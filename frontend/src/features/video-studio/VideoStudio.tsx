@@ -11,6 +11,7 @@ import {
   Popconfirm,
   Progress,
   Space,
+  Switch,
   Tabs,
   Tag,
   Typography,
@@ -37,7 +38,7 @@ import {
   motionStoryboardSummary,
   resizeMotionBeats,
 } from "./motion-duration";
-import { MOTION_AUTHORING_IDLE_WAIT } from "./motion-model-call";
+import { MOTION_AUTHORING_IDLE_WAIT, motionThinkingNotice } from "./motion-model-call";
 import {
   DURATION_SECONDS_MINIMUM,
   MOTION_AUTHORING_MEASURED,
@@ -53,6 +54,7 @@ import {
   setMotionBrief,
   setMotionFilmSeconds,
   setMotionMethod,
+  setMotionThinking,
   settleMotionRun,
   startMotionRun,
   useMotionRun,
@@ -459,6 +461,8 @@ function NewVideoPage({
   onBriefChange,
   briefFilmSeconds,
   onBriefFilmSecondsChange,
+  briefThinking,
+  onBriefThinkingChange,
   briefBusy,
   onSubmitBrief,
   briefProblem,
@@ -474,6 +478,8 @@ function NewVideoPage({
   readonly onBriefChange: (brief: string) => void;
   readonly briefFilmSeconds: number;
   readonly onBriefFilmSecondsChange: (filmSeconds: number) => void;
+  readonly briefThinking: boolean;
+  readonly onBriefThinkingChange: (thinking: boolean) => void;
   readonly briefBusy: boolean;
   readonly onSubmitBrief: () => void;
   readonly embedded: boolean;
@@ -576,6 +582,18 @@ function NewVideoPage({
                   * 所以等待随镜头数涨、涨得比片长快。只给控件不给这句话，
                   * 就是请人顺手拉到 180 秒，然后对着不动的屏幕等将近一小时。
                   */}
+                <span className="motion-brief-length">
+                  <Switch
+                    id="motion-brief-thinking"
+                    aria-label="让模型先想一遍再落笔"
+                    checked={briefThinking}
+                    onChange={onBriefThinkingChange}
+                  />
+                  <label htmlFor="motion-brief-thinking">让模型先想一遍再落笔</label>
+                </span>
+                <Typography.Text type="secondary">
+                  {motionThinkingNotice(briefThinking)}
+                </Typography.Text>
                 <Typography.Text type="secondary">
                   {`本机是一个镜头渲染一次：${briefFilmSeconds} 秒大约 ${briefWait.shots} 个镜头，编排加渲染最长约 ${motionSpokenDuration(briefWait.ceilingSeconds)}。片子越长镜头越多，等待时间涨得比片长快。`}
                 </Typography.Text>
@@ -1356,6 +1374,7 @@ export function VideoStudio({
     ownJobs: ownMotionJobs,
     brief,
     filmSeconds: briefFilmSeconds,
+    modelThinking: briefThinking,
     selectedMethod,
     activeTab,
   } = useMotionRun();
@@ -1429,6 +1448,7 @@ export function VideoStudio({
       aspectRatio: MOTION_BRIEF_LIMITS.aspectRatios[0]!,
       durationSeconds: briefFilmSeconds,
       language: MOTION_BRIEF_LIMITS.languages[0]!,
+      modelThinking: briefThinking,
     };
     setBusy(true);
     /*
@@ -1597,6 +1617,8 @@ export function VideoStudio({
                 onBriefChange={setMotionBrief}
                 briefFilmSeconds={briefFilmSeconds}
                 onBriefFilmSecondsChange={setMotionFilmSeconds}
+                briefThinking={briefThinking}
+                onBriefThinkingChange={setMotionThinking}
                 briefBusy={busy || pending !== null}
                 onSubmitBrief={submitBrief}
                 briefProblem={briefProblem}

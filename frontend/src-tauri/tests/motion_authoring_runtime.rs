@@ -201,6 +201,40 @@ fn every_length_the_entry_offers_is_one_the_render_plan_accepts() {
     assert!(limits.brief_plan(0).is_err());
 }
 
+/// 深度思考的开关要一路走到编排请求里，不能在某一层被吃掉。
+///
+/// 这条线本周已经栽过七次「一侧改了另一侧没跟上」，其中 `catalogRoot` 那次正是
+/// **协议接受了这个字段、然后把它丢掉**——两侧测试各自全绿，产品安静地少做一件事。
+/// 所以这里断言的是「发出去的请求文档里有它」，不是「结构体收得下它」。
+#[test]
+fn the_thinking_choice_reaches_the_authoring_request() {
+    use automation_tool_desktop_lib::motion_authoring_request;
+
+    let root = TempDirectory::new();
+    for thinking in [true, false] {
+        let request = MotionVideoBriefRequest::one_sentence_with_thinking(
+            "用蓝色商务风做一段本周销售增长说明".to_owned(),
+            "16:9".to_owned(),
+            12,
+            "zh".to_owned(),
+            thinking,
+        )
+        .unwrap();
+        let document = motion_authoring_request(
+            &root.0,
+            &root.0.join("catalog"),
+            &request,
+            "qwen3.7-max-2026-06-08",
+            "sk-not-a-real-key",
+        );
+        assert_eq!(
+            document["modelThinking"],
+            serde_json::Value::Bool(thinking),
+            "编排请求必须带上这次选的深度思考开关"
+        );
+    }
+}
+
 #[test]
 fn a_brief_is_judged_against_the_same_contracts_the_agent_reads() {
     // The one-sentence entry's own ceiling, not the template path's: this path

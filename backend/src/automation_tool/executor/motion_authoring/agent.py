@@ -1708,24 +1708,32 @@ def call_video_creation_model(
     messages: list[dict[str, str]],
     *,
     timeout_seconds: int,
+    thinking: bool = True,
 ) -> str:
     """Stream one OpenAI-compatible chat completion and return the reply text.
 
     The request is streamed so ``timeout_seconds`` bounds the inter-chunk gap
     rather than the whole generation — a reasoning model that thinks for a
     minute before emitting the composition would otherwise time out.
+
+    ``thinking`` is the operator's choice for this film, not a setting. Measured
+    2026-07-28 against the real model with the real authoring prompt, three runs
+    each: reasoning on 41.7s median, off 10.9s. The field is only sent when it
+    is being turned *off*, so a provider that has never heard of it behaves
+    exactly as it does today unless someone asked for the change.
     """
     if not isinstance(config, VideoCreationModelConfig):
         _reject("config must be a VideoCreationModelConfig")
-    body = json.dumps(
-        {
-            "model": config.model_id,
-            "messages": messages,
-            "temperature": 0.2,
-            "response_format": {"type": "json_object"},
-            "stream": True,
-        }
-    ).encode("utf-8")
+    payload: dict[str, object] = {
+        "model": config.model_id,
+        "messages": messages,
+        "temperature": 0.2,
+        "response_format": {"type": "json_object"},
+        "stream": True,
+    }
+    if not thinking:
+        payload["enable_thinking"] = False
+    body = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
         f"{config.base_url}/chat/completions",
         data=body,
@@ -1953,6 +1961,7 @@ class MotionAuthoringAgent:
         workflow: WorkflowReference,
         model_config: VideoCreationModelConfig | None,
         model_call: Callable[..., str] = call_video_creation_model,
+        model_thinking: bool = True,
         fps: int = DEFAULT_FPS,
         model_timeout_seconds: int = MODEL_TIMEOUT_SECONDS,
         catalog_root: Path | None = None,
@@ -1978,13 +1987,17 @@ class MotionAuthoringAgent:
         self._workflow = workflow
         self._model_config = model_config
         self._model_call = model_call
+        self._model_thinking = model_thinking
         self._fps = fps
         self._model_timeout_seconds = model_timeout_seconds
 
     def _call(self, messages: list[dict[str, str]]) -> dict[str, Any]:
         assert self._model_config is not None  # guarded in author()
         reply = self._model_call(
-            self._model_config, messages, timeout_seconds=self._model_timeout_seconds
+            self._model_config,
+            messages,
+            timeout_seconds=self._model_timeout_seconds,
+            thinking=self._model_thinking,
         )
         _require(type(reply) is str, "model reply must be a string")
         try:

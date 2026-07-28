@@ -53,6 +53,11 @@ _REQUEST_FIELDS: Final = frozenset(
 _OPTIONAL_REQUEST_FIELDS: Final = frozenset(
     {
         "catalogRoot",
+        # Optional so an older caller keeps today's behaviour: reasoning stays
+        # on unless somebody asked for it to be off. Measured 2026-07-28, that
+        # phase is 31 of the 42 seconds authoring takes — worth offering, not
+        # worth changing under anyone silently.
+        "modelThinking",
     }
 )
 _MODEL_FIELDS: Final = frozenset({"baseUrl", "modelId", "apiKey"})
@@ -175,6 +180,7 @@ _ENTRY_REASON_TOKENS: Final = {
     "unsupported request schema version": "request_schema_unsupported",
     "video creation model is unavailable": "video_creation_model_unavailable",
     "request is too large": "request_too_large",
+    "model thinking choice must be true or false": "model_thinking_choice_invalid",
 }
 
 _BRIEF_REASON_TOKENS: Final = {
@@ -503,6 +509,9 @@ def run_motion_authoring_entry(
     brief = _brief(document)
     model = _model(document["model"])
     try:
+        thinking = document.get("modelThinking", True)
+        if type(thinking) is not bool:
+            raise _reject("model thinking choice must be true or false")
         agent = MotionAuthoringAgent(
             workspace=workspace,
             tools=MotionAuthoringTools(workspace),
@@ -512,6 +521,7 @@ def run_motion_authoring_entry(
             ),
             model_config=model,
             model_call=model_call,
+            model_thinking=thinking,
             catalog_root=_catalog_root(document),
         )
         result = agent.author(brief)

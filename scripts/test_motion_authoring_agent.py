@@ -227,6 +227,7 @@ class ScriptedModel:
         messages: list[dict[str, str]],
         *,
         timeout_seconds: int,
+        thinking: bool = True,
     ) -> str:
         self.calls.append(messages)
         if not self._responses:
@@ -695,6 +696,7 @@ class AgentAuthoringTests(unittest.TestCase):
             messages: list[dict[str, str]],
             *,
             timeout_seconds: int,
+            thinking: bool = True,
         ) -> str:
             calls.append(1)
             return _valid_model_payload()
@@ -755,6 +757,7 @@ class ModelTimeoutTests(unittest.TestCase):
             messages: list[dict[str, str]],
             *,
             timeout_seconds: int,
+            thinking: bool = True,
         ) -> str:
             seen.append(timeout_seconds)
             return _valid_model_payload()
@@ -1658,6 +1661,80 @@ class ExecutorEntryTests(unittest.TestCase):
                 MAX_STORYBOARD_BEATS,
                 f"{duration} 秒按每段 {low} 秒要切 {math.ceil(duration / low)} 段，"
                 f"超过上限 {MAX_STORYBOARD_BEATS}",
+            )
+
+    def test_the_entry_hands_the_thinking_choice_to_the_model_call(self) -> None:
+        """请求里的开关要真的传到模型调用那一层。
+
+        `catalogRoot` 就是在这一环被丢掉的：entry 校验通过、然后不往下传，
+        于是每台装机在 agent 眼里都像没有零件目录。断言落在**模型调用收到的
+        参数**上，不是「entry 没报错」。
+        """
+        seen: dict[str, object] = {}
+
+        def spy(config, messages, *, timeout_seconds, thinking=True):  # noqa: ANN001, ARG001
+            seen["thinking"] = thinking
+            return _valid_model_payload()
+
+        for requested in (True, False):
+            seen.clear()
+            with TemporaryDirectory() as raw:
+                root = Path(raw)
+                _make_workspace(root)
+                request = {
+                    "schemaVersion": 1,
+                    "workspace": str(root),
+                    "brief": "用蓝色商务风做一段本周销售增长说明",
+                    "aspectRatio": "16:9",
+                    "durationSeconds": 6,
+                    "language": "zh",
+                    "brandAssets": [],
+                    "modelThinking": requested,
+                    "model": {
+                        "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "modelId": "qwen3.7-max-2026-06-08",
+                        "apiKey": "sk-" + "a" * 40,
+                    },
+                }
+                run_motion_authoring_entry(request, model_call=spy)
+            self.assertEqual(seen.get("thinking"), requested)
+
+    def test_the_thinking_choice_reaches_the_model_request(self) -> None:
+        """开关必须真的改到发给模型的那个请求体上。
+
+        这是本周第八次防同一个形状：`catalogRoot` 当初就是**协议接受了、然后被
+        丢掉**，两侧测试各自全绿，产品安静地少做一件事。所以这里断言的是
+        HTTP 请求体，不是「entry 收得下这个字段」。
+        """
+        import json as _json
+        import urllib.request as _urllib
+
+        for thinking, expected in [(True, None), (False, False)]:
+            sent: dict[str, object] = {}
+
+            class _Response:
+                def __enter__(self):
+                    return iter([b'data: {"choices":[{"delta":{"content":"{}"}}]}', b"data: [DONE]"])
+
+                def __exit__(self, *args):
+                    return False
+
+            def _urlopen(request, timeout=None):  # noqa: ANN001, ARG001
+                sent.update(_json.loads(request.data.decode("utf-8")))
+                return _Response()
+
+            with mock.patch.object(_urllib, "urlopen", _urlopen):
+                reply = call_video_creation_model(
+                    _model_config(),
+                    [{"role": "user", "content": "x"}],
+                    timeout_seconds=5,
+                    thinking=thinking,
+                )
+            self.assertEqual(reply, "{}")
+            self.assertEqual(
+                sent.get("enable_thinking"),
+                expected,
+                f"thinking={thinking} 时请求体里的 enable_thinking 不对",
             )
 
     def test_a_film_longer_than_one_capture_reaches_the_model(self) -> None:

@@ -379,6 +379,21 @@ pub struct MotionVideoBriefRequest {
     aspect_ratio: String,
     duration_seconds: u32,
     language: String,
+    /// Whether the video-creation model reasons before it answers.
+    ///
+    /// Per request rather than per installation: measured 2026-07-28, the
+    /// reasoning phase is 31 of the 42 seconds authoring takes, and whether
+    /// that is worth paying depends on whether this particular film is a
+    /// rehearsal or a delivery.
+    #[serde(default = "thinking_default")]
+    model_thinking: bool,
+}
+
+/// Reasoning stays on unless the operator turns it off. Only the time it costs
+/// was measured, not the quality of what comes back, and quietly making every
+/// film worse to save half a minute is not this side's trade to make.
+const fn thinking_default() -> bool {
+    true
 }
 
 impl MotionVideoBriefRequest {
@@ -388,12 +403,29 @@ impl MotionVideoBriefRequest {
         duration_seconds: u32,
         language: String,
     ) -> Result<Self, MotionVideoStudioError> {
+        Self::one_sentence_with_thinking(
+            brief,
+            aspect_ratio,
+            duration_seconds,
+            language,
+            thinking_default(),
+        )
+    }
+
+    pub fn one_sentence_with_thinking(
+        brief: String,
+        aspect_ratio: String,
+        duration_seconds: u32,
+        language: String,
+        model_thinking: bool,
+    ) -> Result<Self, MotionVideoStudioError> {
         let value = Self {
             creation_mode: MOTION_BRIEF_CREATION_MODE.to_owned(),
             brief,
             aspect_ratio,
             duration_seconds,
             language,
+            model_thinking,
         };
         value.validate()?;
         Ok(value)
@@ -413,6 +445,10 @@ impl MotionVideoBriefRequest {
 
     pub fn language(&self) -> &str {
         &self.language
+    }
+
+    pub const fn model_thinking(&self) -> bool {
+        self.model_thinking
     }
 
     /// Judged against the two contracts the agent reads, so a brief this side

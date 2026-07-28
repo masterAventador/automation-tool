@@ -18,6 +18,7 @@ import {
   type MaterialVideoStudioGateway,
 } from "./material-video-studio-gateway";
 import { motionSpokenDuration } from "./motion-duration";
+import { motionThinkingNotice } from "./motion-model-call";
 import {
   DURATION_SECONDS_MINIMUM,
   MOTION_BRIEF_FILM_SECONDS,
@@ -832,6 +833,37 @@ describe("video studio shell", () => {
         new RegExp(`渲染超过 ${motionSpokenDuration(longest.renderCeilingSeconds)} 会自动停下`),
       ),
     ).toBeVisible();
+  });
+
+  /**
+   * 深度思考要能关，而且关之前得先看见这笔账。
+   *
+   * 2026-07-28 拿真实编排 prompt 对着真实模型各跑三次：开着 41.7 秒
+   * （40.5~51.0），关掉 10.9 秒（8.5~23.5）。省下的这半分钟对着急演示的人是有
+   * 意义的，但代价没量过——只量了时间，没量质量。所以给开关、给账单，
+   * 默认不动，判断交给操作者。
+   */
+  it("lets the operator turn the model's own reasoning off, and prices it first", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+    const thinking = screen.getByRole("switch", { name: "让模型先想一遍再落笔" });
+    expect(thinking).toBeChecked();
+    expect(screen.getByText(new RegExp(motionThinkingNotice(true)))).toBeVisible();
+
+    await user.click(thinking);
+    expect(thinking).not.toBeChecked();
+    expect(screen.getByText(new RegExp(motionThinkingNotice(false)))).toBeVisible();
+
+    await user.clear(screen.getByLabelText("一句话视频需求"));
+    await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+    await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+    expect(studioGateway.submitMotionBrief).toHaveBeenCalledWith(
+      expect.objectContaining({ modelThinking: false }),
+    );
   });
 
   /**

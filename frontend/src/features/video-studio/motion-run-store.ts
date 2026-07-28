@@ -22,6 +22,7 @@
  */
 import { useSyncExternalStore } from "react";
 
+import { MOTION_THINKING } from "./motion-model-call";
 import { MOTION_BRIEF_FILM_SECONDS } from "./motion-one-sentence";
 
 export type VideoCreationMethodId = "material_montage_v1" | "motion_composition_v1";
@@ -100,6 +101,14 @@ export interface MotionRunState {
    * changed.
    */
   readonly filmSeconds: number;
+  /**
+   * Whether the model reasons before it answers.
+   *
+   * A field of the same form as the sentence and the length, so it lives here
+   * for the same reason they do. Measured 2026-07-28: the reasoning phase is
+   * 31 of the 42 seconds the authoring pass takes.
+   */
+  readonly modelThinking: boolean;
   readonly selectedMethod: VideoCreationMethodId | null;
   readonly activeTab: string;
   readonly tracking: MotionRunTracking;
@@ -111,6 +120,7 @@ const EMPTY: MotionRunState = {
   ownJobs: new Map(),
   brief: "",
   filmSeconds: MOTION_BRIEF_FILM_SECONDS,
+  modelThinking: MOTION_THINKING.defaultEnabled,
   selectedMethod: null,
   activeTab: "new",
   tracking: "ok",
@@ -253,6 +263,10 @@ export function setMotionBrief(brief: string): void {
 
 export function setMotionFilmSeconds(filmSeconds: number): void {
   commit({ filmSeconds });
+}
+
+export function setMotionThinking(modelThinking: boolean): void {
+  commit({ modelThinking });
 }
 
 export function setMotionMethod(method: VideoCreationMethodId | null): void {

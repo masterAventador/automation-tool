@@ -618,6 +618,7 @@ pub fn motion_authoring_request(
         "aspectRatio": request.aspect_ratio(),
         "durationSeconds": request.duration_seconds(),
         "language": request.language(),
+        "modelThinking": request.model_thinking(),
         "brandAssets": [],
         "model": {
             "baseUrl": model_service_settings::PRODUCTION_BASE_URL,
