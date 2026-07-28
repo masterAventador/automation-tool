@@ -22,6 +22,8 @@
  */
 import { useSyncExternalStore } from "react";
 
+import { MOTION_BRIEF_FILM_SECONDS } from "./motion-one-sentence";
+
 export type VideoCreationMethodId = "material_montage_v1" | "motion_composition_v1";
 
 /**
@@ -52,6 +54,17 @@ export type MotionJobEnding = "succeeded" | "failed" | "cancelled";
 export interface OwnMotionJob {
   readonly startedAt: number;
   readonly filmSeconds: number;
+  /**
+   * Which path made this film, because the two are timed by different rules.
+   *
+   * The fixed template captures its whole film in one pass, so the sandbox's
+   * single-render stall guard is its real ceiling. A one-sentence film is one
+   * render per shot and pays the startup again for each — at 180 seconds the
+   * single-render formula understates the legitimate wait by 22 minutes, which
+   * is long enough for the page to tell an operator that a healthy run has
+   * already passed the point where it stops itself.
+   */
+  readonly kind: MotionRunPending["kind"];
   /** How it ended, or that it has not. */
   readonly outcome: "running" | MotionJobEnding;
 }
@@ -77,6 +90,16 @@ export interface MotionRunState {
   readonly message: MotionRunMessage | null;
   readonly ownJobs: ReadonlyMap<string, OwnMotionJob>;
   readonly brief: string;
+  /**
+   * How long a film the operator has asked for.
+   *
+   * Here rather than in the page for the same reason the sentence is: the two
+   * are fields of one form and a sidebar click unmounts the page. A length kept
+   * in component state would quietly go back to the default while the sentence
+   * beside it survived — a wrong number with nothing on screen saying it
+   * changed.
+   */
+  readonly filmSeconds: number;
   readonly selectedMethod: VideoCreationMethodId | null;
   readonly activeTab: string;
   readonly tracking: MotionRunTracking;
@@ -87,6 +110,7 @@ const EMPTY: MotionRunState = {
   message: null,
   ownJobs: new Map(),
   brief: "",
+  filmSeconds: MOTION_BRIEF_FILM_SECONDS,
   selectedMethod: null,
   activeTab: "new",
   tracking: "ok",
@@ -134,6 +158,7 @@ export function startMotionRun(pending: MotionRunPending): void {
 export function settleMotionRun(
   renderJobId: string,
   filmSeconds: number,
+  kind: MotionRunPending["kind"],
   message: MotionRunMessage,
 ): void {
   commit({
@@ -142,6 +167,7 @@ export function settleMotionRun(
     ownJobs: new Map(state.ownJobs).set(renderJobId, {
       startedAt: Date.now(),
       filmSeconds,
+      kind,
       outcome: "running",
     }),
   });
@@ -223,6 +249,10 @@ export function forgetMotionJob(renderJobId: string): void {
 
 export function setMotionBrief(brief: string): void {
   commit({ brief });
+}
+
+export function setMotionFilmSeconds(filmSeconds: number): void {
+  commit({ filmSeconds });
 }
 
 export function setMotionMethod(method: VideoCreationMethodId | null): void {

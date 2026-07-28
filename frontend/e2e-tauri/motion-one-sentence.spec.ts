@@ -20,15 +20,24 @@ import { browser, expect } from "@wdio/globals";
 const BRIEF = "用蓝色商务风做一段本周销售增长说明，三个要点";
 
 /**
- * Three beats of four seconds: what the form submits, from the shared contract.
+ * The length this run asks for, typed into the form's own control.
  *
  * Not what the film measures. A shot is as long as its line or its part's own
  * motion, whichever is longer, and the film is the sum of its shots — so this
  * number steers how much the storyboard tries to say and does not cut the
  * result. The form's own wording says exactly that; the finished length is
  * measured off the artifact by `inspect_film`.
+ *
+ * Deliberately longer than the twelve second default, because the default is
+ * what kept the packaged parts out of every film. Measured 2026-07-28 against
+ * the real model: at twelve seconds the shortest catalog part costs 37% of the
+ * whole budget and the model declined every one of them — correctly, since the
+ * prompt tells it a part's length is spent from the film's budget. The same
+ * sentence at twenty seconds picked one to two parts. So this run both
+ * exercises the new control and is the only length at which "the film really
+ * used a part" can be observed at all.
  */
-const EXPECTED_FILM_SECONDS = 12;
+const EXPECTED_FILM_SECONDS = 20;
 
 /** The stage names a user watches go by, in the order they must appear. */
 const RUNNING_STAGES = ["准备中", "逐帧渲染中", "正在合成视频"] as const;
@@ -117,8 +126,8 @@ async function openVideoStudio() {
 
 describe("T36 一句话自动制作的真实 App 用户路径", () => {
   it("configures the model, refuses an empty brief, then authors, renders and plays", async function () {
-    // Authoring is a real model round trip and the render captures 360 frames
-    // through a real browser, so this test is minutes long by construction.
+    // Authoring is a real model round trip and every shot is captured frame by
+    // frame through a real browser, so this test is minutes long by construction.
     this.timeout(1_500_000);
 
     const apiKey = process.env.AUTOMATION_TOOL_T36_MODEL_KEY;
@@ -177,9 +186,12 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
     // --- An empty sentence is refused before anything is started ----------
     const studio = await openVideoStudio();
     await expect(await studio.$("textarea[aria-label='一句话视频需求']")).toBeDisplayed();
-    // The entry has no length control, so the length has to be on the card. A
-    // customer who says "make me a three minute intro" otherwise gets a much
-    // shorter film with nothing anywhere saying so.
+    // The length is set through the control a user has, not pre-seeded. A
+    // customer who says "make me a three minute intro" used to get a much
+    // shorter film with nothing anywhere saying so; now he sets it, and the
+    // card restates what he set.
+    const filmSeconds = await studio.$("#motion-brief-seconds");
+    await filmSeconds.setValue(String(EXPECTED_FILM_SECONDS));
     await expect(studio).toHaveText(
       expect.stringContaining(`按 ${EXPECTED_FILM_SECONDS} 秒来安排内容`),
     );

@@ -487,6 +487,8 @@ pub struct MotionDurationLimits {
     seconds_per_beat_maximum: u32,
     total_seconds_maximum: u32,
     brief_seconds_maximum: u32,
+    brief_beat_count_maximum: u32,
+    brief_seconds_per_beat_minimum: u32,
     render_wall_seconds_base: u32,
     render_wall_millis_per_frame: u32,
     render_cpu_parallelism: u32,
@@ -527,6 +529,16 @@ impl MotionDurationLimits {
         self.brief_seconds_maximum
     }
 
+    /// The most shots a one-sentence storyboard may be cut into.
+    pub const fn brief_beat_count_maximum(&self) -> u32 {
+        self.brief_beat_count_maximum
+    }
+
+    /// The shortest shot the model is ever told to aim for.
+    pub const fn brief_seconds_per_beat_minimum(&self) -> u32 {
+        self.brief_seconds_per_beat_minimum
+    }
+
     pub const fn frame_count_maximum(&self) -> u32 {
         self.total_seconds_maximum * self.frames_per_second
     }
@@ -541,7 +553,12 @@ impl MotionDurationLimits {
         &self,
         duration_seconds: u32,
     ) -> Result<MotionStoryboardPlan, MotionVideoStudioError> {
-        if duration_seconds == 0 || duration_seconds > self.total_seconds_maximum {
+        // The brief ceiling, not the template one. Asking `total_seconds_maximum`
+        // here was the half of the raise that was missed: the request validator
+        // accepted 60 seconds and this refused it, so the operator waited out
+        // the whole authoring pass — minutes — to be told his film could not be
+        // made, at a length the form had offered him.
+        if duration_seconds == 0 || duration_seconds > self.brief_seconds_maximum {
             return Err(draft_invalid());
         }
         Ok(MotionStoryboardPlan {
@@ -612,6 +629,8 @@ struct DurationContract {
     seconds_per_beat_default: u32,
     total_seconds_maximum: u32,
     brief_seconds_maximum: u32,
+    brief_beat_count_maximum: u32,
+    brief_seconds_per_beat_minimum: u32,
     render_wall_seconds_base: u32,
     render_wall_millis_per_frame: u32,
     render_cpu_parallelism: u32,
@@ -668,6 +687,17 @@ pub fn duration_limits() -> Result<MotionDurationLimits, MotionVideoStudioError>
         // capture — that bound lives on the segment and is enforced where
         // segments are accepted.
         || contract.brief_seconds_maximum < contract.total_seconds_maximum
+        // A film at the brief ceiling has to be cuttable into shots this side
+        // can actually render: at most `briefBeatCountMaximum` of them, each
+        // inside one capture. Without this the form could offer a length no
+        // storyboard could legally express, and the refusal would arrive
+        // minutes later with the authoring pass already paid for.
+        || contract.brief_beat_count_maximum == 0
+        || contract.brief_seconds_per_beat_minimum == 0
+        || contract.brief_seconds_maximum
+            > contract
+                .brief_beat_count_maximum
+                .saturating_mul(frame_count_maximum / contract.frames_per_second)
     {
         return Err(draft_invalid());
     }
@@ -679,6 +709,8 @@ pub fn duration_limits() -> Result<MotionDurationLimits, MotionVideoStudioError>
         seconds_per_beat_maximum: contract.seconds_per_beat_maximum,
         total_seconds_maximum: contract.total_seconds_maximum,
         brief_seconds_maximum: contract.brief_seconds_maximum,
+        brief_beat_count_maximum: contract.brief_beat_count_maximum,
+        brief_seconds_per_beat_minimum: contract.brief_seconds_per_beat_minimum,
         render_wall_seconds_base: contract.render_wall_seconds_base,
         render_wall_millis_per_frame: contract.render_wall_millis_per_frame,
         render_cpu_parallelism: contract.render_cpu_parallelism,
@@ -771,6 +803,8 @@ pub struct MotionRenderSegment {
     height: u32,
     device_scale_factor: u32,
     frame_count: u32,
+    source_start_millis: u32,
+    source_end_millis: u32,
 }
 
 impl MotionRenderSegment {
@@ -792,6 +826,24 @@ impl MotionRenderSegment {
 
     pub const fn device_scale_factor(&self) -> u32 {
         self.device_scale_factor
+    }
+
+    /// Where on the loaded document's own timeline this render starts.
+    ///
+    /// Two template shots load the same composition and differ by nothing else.
+    /// Without this the Worker's only rule was "spread the page's whole
+    /// timeline over the frames asked for", so each of them re-rendered the
+    /// entire film — the kept artifact of 2026-07-28 is twelve seconds made of
+    /// two identical six second halves, each at double speed, with the codec,
+    /// the canvas, the frame count, the duration and the still-image gate all
+    /// green over it.
+    pub const fn source_start_millis(&self) -> u32 {
+        self.source_start_millis
+    }
+
+    /// Where that stretch ends. Always greater than the start.
+    pub const fn source_end_millis(&self) -> u32 {
+        self.source_end_millis
     }
 
     pub const fn frame_count(&self) -> u32 {
@@ -1038,6 +1090,11 @@ fn prepare_inside_workspace(
             height: TEMPLATE_CANVAS_HEIGHT,
             device_scale_factor: TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
             frame_count: plan.frame_count(),
+            // The whole composition, because this path captures the whole film
+            // in one pass. The window only has work to do where several shots
+            // load one document.
+            source_start_millis: 0,
+            source_end_millis: plan.beat_count() * plan.seconds_per_beat() * 1000,
         }],
         // The fixed template draws a 16:9 stage and offers no choice of
         // framing, so its film is delivered on the 16:9 canvas.
@@ -1145,6 +1202,8 @@ struct RenderSegmentAnswer {
     allowed_assets: Vec<String>,
     canvas: RenderSegmentCanvasAnswer,
     frame_count: u32,
+    source_start_millis: u32,
+    source_end_millis: u32,
 }
 
 #[derive(Deserialize)]
@@ -1504,6 +1563,12 @@ fn accepted_segments(
         {
             return Err(authoring_answer_invalid());
         }
+        // A window that ends no later than it starts leaves every frame of this
+        // shot seeking nowhere. Checked here rather than in the Worker because
+        // this is where the child's word stops being taken.
+        if segment.source_end_millis <= segment.source_start_millis {
+            return Err(authoring_answer_invalid());
+        }
         segments.push(MotionRenderSegment {
             entry_html,
             allowed_assets,
@@ -1511,6 +1576,8 @@ fn accepted_segments(
             height: segment.canvas.height,
             device_scale_factor: segment.canvas.device_scale_factor,
             frame_count: segment.frame_count,
+            source_start_millis: segment.source_start_millis,
+            source_end_millis: segment.source_end_millis,
         });
     }
     Ok(segments)

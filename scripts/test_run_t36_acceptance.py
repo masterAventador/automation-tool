@@ -26,7 +26,11 @@ def _load_run_t36_acceptance() -> types.ModuleType:
         return None
 
     stubs = {
-        "prepare_video_runtime": _stub_module("prepare_video_runtime", prepare=noop),
+        # `install` 是 T36 验收现在用来把零件目录装进调试资源树的入口。
+        # 桩少一个名字，这条门禁就会以 ImportError 整个红掉——而红的不是被测的行为。
+        "prepare_video_runtime": _stub_module(
+            "prepare_video_runtime", prepare=noop, install=noop
+        ),
         "run_e4_14_acceptance": _stub_module(
             "run_e4_14_acceptance",
             require_port_available=noop,

@@ -124,6 +124,11 @@ def sandbox_spec(workspace: Path, **overrides: object) -> dict[str, object]:
         "maxDurationSeconds": 20,
         "maxMemoryMegabytes": 1024,
         "maxOutputBytes": 50_000_000,
+        # 这一段覆盖入口文件时间轴上的哪一截。必填：它替换掉的那条规则
+        # （把页面整条时间轴摊到这些帧上）对一次拍完的片子是对的，
+        # 对镜头共用一份文档的片子是错的，而缺字段就会退回那条规则。
+        "sourceStartMillis": 0,
+        "sourceEndMillis": 3000,
         "workspace": str(workspace),
     }
     spec.update(overrides)
@@ -409,6 +414,11 @@ def test_sandbox_rejects_invalid_spec(assets: Path, decoy: Path) -> None:
         sandbox_spec(workspace, frameCount=0),
         sandbox_spec(workspace, frameCount=601),
         sandbox_spec(workspace, frameCount="3"),
+        # 时间窗：倒着来、非整数、缺一半，都不能开渲染。
+        sandbox_spec(workspace, sourceEndMillis=0),
+        sandbox_spec(workspace, sourceStartMillis=3000, sourceEndMillis=3000),
+        sandbox_spec(workspace, sourceEndMillis=3000.5),
+        sandbox_spec(workspace, sourceStartMillis=-1),
         sandbox_spec(workspace, maxDurationSeconds=0),
         sandbox_spec(workspace, maxDurationSeconds=301),
         sandbox_spec(workspace, maxCpuSeconds=0),

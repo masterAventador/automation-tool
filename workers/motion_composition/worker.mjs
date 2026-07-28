@@ -361,8 +361,24 @@ function validSandboxSpec(value) {
   if (!hasExactKeys(value, [
     "allowedAssets", "canvas", "cancelMarker", "entryHtml", "frameCount",
     "maxCpuSeconds", "maxDurationSeconds", "maxMemoryMegabytes", "maxOutputBytes",
-    "workspace",
+    "sourceEndMillis", "sourceStartMillis", "workspace",
   ])) return false;
+  // Which stretch of the entry document's own timeline this render covers.
+  // Required, not optional: the rule this replaced — spread the page's whole
+  // timeline over the frames asked for — is right for a film captured in one
+  // pass and silently wrong for a film whose shots share one document, and a
+  // caller that omits the window would get exactly that silence back.
+  //
+  // Whole milliseconds rather than seconds, because the command's HMAC binds to
+  // a canonical JSON that three languages have to produce byte for byte, and a
+  // float does not survive that: Python writes 0.0 where JSON.stringify writes
+  // 0, the proof stops matching and the render command is dropped without a
+  // word. Every other number in this spec is an integer for the same reason.
+  if (
+    !boundedInteger(value.sourceStartMillis, 0, SANDBOX_SECONDS_MAXIMUM * 1000)
+    || !boundedInteger(value.sourceEndMillis, 1, SANDBOX_SECONDS_MAXIMUM * 1000)
+    || value.sourceEndMillis <= value.sourceStartMillis
+  ) return false;
   if (!validCanvas(value.canvas)) return false;
   if (typeof value.workspace !== "string" || !isAbsolute(value.workspace)) return false;
   if (!validSandboxRelativePath(value.entryHtml)) return false;
@@ -1173,7 +1189,12 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
           // The cancellation marker the caller named is absent; continue.
         }
         if (seekableDuration > 0) {
-          const time = seekableDuration * (index - 1) / spec.frameCount;
+          // This shot's own stretch of the timeline, not the whole of it.
+          // Clamped to what the document actually declares, because a window
+          // past its end would hold the last frame and read as a freeze.
+          const windowStart = Math.min(spec.sourceStartMillis / 1000, seekableDuration);
+          const windowEnd = Math.min(spec.sourceEndMillis / 1000, seekableDuration);
+          const time = windowStart + (windowEnd - windowStart) * (index - 1) / spec.frameCount;
           const seek = await pipe.send("Runtime.evaluate", {
             expression: `(() => {
               const time = ${JSON.stringify(time)};

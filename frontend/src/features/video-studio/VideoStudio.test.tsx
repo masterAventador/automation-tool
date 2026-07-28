@@ -11,14 +11,19 @@ import {
 import contract from "../../../../contracts/video/motion-style-presets.v1.json";
 import durationContract from "../../../../contracts/video/motion-storyboard-duration.v1.json";
 import modelCallContract from "../../../../contracts/video/motion-authoring-model-call.v1.json";
-import { motionSpokenDuration } from "./motion-duration";
 import terminology from "../../../../contracts/quality/user-facing-terminology.v1.json";
 import {
   MaterialVideoStudioGatewayError,
   type MaterialVideoStudioErrorCode,
   type MaterialVideoStudioGateway,
 } from "./material-video-studio-gateway";
-import { MOTION_BRIEF_FILM_SECONDS } from "./motion-one-sentence";
+import { motionSpokenDuration } from "./motion-duration";
+import {
+  DURATION_SECONDS_MINIMUM,
+  MOTION_BRIEF_FILM_SECONDS,
+  MOTION_BRIEF_LIMITS,
+  motionBriefWaitEstimate,
+} from "./motion-one-sentence";
 import { VideoStudio } from "./VideoStudio";
 
 function gateway(): MaterialVideoStudioGateway {
@@ -673,10 +678,9 @@ describe("video studio shell", () => {
   /**
    * 一句话卡片必须在点按钮之前就说清楚会得到多长的片子。
    *
-   * 这个入口没有片长控件，成片长度固定。客户在演示现场随口说「做一个三分钟的
-   * 产品介绍」，那句话会作为描述被接受，然后系统安静地做出十几秒的片子——
-   * 需求被丢掉且不给任何提示。这条用例把界面上的数字和真正提交的时长绑在一起，
-   * 免得文案和行为各说各的。
+   * 客户在演示现场随口说「做一个三分钟的产品介绍」，那句话会作为描述被接受，
+   * 然后系统安静地做出十几秒的片子——需求被丢掉且不给任何提示。
+   * 这条用例把界面上的数字和真正提交的时长绑在一起，免得文案和行为各说各的。
    */
   it("says the length steers the film rather than fixing it, and submits it", async () => {
     const user = userEvent.setup();
@@ -684,17 +688,19 @@ describe("video studio shell", () => {
     render(<VideoStudio gateway={studioGateway} />);
 
     await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
-    // The number is still shown — it is what gets submitted and what steers how
-    // much the storyboard tries to say. What it must not do is promise the
-    // finished length: a shot runs for whichever is longer, its line or its
-    // part's own motion, and the film is the sum of its shots (the product
-    // owner's correction of 2026-07-27). Measured 2026-07-28 against the real
-    // model: a 20 second brief produced a 900 frame film — 30 seconds — so the
-    // old wording told the user a number the product would not deliver.
-    const note = screen.getByText(new RegExp(`${MOTION_BRIEF_FILM_SECONDS} 秒`));
+    // The number is what gets submitted and what steers how much the storyboard
+    // tries to say. What it must not do is promise the finished length: a shot
+    // runs for whichever is longer, its line or its part's own motion, and the
+    // film is the sum of its shots (the product owner's correction of
+    // 2026-07-27). Measured 2026-07-28 against the real model: a 20 second brief
+    // produced a 900 frame film — 30 seconds — so the old wording told the user
+    // a number the product would not deliver.
+    expect(screen.getByLabelText("成片时长（秒）")).toHaveDisplayValue(
+      String(MOTION_BRIEF_FILM_SECONDS),
+    );
+    const note = screen.getByText(/实际片长以成片为准/);
     expect(note).toBeVisible();
-    expect(note.textContent).not.toMatch(new RegExp(`会生成一段 ${MOTION_BRIEF_FILM_SECONDS} 秒的视频`));
-    expect(note.textContent).toMatch(/实际片长|以成片为准|可能更长/);
+    expect(note.textContent).not.toMatch(/会生成一段 \d+ 秒的视频/);
 
     await user.clear(screen.getByLabelText("一句话视频需求"));
     await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
@@ -703,6 +709,145 @@ describe("video studio shell", () => {
     expect(studioGateway.submitMotionBrief).toHaveBeenCalledWith(
       expect.objectContaining({ durationSeconds: MOTION_BRIEF_FILM_SECONDS }),
     );
+  });
+
+  /**
+   * 片长写死 12 秒不只是少一个设置，它让整批零件在原理上够得着、实际上一个都用不上。
+   *
+   * 2026-07-28 对着真实模型量过：12 秒预算下最短的零件也要 4.5 秒、占掉 37%，
+   * 模型每次都判定放不下——这是对的，提示词本来就告诉它零件时长从整片预算里扣。
+   * 同一句话给 20 秒，立刻选中一到两个。所以「能改片长」是 134 个零件能不能进片子
+   * 的前提，不是锦上添花。这条守住操作者改的数真的会送到编排那一侧去。
+   */
+  it("submits the length the operator chose rather than the default", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+    await user.clear(screen.getByLabelText("成片时长（秒）"));
+    await user.type(screen.getByLabelText("成片时长（秒）"), "60");
+    await user.clear(screen.getByLabelText("一句话视频需求"));
+    await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+    await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+
+    expect(studioGateway.submitMotionBrief).toHaveBeenCalledWith(
+      expect.objectContaining({ durationSeconds: 60 }),
+    );
+  });
+
+  /** 上限是产品定的 180 秒，控件自己就得挡住，不能等提交才报错。 */
+  it("caps the length control at the contract ceiling", async () => {
+    const user = userEvent.setup();
+    render(<VideoStudio gateway={gateway()} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+
+    const control = screen.getByLabelText("成片时长（秒）");
+    expect(control).toHaveAttribute(
+      "aria-valuemax",
+      String(MOTION_BRIEF_LIMITS.durationSecondsMaximum),
+    );
+    expect(control).toHaveAttribute("aria-valuemin", String(DURATION_SECONDS_MINIMUM));
+  });
+
+  /**
+   * 拉长片长要付的时间必须当场看得见。
+   *
+   * 路线 A 是一个镜头渲染一次，每次都重新起一遍浏览器（契约里记作 30 秒固定开销），
+   * 所以耗时随镜头数涨而不只随帧数涨。一个只能拉、不说代价的控件，会让人顺手拉到头
+   * 然后等一个多小时，中途以为卡死了——这正是「AI 自测全绿、用户一用傻眼」那类问题的
+   * 界面版本。
+   */
+  it("tells the operator what a longer film costs in waiting", async () => {
+    const user = userEvent.setup();
+    render(<VideoStudio gateway={gateway()} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+
+    const shortWait = motionBriefWaitEstimate(MOTION_BRIEF_FILM_SECONDS);
+    expect(
+      screen.getByText(new RegExp(motionSpokenDuration(shortWait.ceilingSeconds))),
+    ).toBeVisible();
+
+    await user.clear(screen.getByLabelText("成片时长（秒）"));
+    await user.type(
+      screen.getByLabelText("成片时长（秒）"),
+      String(MOTION_BRIEF_LIMITS.durationSecondsMaximum),
+    );
+
+    const longWait = motionBriefWaitEstimate(MOTION_BRIEF_LIMITS.durationSecondsMaximum);
+    expect(longWait.ceilingSeconds).toBeGreaterThan(shortWait.ceilingSeconds);
+    expect(
+      screen.getByText(new RegExp(motionSpokenDuration(longWait.ceilingSeconds))),
+    ).toBeVisible();
+  });
+
+  /**
+   * 「渲染超过 X 会自动停下」在长片上不能再用单次渲染的公式算。
+   *
+   * 那个公式是「一次渲染的沙箱停摆阈值」，片长写死 12 秒时它报 174 秒、实际约
+   * 234 秒，差一分钟看不出来。片长放开之后差出 22 分钟：180 秒的片子它报
+   * 36 分 30 秒，而这一轮合法耗时可达 51 分——于是一部**健康**的片子跑到 40 分钟时，
+   * 界面会显示「已用 40 分 · 渲染超过 36 分 30 秒 会自动停下」，
+   * 已用时间超过了它自己声称的自动停止点。
+   */
+  it("times a one-sentence film by what a film of many shots may take", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    vi.mocked(studioGateway.motionJobs).mockResolvedValue([
+      {
+        renderJobId: "b1f0d0c6-1d2f-4a0e-9c3a-2b6f5e7d8a90",
+        revision: 2,
+        status: "rendering",
+        progressPercent: 55,
+        subject: "用蓝色商务风做一段说明",
+        styleDisplayName: "专业蓝",
+        artifactId: null,
+        artifactSizeBytes: null,
+        failureCode: null,
+      },
+    ]);
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+    await user.clear(screen.getByLabelText("成片时长（秒）"));
+    await user.type(
+      screen.getByLabelText("成片时长（秒）"),
+      String(MOTION_BRIEF_LIMITS.durationSecondsMaximum),
+    );
+    await user.clear(screen.getByLabelText("一句话视频需求"));
+    await user.type(screen.getByLabelText("一句话视频需求"), "用蓝色商务风做一段说明");
+    await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+    expect(
+      await screen.findByText("已提交一句话自动制作，编排完成，本机渲染开始了。"),
+    ).toBeVisible();
+
+    const longest = motionBriefWaitEstimate(MOTION_BRIEF_LIMITS.durationSecondsMaximum);
+    expect(
+      await screen.findByText(
+        new RegExp(`渲染超过 ${motionSpokenDuration(longest.ceilingSeconds)} 会自动停下`),
+      ),
+    ).toBeVisible();
+  });
+
+  /**
+   * 侧边栏一点就把这个组件卸载掉——句子当年就是这么丢的（motion-run-store 的
+   * 开头记着那次实测）。片长是同一张表单上的字段，必须一起活下来，
+   * 否则会出现最难查的那种：设好 180 秒，去别处看一眼回来，句子还在、数字悄悄退回 12。
+   */
+  it("keeps the chosen length when the page is left and reopened", async () => {
+    const user = userEvent.setup();
+    const view = render(<VideoStudio gateway={gateway()} />);
+
+    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
+    await user.clear(screen.getByLabelText("成片时长（秒）"));
+    await user.type(screen.getByLabelText("成片时长（秒）"), "45");
+
+    view.unmount();
+    render(<VideoStudio gateway={gateway()} />);
+
+    expect(screen.getByLabelText("成片时长（秒）")).toHaveDisplayValue("45");
   });
 
   /**

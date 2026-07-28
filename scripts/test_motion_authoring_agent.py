@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sys
 import unittest
 from pathlib import Path
@@ -1624,6 +1625,76 @@ class ExecutorEntryTests(unittest.TestCase):
             catalog,
             "the entry accepted catalogRoot and never handed it to the agent",
         )
+
+    def test_the_beat_length_it_suggests_can_always_fit_the_beat_ceiling(self) -> None:
+        """给模型的两条约束不能互相矛盾。
+
+        prompt 一边要求「铺满 0..duration 秒、不重叠不留空」，一边建议「每段
+        2~3 秒」，而 `MAX_STORYBOARD_BEATS` 是 24。片长 72 秒（24×3）以上这两条
+        就无解了：照建议切 180 秒要 60~90 段，一律被 `write_storyboard` 拒；
+        照 24 段切，每段 7.5 秒，又和建议对不上。
+
+        用户等三分钟编排、最后死在最后一步——而他选的是界面给的长度。
+        所以建议时长必须随片长走。
+        """
+        from automation_tool.executor.motion_authoring.agent import (
+            MAX_STORYBOARD_BEATS,
+            suggested_beat_seconds,
+        )
+
+        for duration in (1, 12, 20, 60, 120, MAX_DURATION_SECONDS):
+            low, high = suggested_beat_seconds(duration)
+            self.assertLessEqual(low, high, f"{duration} 秒的建议区间是倒的")
+            self.assertGreaterEqual(low, 1, f"{duration} 秒建议了不足一秒的镜头")
+            # 照建议的**最短**那头切，段数也不能超过上限——否则模型照做就被拒。
+            self.assertLessEqual(
+                math.ceil(duration / low),
+                MAX_STORYBOARD_BEATS,
+                f"{duration} 秒按每段 {low} 秒要切 {math.ceil(duration / low)} 段，"
+                f"超过上限 {MAX_STORYBOARD_BEATS}",
+            )
+
+    def test_a_film_longer_than_one_capture_reaches_the_model(self) -> None:
+        """路线 A 之后，整片帧数不再是一次捕获的事。
+
+        `author()` 顶上那条 `duration * fps <= MAX_FRAME_COUNT` 是单次渲染时代
+        留下的：整片必须塞进沙箱 600 帧。可现在一个镜头一次渲染再拼，受 600 帧
+        约束的是**段**（`plan_film` 逐段判），整片没有这个限制——PC-08 的失败矩阵
+        里写着「20 镜共 3600 帧（远超单次上限）→ 放行」。
+
+        这条守卫留着的后果是实测出来的：界面把上限开到 180 秒、请求校验也放行，
+        60 秒的请求走到这里被拒，理由是 `duration exceeds the snapshot frame
+        budget for this fps`——一个用户既看不懂、也无从规避的说法，因为那个长度
+        正是界面让他选的。
+        """
+        model = ScriptedModel([_valid_model_payload()])
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root)
+            catalog = root / "catalog"
+            catalog.mkdir()
+            agent = MotionAuthoringAgent(
+                workspace=workspace,
+                tools=MotionAuthoringTools(workspace),
+                workflow=load_locked_authoring_workflow(
+                    vendor_root=VENDOR_ROOT, contract_path=WORKFLOW_CONTRACT
+                ),
+                model_config=_model_config(),
+                model_call=model,
+                catalog_root=catalog,
+            )
+            long_film = MotionBrief(
+                text="用蓝色商务风做一段本周销售增长说明",
+                aspect_ratio="16:9",
+                duration_seconds=60,
+                language="zh",
+            )
+            with self.assertRaises(MotionAuthoringRejected) as refusal:
+                agent.author(long_film)
+            # 走到模型、拿到应答、再因为脚本化应答与 60 秒对不上而被后面的门禁拒，
+            # 都是可以的；不可以的是**根本没问模型**就以帧预算为由拒掉。
+            self.assertNotIn("snapshot frame budget", str(refusal.exception))
+            self.assertEqual(len(model.calls), 1, "60 秒的片子必须走到模型")
 
     def test_the_answer_carries_no_workspace_path_and_no_credential(self) -> None:
         """What comes back must be safe to log and safe to hand to the WebView.

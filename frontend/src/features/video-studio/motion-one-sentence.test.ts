@@ -6,6 +6,7 @@ import {
   MOTION_BRIEF_FILM_SECONDS,
   MOTION_BRIEF_LIMITS,
   motionBriefProblem,
+  motionBriefWaitEstimate,
 } from "./motion-one-sentence";
 
 /**
@@ -61,12 +62,12 @@ describe("one-sentence motion brief limits", () => {
 });
 
 /**
- * 一句话入口没有片长控件，成片长度是固定的。
+ * 片长现在是操作者定的，这里守的是它的默认值。
  *
- * 用户此前就为「每段 1 秒写死」抱怨过一次，那条已经改成可配；这个入口又把总时长
- * 写死了一遍。写死本身在首期是可以接受的取舍，但**不告诉用户**不行：客户说
- * 「做一个三分钟的产品介绍」，系统安静地做出十几秒的片子、全程不提示，
- * 在演示现场比少一个功能更难看。所以这个数字必须只有一个来源，界面照它说。
+ * 这个入口一度把总时长写死。用户此前就为「每段 1 秒写死」抱怨过一次，那条已经
+ * 改成可配，这里又写死了一遍：客户说「做一个三分钟的产品介绍」，系统安静地做出
+ * 十几秒的片子、全程不提示，在演示现场比少一个功能更难看。控件补上之后写死没了，
+ * 默认值还在——它必须只有一个来源，界面照它说。
  */
 describe("one-sentence film length", () => {
   it("is the storyboard default, taken from the shared duration contract", () => {
@@ -111,5 +112,101 @@ describe("片长由操作者选择", () => {
       motionBriefProblem(sentence, MOTION_BRIEF_LIMITS.durationSecondsMaximum + 1),
     ).toContain(`${MOTION_BRIEF_LIMITS.durationSecondsMaximum} 秒`);
     expect(motionBriefProblem(sentence, 0)).not.toBeNull();
+  });
+});
+
+/**
+ * 把片长交给用户之前，得先让他知道这条选择要付多少时间。
+ *
+ * 上限从 20 秒抬到 180 秒之后，最贵的那个选项贵得不成比例：路线 A 是**一个镜头
+ * 一次渲染**，每次渲染都要重新启动一遍浏览器、装载页面、等它稳定，契约里
+ * `renderWallSecondsBase` 把这笔固定开销记作 30 秒。所以耗时不只随帧数涨，
+ * 还随镜头数涨——180 秒的片子光启动就是几十次。一个只能选、不告诉代价的滑块，
+ * 会让人顺手拉到头然后等一个多小时，中途以为卡死。
+ */
+describe("片长对应的等待时间", () => {
+  const limits = durationContract;
+
+  /**
+   * 镜头数按**编排真正会收下的最多镜头数**算，不是另找一个数。
+   *
+   * 第一版拿 `secondsPerBeatDefault`（4 秒）估，而那个默认值是固定模板编辑器的，
+   * 从来没进过编排 prompt——180 秒按它算 45 镜，而硬上限是 24 镜。
+   * 少算一个镜头就是少算一整份 30 秒启动开销，多算同理。
+   */
+  it("镜头数不超过编排收得下的上限", () => {
+    for (const seconds of [1, 12, 20, 60, 120, limits.briefSecondsMaximum]) {
+      const { shots } = motionBriefWaitEstimate(seconds);
+      expect(shots).toBe(
+        Math.min(
+          limits.briefBeatCountMaximum,
+          Math.ceil(seconds / limits.briefSecondsPerBeatMinimum),
+        ),
+      );
+      expect(shots).toBeLessThanOrEqual(limits.briefBeatCountMaximum);
+      expect(shots).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  /**
+   * 钉死具体的数，不复写生产表达式。
+   *
+   * 上一版五条断言全是「复写同一行代数」或「松散不等式」，于是 135 秒和 150 秒
+   * 因为浮点往返多报了整整一分钟，五条全绿。单调性也挡不住——多报是往上跳的。
+   */
+  it("每一档都算出确定的数", () => {
+    // 12 秒：每镜 2 秒 → 6 镜。渲染 6×30 + 12×30×0.4 = 324 秒，
+    // 加编排上限 178 秒 = 502 秒，往上取整到整分钟 = 540 秒。
+    expect(motionBriefWaitEstimate(12)).toEqual({ shots: 6, ceilingSeconds: 540 });
+    // 180 秒：撞上 24 镜的硬上限。渲染 24×30 + 180×30×0.4 = 2880 秒，
+    // 加 178 = 3058，取整 = 3060 秒。
+    expect(motionBriefWaitEstimate(180)).toEqual({ shots: 24, ceilingSeconds: 3060 });
+  });
+
+  it("整分钟报出来，别给出没有的精度", () => {
+    for (let seconds = 1; seconds <= limits.briefSecondsMaximum; seconds += 1) {
+      expect(motionBriefWaitEstimate(seconds).ceilingSeconds % 60).toBe(0);
+    }
+  });
+
+  it("浮点往返不许把估算顶上一整分钟", () => {
+    // 135 和 150 是实测踩到的两个点：除完再乘回来落在 2820.0000000000005，
+    // 向上取整整整跳了一分钟。
+    for (const seconds of [135, 150]) {
+      const { shots, ceilingSeconds } = motionBriefWaitEstimate(seconds);
+      const exact =
+        178 +
+        shots * limits.renderWallSecondsBase +
+        (seconds * limits.framesPerSecond * limits.renderWallMillisPerFrame) / 1000;
+      expect(ceilingSeconds).toBe(Math.ceil(exact / 60) * 60);
+    }
+  });
+
+  it("镜头数也是成本，不只是帧数", () => {
+    // 同样的总帧数，切成更多镜头就更贵——这正是要写在界面上的那件事。
+    const oneShot = motionBriefWaitEstimate(2);
+    const manyShots = motionBriefWaitEstimate(20);
+    expect(manyShots.shots).toBeGreaterThan(oneShot.shots);
+    expect(manyShots.ceilingSeconds).toBeGreaterThan(oneShot.ceilingSeconds);
+  });
+
+  it("拉到头的那个选项要贵到必须先说一声", () => {
+    const longest = motionBriefWaitEstimate(limits.briefSecondsMaximum);
+    // 半小时：这个量级的等待，界面不先说一声就是在坑人。
+    const HALF_AN_HOUR_SECONDS = 30 * 60;
+    expect(longest.ceilingSeconds).toBeGreaterThan(HALF_AN_HOUR_SECONDS);
+  });
+
+  it("片子更长，估算不会更短", () => {
+    let previous = 0;
+    for (let seconds = 1; seconds <= limits.briefSecondsMaximum; seconds += 1) {
+      const { ceilingSeconds } = motionBriefWaitEstimate(seconds);
+      expect(ceilingSeconds).toBeGreaterThanOrEqual(previous);
+      previous = ceilingSeconds;
+    }
+  });
+
+  it("最短的片子也至少有一个镜头", () => {
+    expect(motionBriefWaitEstimate(1).shots).toBe(1);
   });
 });

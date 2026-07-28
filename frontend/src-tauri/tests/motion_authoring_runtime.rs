@@ -174,6 +174,33 @@ fn a_missing_runtime_is_refused_rather_than_silently_skipped() {
     assert_eq!(error.code(), MotionVideoStudioErrorCode::RenderUnavailable);
 }
 
+/// 一句话入口开放的每一个片长，后面每一层都得真的收得下。
+///
+/// 上一轮把上限从 20 抬到 180 时只改了请求校验那一处，`brief_plan` 还在拿
+/// `total_seconds_maximum`（20，固定模板那条路的沙箱单次上限）去卡。于是 60 秒
+/// 的请求先通过校验，再在编排跑完之后死在这里——**用户等三分钟才拿到一句
+/// 「做不出来」**，而他选的正是界面允许他选的长度。
+#[test]
+fn every_length_the_entry_offers_is_one_the_render_plan_accepts() {
+    use automation_tool_desktop_lib::motion_video_studio::duration_limits;
+
+    let limits = duration_limits().unwrap();
+    for seconds in [1, limits.total_seconds_maximum(), limits.brief_seconds_maximum()] {
+        MotionVideoBriefRequest::one_sentence(
+            "用蓝色商务风做一段本周销售增长说明".to_owned(),
+            "16:9".to_owned(),
+            seconds,
+            "zh".to_owned(),
+        )
+        .unwrap_or_else(|_| panic!("{seconds} 秒是界面允许选的，请求校验必须放行"));
+        limits
+            .brief_plan(seconds)
+            .unwrap_or_else(|_| panic!("{seconds} 秒过了请求校验，渲染计划就不能再拒它"));
+    }
+    assert!(limits.brief_plan(limits.brief_seconds_maximum() + 1).is_err());
+    assert!(limits.brief_plan(0).is_err());
+}
+
 #[test]
 fn a_brief_is_judged_against_the_same_contracts_the_agent_reads() {
     // The one-sentence entry's own ceiling, not the template path's: this path
@@ -251,6 +278,8 @@ fn an_authored_answer_is_rechecked_against_the_brief_before_it_becomes_a_render_
             "allowedAssets": [AUTHORING_RUNTIME_ASSET],
             "canvas": {"width": 640, "height": 360, "deviceScaleFactor": 2},
             "frameCount": 6 * 30,
+            "sourceStartMillis": 0,
+            "sourceEndMillis": 6000,
         }],
     });
     let prepared = accept_authored_render_job(&store, &workspace, &request, &good.to_string())
@@ -342,6 +371,10 @@ fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
             "deviceScaleFactor": TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
         },
         "frameCount": 90,
+        // 这一段覆盖 composition 时间轴上的哪一截。模板段全都加载同一个文件，
+        // 除了这个窗口以外没有任何东西能把两次渲染区分开。
+        "sourceStartMillis": 0,
+        "sourceEndMillis": 3000,
     });
     let part_segment = serde_json::json!({
         "entryHtml": part_entry,
@@ -350,6 +383,9 @@ fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
         // resolution, and sharpening it further costs every frame.
         "canvas": {"width": 1920, "height": 1080, "deviceScaleFactor": 1},
         "frameCount": 144,
+        // 零件是自带时间轴的独立文件，窗口就是它自己那条。
+        "sourceStartMillis": 0,
+        "sourceEndMillis": 4800,
     });
     let good = serde_json::json!({
         "schemaVersion": 1,
@@ -375,6 +411,13 @@ fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
     assert_eq!(segments[1].height(), 1080);
     assert_eq!(segments[1].device_scale_factor(), 1);
     assert_eq!(segments[1].frame_count(), 144);
+    // 每一段覆盖源文件时间轴上的哪一截，必须一路传到渲染请求里。
+    // 没有它的时候，Worker 只能把整条时间轴摊到这一段要的帧数上——
+    // 于是每个模板镜头都把整部片子重渲一遍。2026-07-28 留档那条 12 秒成片
+    // 就是这么来的：两段一模一样的 6 秒，各自倍速。
+    assert_eq!(segments[0].source_start_millis(), 0);
+    assert_eq!(segments[0].source_end_millis(), 3000);
+    assert_eq!(segments[1].source_end_millis(), 4800);
     // The film is as long as its shots come to. It is deliberately not the
     // brief's `durationSeconds` x fps: a shot runs for whichever is longer, the
     // line or the part's own motion, so the requested length steers the
@@ -390,6 +433,8 @@ fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
             "allowedAssets": [part_asset],
             "canvas": {"width": 1920, "height": 1080, "deviceScaleFactor": 1},
             "frameCount": 144,
+            "sourceStartMillis": 0,
+            "sourceEndMillis": 3000,
         }]}),
         // 入口在工作区里根本不存在
         serde_json::json!({"segments": [{
@@ -397,6 +442,8 @@ fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
             "allowedAssets": [part_asset],
             "canvas": {"width": 1920, "height": 1080, "deviceScaleFactor": 1},
             "frameCount": 144,
+            "sourceStartMillis": 0,
+            "sourceEndMillis": 3000,
         }]}),
         // 把沙箱白名单扩大到工作区之外
         serde_json::json!({"segments": [{
@@ -404,6 +451,8 @@ fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
             "allowedAssets": ["../../../etc/passwd"],
             "canvas": {"width": 1920, "height": 1080, "deviceScaleFactor": 1},
             "frameCount": 144,
+            "sourceStartMillis": 0,
+            "sourceEndMillis": 3000,
         }]}),
         // 画布超出渲染沙箱一帧能承受的像素
         serde_json::json!({"segments": [{
@@ -411,6 +460,8 @@ fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
             "allowedAssets": [part_asset],
             "canvas": {"width": 2560, "height": 2560, "deviceScaleFactor": 3},
             "frameCount": 144,
+            "sourceStartMillis": 0,
+            "sourceEndMillis": 3000,
         }]}),
         // 一段的帧数超过单次渲染的上限
         serde_json::json!({"segments": [{
@@ -418,6 +469,8 @@ fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
             "allowedAssets": [part_asset],
             "canvas": {"width": 1920, "height": 1080, "deviceScaleFactor": 1},
             "frameCount": 601,
+            "sourceStartMillis": 0,
+            "sourceEndMillis": 3000,
         }]}),
         // 一段没有帧
         serde_json::json!({"segments": [{
@@ -425,6 +478,8 @@ fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
             "allowedAssets": [part_asset],
             "canvas": {"width": 1920, "height": 1080, "deviceScaleFactor": 1},
             "frameCount": 0,
+            "sourceStartMillis": 0,
+            "sourceEndMillis": 3000,
         }]}),
         // 模板段没带它必须加载的动画运行时
         serde_json::json!({"segments": [{
@@ -436,6 +491,35 @@ fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
                 "deviceScaleFactor": TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
             },
             "frameCount": 90,
+            "sourceStartMillis": 0,
+            "sourceEndMillis": 3000,
+        }]}),
+        // 时间窗倒着来：结束不晚于开始，这一段没有任何时间可采
+        serde_json::json!({"segments": [{
+            "entryHtml": part_entry,
+            "allowedAssets": [part_asset],
+            "canvas": {"width": 1920, "height": 1080, "deviceScaleFactor": 1},
+            "frameCount": 144,
+            "sourceStartSeconds": 4.8,
+            "sourceEndMillis": 4800,
+        }]}),
+        // 起点是负的
+        serde_json::json!({"segments": [{
+            "entryHtml": part_entry,
+            "allowedAssets": [part_asset],
+            "canvas": {"width": 1920, "height": 1080, "deviceScaleFactor": 1},
+            "frameCount": 144,
+            "sourceStartSeconds": -1.0,
+            "sourceEndMillis": 4800,
+        }]}),
+        // 小数：整份 spec 全是整数，签名绑定的规范化 JSON 容不下浮点
+        serde_json::json!({"segments": [{
+            "entryHtml": part_entry,
+            "allowedAssets": [part_asset],
+            "canvas": {"width": 1920, "height": 1080, "deviceScaleFactor": 1},
+            "frameCount": 144,
+            "sourceStartMillis": 0,
+            "sourceEndMillis": 4800.5,
         }]}),
     ] {
         let mut document = good.clone();
@@ -587,6 +671,8 @@ fn every_progress_the_render_loop_reports_is_one_the_job_accepts() {
                 "allowedAssets": [AUTHORING_RUNTIME_ASSET],
                 "canvas": {"width": 640, "height": 360, "deviceScaleFactor": 2},
                 "frameCount": 30,
+                "sourceStartMillis": 0,
+                "sourceEndMillis": 1000,
             })).collect::<Vec<_>>(),
         });
         let prepared = accept_authored_render_job(&store, &workspace, &request, &answer.to_string())

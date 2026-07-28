@@ -893,6 +893,14 @@ fn run_motion_render_job(
                     segment.device_scale_factor(),
                 )
                 .map_err(|_| MotionRenderStageFailure::Render)?,
+                // Which stretch of the loaded document this shot is. Template
+                // shots all load the one composition, so without this they all
+                // rendered the whole film — see `VideoWorkerSourceWindow`.
+                local_video_orchestrator::VideoWorkerSourceWindow::new(
+                    segment.source_start_millis(),
+                    segment.source_end_millis(),
+                )
+                .map_err(|_| MotionRenderStageFailure::Render)?,
                 segment.allowed_assets().to_vec(),
                 segment.frame_count(),
                 budget.wall_seconds(),

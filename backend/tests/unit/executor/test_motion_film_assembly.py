@@ -141,6 +141,51 @@ def test_a_film_mixes_part_segments_and_template_segments(tmp_path) -> None:
     assert film.total_frames == 144 + 90
 
 
+def test_each_template_shot_samples_its_own_stretch_of_the_composition(tmp_path) -> None:
+    """The defect that made the first real film play the same footage twice.
+
+    A template segment loads the whole composition — one document that draws
+    every beat along one timeline. The Worker spreads *the page's whole seekable
+    duration* over the frames it is asked for, so two template segments both
+    rendered the entire film, each squeezed into its own half. Measured on the
+    kept artifact of 2026-07-28: 12 seconds, two identical 6 second halves at
+    double speed, and every mechanical check — codec, canvas, frame count,
+    duration, the still-image gate — green over it.
+
+    So a segment has to say which stretch of its source it is. For a template
+    beat that is the window the storyboard gave it.
+    """
+    film = assemble(
+        [
+            BeatPlan(beat_id="b1", part=None, copy={}, voice_seconds=None, declared_seconds=6.0,
+                     start_seconds=0.0),
+            BeatPlan(beat_id="b2", part=None, copy={}, voice_seconds=None, declared_seconds=6.0,
+                     start_seconds=6.0),
+        ],
+        tmp_path,
+    )
+
+    first, second = film.segments
+    # 毫秒整数：命令签名绑定的规范化 JSON 要在三门语言里逐字节一致，浮点过不了这一关。
+    assert (first.source_start_millis, first.source_end_millis) == (0, 6000)
+    assert (second.source_start_millis, second.source_end_millis) == (6000, 12000)
+    # Same document, different stretch of it — that is what "one render per
+    # shot" has to mean for beats the template carries.
+    assert first.entry_html == second.entry_html
+
+
+def test_a_part_segment_samples_its_own_document_from_the_start(tmp_path) -> None:
+    """A part is its own composition, so its window is its own timeline."""
+    film = assemble(
+        [BeatPlan(beat_id="b1", part="lt-bold-block", copy={1: "张三"}, voice_seconds=None)],
+        tmp_path,
+    )
+
+    segment = film.segments[0]
+    assert segment.source_start_millis == 0
+    assert segment.source_end_millis == round(DURATIONS["lt-bold-block"] * 1000)
+
+
 def test_narration_longer_than_the_motion_lengthens_the_shot(tmp_path) -> None:
     """PC-08's rule, reaching the render request that is actually sent."""
     film = assemble(

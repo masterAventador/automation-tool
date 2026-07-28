@@ -23,6 +23,10 @@ export interface MotionDurationLimits {
    * rather than a sandbox one.
    */
   readonly briefSecondsMaximum: number;
+  /** The most shots a one-sentence storyboard may be cut into. */
+  readonly briefBeatCountMaximum: number;
+  /** The shortest shot the authoring agent is ever told to aim for. */
+  readonly briefSecondsPerBeatMinimum: number;
   /** Fixed startup cost of a render: browser launch, page load, warm-up. */
   readonly renderWallSecondsBase: number;
   /** Per-frame cost of a render: seek, composite, capture. */
@@ -39,6 +43,8 @@ export const MOTION_DURATION_LIMITS: MotionDurationLimits = {
   secondsPerBeatDefault: contract.secondsPerBeatDefault,
   totalSecondsMaximum: contract.totalSecondsMaximum,
   briefSecondsMaximum: contract.briefSecondsMaximum,
+  briefBeatCountMaximum: contract.briefBeatCountMaximum,
+  briefSecondsPerBeatMinimum: contract.briefSecondsPerBeatMinimum,
   renderWallSecondsBase: contract.renderWallSecondsBase,
   renderWallMillisPerFrame: contract.renderWallMillisPerFrame,
 };
@@ -60,11 +66,20 @@ export function motionRenderCeilingSeconds(filmSeconds: number): number {
   return limits.renderWallSecondsBase + (frames * limits.renderWallMillisPerFrame) / 1000;
 }
 
-/** A number of seconds, written the way it is said out loud. */
+/**
+ * A number of seconds, written the way it is said out loud.
+ *
+ * Hours are spelled once the number reaches one, because the longest film this
+ * App offers costs more than an hour of waiting and «62 分» is not how anyone
+ * hears that. The whole point of showing the number is to make the most
+ * expensive choice feel as expensive as it is.
+ */
 export function motionSpokenDuration(seconds: number): string {
   const whole = Math.max(0, Math.floor(seconds));
-  const minutes = Math.floor(whole / 60);
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
   const rest = whole % 60;
+  if (hours > 0) return minutes === 0 ? `${hours} 小时` : `${hours} 小时 ${minutes} 分`;
   if (minutes === 0) return `${rest} 秒`;
   if (rest === 0) return `${minutes} 分`;
   return `${minutes} 分 ${rest} 秒`;

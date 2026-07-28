@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import urllib.error
 import urllib.request
@@ -478,6 +479,33 @@ def _load_maximum_duration_seconds() -> int:
     return maximum
 
 
+def _load_brief_beat_bound(field: str) -> int:
+    """One of the two bounds on how a one-sentence film may be cut into shots.
+
+    Read here rather than written here for the same reason the duration ceiling
+    is: the form offers the length, the native validator accepts it and this
+    agent tells the model what to aim for, and the three drifting apart is
+    invisible from any one of them.
+    """
+    try:
+        contract = json.loads(_DURATION_CONTRACT_PATH.read_text(encoding="utf-8"))
+        value = contract[field]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: storyboard duration contract is unreadable"
+        ) from error
+    if (
+        contract.get("schemaVersion") != 1
+        or contract.get("policy") != "fail_closed"
+        or type(value) is not int
+        or not (1 <= value <= 3600)
+    ):
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: storyboard duration contract drifted"
+        )
+    return value
+
+
 def _load_model_stream_idle_timeout_seconds() -> int:
     """How long the model may go quiet mid-response before the run gives up.
 
@@ -517,7 +545,12 @@ def _load_model_stream_idle_timeout_seconds() -> int:
 MAX_DURATION_SECONDS: Final = _load_maximum_duration_seconds()
 
 MAX_SCRIPT_BEATS: Final = 12
-MAX_STORYBOARD_BEATS: Final = 24
+# Both read from the duration contract rather than written here: the form that
+# offers the length, the validator that accepts it and this agent all have to
+# agree on how many shots a film may be cut into, and the one place that can be
+# is the contract they already share.
+MAX_STORYBOARD_BEATS: Final = _load_brief_beat_bound("briefBeatCountMaximum")
+SUGGESTED_BEAT_SECONDS_MINIMUM: Final = _load_brief_beat_bound("briefSecondsPerBeatMinimum")
 MAX_COMPOSITION_BYTES: Final = 512_000
 DEFAULT_FPS: Final = 30
 MAX_FRAME_COUNT: Final = 600  # snapshot per-job frame budget (20s @ 30fps)
@@ -1299,15 +1332,24 @@ class SnapshotPlan:
     sample_times_seconds: tuple[float, ...]
 
 
-def snapshot_plan(html: str, *, duration_seconds: int, fps: int) -> SnapshotPlan:
-    """Compute the deterministic per-frame seek plan — pure arithmetic, no browser."""
+def snapshot_plan(
+    html: str, *, duration_seconds: int, fps: int, frames_maximum: int = MAX_FRAME_COUNT
+) -> SnapshotPlan:
+    """Compute the deterministic per-frame seek plan — pure arithmetic, no browser.
+
+    `frames_maximum` is what one *capture* may hold, and it stopped being one
+    number when a film stopped being one capture. A composition every shot is
+    cut out of is never captured whole, so planning it is bounded by the film
+    ceiling; a composition that *is* the film — an installation with no parts
+    catalog — still has to fit the sandbox's 600.
+    """
     _require(
         check_composition(html, duration_seconds=duration_seconds).ok,
         "composition not seekable",
     )
     _require(type(fps) is int and 1 <= fps <= 120, "fps out of range")
     frame_count = duration_seconds * fps
-    _require(1 <= frame_count <= MAX_FRAME_COUNT, "frame count out of range")
+    _require(1 <= frame_count <= frames_maximum, "frame count out of range")
     times = tuple(round(index / fps, 6) for index in range(frame_count))
     return SnapshotPlan(frame_count=frame_count, fps=fps, sample_times_seconds=times)
 
@@ -1324,12 +1366,21 @@ class RenderSegment:
     A film is a list of these because the parts do not share a stage: most of
     the catalog declares 1920x1080, three declare 1080x1920, and the built-in
     template draws on 640x360. One render per shot is what lets each be itself.
+
+    The source window is what tells two renders of the *same* document apart.
+    Template beats all load the one composition, so without it the Worker had
+    nothing to go on and spread that composition's whole timeline over whatever
+    frame count each segment asked for — every template beat re-rendered the
+    entire film. The kept artifact of 2026-07-28 is twelve seconds of that: two
+    identical six second halves at double speed.
     """
 
     entry_html: str
     allowed_assets: tuple[str, ...]
     canvas: dict[str, int]
     frame_count: int
+    source_start_millis: int
+    source_end_millis: int
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -1337,6 +1388,8 @@ class RenderSegment:
             "allowedAssets": list(self.allowed_assets),
             "canvas": dict(self.canvas),
             "frameCount": self.frame_count,
+            "sourceStartMillis": self.source_start_millis,
+            "sourceEndMillis": self.source_end_millis,
         }
 
 
@@ -1458,9 +1511,20 @@ class MotionAuthoringTools:
         html = self._workspace.read_text(relative_path)
         return check_composition(html, duration_seconds=duration_seconds)
 
-    def snapshot(self, relative_path: str, duration_seconds: int, fps: int) -> SnapshotPlan:
+    def snapshot(
+        self,
+        relative_path: str,
+        duration_seconds: int,
+        fps: int,
+        frames_maximum: int = MAX_FRAME_COUNT,
+    ) -> SnapshotPlan:
         html = self._workspace.read_text(relative_path)
-        return snapshot_plan(html, duration_seconds=duration_seconds, fps=fps)
+        return snapshot_plan(
+            html,
+            duration_seconds=duration_seconds,
+            fps=fps,
+            frames_maximum=frames_maximum,
+        )
 
     def submit_render_job(
         self,
@@ -1767,6 +1831,28 @@ _SYSTEM_RULES: Final = (
     "你只负责：选定风格与配色、写出每一段分镜的画面文案、给出每段的起止时间。"
 )
 
+def suggested_beat_seconds(duration_seconds: int) -> tuple[int, int]:
+    """How long to tell the model to make each beat, for a film this long.
+
+    Two instructions have to agree and used to be written independently: the
+    storyboard must tile 0..duration with no gap and no overlap, and it may hold
+    at most `MAX_STORYBOARD_BEATS` beats. A fixed "2 to 3 seconds" satisfies
+    both only up to 24 x 3 = 72 seconds. Past that the model is given a task
+    with no solution: obey the suggestion and produce sixty beats that
+    `write_storyboard` refuses, or obey the ceiling and ignore the suggestion.
+    Either way the operator waits out the whole authoring pass — minutes — to be
+    told his film could not be made, at a length the form offered him.
+
+    So the floor is whatever the ceiling forces, never below two seconds — the
+    shortest beat a viewer can read a title and a caption in, which is the same
+    number `motion-storyboard-duration.v1.json` gives for the template editor.
+    The top of the range is half again as long, so there is room to vary shot
+    length rather than a single number to hit exactly.
+    """
+    low = max(SUGGESTED_BEAT_SECONDS_MINIMUM, math.ceil(duration_seconds / MAX_STORYBOARD_BEATS))
+    return low, low + max(1, low // 2)
+
+
 # The layouts the local template publishes, in the words the instruction uses.
 # Kept beside the prompt because a layout the model is never told about is a
 # layout it will never pick, which would silently narrow the product to one card.
@@ -1803,6 +1889,7 @@ def _selectable_parts_table() -> str:
 
 
 def _first_message_contract(brief: MotionBrief) -> str:
+    _suggested_low, _suggested_high = suggested_beat_seconds(brief.duration_seconds)
     return (
         "请根据一句话 Brief 生成动效视频编排，返回 JSON，键必须精确为 "
         '{"design", "script", "storyboard"}。\n'
@@ -1822,7 +1909,8 @@ def _first_message_contract(brief: MotionBrief) -> str:
         # never involved.
         "- beat_id 是字符串，只能用小写字母、数字和连字符，例如 beat-1、beat-2；\n"
         f"- 所有分镜的时间区间必须首尾相接铺满 0..{brief.duration_seconds} 秒，"
-        "不重叠也不留空；建议每段 2~3 秒；\n"
+        f"不重叠也不留空；建议每段 {_suggested_low}~{_suggested_high} 秒，"
+        f"总共不超过 {MAX_STORYBOARD_BEATS} 段；\n"
         f"- layout 只能取 {list(SCENE_LAYOUTS)}，含义：\n{_LAYOUT_GUIDE}\n"
         "- headline 是画面上的大字，控制在 16 字以内；body 是画面上的说明文字，"
         f"控制在 30 字以内；items 最多 {MAX_SCENE_ITEMS} 项、每项 8 字以内；\n"
@@ -1933,6 +2021,10 @@ class MotionAuthoringAgent:
                     allowed_assets=template_assets,
                     canvas=dict(TEMPLATE_CANVAS),
                     frame_count=template_frames,
+                    # One segment for the whole film, so the window is the whole
+                    # composition.
+                    source_start_millis=0,
+                    source_end_millis=round(template_frames * 1000 / self._fps),
                 ),
             )
 
@@ -1956,6 +2048,7 @@ class MotionAuthoringAgent:
                     copy=catalog.copy_for(beat),
                     voice_seconds=None,
                     declared_seconds=beat.duration_seconds,
+                    start_seconds=beat.start_seconds,
                 )
                 for beat in storyboard.beats
             ],
@@ -1981,6 +2074,8 @@ class MotionAuthoringAgent:
                 ),
                 canvas=segment.canvas,
                 frame_count=segment.frames,
+                source_start_millis=segment.source_start_millis,
+                source_end_millis=segment.source_end_millis,
             )
             for segment in film.segments
         )
@@ -1992,8 +2087,19 @@ class MotionAuthoringAgent:
             )
         if not isinstance(brief, MotionBrief):
             _reject("brief must be a MotionBrief")
+        # What one render may capture, and what this film may come to, are two
+        # different numbers now. Every shot is its own render and `plan_film`
+        # holds each of them to `MAX_FRAME_COUNT`; the film is their sum and
+        # PC-08's matrix says a 3600 frame film is admissible. The exception is
+        # an installation with no parts catalog: there the composition *is* the
+        # film and is captured in one pass, so the sandbox's limit is the film's.
+        film_frames_maximum = (
+            MAX_FRAME_COUNT
+            if self._catalog is None
+            else MAX_DURATION_SECONDS * self._fps
+        )
         _require(
-            brief.duration_seconds * self._fps <= MAX_FRAME_COUNT,
+            brief.duration_seconds * self._fps <= film_frames_maximum,
             "duration exceeds the snapshot frame budget for this fps",
         )
 
@@ -2027,7 +2133,9 @@ class MotionAuthoringAgent:
                 f"{sorted(lint.codes() | check.codes())}"
             )
 
-        snapshot = self._tools.snapshot(composition_path, brief.duration_seconds, self._fps)
+        snapshot = self._tools.snapshot(
+            composition_path, brief.duration_seconds, self._fps, film_frames_maximum
+        )
         # PC-03..PC-09: the beats that named a catalog part become their own
         # renders, on the stage those parts declare. Beats that named none stay
         # on the template segment this composition already is. Before this, the

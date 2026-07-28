@@ -12,11 +12,13 @@ import {
   resetMotionRunStore,
   setMotionActiveTab,
   setMotionBrief,
+  setMotionFilmSeconds,
   setMotionMethod,
   settleMotionRun,
   startMotionRun,
   subscribeMotionRun,
 } from "./motion-run-store";
+import { MOTION_BRIEF_FILM_SECONDS } from "./motion-one-sentence";
 
 const JOB_ID = "f89d8f18-6b4e-4f5a-8325-8da45f71d7e2";
 
@@ -71,7 +73,7 @@ describe("motion run store", () => {
 
   it("hands the pending row over to the real job once the run returns", () => {
     startMotionRun(PENDING);
-    settleMotionRun(JOB_ID, 12, {
+    settleMotionRun(JOB_ID, 12, "one_sentence", {
       tone: "info",
       text: "已提交一句话自动制作。",
     });
@@ -80,6 +82,9 @@ describe("motion run store", () => {
     expect(motionRunSnapshot().ownJobs.get(JOB_ID)).toEqual({
       startedAt: expect.any(Number),
       filmSeconds: 12,
+      // 哪条路做的这部片子，决定了「渲染超过多久算不正常」用哪条公式：
+      // 固定模板一次拍完，一句话是一镜一渲染再拼。
+      kind: "one_sentence",
       outcome: "running",
     });
 
@@ -98,7 +103,7 @@ describe("motion run store", () => {
   it("knows a film still needs watching from the moment the render starts", () => {
     expect(motionRunNeedsWatch(motionRunSnapshot())).toBe(false);
 
-    settleMotionRun(JOB_ID, 12, { tone: "info", text: "本机渲染开始了。" });
+    settleMotionRun(JOB_ID, 12, "one_sentence", { tone: "info", text: "本机渲染开始了。" });
     expect(motionRunNeedsWatch(motionRunSnapshot())).toBe(true);
 
     endMotionJob(JOB_ID, "succeeded");
@@ -117,7 +122,7 @@ describe("motion run store", () => {
    * 好消息），但形状同族，而且演示当天客户切走再切回来看到「还在做」一样难看。
    */
   it("says the film is finished rather than still claiming it is being made", () => {
-    settleMotionRun(JOB_ID, 12, { tone: "info", text: "本机渲染开始了。" });
+    settleMotionRun(JOB_ID, 12, "one_sentence", { tone: "info", text: "本机渲染开始了。" });
     expect(motionRunAttention(motionRunSnapshot())).toBe("running");
 
     endMotionJob(JOB_ID, "succeeded");
@@ -134,7 +139,7 @@ describe("motion run store", () => {
    * 机会，而两个界面对同一件事说不同的话正是本条线一直在修的病。
    */
   it("stops offering a film once the operator has opened it", () => {
-    settleMotionRun(JOB_ID, 12, { tone: "info", text: "本机渲染开始了。" });
+    settleMotionRun(JOB_ID, 12, "one_sentence", { tone: "info", text: "本机渲染开始了。" });
     endMotionJob(JOB_ID, "succeeded");
     expect(motionRunAttention(motionRunSnapshot())).toBe("finished");
 
@@ -152,7 +157,7 @@ describe("motion run store", () => {
    * 把两者压成同一个「已结束」标志，侧边栏就会对着一条用户亲手掐掉的任务说「完成」。
    */
   it("does not offer a film for a render the operator cancelled himself", () => {
-    settleMotionRun(JOB_ID, 12, { tone: "info", text: "本机渲染开始了。" });
+    settleMotionRun(JOB_ID, 12, "one_sentence", { tone: "info", text: "本机渲染开始了。" });
 
     endMotionJob(JOB_ID, "cancelled");
 
@@ -173,7 +178,7 @@ describe("motion run store", () => {
    * 事实。这里断言 `none` 而不是「不等于 running」，是因为取消之后确实什么都不欠他了。
    */
   it("stops claiming a run is in flight once the operator cancelled it", () => {
-    settleMotionRun(JOB_ID, 12, {
+    settleMotionRun(JOB_ID, 12, "one_sentence", {
       tone: "info",
       text: "已提交一句话自动制作，编排完成，本机渲染开始了。",
     });
@@ -194,7 +199,7 @@ describe("motion run store", () => {
    * 两条用例合起来钉的是同一句话：`running` 必须来自运行事实，不是来自页面通告在不在。
    */
   it("keeps marking a render that is still going after its notice was closed", () => {
-    settleMotionRun(JOB_ID, 12, {
+    settleMotionRun(JOB_ID, 12, "one_sentence", {
       tone: "info",
       text: "已提交一句话自动制作，编排完成，本机渲染开始了。",
     });
@@ -213,10 +218,10 @@ describe("motion run store", () => {
    */
   it("keeps a failure and a blind spot ahead of a film waiting to be opened", () => {
     const OTHER_JOB = "0f2f0e56-2f1d-4a2b-8f3c-1d4e5f6a7b8c";
-    settleMotionRun(JOB_ID, 12, { tone: "info", text: "本机渲染开始了。" });
+    settleMotionRun(JOB_ID, 12, "one_sentence", { tone: "info", text: "本机渲染开始了。" });
     endMotionJob(JOB_ID, "succeeded");
     // 第二条还在跑，而且现在读不到它。
-    settleMotionRun(OTHER_JOB, 12, { tone: "info", text: "本机渲染开始了。" });
+    settleMotionRun(OTHER_JOB, 12, "one_sentence", { tone: "info", text: "本机渲染开始了。" });
     reportMotionRunTracking("lost");
     expect(motionRunAttention(motionRunSnapshot())).toBe("unknown");
 
@@ -225,7 +230,7 @@ describe("motion run store", () => {
   });
 
   it("ignores an ending for a job it never started", () => {
-    settleMotionRun(JOB_ID, 12, { tone: "info", text: "本机渲染开始了。" });
+    settleMotionRun(JOB_ID, 12, "one_sentence", { tone: "info", text: "本机渲染开始了。" });
     const before = motionRunSnapshot();
 
     endMotionJob("00000000-0000-4000-8000-000000000000", "succeeded");
@@ -240,7 +245,7 @@ describe("motion run store", () => {
    * 标记就会停在「正在进行中」——那正是本任务在修的形状，不能自己再造一个。
    */
   it("says the run cannot be read rather than leaving it looking healthy", () => {
-    settleMotionRun(JOB_ID, 12, { tone: "info", text: "本机渲染开始了。" });
+    settleMotionRun(JOB_ID, 12, "one_sentence", { tone: "info", text: "本机渲染开始了。" });
     expect(motionRunAttention(motionRunSnapshot())).toBe("running");
 
     reportMotionRunTracking("lost");
@@ -251,7 +256,7 @@ describe("motion run store", () => {
   });
 
   it("keeps a real failure ahead of merely not being able to look", () => {
-    settleMotionRun(JOB_ID, 12, { tone: "info", text: "本机渲染开始了。" });
+    settleMotionRun(JOB_ID, 12, "one_sentence", { tone: "info", text: "本机渲染开始了。" });
     reportMotionRunTracking("lost");
     failMotionRun({ tone: "error", text: "这条视频没有做出来。" });
 
@@ -275,6 +280,30 @@ describe("motion run store", () => {
     expect(motionRunSnapshot().activeTab).toBe("jobs");
     // 只是把句子放在这里，本身不构成「有东西要看」。
     expect(motionRunAttention(motionRunSnapshot())).toBe("none");
+  });
+
+  /**
+   * 片长和句子是同一张表单上的两个字段，寿命必须一样。
+   *
+   * 句子放在这里是有实测理由的：`WorkbenchShell` 一点侧边栏就把 `VideoStudio`
+   * 卸载掉。片长要是留在组件 state 里，就会出现最难查的那种：操作者把 180 秒
+   * 设好、去别处看一眼再回来，句子还在、数字却悄悄退回 12，而界面上没有任何
+   * 地方说它变过。
+   */
+  it("holds the chosen film length across the same page change", () => {
+    expect(motionRunSnapshot().filmSeconds).toBe(MOTION_BRIEF_FILM_SECONDS);
+
+    setMotionFilmSeconds(90);
+
+    expect(motionRunSnapshot().filmSeconds).toBe(90);
+    expect(motionRunAttention(motionRunSnapshot())).toBe("none");
+  });
+
+  it("puts the film length back to the default when the store is reset", () => {
+    setMotionFilmSeconds(90);
+    resetMotionRunStore();
+
+    expect(motionRunSnapshot().filmSeconds).toBe(MOTION_BRIEF_FILM_SECONDS);
   });
 
   it("tells subscribers on every change and stops the moment one leaves", () => {

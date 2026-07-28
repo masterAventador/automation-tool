@@ -315,7 +315,7 @@ describe("video studio watched from anywhere in the app", () => {
 
   /** 提交已经返回、本机渲染已经开始，而用户此刻在别的页面。 */
   function renderStartedElsewhere() {
-    settleMotionRun(RENDERING_JOB.renderJobId, 12, {
+    settleMotionRun(RENDERING_JOB.renderJobId, 12, "one_sentence", {
       tone: "info",
       text: "已提交一句话自动制作，编排完成，本机渲染开始了。",
     });

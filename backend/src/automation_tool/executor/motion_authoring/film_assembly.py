@@ -62,11 +62,26 @@ class BeatPlan:
     # can — a template beat with no part and, until the narration exists, no
     # line.
     declared_seconds: float | None = None
+    # Where this beat sits on the composition's own timeline. Only template
+    # beats need it — they all load the same document and differ by nothing
+    # else — but every beat carries it so the two kinds are described the same
+    # way.
+    start_seconds: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
 class FilmSegment:
-    """One render: what to load, on what stage, for how many frames."""
+    """One render: what to load, on what stage, for how many frames.
+
+    `source_start_millis` and `source_end_millis` say which stretch of the
+    loaded document this render covers. Whole milliseconds because the render
+    command's HMAC binds to a canonical JSON three languages must produce byte
+    for byte, and a float does not survive that trip. Without them a segment was only "this
+    page, this many frames", and the Worker's only remaining choice was to
+    spread the page's whole timeline across those frames — so every template
+    beat re-rendered the entire film. See
+    `test_each_template_shot_samples_its_own_stretch_of_the_composition`.
+    """
 
     beat_id: str
     part: str | None
@@ -75,6 +90,8 @@ class FilmSegment:
     frames: int
     seconds: float
     slot_budgets: tuple[SlotBudget, ...]
+    source_start_millis: int
+    source_end_millis: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +180,11 @@ def assemble_film(
                     frames=planned.frames,
                     seconds=planned.seconds,
                     slot_budgets=(),
+                    # The window the storyboard drew this beat into. The
+                    # composition holds every beat on one timeline, so this is
+                    # the only thing telling two template renders apart.
+                    source_start_millis=round(beat.start_seconds * 1000),
+                    source_end_millis=round((beat.start_seconds + planned.seconds) * 1000),
                 )
             )
             continue
@@ -193,6 +215,16 @@ def assemble_film(
                 canvas={"width": width, "height": height, "deviceScaleFactor": 1},
                 frames=planned.frames,
                 seconds=planned.seconds,
+                # A part is its own document with its own timeline, so the
+                # window is that timeline. When the shot outlasts the part —
+                # the line is longer than the motion — the part still spans the
+                # shot, which is how it has always been rendered; what changes
+                # here is only that the span is now stated rather than inferred
+                # from whatever the page happened to declare.
+                source_start_millis=0,
+                source_end_millis=round(
+                    (part_durations.get(beat.part) or planned.seconds) * 1000
+                ),
                 slot_budgets=tuple(
                     SlotBudget(
                         index=entry_["index"],
