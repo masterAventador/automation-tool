@@ -81,6 +81,12 @@
 | `backend/src/automation_tool/control_plane/infrastructure/database/schema.py:2416+` | 删 `editing_output_lineages` 表 |
 | `frontend/src/main.tsx:20,23,47,50,73,76` | 移除服务网关 import 与注入 |
 | `frontend/src/app/WorkbenchShell.tsx:54-55,405-423,474,500` | 移除服务设置页与其 fallback 网关 |
+| `frontend/src/app/App.tsx` | **同一网关与组件的第二处独立 import**，与 `WorkbenchShell.tsx` 无关联，必须单独处理 |
+| `frontend/src/app/production-wiring.test.ts` | `REQUIRED_TAURI_PROPS` 中移除 `videoEditingServiceGateway` 一项——该 prop 已不存在。**只删这一项**，`it.fails("videoEditingGateway is handed a real Tauri gateway")` 必须原样保留 |
+| `frontend/src/styles/global.css` | 移除只服务于已删凭据表单的规则 |
+| `frontend/e2e/unstyled-class-hooks.spec.ts` | 移除凭据表单那个 describe 及其专用 helper 与窗口尺寸导入；保留时间轴转场下拉框那个 describe。留着会去点已删除的菜单项、找已不存在的「剪辑服务凭据」标题，必然失败 |
+
+**最后三项是 vitest / typecheck / lint 都照不到的**：死 CSS 不会让任何测试变红，Playwright spec 不在这三条命令的范围内。删除功能时必须按项目规范主动排查这类连带物，而不是等门禁报错。
 | `frontend/src-tauri/src/lib.rs:35,259-306,4371,4471-4474,4538-4541,4636-4639` | 移除模块声明、4 个 command 定义与 3 处注册 |
 | `frontend/src-tauri/tests/acceptance_gate_honesty.rs` | 移除 VE 验收脚本相关条目 |
 | `scripts/run_cq_04_acceptance.py` | 移除云剪辑环节 |
