@@ -24,6 +24,25 @@ from automation_tool.control_plane.domain.video_creation import (
 NOW = datetime(2026, 7, 23, 0, 0, tzinfo=UTC)
 SHA256 = "a" * 64
 
+_BANNED_FIELD_NAME_FRAGMENTS = ("provider", "model", "vendor", "api_key", "base_url", "voice_id")
+
+
+def assert_field_names_carry_no_banned_fragment(field_names: tuple[str, ...]) -> None:
+    """Every field name must not *contain* a banned provider-coupling fragment.
+
+    This has to be substring containment, not `set(...).intersection(...)`:
+    intersection only matches whole elements, so a set containing "provider"
+    would let a field literally named "provider_job_id" straight through.
+    These dataclass fields carry no default, so a *required* provider field
+    already breaks every call site at construction time — this guard exists
+    for the *optional* one (`str | None = None`), which would otherwise pass
+    silently and be the actual shape violation project rule §6 forbids.
+    """
+    for field_name in field_names:
+        assert not any(fragment in field_name for fragment in _BANNED_FIELD_NAME_FRAGMENTS), (
+            f"{field_name!r} carries a banned provider-coupling fragment"
+        )
+
 
 def test_the_creation_line_no_longer_defines_its_own_timeline() -> None:
     """One Timeline, in one module. Two would drift apart."""
@@ -184,10 +203,9 @@ def test_public_models_have_exact_provider_neutral_fields() -> None:
             "updated_at",
         ),
     }
-    banned_fragments = {"provider", "model", "vendor", "api_key", "base_url", "voice_id"}
     for model, field_names in expected.items():
         assert tuple(field.name for field in fields(model)) == field_names
-        assert not banned_fragments.intersection(field_names)
+        assert_field_names_carry_no_banned_fragment(field_names)
 
 
 @pytest.mark.parametrize(

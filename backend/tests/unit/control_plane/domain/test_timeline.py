@@ -6,6 +6,7 @@ from dataclasses import fields
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
+from test_video_creation import assert_field_names_carry_no_banned_fragment
 
 from automation_tool.control_plane.domain.material import MaterialId
 from automation_tool.control_plane.domain.resource_ids import InvalidResourceId
@@ -43,9 +44,9 @@ def test_invalid_timeline_model_is_a_value_error() -> None:
 
 
 def test_public_timeline_models_have_exact_provider_neutral_fields() -> None:
-    """Same guard `video_creation.py` carried for its own models (T5 review finding):
+    """Same guard `video_creation.py` carries for its own models (T5 review finding):
     an exact field tuple catches a silently added/renamed field, and the banned
-    fragment set catches a provider concept sneaking in as an *optional* field —
+    fragment check catches a provider concept sneaking in as an *optional* field —
     which a required-field-only check would miss, since every field here has no
     default and a required addition already breaks every call site.
     """
@@ -65,10 +66,9 @@ def test_public_timeline_models_have_exact_provider_neutral_fields() -> None:
         TimelineTrack: ("track_id", "kind", "clips"),
         Timeline: ("timeline_id", "revision", "duration_ms", "tracks", "created_at"),
     }
-    banned_fragments = {"provider", "model", "vendor", "api_key", "base_url", "voice_id"}
     for model, field_names in expected.items():
         assert tuple(field.name for field in fields(model)) == field_names
-        assert not banned_fragments.intersection(field_names)
+        assert_field_names_carry_no_banned_fragment(field_names)
 
 
 def test_track_kinds_split_one_audio_lane_into_three() -> None:
