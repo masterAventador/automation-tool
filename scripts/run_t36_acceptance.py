@@ -25,12 +25,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -90,6 +92,8 @@ TAURI_CONFIG = FRONTEND / "src-tauri" / "tauri.t36-e2e.conf.json"
 BUILD_SCRIPT = "build:tauri:t36-test"
 WDIO_CONFIG = "wdio.t36.conf.ts"
 DEFAULT_SECRET = ROOT / ".local/secrets/bailian-model.json"
+# 一次重复要算数，就得几乎每一帧都对得上；4/60 那种是镜头定格。
+REPEAT_MATCH_RATIO = 0.8
 EVIDENCE = ROOT / ".local/embedded-browser-video-studio/t36-evidence"
 # Every isolated resource this run creates carries this stem plus the pid, so a
 # stray container, network or volume can always be traced back to one run of
@@ -389,6 +393,75 @@ def inspect_film(video: Path) -> None:
             f"the film is {stream['width']}x{stream['height']}, not the "
             f"{canvas['width']}x{canvas['height']} canvas a 16:9 film is delivered on"
         )
+    require_no_repeated_stretch(video, float(stream["duration"]))
+
+
+def require_no_repeated_stretch(video: Path, duration_seconds: float) -> None:
+    """The film must not be one stretch of footage played more than once.
+
+    PC-19: every check above this one passed over a film that was six seconds of
+    content played twice at double speed. Codec, canvas, frame count, duration
+    and the still-image gate were all green, because each of them asks about the
+    file and none of them asks whether the *picture* moves on. Two template
+    shots loading one composition rendered the whole composition each.
+
+    What is looked for is **periodicity**, not duplicate frames. The first
+    version of this check refused any two identical samples and was wrong the
+    first time it met a real film: a `data-chart` shot animates for ten seconds
+    and then holds its final frame for five, which is what a motion part is
+    supposed to do — 64 samples, 55 distinct, and every duplicate inside that
+    one held tail. A repeat is a different shape entirely: the *sequence*
+    recurs, so `frame[i] == frame[i + lag]` holds for nearly every i rather than
+    for a handful.
+
+    Deliberately measured on the delivered artifact rather than on the segment
+    list: what the segments were asked to render is the thing under test, and
+    reading the answer back out of the request is how the original defect stayed
+    invisible for nine acceptance runs.
+    """
+    if duration_seconds < 4:
+        return
+    ffmpeg = DEBUG_APP_RESOURCE_ROOT / "media-toolchain/bin/ffmpeg"
+    step = 0.5
+    with tempfile.TemporaryDirectory(prefix="automation-tool-t36-frames-") as raw:
+        frames = Path(raw)
+        offsets: list[float] = []
+        digests: list[str] = []
+        offset = 0.25
+        while offset < duration_seconds - 0.25:
+            still = frames / f"t{offset:.2f}.png"
+            subprocess.run(
+                [str(ffmpeg), "-v", "error", "-ss", f"{offset}", "-i", str(video),
+                 "-frames:v", "1", "-y", str(still)],
+                check=True, timeout=120,
+            )
+            digests.append(hashlib.sha256(still.read_bytes()).hexdigest())
+            offsets.append(offset)
+            offset += step
+    distinct = len(set(digests))
+    # A lag of at least two seconds: shorter than that is a shot holding still,
+    # which is what motion is for. `REPEAT_MATCH_RATIO` is what separates "the
+    # sequence recurs" from "a few frames happen to coincide" — measured, a
+    # genuine repeat matches every comparable frame while the real film above
+    # matched 4 of 60 at its worst lag.
+    minimum_lag = max(4, int(2 / step))
+    for lag in range(minimum_lag, len(digests)):
+        comparable = len(digests) - lag
+        if comparable < 4:
+            break
+        matches = sum(1 for index in range(comparable) if digests[index] == digests[index + lag])
+        if matches >= REPEAT_MATCH_RATIO * comparable:
+            raise RuntimeError(
+                f"the film repeats itself every {lag * step:.1f}s: "
+                f"{matches} of {comparable} sampled frames recur at that lag. "
+                "A film assembled from shots that each re-rendered the whole "
+                "composition looks exactly like this and passes every other "
+                "check (PC-19)."
+            )
+    print(
+        f"T36 evidence film: {len(digests)} samples, {distinct} distinct, "
+        "no stretch recurs"
+    )
 
 
 def main() -> int:
