@@ -42,7 +42,7 @@ VE 线的核心问题不是实现质量，而是**分层实现完成但从未装
 | --- | --- | --- | --- | --- |
 | LE-02 | Material 素材库领域对象 | `Material`（kind/时长/分辨率/内容摘要/has_audio/响度/镜头边界/AI 描述与标签）、`MaterialId`、校验与去重规则；用户改过的描述不被 AI 覆盖 | LE-01 | ✅ 已完成 |
 | LE-03 | Timeline 重写（含 Material 尺寸形状决策） | `TimelineClip` 补 `source_in_ms`/`source_out_ms`/`gain_db`；`TimelineTrackKind` 拆成 visual/narration/ambient/music/caption；首期锁死"取片时长等于占位时长"（不变速）并有拒绝用例；**顺带决定 `Material.width`/`height` 对音频素材的形状**——当前音频被强制要求填 [1,8192] 的宽高，属强制荒谬而非可选荒谬，改成 `int | None` 按 kind 分叉是形状变更，LE-02 终审建议单独决策而非顺手折进去 | LE-02 | ✅ 已完成 |
-| LE-04 | 剪辑项目与任务状态机 | `EditingProject`、`EditingJob`、状态转换与非法转换拒绝、失败码归类；不含任何供应商概念；并把 `Timeline` 接到 `EditingProject`（LE-03 有意未加 owner 字段）；接入时会先碰到前端 `video-editing-dto.ts` 的契约形状（见 LE-17 行三处 drift），本任务不处理前端，仅提前知会 | LE-03 | ⬜ 未开始 |
+| LE-04 | 剪辑项目与任务状态机 | `EditingProject`、`EditingJob`、状态转换与非法转换拒绝、失败码归类；不含任何供应商概念；并把 `Timeline` 接到 `EditingProject`（LE-03 有意未加 owner 字段）；接入时会先碰到前端 `video-editing-dto.ts` 的契约形状（见 LE-17 行三处 drift），本任务不处理前端，仅提前知会；**`EditingProject` 必须承载输出规格**——输出画幅、帧率与字幕样式基线（字号/描边/行距/字体）。LE-03 终审发现这三样是渲染必需项却无人认领：`Timeline` 没有、创作线放在 `ContentBrief.aspect_ratio` 而剪辑线无对应物、全库 `caption_style|font_size|stroke_width` 零命中，而 LE-10 的完成定义要求 ffprobe 断言分辨率与帧数、LE-09 承诺字幕换行描边行距可控、LE-20 承诺用户可选字体。这正是本线立项要防的「装配缺口掉进任务之间的缝里」 | LE-03 | ⬜ 未开始 |
 
 ### 3.3 Control Plane 装配（2 项）
 
@@ -59,7 +59,7 @@ VE 线的核心问题不是实现质量，而是**分层实现完成但从未装
 | LE-08 | 自适应抽帧 | `select='eq(n,0)+gt(scene,TH)'` 场景检测抽帧、长镜头按时间补抽、按时长分档封顶、超限时保切点降采样；产出 768px JPEG 并断言帧数与文件存在 | LE-07 | ⬜ 未开始 |
 | LE-09 | 字幕渲染与 fallback 机制 | PIL 渲染字幕 PNG；`fontTools` 读 cmap 实现缺字 fallback **机制**；换行、描边、行距可控；产出 PNG 并断言像素尺寸与非空。**只用现有 Noto Sans SC 加一个拉丁字体验证 fallback 链路本身**，生僻字字体的引入与装配属于 LE-19，两者不得互相阻塞 | LE-01 | ⬜ 未开始 |
 | LE-10 | 视频渲染管线 | trim(in/out) → scale/crop → fps 归一 → concat → `xfade` 转场 → 字幕 overlay；补齐 `ffmpeg-toolchain.v1.json` 的 `required_capabilities.filters` 声明（xfade/select/scdet 等，**无需重建 ffmpeg**）；产出 mp4 并以 ffprobe 断言编码/分辨率/帧数/时长 | LE-03,LE-09 | ⬜ 未开始 |
-| LE-11 | 音频管线 | 旁白/原声/BGM 三轨；`sidechaincompress` 以旁白为 sidechain 自动闪避；`has_audio` 为假时不排 ambient 轨；采样率归一；断言输出音轨时长与成片一致 | LE-10 | ⬜ 未开始 |
+| LE-11 | 音频管线 | 旁白/原声/BGM 三轨；`sidechaincompress` 以旁白为 sidechain 自动闪避；`has_audio` 为假时不排 ambient 轨；采样率归一；断言输出音轨时长与成片一致；**必须实现设计 §5.3 的「原声处理方式」三态开关**（自动闪避 / 固定音量 / 静音，默认自动闪避）。LE-03 终审指出模型只有 `gain_db`（对应三态里的基准音量那一维），三态本身表达不出来：静音可靠不排 ambient clip 表达，但「固定音量」需要一条**既不被旁白压、也不作为 sidechain 源**的音频通路，而五种轨道里没有这样一条——NARRATION 是 sidechain 源，AMBIENT 与 MUSIC 按 §5 都要过 `sidechaincompress`。本任务需决定：加第六种轨道、给 clip 加处理方式字段、还是收窄设计承诺 | LE-10 | ⬜ 未开始 |
 | LE-12 | Worker 生命周期与任务控制 | Tauri 调度渲染 Worker：随机 loopback、高熵会话令牌、健康检查、进度上报、取消与紧停、崩溃恢复、App 退出后任务恢复；`cargo test` 覆盖 | LE-11 | ⬜ 未开始 |
 
 ### 3.5 AI 编排（4 项）
@@ -75,7 +75,7 @@ VE 线的核心问题不是实现质量，而是**分层实现完成但从未装
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| LE-17 | 工作台接真实网关 | `main.tsx` 生产组合根从 sessionStorage 草稿网关换成真实 Control Plane 网关；提交路径打通不再固定抛错；重写 `e2e-tauri/video-editing.spec.ts`，断言目标从"诚实展示不可用"改为真实出片；**同时清理 `video-editing-dto.ts`/`VideoEditingWorkbench.tsx` 与后端 `timeline.py` 脱节的三处 Timeline 词汇**（LE-03 复审实测发现，T1 建 `timeline.py` 起就存在）：`transitionKindSchema` 仍含 `"cut"`（后端已确定硬切=`transition_in=None`，无 `CUT` 成员）、`timelineTrackKindSchema` 仍是 `visual/audio/caption` 单一音频轨（未拆成 visual/narration/ambient/music/caption 五轨）、`MAX_TRACKS = 32`（应为 `len(TimelineTrackKind)` = 5） | LE-06 | ⬜ 未开始 |
+| LE-17 | 工作台接真实网关 | `main.tsx` 生产组合根从 sessionStorage 草稿网关换成真实 Control Plane 网关；提交路径打通不再固定抛错；重写 `e2e-tauri/video-editing.spec.ts`，断言目标从"诚实展示不可用"改为真实出片；**同任务内必须重写前端 Timeline 契约**——`video-editing-dto.ts` 那份手写 zod 副本与新后端模型**整体不兼容，需按 `timeline.py` 重写而非逐点修补**（drift 由 LE-03 在 T2/T3/T4 改后端时造成，终审核基线 `d00f547` 确认此前前后端逐字同步）。LE-03 终审用真实 zod 探针实测：带转场的后端时间轴、带 `sourceInMs`/`sourceOutMs`/`gainDb` 的 clip、`narration`/`ambient`/`music` 三种轨道，**前端一律拒绝**。分歧至少七处：① `timelineClipSchema` 是 `z.strictObject` 且缺三个新字段，后端快照是硬报错不是静默忽略；② 仍用 `sourceArtifactId`（`ArtifactId`），后端已改指 `MaterialId`；③ 布局 refine 对所有轨道要求「不许重叠」，而新后端转场靠真实重叠实现；④ 无画面轨首尾相接、`visual.end == duration`、每种轨道至多一条等核心不变式；⑤ `transitionKindSchema` 仍含 `"cut"`；⑥ `timelineTrackKindSchema` 仍是单一音频轨；⑦ `MAX_TRACKS = 32`（应为 5） | LE-06 | ⬜ 未开始 |
 | LE-18 | 素材库界面 | 导入素材、展示 AI 描述与标签、**标注哪些素材有人说话并可试听/查看转写**、编辑描述、去重提示、缺失素材提示；用户可见文案全中文且无未解释术语 | LE-17 | ⬜ 未开始 |
 | LE-19 | 智能剪辑入口 | 一句话输入 → 生成 Timeline 草稿落进工作台；"一键直出片"跳过审阅走同一生成器；进度与取消可见；**剪辑模块的产品形态在此最终确定，同任务内更新 `contracts/quality/user-facing-terminology.v1.json` 的 `video_editing_module` 条目使其与实际界面一致，并让 `check_user_facing_branding.py` 转绿**（见 §7 已知问题） | LE-16,LE-18 | ⬜ 未开始 |
 | LE-24 | 深度思考开关与耗时告知 | 智能剪辑入口的高级选项里增加一个总开关，统一控制素材理解、文案分句、语义匹配三处模型调用是否开启深度思考；默认关闭；用户偏好持久化并在下次进入时保持；**开关旁必须显示开启后预计多花的时间，该数字由实测得出，禁止估计或编造**——先用固定素材集实测开/关两种模式的端到端耗时差，若耗时随素材条数线性增长则按条数动态计算展示（如"约多花 3 秒 × 素材条数"），否则展示实测区间；实测数据与计算方式写入 `docs/development/LE-24.md`；用户可见文案无未解释术语，过 `check_user_facing_branding.py`；开关状态真实传达到模型请求参数，断言请求体中该字段随开关变化 | LE-16,LE-19 | ⬜ 未开始 |
