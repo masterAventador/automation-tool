@@ -87,5 +87,8 @@ class Material:
             if self.duration_ms is not None:
                 _reject()
             return
-        if type(self.duration_ms) is not int or not 1 <= self.duration_ms <= MAX_MATERIAL_DURATION_MS:
+        if (
+            type(self.duration_ms) is not int
+            or not 1 <= self.duration_ms <= MAX_MATERIAL_DURATION_MS
+        ):
             _reject()

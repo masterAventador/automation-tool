@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from automation_tool.control_plane.domain.material import (
@@ -101,5 +103,5 @@ def test_content_digest_must_be_lowercase_sha256(digest: str) -> None:
 
 def test_material_is_immutable() -> None:
     material = _video()
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         material.width = 640  # type: ignore[misc]
