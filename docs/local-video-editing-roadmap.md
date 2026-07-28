@@ -34,7 +34,7 @@ VE 线的核心问题不是实现质量，而是**分层实现完成但从未装
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| LE-01 | 删除云剪辑路线 | 删除阿里云 IMS 全部生产代码与测试、供应商无关 Provider 抽象层、`schema.py` 两张表声明、`aliyun-ims-editing-staging.v1.json`、前端剪辑服务设置页与网关、Tauri 4 个 service command；**迁移文件不删而是新增 `0035` drop 迁移**（`0032` 在链中间，`0033` 指向它，删文件会断链）；从专项台账移除 VE-01～VE-08 并修正计数；新建 `scripts/check_local_editing_roadmap_counts.py` 守护本文件计数；**保留** `frontend/e2e-tauri/video-editing.spec.ts`（由 LE-17 重写而非删除）；全量测试与门禁脚本通过 | — | ✅ 已完成 |
+| LE-01 | 删除云剪辑路线 | 删除阿里云 IMS 全部生产代码与测试、供应商无关 Provider 抽象层、`schema.py` 三张表声明（`aliyun_editing_intents`、`editing_output_lineages`、`editing_output_artifacts`）、`aliyun-ims-editing-staging.v1.json`、前端剪辑服务设置页与网关、Tauri 4 个 service command；**迁移文件不删而是新增 `0035` drop 迁移**（`0032` 在链中间，`0033` 指向它，删文件会断链）；从专项台账移除 VE-01～VE-08 并修正计数；新建 `scripts/check_local_editing_roadmap_counts.py` 守护本文件计数；**保留** `frontend/e2e-tauri/video-editing.spec.ts`（由 LE-17 重写而非删除）；全量测试与门禁脚本通过 | — | ✅ 已完成 |
 
 ### 3.2 领域层重写（3 项）
 
@@ -148,3 +148,33 @@ frontend/src/app/WorkbenchShell.tsx: concept video_editing_module (独立视频�
 - **长视频自动剪成多条短视频**
 - **说话人分离**：同一条素材里多人对话时区分说话人（LE-14 只判断有无人声并整体转写，不做 diarization）
 - **重新构建 ffmpeg 以获得 drawtext/libass**：首期字幕走 PIL，不重建
+
+## 8. LE-01 终审遗留（有 owner，未在 LE-01 内解决）
+
+全分支终审（25 提交）确认删除本身可合并，但留下六项，按归属分列。
+
+### 8.1 需用户决定：阿里云凭据已无消费者
+
+`docs/credentials-aliyun-video-editing.md` 含真实 RAM AccessKey 明文，入库理由是「视频剪辑模块 VE-04+ 的 OSS 暂存与 IMS 云剪辑验收」。LE-01 删除了它的全部消费者：两个 VE 验收驱动，以及 `run_cq_04_acceptance.py` 对 `.local/secrets/aliyun-video-editing.json` 的探测。该密钥现在没有任何用途。
+
+**该密钥已进入 git 历史，删除文件并不能移除它——唯一有效的补救是在阿里云控制台轮换或禁用。** 文件本身写明「不要顺手清理；如迁移到更安全的方案需用户确认」，故 LE-01 不擅自处理。`docs/development/RESEARCH-cloud-deployment-readiness.md:395` 仍指示把该密钥预置进 Demo Profile，一并待处理。
+
+### 8.2 归 LE-17：工作台四句文案已成假话
+
+`VideoEditingWorkbench.tsx:63,553,577,600` 仍写着「云端剪辑功能尚未开通」「视频画面预览将在云端剪辑服务接入后提供」等。这些话在 LE-01 之前为真，之后为假——不会再有云端剪辑服务，替代方案是本地 FFmpeg。由 `VideoEditingWorkbench.test.tsx:143,160` 钉住。两个删除守卫只查模块与文件存在性，不覆盖文案。LE-17 重写工作台时一并改。
+
+### 8.3 归 LE-19：文案门禁缺机制化豁免
+
+§7 的「必须恰好两条」目前只是散文约定，而 `check_user_facing_branding.py` 是 `.github/workflows/quality.yml` governance 作业的必跑步骤，在 LE-02 到 LE-19 这段长窗口里，第三条出现在一个已经红的门禁里不会有人发现。建议在 checker 内把这两条编码为显式豁免并加测试断言「恰好这两条」，LE-19 转绿时一并删除。
+
+### 8.4 归后续文档任务：架构基线仍描述已删结构
+
+`docs/development-roadmap.md:25,27`、`docs/project-structure.md:100`、`docs/backend-architecture.md:913-921`（描述已删的 `video_editing.py`、`EditingProject`、`VideoEditingProvider` 契约与「首期只接阿里云 IMS/ICE」）、`docs/frontend-architecture.md:339`（「剪辑入口由 VE-03 交付」）。CLAUDE.md §1 把这些列为必读基线，冲突不得静默保留。
+
+### 8.5 归后续：Demo 检查清单含误导性判据
+
+`docs/demo-preflight-checklist.md:690` 用「视频剪辑服务凭据表单是否够宽」判断装的是不是旧包，而该卡片已整个删除，操作者会看到卡片消失而误判为包坏了。另见 `:603,620-621,681,686,709,719`（引用已删除的 Playwright 用例名）。
+
+### 8.6 归 LE-17：保留的 E2E spec 无执行归属
+
+`frontend/e2e-tauri/video-editing.spec.ts` 按决定保留待 LE-17 重写，但其唯一执行方 `run_ve_03_acceptance.py` 已删除，也没有任何 `wdio.*.conf.ts` 引用它；`check_acceptance_driver_ownership.py` 只审计驱动不审计 spec，故无人会报告它无主。它也不在 `no-cloud-editing.test.ts` 的 `RETAINED_FILES` 里，「保留」这个决定当前没有任何东西钉住。
