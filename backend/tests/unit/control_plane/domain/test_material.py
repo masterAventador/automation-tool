@@ -51,6 +51,11 @@ def _video(**overrides: object) -> Material:
         "width": 1920,
         "height": 1080,
         "content_digest": "a" * 64,
+        "has_audio": False,
+        "audio_loudness_lufs": None,
+        "has_speech": False,
+        "speech_segments_ms": (),
+        "speech_transcript": None,
     }
     defaults.update(overrides)
     return Material(**defaults)  # type: ignore[arg-type]
@@ -105,3 +110,57 @@ def test_material_is_immutable() -> None:
     material = _video()
     with pytest.raises(FrozenInstanceError):
         material.width = 640  # type: ignore[misc]
+
+
+def test_material_without_audio_must_not_carry_loudness() -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _video(has_audio=False, audio_loudness_lufs=-18.0)
+
+
+def test_material_without_audio_cannot_have_speech() -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _video(has_audio=False, has_speech=True)
+
+
+def test_material_without_speech_must_not_carry_segments() -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _video(has_audio=True, has_speech=False, speech_segments_ms=((0, 1_000),))
+
+
+def test_material_without_speech_must_not_carry_a_transcript() -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _video(has_audio=True, has_speech=False, speech_transcript="讲了点什么")
+
+
+def test_speech_material_carries_segments_and_transcript() -> None:
+    material = _video(
+        has_audio=True,
+        has_speech=True,
+        speech_segments_ms=((500, 3_000), (4_000, 9_000)),
+        speech_transcript="第一句。第二句。",
+    )
+    assert material.speech_segments_ms == ((500, 3_000), (4_000, 9_000))
+
+
+def test_speech_segments_must_be_ordered_and_disjoint() -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _video(has_audio=True, has_speech=True, speech_segments_ms=((4_000, 9_000), (500, 3_000)))
+    with pytest.raises(InvalidMaterialModel):
+        _video(has_audio=True, has_speech=True, speech_segments_ms=((0, 5_000), (3_000, 8_000)))
+
+
+def test_speech_segment_must_not_be_empty_or_reversed() -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _video(has_audio=True, has_speech=True, speech_segments_ms=((1_000, 1_000),))
+    with pytest.raises(InvalidMaterialModel):
+        _video(has_audio=True, has_speech=True, speech_segments_ms=((3_000, 1_000),))
+
+
+def test_speech_segment_must_not_exceed_the_material_duration() -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _video(
+            duration_ms=5_000,
+            has_audio=True,
+            has_speech=True,
+            speech_segments_ms=((0, 6_000),),
+        )

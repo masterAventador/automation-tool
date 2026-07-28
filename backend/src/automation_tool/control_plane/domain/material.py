@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final, Never, final
@@ -57,6 +58,18 @@ def _reject() -> Never:
     raise InvalidMaterialModel
 
 
+def _validate_text(value: object, *, maximum: int, optional: bool = False) -> None:
+    if value is None and optional:
+        return
+    if not isinstance(value, str) or not value or value != value.strip() or len(value) > maximum:
+        _reject()
+    for character in value:
+        if character in {"\n", "\t"}:
+            continue
+        if unicodedata.category(character).startswith("C"):
+            _reject()
+
+
 @dataclass(frozen=True, slots=True)
 class Material:
     """One imported source file and everything probing has learned about it."""
@@ -67,6 +80,11 @@ class Material:
     width: int
     height: int
     content_digest: str
+    has_audio: bool
+    audio_loudness_lufs: float | None
+    has_speech: bool
+    speech_segments_ms: tuple[tuple[int, int], ...]
+    speech_transcript: str | None
 
     def __post_init__(self) -> None:
         if (
@@ -81,6 +99,7 @@ class Material:
         ):
             _reject()
         self._validate_duration()
+        self._validate_audio()
 
     def _validate_duration(self) -> None:
         if self.kind is MaterialKind.IMAGE:
@@ -92,3 +111,38 @@ class Material:
             or not 1 <= self.duration_ms <= MAX_MATERIAL_DURATION_MS
         ):
             _reject()
+
+    def _validate_audio(self) -> None:
+        if type(self.has_audio) is not bool or type(self.has_speech) is not bool:
+            _reject()
+        if not self.has_audio:
+            if self.audio_loudness_lufs is not None or self.has_speech:
+                _reject()
+        elif self.audio_loudness_lufs is not None and (
+            type(self.audio_loudness_lufs) is not float
+            or not -70.0 <= self.audio_loudness_lufs <= 0.0
+        ):
+            _reject()
+        if not isinstance(self.speech_segments_ms, tuple):
+            _reject()
+        if not self.has_speech:
+            if self.speech_segments_ms or self.speech_transcript is not None:
+                _reject()
+            return
+        if not 1 <= len(self.speech_segments_ms) <= MAX_SPEECH_SEGMENTS:
+            _reject()
+        _validate_text(self.speech_transcript, maximum=MAX_TRANSCRIPT_CHARACTERS, optional=True)
+        previous_end = 0
+        for segment in self.speech_segments_ms:
+            if (
+                not isinstance(segment, tuple)
+                or len(segment) != 2
+                or any(type(value) is not int for value in segment)
+            ):
+                _reject()
+            start, end = segment
+            if start < previous_end or end <= start:
+                _reject()
+            if self.duration_ms is not None and end > self.duration_ms:
+                _reject()
+            previous_end = end
