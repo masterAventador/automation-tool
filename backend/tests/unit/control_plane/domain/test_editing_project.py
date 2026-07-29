@@ -232,6 +232,12 @@ def test_a_project_carries_everything_a_render_needs_but_the_timeline() -> None:
         ("title", "带\x00空字符"),
         ("title", "x" * (MAX_PROJECT_TITLE_CHARACTERS + 1)),
         ("title", None),
+        # A truthy non-string: `not value` cannot catch this one, so it is
+        # the only input that makes the isinstance guard do the deciding.
+        # Without it that guard is load-bearing in production yet untested,
+        # and its absence turns a 400 into a 500 with a traceback.
+        ("title", 123),
+        ("title", b"title"),
         ("output", {"width": 1080, "height": 1920, "fps": 30}),
         ("output", None),
         ("caption_style", "noto-sans-sc"),
