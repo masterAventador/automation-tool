@@ -139,6 +139,7 @@ def _render_once(
     allowed_assets: list[str],
     frame_count: int,
     budget_seconds: int = SHORT_RENDER_BUDGET_SECONDS,
+    window_end_millis: int = 3000,
 ) -> dict[str, object]:
     """One real sandboxed render; returns the success event and frame digests."""
     frames = workspace / "frames"
@@ -168,6 +169,8 @@ def _render_once(
             maxDurationSeconds=budget_seconds,
             maxMemoryMegabytes=2048,
             maxOutputBytes=256 * 1024 * 1024,
+            sourceStartMillis=0,
+            sourceEndMillis=window_end_millis,
         )
         session.send_line(sandbox_command_line(job_id, specification))
         event = session.read_event()
@@ -213,6 +216,19 @@ def run_item_render_sweep(
         if path.is_file()
     )
     results: dict[str, object] = {}
+    # PC-19 之后段必须自带时间窗，而本 sweep 一直用夹具默认的 [0, 3000ms] 渲每一个
+    # 零件。零件的动作不必发生在前三秒——apple-money-count 声明 5 秒，数钱、闪绿、
+    # 撒钱币都在后半段，于是三秒窗里它是静止的，被静帧门禁正确地拒了（2026-07-29
+    # 实测，PC-19 之前这条 sweep 是 134/134 全过的）。窗口按目录声明的时长开；
+    # 25 个 component 不声明时长（PC-01：duration 只在 109 个 block 上），回退 3 秒。
+    catalog_durations = {
+        entry["name"]: entry.get("duration")
+        for entry in json.loads(
+            (ROOT / "contracts/quality/motion-catalog.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )["items"]
+    }
     for index, item in enumerate(manifest["items"], start=1):
         name = item["name"]
         files = list(item["files"])
@@ -222,6 +238,7 @@ def run_item_render_sweep(
         allowed = sorted(set(files + shared) - {entries[0]})
         if len(allowed) > 128:
             raise RuntimeError(f"{name}: allowlist exceeds the sandbox maximum")
+        declared_seconds = catalog_durations.get(name)
         rendered = _render_once(
             browser,
             chromium_major,
@@ -229,6 +246,9 @@ def run_item_render_sweep(
             entries[0],
             allowed,
             SWEEP_FRAMES,
+            window_end_millis=(
+                int(declared_seconds * 1000) if declared_seconds else 3000
+            ),
         )
         results[name] = {
             "frames": rendered["frames"],
