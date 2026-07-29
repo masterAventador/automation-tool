@@ -18,10 +18,12 @@ import stat
 import subprocess
 import tempfile
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import IO, Final, Never
+from typing import IO, Final, Never, cast
+from uuid import RFC_4122, UUID
 
 from automation_tool.protocol.safe_text import contains_control_or_bidi
 
@@ -116,6 +118,26 @@ MAX_MATERIAL_DURATION_MS: Final = 4 * 60 * 60 * 1000
 MAX_MATERIAL_DIMENSION: Final = 8192
 
 _PROBE_ENTRIES: Final = "format=duration,format_name:stream=codec_type,codec_name,width,height"
+
+# The path registry's document, below the private Executor state directory the
+# bootstrap already owns — the same place `ledger` puts its database.
+MATERIAL_PATH_REGISTRY_FILE_NAME: Final = "material-paths.json"
+# Stamped into the document so a later format can be recognised rather than
+# guessed at. A document stating anything else is refused, not reinterpreted.
+MATERIAL_PATH_REGISTRY_VERSION: Final = "executor.material-path-registry.v1"
+# The whole document is read into memory to be parsed, so it needs a bound for
+# the same reason the probe's output does. Sharing `MAX_MEASURE_OUTPUT_BYTES`'s
+# value rather than inventing a figure: it is already this module's answer to
+# "the largest local scratch file one material may cost us to read".
+#
+# There is deliberately no second limit on the number of entries. One would have
+# to be kept consistent with this one, and it is this one that bounds the work;
+# the count follows from it. An ordinary entry — an absolute path of a hundred
+# characters and the four numbers beside it — is under 200 bytes, so the limit
+# is worth some eighty thousand materials, and even a library of paths at the
+# length limit gets several hundred.
+MAX_MATERIAL_PATH_REGISTRY_BYTES: Final = MAX_MEASURE_OUTPUT_BYTES
+_REGISTRY_ENTRY_KEYS: Final = frozenset({"path", "device", "inode", "modified_ns", "size_bytes"})
 
 # Container names ffprobe reports for a single still picture, measured with the
 # packaged build: PNG and BMP demux as `*_pipe`, a JPEG as `image2`.
@@ -1112,16 +1134,500 @@ def probe_material(tools: PackagedMediaTools, source: Path) -> MaterialFacts:
     )
 
 
+class MaterialPathRegistryRejection(StrEnum):
+    """Why one material's file cannot be recorded or handed back.
+
+    Separate from `MaterialProbeRejection`, which answers "why this file cannot
+    become a material". These answer questions probing has no word for, and each
+    names a different next step for the material library: re-import it, point it
+    at the file again, or stop and show that something is wrong with the
+    library itself.
+    """
+
+    UNUSABLE_IDENTIFIER = "unusable_identifier"
+    NOT_REGISTERED = "not_registered"
+    # Split from each other because the user's next step differs. The file is
+    # gone from the path it was imported from — moved, deleted, or on a volume
+    # that is not mounted — against: something is at that path, but it is not
+    # the file that was probed. The first is answered by finding it again, the
+    # second by importing it again, and telling the user the wrong one sends
+    # them looking for a file that is sitting right there.
+    FILE_MISSING = "file_missing"
+    FILE_CHANGED = "file_changed"
+    REGISTRY_UNREADABLE = "registry_unreadable"
+    REGISTRY_UNWRITABLE = "registry_unwritable"
+    REGISTRY_FULL = "registry_full"
+
+
+class MaterialPathRegistryRejected(RuntimeError):
+    """Carries a closed reason code; the message stays fixed and path-free.
+
+    Every path this class can fail about is one of the operator's own, so the
+    message may not name it (`CLAUDE.md` §7), exactly as with
+    `MaterialProbeRejected`.
+    """
+
+    def __init__(self, rejection: MaterialPathRegistryRejection) -> None:
+        super().__init__("material path registry rejected")
+        self.rejection = rejection
+
+
+def _reject_registry(rejection: MaterialPathRegistryRejection) -> Never:
+    """Raise with nothing chained behind it, for `_reject`'s reasons.
+
+    `OSError.filename` is the path itself and it survives `from None` on
+    `__context__`. Every call site below therefore reduces its failure to one of
+    these codes *inside* the handler and raises after leaving it, so there is no
+    handled exception left to reach.
+    """
+    raise MaterialPathRegistryRejected(rejection) from None
+
+
+@dataclass(frozen=True, slots=True)
+class _FileIdentity:
+    """Which file, and whether it is still the way it was. Four numbers, no path.
+
+    The same four things `_held_still` compares, in a form that survives a round
+    trip through JSON — which an `os.stat_result` does not. That duplication is
+    deliberate and is held in place by a test asserting the two agree field for
+    field; see `TestRegisteredIdentityAgreesWithTheProbesOwnRule`.
+    """
+
+    device: int
+    inode: int
+    modified_ns: int
+    size_bytes: int
+
+
+def _identity_of(metadata: os.stat_result) -> _FileIdentity:
+    return _FileIdentity(
+        device=metadata.st_dev,
+        inode=metadata.st_ino,
+        modified_ns=metadata.st_mtime_ns,
+        size_bytes=metadata.st_size,
+    )
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class _RegisteredFile:
+    """One material's file, as it was when the mapping was recorded.
+
+    The redacted `repr` is not decoration: this object is reachable from the
+    registry's own frame locals, and a crash reporter walking them is precisely
+    the leak `PackagedMediaTools` closes the same way.
+    """
+
+    path: Path
+    identity: _FileIdentity
+
+    def __repr__(self) -> str:
+        return "_RegisteredFile(<redacted>)"
+
+
+def _usable_identifier(value: object) -> UUID | None:
+    """The material's identifier, or `None` when it is not one that could exist.
+
+    The Control Plane issues these as `control_plane.domain.material.MaterialId`,
+    which the executor may not import (`CLAUDE.md` §4.3), so what crosses the
+    boundary is the `uuid.UUID` inside it. The rule is
+    `local_artifact._valid_artifact_id`'s, stated again here for the same reason:
+    reaching into another module's private name would be worse than saying it
+    twice. A test pins this against the domain's own identifier so an
+    identifier the Control Plane can issue and this cannot store — a row nothing
+    could ever look up again — fails loudly rather than silently.
+
+    The round trip through `str` is what a `UUID` subclass with its own
+    `__str__` would fail: the text is the document's key, so a value that does
+    not print canonically would be written under a key nothing looks up.
+    """
+    if not isinstance(value, UUID) or value.version != 4 or value.variant != RFC_4122:
+        return None
+    return value if str(value) == str(UUID(str(value))) else None
+
+
+def _shaped_path(value: object) -> Path | None:
+    """A path out of the document, checked the way an imported path is checked.
+
+    Reads back through `_require_path_shape` rather than restating its rules, so
+    a document can never smuggle in something the import path would have
+    refused. It returns rather than raises because the caller is parsing a
+    damaged file and owes the user a registry reason, not a probe reason.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        return _require_path_shape(Path(value))
+    except MaterialProbeRejected:
+        return None
+
+
+def _whole_number(value: object) -> bool:
+    """`type(...) is not int` rather than `isinstance`: `True` is not a device number."""
+    return type(value) is int and value >= 0
+
+
+def _parsed_entry(value: object) -> _RegisteredFile | None:
+    if not isinstance(value, dict) or set(value) != _REGISTRY_ENTRY_KEYS:
+        return None
+    path = _shaped_path(value["path"])
+    numbers = (value["device"], value["inode"], value["modified_ns"], value["size_bytes"])
+    if path is None or not all(_whole_number(number) for number in numbers):
+        return None
+    device, inode, modified_ns, size_bytes = (cast(int, number) for number in numbers)
+    return _RegisteredFile(
+        path=path,
+        identity=_FileIdentity(
+            device=device,
+            inode=inode,
+            modified_ns=modified_ns,
+            size_bytes=size_bytes,
+        ),
+    )
+
+
+def _parsed_document(payload: bytes) -> dict[UUID, _RegisteredFile] | None:
+    """Every mapping the document states, or `None` when it does not state mappings.
+
+    `json.loads` raising is only half of what can be wrong: measured, it returns
+    a list for `[]` and a string for `"a string"` without raising at all, so the
+    shape is checked rather than caught. Both non-UTF-8 bytes and malformed text
+    arrive as `ValueError` — `UnicodeDecodeError` and `JSONDecodeError` are both
+    subclasses, measured — so one handler covers them.
+    """
+    try:
+        document = json.loads(payload)
+    except ValueError:
+        return None
+    if (
+        not isinstance(document, dict)
+        or document.get("version") != MATERIAL_PATH_REGISTRY_VERSION
+        or not isinstance(document.get("entries"), dict)
+    ):
+        return None
+    entries: dict[UUID, _RegisteredFile] = {}
+    for key, value in document["entries"].items():
+        identifier = _usable_identifier(_parsed_identifier(key))
+        entry = _parsed_entry(value)
+        if identifier is None or entry is None:
+            return None
+        entries[identifier] = entry
+    return entries
+
+
+def _parsed_identifier(key: str) -> UUID | None:
+    """The identifier a document's key names, or `None` when it names none.
+
+    No check that the key is text: JSON has no other kind of key, so every
+    caller reaching here has one from `json.loads`. A guard for it would be a
+    term nothing reachable could decide, which is the shape this module has
+    twice found riding along at full coverage while checking nothing.
+    """
+    try:
+        parsed = UUID(key)
+    except ValueError:
+        return None
+    return parsed if str(parsed) == key else None
+
+
+class MaterialPathRegistry:
+    """Where each material's file is, kept on this computer and nowhere else.
+
+    `Material` has no path field and `MaterialFacts` has nowhere to put one, so
+    the operator's private paths never reach the Control Plane (`CLAUDE.md`
+    §4.2, §7). Something still has to remember which file a material was made
+    from — to play it back, to re-cut it, to tell the user it has gone missing —
+    and this is that something: a JSON document below the Executor's private
+    state directory, which never leaves the machine.
+
+    **A mapping is a fact about a moment.** T5 established that nothing holds a
+    file still even across one probe; between a probe and the next use of what
+    it learned there is no bound at all. So each entry records the file's
+    identity as well as its path, and `resolve` re-checks it: what comes back is
+    either the file that was registered or a reason it is not. Storing the path
+    alone would reopen exactly the window T5 closed, one layer up — facts about
+    one file used against another, with nothing surfacing as an error.
+
+    **The registry is not an identity.** A digest tells two materials apart only
+    in one direction: identical digests do mean identical bytes, but different
+    digests do not mean different materials — a half-finished download of a
+    `+faststart` file states the complete material's duration, frame size and
+    codecs while hashing differently (see `SOURCE_NOT_AT_REST`). Nothing here is
+    keyed or deduplicated by content for that reason; the key is the identifier
+    the Control Plane issued, and deciding what is a duplicate belongs where the
+    materials themselves are stored.
+
+    **One writer.** The document is held in memory and rewritten whole on each
+    registration, which is correct for the single local Executor the product
+    runs (`CLAUDE.md` §4.3) and would lose writes if there were two. Nothing
+    here takes a lock, so this is an assumption the deployment satisfies rather
+    than one the code enforces.
+    """
+
+    __slots__ = ("_document", "_entries", "_state_directory")
+
+    def __init__(self, *, state_directory: Path) -> None:
+        """Load what is already recorded, or start empty on a computer that has none.
+
+        The directory is the bootstrap's, taken rather than searched for or
+        created: this is a tenant of the Executor's private state root, and a
+        registry that created its own directory would answer a mistyped path by
+        silently starting a second, empty library.
+        """
+        self._state_directory = _require_state_directory(state_directory)
+        self._document = self._state_directory / MATERIAL_PATH_REGISTRY_FILE_NAME
+        self._entries = self._load()
+
+    def register(self, material_id: UUID, source: Path) -> None:
+        """Record where one material's file is, replacing whatever was recorded before.
+
+        Re-registering an identifier at a *different* path is how a material the
+        user moved is found again; refusing it would leave the material
+        unreachable for good, and the library's "this file is missing" would
+        have no cure. The previous path is forgotten rather than kept, because
+        nothing reads a history and keeping one would be a second place a path
+        lives.
+
+        Re-registering the *same* pair rewrites the same bytes, so it is
+        idempotent. The identity is re-read each time rather than preserved: a
+        caller reaching this line has just probed the file, so what it observes
+        now is the newer truth.
+
+        Two materials naming one file is allowed. Whether that should have been
+        one material is a question about content, and this is not where content
+        is compared.
+
+        The file itself is checked exactly as an imported file is checked, and
+        those failures are raised as `MaterialProbeRejected` — the caller is
+        already handling them from the probe it just ran, and restating
+        `UNSAFE_PATH` against `UNREADABLE` in a second vocabulary would lose the
+        distinction to no purpose.
+        """
+        identifier = _usable_identifier(material_id)
+        if identifier is None:
+            _reject_registry(MaterialPathRegistryRejection.UNUSABLE_IDENTIFIER)
+        path, metadata = _require_source_file(source)
+        entries = dict(self._entries)
+        entries[identifier] = _RegisteredFile(path=path, identity=_identity_of(metadata))
+        self._write(_serialized(entries))
+        # Only now: a registration that could not be persisted must not be
+        # visible to this process either, or a restart would appear to lose it.
+        self._entries = entries
+
+    def resolve(self, material_id: UUID) -> Path:
+        """The file this material was made from, if it is still that file.
+
+        The check is not optional and not a separate call, because a caller that
+        could take the path without it would be back to using facts about one
+        file against another.
+        """
+        identifier = _usable_identifier(material_id)
+        if identifier is None:
+            _reject_registry(MaterialPathRegistryRejection.UNUSABLE_IDENTIFIER)
+        entry = self._entries.get(identifier)
+        if entry is None:
+            _reject_registry(MaterialPathRegistryRejection.NOT_REGISTERED)
+        # `_require_source_file` refuses a vanished path, an unreadable one and
+        # anything that is no longer a regular file. All three mean the same
+        # thing to the library — the file it was told about is not there to be
+        # used — and it is reduced to that inside the handler so the `OSError`
+        # underneath, which carries the path, is not left on the chain.
+        metadata: os.stat_result | None
+        try:
+            _, metadata = _require_source_file(entry.path)
+        except MaterialProbeRejected:
+            metadata = None
+        if metadata is None:
+            _reject_registry(MaterialPathRegistryRejection.FILE_MISSING)
+        if _identity_of(metadata) != entry.identity:
+            _reject_registry(MaterialPathRegistryRejection.FILE_CHANGED)
+        return entry.path
+
+    def __repr__(self) -> str:
+        return "MaterialPathRegistry(<redacted>)"
+
+    def _load(self) -> dict[UUID, _RegisteredFile]:
+        """What the document states, refusing rather than rebuilding when it is damaged.
+
+        **A damaged document is not rebuilt empty.** Writes go through
+        `os.replace`, so a half-written document is not something a killed
+        process leaves behind; one that will not parse means something else
+        happened to it. Starting over would then destroy every mapping the user
+        has and present the result as an ordinary empty library — the user could
+        not tell that from having imported nothing, and there would be nothing
+        left to recover from. Refusing keeps the file on disk and says so.
+
+        The absent document is the other case entirely, and the two must not be
+        confused: no file is a first run, while a file that cannot be read is a
+        failure. `FileNotFoundError` is what separates them, so a permission
+        error can never be mistaken for a fresh start.
+        """
+        payload = _read_document(self._document)
+        if payload is None:
+            return {}
+        if isinstance(payload, MaterialPathRegistryRejection):
+            _reject_registry(payload)
+        entries = _parsed_document(payload)
+        if entries is None:
+            _reject_registry(MaterialPathRegistryRejection.REGISTRY_UNREADABLE)
+        return entries
+
+    def _write(self, payload: bytes) -> None:
+        """Publish a whole document or none of it.
+
+        The bytes go to a scratch file in the same directory — the same
+        filesystem, so the rename cannot fail for crossing one — and only
+        `os.replace` makes them the document. A process killed at any point
+        before that leaves the previous document exactly as it was, and the
+        scratch file behind; killed after it, the new one. There is no moment at
+        which the document is half of anything. This states
+        `control_plane.bootstrap.local_provisioning._write_private_document`'s
+        shape, which is the same trade for the same reason.
+
+        `fsync` on the scratch file makes its contents durable before the
+        rename. The rename itself is not followed by a directory `fsync`, so a
+        power cut in that window can still lose the registration — the guarantee
+        here is against a killed process, not against a power cut, and the
+        sibling writer above draws the line in the same place.
+
+        `mkstemp` opens with `O_EXCL` at mode 0600 and `os.replace` carries that
+        mode across, both measured, so the document is never briefly readable by
+        anyone else.
+        """
+        if len(payload) > MAX_MATERIAL_PATH_REGISTRY_BYTES:
+            _reject_registry(MaterialPathRegistryRejection.REGISTRY_FULL)
+        outcome: MaterialPathRegistryRejection | None = None
+        scratch: str | None = None
+        try:
+            descriptor, scratch = tempfile.mkstemp(
+                dir=self._state_directory,
+                prefix=f".{MATERIAL_PATH_REGISTRY_FILE_NAME}.",
+                suffix=".tmp",
+            )
+            with os.fdopen(descriptor, "wb") as sink:
+                sink.write(payload)
+                sink.flush()
+                os.fsync(sink.fileno())
+            os.replace(scratch, self._document)
+            scratch = None
+        except OSError:
+            outcome = MaterialPathRegistryRejection.REGISTRY_UNWRITABLE
+        finally:
+            # Whatever went wrong, the scratch file is this method's to remove:
+            # left behind it would sit in the state directory forever, and
+            # `register` promises the directory holds one document and nothing
+            # else.
+            if scratch is not None:
+                with suppress(OSError):
+                    os.unlink(scratch)
+        if outcome is not None:
+            _reject_registry(outcome)
+
+
+def _require_state_directory(state_directory: object) -> Path:
+    """The bootstrap's private state directory, which must already be one."""
+    if not isinstance(state_directory, Path) or not state_directory.is_dir():
+        _reject_registry(MaterialPathRegistryRejection.REGISTRY_UNREADABLE)
+    return state_directory
+
+
+def _read_document(document: Path) -> bytes | MaterialPathRegistryRejection | None:
+    """The document's bytes, `None` when there is none, or why it could not be read.
+
+    A reason rather than a raised rejection, for `_digest_stable_file`'s reason:
+    returning from inside the handler lets the caller raise after the handled
+    `OSError` — which carries the path in `filename` — has been let go of.
+
+    The size is taken from the descriptor the read will use and checked before
+    a byte is read, so an oversized document costs nothing to refuse. That is
+    the shape `_run_probe` was found not to have: it reads ffprobe's output in
+    full and compares afterwards.
+    """
+    # `O_NONBLOCK` for `_digest_stable_file`'s reason, which applies here with
+    # nothing in front of it to help: the mode cannot be checked until the open
+    # returns, and for a FIFO with no writer it never does — measured, a plain
+    # read-only open was still waiting after a full second while this one came
+    # back in a fraction of a millisecond and reported the FIFO. There the path
+    # had already been stat'd; here it has not, so this flag is the only thing
+    # between a pipe left in the state directory and an Executor that never
+    # finishes starting. On a regular file it changes nothing, measured.
+    #
+    # `O_NOFOLLOW` because the document is ours: a link where it belongs means
+    # someone is redirecting what we read, and following it would be reading
+    # somebody else's file as though it were the library.
+    flags = os.O_RDONLY | os.O_NONBLOCK | cast(int, getattr(os, "O_NOFOLLOW", 0))
+    try:
+        descriptor = os.open(document, flags)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_size > MAX_MATERIAL_PATH_REGISTRY_BYTES
+        ):
+            return MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+        chunks: list[bytes] = []
+        remaining = metadata.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(remaining, _DIGEST_CHUNK_BYTES))
+            if not chunk:
+                return MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+    except OSError:
+        return MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+    finally:
+        os.close(descriptor)
+
+
+def _serialized(entries: dict[UUID, _RegisteredFile]) -> bytes:
+    """The document, written the one way, so the same mapping is the same bytes.
+
+    Sorted and separator-fixed because `register` is idempotent by producing
+    identical bytes rather than by comparing first, and `ensure_ascii` because a
+    document of pure ASCII cannot depend on anything reading it guessing an
+    encoding. Both follow `page_drift_artifact`.
+    """
+    document = {
+        "entries": {
+            str(identifier): {
+                "path": os.fspath(entry.path),
+                "device": entry.identity.device,
+                "inode": entry.identity.inode,
+                "modified_ns": entry.identity.modified_ns,
+                "size_bytes": entry.identity.size_bytes,
+            }
+            for identifier, entry in entries.items()
+        },
+        "version": MATERIAL_PATH_REGISTRY_VERSION,
+    }
+    return json.dumps(
+        document,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+
+
 __all__ = [
+    "MATERIAL_PATH_REGISTRY_FILE_NAME",
+    "MATERIAL_PATH_REGISTRY_VERSION",
     "MAX_CODEC_NAME_CHARACTERS",
     "MAX_MATERIAL_DIMENSION",
     "MAX_MATERIAL_DURATION_MS",
+    "MAX_MATERIAL_PATH_REGISTRY_BYTES",
     "MAX_MEASURE_OUTPUT_BYTES",
     "MAX_PATH_CHARACTERS",
     "MAX_PROBE_OUTPUT_BYTES",
     "MAX_SOURCE_FILE_BYTES",
     "AudioFacts",
     "MaterialFacts",
+    "MaterialPathRegistry",
+    "MaterialPathRegistryRejected",
+    "MaterialPathRegistryRejection",
     "MaterialProbeRejected",
     "MaterialProbeRejection",
     "MediaStreamFacts",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import dataclasses
 import hashlib
 import json
@@ -13,6 +14,7 @@ import tempfile
 import threading
 import time
 import traceback
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,15 +36,21 @@ from automation_tool.executor import material_probe  # noqa: E402
 from automation_tool.executor.material_probe import (  # noqa: E402
     LOUDNESS_CEILING_LUFS,
     LOUDNESS_FLOOR_LUFS,
+    MATERIAL_PATH_REGISTRY_FILE_NAME,
+    MATERIAL_PATH_REGISTRY_VERSION,
     MAX_CODEC_NAME_CHARACTERS,
     MAX_MATERIAL_DIMENSION,
     MAX_MATERIAL_DURATION_MS,
+    MAX_MATERIAL_PATH_REGISTRY_BYTES,
     MAX_MEASURE_OUTPUT_BYTES,
     MAX_PATH_CHARACTERS,
     MAX_PROBE_OUTPUT_BYTES,
     MAX_SOURCE_FILE_BYTES,
     AudioFacts,
     MaterialFacts,
+    MaterialPathRegistry,
+    MaterialPathRegistryRejected,
+    MaterialPathRegistryRejection,
     MaterialProbeRejected,
     MaterialProbeRejection,
     MediaStreamFacts,
@@ -3691,3 +3699,1034 @@ class TestProbeMaterialAgainstThePackagedBinaries:
         assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
         assert str(excinfo.value) == "material probe rejected"
         assert secret not in _rendered_traceback(excinfo.value)
+
+
+# --- T6: the path registry ---------------------------------------------------
+
+
+def _state_directory(directory: Path, name: str = "state") -> Path:
+    state = directory / name
+    state.mkdir(mode=0o700)
+    return state
+
+
+def _document(state: Path) -> Path:
+    return state / MATERIAL_PATH_REGISTRY_FILE_NAME
+
+
+def _registry_rejection(
+    excinfo: pytest.ExceptionInfo[MaterialPathRegistryRejected],
+) -> MaterialPathRegistryRejection:
+    return excinfo.value.rejection
+
+
+def _write_document(state: Path, payload: object) -> None:
+    """Put a document on disk without going through the registry's own writer."""
+    text = payload if isinstance(payload, str) else json.dumps(payload)
+    _document(state).write_text(text, encoding="utf-8")
+
+
+def _entry(source: Path) -> dict[str, object]:
+    metadata = source.stat()
+    return {
+        "path": os.fspath(source),
+        "device": metadata.st_dev,
+        "inode": metadata.st_ino,
+        "modified_ns": metadata.st_mtime_ns,
+        "size_bytes": metadata.st_size,
+    }
+
+
+class TestMaterialPathRegistryHoldsTheMapping:
+    """The one place a path is allowed to live, and it lives on this machine only."""
+
+    def test_a_registered_material_resolves_to_its_file(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        assert registry.resolve(identifier) == source
+
+    def test_an_unregistered_material_has_no_path(self, tmp_path: Path) -> None:
+        registry = MaterialPathRegistry(state_directory=_state_directory(tmp_path))
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.resolve(uuid.uuid4())
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.NOT_REGISTERED
+
+    def test_the_mapping_survives_a_restart(self, tmp_path: Path) -> None:
+        """The App is expected to be closed and reopened; the library must not empty."""
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        identifier = uuid.uuid4()
+        MaterialPathRegistry(state_directory=state).register(identifier, source)
+        assert MaterialPathRegistry(state_directory=state).resolve(identifier) == source
+
+    def test_the_first_run_starts_empty_rather_than_failing(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        assert not _document(state).exists()
+        registry = MaterialPathRegistry(state_directory=state)
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.resolve(uuid.uuid4())
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.NOT_REGISTERED
+
+    def test_it_writes_only_below_the_state_directory(self, tmp_path: Path) -> None:
+        """Local means local: one file, in the directory the caller named, and nothing else."""
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        MaterialPathRegistry(state_directory=state).register(uuid.uuid4(), source)
+        assert sorted(item.name for item in state.iterdir()) == [MATERIAL_PATH_REGISTRY_FILE_NAME]
+
+    def test_the_document_is_private_to_this_account(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        MaterialPathRegistry(state_directory=state).register(uuid.uuid4(), _source(tmp_path))
+        assert stat.S_IMODE(_document(state).stat().st_mode) == 0o600
+
+
+class TestMaterialPathRegistryRepeatRegistration:
+    """Registering again is how a moved material is found again, so it must work."""
+
+    def test_registering_the_same_pair_twice_changes_nothing(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        first = _document(state).read_bytes()
+        registry.register(identifier, source)
+        assert _document(state).read_bytes() == first
+        assert registry.resolve(identifier) == source
+
+    def test_registering_the_same_material_at_a_new_path_moves_it(self, tmp_path: Path) -> None:
+        """A material the user moved and re-imported must follow, or it is lost forever.
+
+        There is no history: the previous path is forgotten outright, because
+        keeping it would be a second place a path lives and nothing reads it.
+        """
+        state = _state_directory(tmp_path)
+        first = _source(tmp_path, "before.mp4")
+        second = _source(tmp_path, "after.mp4")
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, first)
+        registry.register(identifier, second)
+        assert registry.resolve(identifier) == second
+        assert os.fspath(first) not in _document(state).read_text(encoding="utf-8")
+
+    def test_two_materials_may_name_one_file(self, tmp_path: Path) -> None:
+        """Nothing here enforces upstream dedup, and pretending to would break recovery."""
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        left, right = uuid.uuid4(), uuid.uuid4()
+        registry.register(left, source)
+        registry.register(right, source)
+        assert registry.resolve(left) == source
+        assert registry.resolve(right) == source
+
+
+class TestMaterialPathRegistryRejectsAnUnusableSource:
+    """The same checks the probe made on the same file, raised the same way.
+
+    `register` is only reachable from a caller that has just probed this file,
+    so it is already inside a `MaterialProbeRejected` handler; translating these
+    into a second vocabulary would lose `UNSAFE_PATH` against `UNREADABLE` and
+    gain nothing.
+    """
+
+    def test_a_relative_path_is_refused(self, tmp_path: Path) -> None:
+        registry = MaterialPathRegistry(state_directory=_state_directory(tmp_path))
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            registry.register(uuid.uuid4(), Path("clip.mp4"))
+        assert _rejection(excinfo) is MaterialProbeRejection.UNSAFE_PATH
+
+    def test_a_path_that_is_not_a_path_is_refused(self, tmp_path: Path) -> None:
+        registry = MaterialPathRegistry(state_directory=_state_directory(tmp_path))
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            registry.register(uuid.uuid4(), os.fspath(_source(tmp_path)))  # type: ignore[arg-type]
+        assert _rejection(excinfo) is MaterialProbeRejection.UNSAFE_PATH
+
+    def test_a_control_character_in_the_path_is_refused(self, tmp_path: Path) -> None:
+        registry = MaterialPathRegistry(state_directory=_state_directory(tmp_path))
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            registry.register(uuid.uuid4(), tmp_path / "clip‮.mp4")
+        assert _rejection(excinfo) is MaterialProbeRejection.UNSAFE_PATH
+
+    def test_a_directory_is_not_a_material(self, tmp_path: Path) -> None:
+        registry = MaterialPathRegistry(state_directory=_state_directory(tmp_path))
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            registry.register(uuid.uuid4(), tmp_path)
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+
+    def test_a_fifo_is_not_a_material(self, tmp_path: Path) -> None:
+        pipe = tmp_path / "pipe.mp4"
+        os.mkfifo(pipe)
+        registry = MaterialPathRegistry(state_directory=_state_directory(tmp_path))
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            registry.register(uuid.uuid4(), pipe)
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+
+    def test_a_vanished_file_is_not_a_material(self, tmp_path: Path) -> None:
+        registry = MaterialPathRegistry(state_directory=_state_directory(tmp_path))
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            registry.register(uuid.uuid4(), tmp_path / "gone.mp4")
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+
+    def test_nothing_is_written_when_the_source_is_refused(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        with pytest.raises(MaterialProbeRejected):
+            registry.register(uuid.uuid4(), Path("clip.mp4"))
+        assert list(state.iterdir()) == []
+
+
+class TestMaterialPathRegistryIdentifiers:
+    """The key is the Control Plane's material ID, carried as the stdlib type it is."""
+
+    @pytest.mark.parametrize(
+        "identifier",
+        ["not-a-uuid", 7, None, uuid.UUID(int=0, version=1), uuid.uuid1()],
+    )
+    def test_an_identifier_of_the_wrong_shape_is_refused(
+        self, tmp_path: Path, identifier: object
+    ) -> None:
+        registry = MaterialPathRegistry(state_directory=_state_directory(tmp_path))
+        source = _source(tmp_path)
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.register(identifier, source)  # type: ignore[arg-type]
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.UNUSABLE_IDENTIFIER
+
+    @pytest.mark.parametrize("identifier", ["not-a-uuid", 7, None, uuid.uuid1()])
+    def test_looking_one_up_refuses_it_too(self, tmp_path: Path, identifier: object) -> None:
+        """Not `NOT_REGISTERED`: that would say it could be registered, and it could not."""
+        registry = MaterialPathRegistry(state_directory=_state_directory(tmp_path))
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.resolve(identifier)  # type: ignore[arg-type]
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.UNUSABLE_IDENTIFIER
+
+    def test_it_accepts_exactly_what_the_domain_identifier_accepts(self, tmp_path: Path) -> None:
+        """The executor may not import `MaterialId`, so the two shapes are pinned here.
+
+        A key this side accepted and the Control Plane could not issue would be a
+        row nothing can ever look up again.
+        """
+        registry = MaterialPathRegistry(state_directory=_state_directory(tmp_path))
+        source = _source(tmp_path)
+        domain_identifier = MaterialId.new()
+        registry.register(domain_identifier.uuid, source)
+        assert registry.resolve(domain_identifier.uuid) == source
+        assert str(MaterialId.parse(str(domain_identifier.uuid))) == str(domain_identifier)
+
+
+class TestMaterialPathRegistryNoticesTheFileMoved:
+    """A stored mapping is a fact about a moment, and the moment passes.
+
+    T5 closed the window inside one probe. Between a probe and the next use of
+    what it learned lies an unbounded span, so the identity the file had when it
+    was registered is stored beside the path and checked again on the way out.
+    """
+
+    def test_a_deleted_file_is_reported_missing(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        source.unlink()
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.resolve(identifier)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.FILE_MISSING
+
+    def test_a_replaced_file_is_reported_changed(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        source.unlink()
+        source.write_bytes(b"\x01" * 32)
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.resolve(identifier)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.FILE_CHANGED
+
+    def test_a_rewritten_file_of_the_same_length_is_reported_changed(self, tmp_path: Path) -> None:
+        """Same inode, same length — only the timestamp moves, which is why it is stored."""
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        metadata = source.stat()
+        with source.open("r+b") as handle:
+            handle.write(b"\x02" * 32)
+        os.utime(source, ns=(metadata.st_atime_ns, metadata.st_mtime_ns + 1))
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.resolve(identifier)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.FILE_CHANGED
+
+    def test_a_file_that_only_grew_is_reported_changed(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        metadata = source.stat()
+        with source.open("ab") as handle:
+            handle.write(b"\x03")
+        os.utime(source, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.resolve(identifier)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.FILE_CHANGED
+
+    def test_reading_the_file_is_not_a_change(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        source.read_bytes()
+        assert registry.resolve(identifier) == source
+
+    def test_re_registering_accepts_the_file_as_it_is_now(self, tmp_path: Path) -> None:
+        """A re-import means the caller has just re-probed; the record follows it."""
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        source.unlink()
+        source.write_bytes(b"\x04" * 64)
+        registry.register(identifier, source)
+        assert registry.resolve(identifier) == source
+
+
+class TestRegisteredIdentityAgreesWithTheProbesOwnRule:
+    """Two spellings of one rule, held together by test rather than left to drift.
+
+    `_held_still` compares two `os.stat_result`s inside one probe; the registry
+    compares a stat against four numbers it read back out of JSON, which is not
+    a `stat_result` and cannot be made into one. So the rule is written twice,
+    and this is what stops the second copy from meaning something else.
+    """
+
+    @pytest.mark.parametrize("field", ["st_dev", "st_ino", "st_mtime_ns", "st_size", "st_atime_ns"])
+    def test_both_answer_alike_when_one_field_moves(self, tmp_path: Path, field: str) -> None:
+        before = _source(tmp_path).stat()
+        after = _mutated_stat(before, field, getattr(before, field) + 1)
+        assert material_probe._held_still(before, after) == (
+            material_probe._identity_of(before) == material_probe._identity_of(after)
+        )
+
+    def test_both_accept_an_unchanged_file(self, tmp_path: Path) -> None:
+        metadata = _source(tmp_path).stat()
+        assert material_probe._held_still(metadata, metadata)
+        assert material_probe._identity_of(metadata) == material_probe._identity_of(metadata)
+
+
+def _mutated_stat(metadata: os.stat_result, field: str, value: int) -> os.stat_result:
+    names = (
+        "st_mode",
+        "st_ino",
+        "st_dev",
+        "st_nlink",
+        "st_uid",
+        "st_gid",
+        "st_size",
+        "st_atime",
+        "st_mtime",
+        "st_ctime",
+    )
+    replacement = {field: value}
+    base = tuple(replacement.get(name, getattr(metadata, name)) for name in names)
+    extras = {
+        "st_atime_ns": metadata.st_atime_ns,
+        "st_mtime_ns": metadata.st_mtime_ns,
+        "st_ctime_ns": metadata.st_ctime_ns,
+    }
+    extras.update({key: value for key, value in replacement.items() if key in extras})
+    return os.stat_result(base, extras)
+
+
+class TestMaterialPathRegistryRefusesADamagedDocument:
+    """Rebuilding empty would throw away every mapping the user has, silently.
+
+    Writes go through `os.replace`, so a half-written document is not something
+    a crash produces. A document that will not parse therefore means something
+    else happened to it, and that is exactly when carrying on regardless is
+    worst: the whole library would come back empty, with no way to tell that
+    from having imported nothing.
+    """
+
+    @pytest.mark.parametrize(
+        "payload",
+        ['{"version": "executor.material-path-registry.v1", "entries":', "", "   "],
+    )
+    def test_unparseable_text_is_refused(self, tmp_path: Path, payload: str) -> None:
+        state = _state_directory(tmp_path)
+        _write_document(state, payload)
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            MaterialPathRegistry(state_directory=state)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+    def test_bytes_that_are_not_utf8_are_refused(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        _document(state).write_bytes(b'\xff\xfe{"entries": {}}')
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            MaterialPathRegistry(state_directory=state)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            [],
+            "a string",
+            17,
+            {"entries": {}},
+            {"version": "executor.material-path-registry.v2", "entries": {}},
+            {"version": MATERIAL_PATH_REGISTRY_VERSION},
+            {"version": MATERIAL_PATH_REGISTRY_VERSION, "entries": []},
+        ],
+    )
+    def test_valid_json_of_the_wrong_shape_is_refused(
+        self, tmp_path: Path, payload: object
+    ) -> None:
+        """`json.loads` returns a list for `[]` without raising, so shape is checked, not caught."""
+        state = _state_directory(tmp_path)
+        _write_document(state, payload)
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            MaterialPathRegistry(state_directory=state)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+    @pytest.mark.parametrize(
+        "damage",
+        [
+            {"path": "relative.mp4"},
+            {"path": 5},
+            {"device": "eight"},
+            {"inode": None},
+            {"modified_ns": 1.5},
+            {"size_bytes": -1},
+            {"device": True},
+        ],
+    )
+    def test_an_entry_of_the_wrong_shape_is_refused(
+        self, tmp_path: Path, damage: dict[str, object]
+    ) -> None:
+        state = _state_directory(tmp_path)
+        entry = _entry(_source(tmp_path)) | damage
+        _write_document(
+            state,
+            {
+                "version": MATERIAL_PATH_REGISTRY_VERSION,
+                "entries": {str(uuid.uuid4()): entry},
+            },
+        )
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            MaterialPathRegistry(state_directory=state)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+    def test_a_key_that_is_not_an_identifier_is_refused(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        _write_document(
+            state,
+            {
+                "version": MATERIAL_PATH_REGISTRY_VERSION,
+                "entries": {"not-an-identifier": _entry(_source(tmp_path))},
+            },
+        )
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            MaterialPathRegistry(state_directory=state)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+    def test_the_damaged_document_is_left_on_disk(self, tmp_path: Path) -> None:
+        """Refusing keeps it recoverable; rebuilding would have destroyed it."""
+        state = _state_directory(tmp_path)
+        _write_document(state, "not json at all")
+        with pytest.raises(MaterialPathRegistryRejected):
+            MaterialPathRegistry(state_directory=state)
+        assert _document(state).read_text(encoding="utf-8") == "not json at all"
+
+    def test_a_document_that_cannot_be_read_is_not_taken_for_an_empty_one(
+        self, tmp_path: Path
+    ) -> None:
+        """The one that must not be confused with a first run."""
+        state = _state_directory(tmp_path)
+        _write_document(state, {"version": MATERIAL_PATH_REGISTRY_VERSION, "entries": {}})
+        _document(state).chmod(0o000)
+        try:
+            with pytest.raises(PermissionError):
+                _document(state).read_bytes()
+            with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+                MaterialPathRegistry(state_directory=state)
+        finally:
+            _document(state).chmod(0o600)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+    def test_a_missing_state_directory_is_refused(self, tmp_path: Path) -> None:
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            MaterialPathRegistry(state_directory=tmp_path / "absent")
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+    def test_a_state_directory_that_is_a_file_is_refused(self, tmp_path: Path) -> None:
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            MaterialPathRegistry(state_directory=_source(tmp_path))
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+
+class TestMaterialPathRegistryByteLimit:
+    """An unbounded read is the finding already logged against `_run_probe`."""
+
+    def test_the_limit_clears_a_library_worth_having(self) -> None:
+        """A bound is only usable if the realistic case fits well inside it.
+
+        An ordinary path is well under 200 bytes once the four numbers beside it
+        are counted, so the shipped limit is worth some tens of thousands of
+        materials — more than a single operator's library will hold.
+        """
+        ordinary_entry_bytes = 200
+        assert MAX_MATERIAL_PATH_REGISTRY_BYTES / ordinary_entry_bytes >= 10_000
+
+    def test_a_document_over_the_limit_is_refused(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        _document(state).write_bytes(b" " * (MAX_MATERIAL_PATH_REGISTRY_BYTES + 1))
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            MaterialPathRegistry(state_directory=state)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+    def test_a_document_of_exactly_the_limit_is_read(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The accepting endpoint, which is the one that tells `>` from `>=`."""
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        identifier = uuid.uuid4()
+        MaterialPathRegistry(state_directory=state).register(identifier, source)
+        monkeypatch.setattr(
+            material_probe,
+            "MAX_MATERIAL_PATH_REGISTRY_BYTES",
+            _document(state).stat().st_size,
+        )
+        assert MaterialPathRegistry(state_directory=state).resolve(identifier) == source
+
+    def test_one_byte_over_the_limit_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        state = _state_directory(tmp_path)
+        MaterialPathRegistry(state_directory=state).register(uuid.uuid4(), _source(tmp_path))
+        monkeypatch.setattr(
+            material_probe,
+            "MAX_MATERIAL_PATH_REGISTRY_BYTES",
+            _document(state).stat().st_size - 1,
+        )
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            MaterialPathRegistry(state_directory=state)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+    def test_a_registration_that_would_overflow_the_limit_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Refused before the write, so the document never grows past what can be read back."""
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        monkeypatch.setattr(material_probe, "MAX_MATERIAL_PATH_REGISTRY_BYTES", 32)
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.register(uuid.uuid4(), source)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_FULL
+        assert list(state.iterdir()) == []
+
+
+class TestMaterialPathRegistryWritesAtomically:
+    """A killed process must not leave a document that cannot be read back."""
+
+    def test_a_failed_rename_leaves_the_previous_document_intact(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        state = _state_directory(tmp_path)
+        first = _source(tmp_path, "first.mp4")
+        second = _source(tmp_path, "second.mp4")
+        registry = MaterialPathRegistry(state_directory=state)
+        kept = uuid.uuid4()
+        registry.register(kept, first)
+        before = _document(state).read_bytes()
+
+        def refuse(*_arguments: object, **_keywords: object) -> None:
+            raise OSError(13, "Permission denied")
+
+        monkeypatch.setattr(os, "replace", refuse)
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.register(uuid.uuid4(), second)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNWRITABLE
+        assert _document(state).read_bytes() == before
+        monkeypatch.undo()
+        assert MaterialPathRegistry(state_directory=state).resolve(kept) == first
+
+    def test_a_failed_rename_leaves_no_scratch_file_behind(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        state = _state_directory(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+
+        def refuse(*_arguments: object, **_keywords: object) -> None:
+            raise OSError(13, "Permission denied")
+
+        monkeypatch.setattr(os, "replace", refuse)
+        with pytest.raises(MaterialPathRegistryRejected):
+            registry.register(uuid.uuid4(), _source(tmp_path))
+        assert list(state.iterdir()) == []
+
+    def test_an_unwritable_directory_is_reported_not_crashed(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        state.chmod(0o500)
+        try:
+            with pytest.raises(PermissionError):
+                (state / "canary").write_text("x", encoding="ascii")
+            with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+                registry.register(uuid.uuid4(), source)
+        finally:
+            state.chmod(0o700)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNWRITABLE
+
+    def test_the_scratch_file_never_becomes_the_document(self, tmp_path: Path) -> None:
+        """Whatever the temporary is called, only the rename publishes it."""
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        seen: list[tuple[str, str]] = []
+        original = os.replace
+
+        def watch(source_name: str | os.PathLike[str], destination: str | os.PathLike[str]) -> None:
+            seen.append((os.fspath(source_name), os.fspath(destination)))
+            original(source_name, destination)
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(os, "replace", watch)
+            registry.register(uuid.uuid4(), source)
+        assert len(seen) == 1
+        scratch, published = seen[0]
+        assert Path(scratch).parent == state
+        assert Path(published) == _document(state)
+
+
+class TestMaterialPathRegistryLeaksNoPath:
+    """The registry object itself goes into logs; the paths it holds must not."""
+
+    def test_the_repr_carries_no_path(self, tmp_path: Path) -> None:
+        secret = "operator-private-anniversary-2019"
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path, f"{secret}.mp4")
+        registry = MaterialPathRegistry(state_directory=state)
+        registry.register(uuid.uuid4(), source)
+        assert repr(registry) == "MaterialPathRegistry(<redacted>)"
+        assert secret not in repr(registry)
+        assert os.fspath(state) not in repr(registry)
+
+    def test_the_rejection_message_stays_fixed(self, tmp_path: Path) -> None:
+        secret = "operator-private-graduation-2018"
+        state = _state_directory(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        registry.register(uuid.uuid4(), _source(tmp_path, f"{secret}.mp4"))
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.resolve(uuid.uuid4())
+        assert str(excinfo.value) == "material path registry rejected"
+        assert secret not in str(excinfo.value)
+
+    def test_no_rendered_traceback_carries_the_path(self, tmp_path: Path) -> None:
+        secret = "operator-private-housewarming-2017"
+        state = _state_directory(tmp_path, f"{secret}-state")
+        source = _source(tmp_path, f"{secret}.mp4")
+        registry = MaterialPathRegistry(state_directory=state)
+        registry.register(uuid.uuid4(), source)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        source.unlink()
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.resolve(identifier)
+        assert secret not in _rendered_traceback(excinfo.value)
+
+    def test_the_unwritable_rejection_chains_nothing(self, tmp_path: Path) -> None:
+        """`OSError.filename` is the path itself, and it survives `from None`."""
+        secret = "operator-private-retirement-2016"
+        state = _state_directory(tmp_path, f"{secret}-state")
+        source = _source(tmp_path, f"{secret}.mp4")
+        registry = MaterialPathRegistry(state_directory=state)
+        state.chmod(0o500)
+        try:
+            with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+                registry.register(uuid.uuid4(), source)
+        finally:
+            state.chmod(0o700)
+        assert excinfo.value.__context__ is None
+        assert secret not in _rendered_traceback(excinfo.value)
+
+    def test_the_damaged_document_rejection_chains_nothing(self, tmp_path: Path) -> None:
+        secret = "operator-private-christening-2015"
+        state = _state_directory(tmp_path, f"{secret}-state")
+        _write_document(state, "not json at all")
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            MaterialPathRegistry(state_directory=state)
+        assert excinfo.value.__context__ is None
+        assert secret not in _rendered_traceback(excinfo.value)
+
+
+def _class_body(source: str, name: str) -> list[ast.stmt]:
+    """The statements of one class, or a failure — never an empty list by accident."""
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ClassDef) and node.name == name:
+            return node.body
+    raise AssertionError(f"{name} is not declared in this source")
+
+
+_PLACE_WORDS = ("path", "dir", "file", "location")
+
+
+def _place_named_members(body: list[ast.stmt]) -> list[str]:
+    """Every name bound in the class body that reads as somewhere on disk."""
+    names: list[str] = []
+    for statement in body:
+        for target in _bound_names(statement):
+            if any(word in target.lower() for word in _PLACE_WORDS):
+                names.append(target)
+    return names
+
+
+def _path_annotated_members(body: list[ast.stmt]) -> list[str]:
+    """Every name in the class body annotated as a path, whatever it is called."""
+    names: list[str] = []
+    for statement in body:
+        if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+            annotation = ast.unparse(statement.annotation)
+            if "Path" in annotation or "PathLike" in annotation:
+                names.append(statement.target.id)
+    return names
+
+
+def _bound_names(statement: ast.stmt) -> list[str]:
+    if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+        return [statement.target.id]
+    if isinstance(statement, ast.Assign):
+        return [target.id for target in statement.targets if isinstance(target, ast.Name)]
+    if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
+        return [statement.name]
+    return []
+
+
+class TestMaterialFactsCannotCarryAPathInTheSource:
+    """The structural claim, read off the source rather than off the built class.
+
+    `dataclasses.fields` sees what the class ended up with; this sees what was
+    written. The two differ exactly where it matters — a plain class attribute,
+    an alias, or a field added to a copy of the class under another name are all
+    invisible to the first and plain in the second.
+    """
+
+    def test_no_member_is_named_for_a_place_on_disk(self) -> None:
+        body = _class_body(_module_source(), "MaterialFacts")
+        assert _place_named_members(body) == []
+
+    def test_no_member_is_annotated_as_a_path(self) -> None:
+        """The hole the name check leaves: a path field called something else."""
+        body = _class_body(_module_source(), "MaterialFacts")
+        assert _path_annotated_members(body) == []
+
+    def test_the_class_really_was_found(self) -> None:
+        """Otherwise a rename would make both checks above pass by finding nothing."""
+        assert _class_body(_module_source(), "MaterialFacts")
+        with pytest.raises(AssertionError):
+            _class_body(_module_source(), "MaterialFactsThatDoNotExist")
+
+    @pytest.mark.parametrize(
+        ("declaration", "caught_by"),
+        [
+            ("    source_path: Path", "both"),
+            ("    directory: str", "name"),
+            ("    origin: Path", "annotation"),
+            ("    home_dir = Path('/tmp')", "name"),
+            ("    def file_of(self) -> str: ...", "name"),
+            ("    where: os.PathLike[str]", "annotation"),
+        ],
+    )
+    def test_the_check_catches_a_violation_it_is_shown(
+        self, declaration: str, caught_by: str
+    ) -> None:
+        """The self-proof: a check nobody has seen fail is not known to work."""
+        body = _class_body(f"class MaterialFacts:\n    kind: int\n{declaration}\n", "MaterialFacts")
+        by_name = _place_named_members(body)
+        by_annotation = _path_annotated_members(body)
+        assert bool(by_name) == (caught_by in {"name", "both"})
+        assert bool(by_annotation) == (caught_by in {"annotation", "both"})
+
+
+class TestTheProbeStaysOnThisMachine:
+    """A local mapping cannot reach the Control Plane if the module cannot talk to it."""
+
+    def test_the_module_imports_nothing_from_the_product_layer(self) -> None:
+        assert _imported_roots(_module_source()) & {"automation_tool.control_plane"} == set()
+
+    def test_the_module_imports_nothing_that_speaks_to_a_network(self) -> None:
+        forbidden = {"socket", "http", "urllib", "httpx", "requests", "asyncio", "ssl"}
+        assert _imported_roots(_module_source()) & forbidden == set()
+
+    def test_the_check_catches_an_import_it_is_shown(self) -> None:
+        """The self-proof, both ways round."""
+        source = "import socket\nfrom automation_tool.control_plane.domain import material\n"
+        roots = _imported_roots(source)
+        assert "socket" in roots
+        assert "automation_tool.control_plane" in roots
+
+
+def _module_source() -> str:
+    return Path(material_probe.__file__).read_text(encoding="utf-8")
+
+
+def _imported_roots(source: str) -> set[str]:
+    """Every module named by an import, plus the prefixes that identify its layer."""
+    roots: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            roots.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            roots.add(node.module)
+    prefixed: set[str] = set()
+    for name in roots:
+        parts = name.split(".")
+        prefixed.update(".".join(parts[: index + 1]) for index in range(len(parts)))
+    return prefixed
+
+
+class TestMaterialPathRegistryRefusesAMalformedEntry:
+    """An entry is a fixed set of five things, and anything else is damage."""
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            [],
+            "a string",
+            None,
+            {"path": "/tmp/clip.mp4"},
+            {"device": 1, "inode": 2, "modified_ns": 3, "size_bytes": 4},
+        ],
+    )
+    def test_an_entry_that_is_not_five_named_numbers_and_a_path_is_refused(
+        self, tmp_path: Path, entry: object
+    ) -> None:
+        state = _state_directory(tmp_path)
+        _write_document(
+            state,
+            {"version": MATERIAL_PATH_REGISTRY_VERSION, "entries": {str(uuid.uuid4()): entry}},
+        )
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            MaterialPathRegistry(state_directory=state)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+    def test_an_entry_carrying_an_extra_key_is_refused(self, tmp_path: Path) -> None:
+        """Not ignored: an unread key is something a later format meant to be read."""
+        state = _state_directory(tmp_path)
+        entry = _entry(_source(tmp_path)) | {"content_digest": "0" * 64}
+        _write_document(
+            state,
+            {"version": MATERIAL_PATH_REGISTRY_VERSION, "entries": {str(uuid.uuid4()): entry}},
+        )
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            MaterialPathRegistry(state_directory=state)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+
+class TestMaterialPathRegistryDocumentReadFailures:
+    """The document is a file like any other, and files fail while being read."""
+
+    def test_a_document_truncated_under_the_read_is_refused(self, tmp_path: Path) -> None:
+        """The size came from the descriptor, and another writer may not honour it."""
+        state = _state_directory(tmp_path)
+        MaterialPathRegistry(state_directory=state).register(uuid.uuid4(), _source(tmp_path))
+        document = _document(state)
+        original = os.fstat
+
+        def truncate_after_stating(descriptor: int) -> os.stat_result:
+            metadata: os.stat_result = original(descriptor)
+            os.truncate(document, 0)
+            return metadata
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(os, "fstat", truncate_after_stating)
+            with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+                MaterialPathRegistry(state_directory=state)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+    def test_an_io_error_while_reading_is_refused_not_crashed(self, tmp_path: Path) -> None:
+        secret = "operator-private-confirmation-2014"
+        state = _state_directory(tmp_path, f"{secret}-state")
+        MaterialPathRegistry(state_directory=state).register(uuid.uuid4(), _source(tmp_path))
+
+        def refuse(_descriptor: int) -> os.stat_result:
+            raise OSError(5, "Input/output error", os.fspath(_document(state)))
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(os, "fstat", refuse)
+            with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+                MaterialPathRegistry(state_directory=state)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+        assert excinfo.value.__context__ is None
+        assert secret not in _rendered_traceback(excinfo.value)
+
+    def test_the_descriptor_is_closed_on_every_way_out(self, tmp_path: Path) -> None:
+        """A registry opened and refused a thousand times must not exhaust the table."""
+        state = _state_directory(tmp_path)
+        _write_document(state, "not json at all")
+        for _ in range(1_000):
+            with pytest.raises(MaterialPathRegistryRejected):
+                MaterialPathRegistry(state_directory=state)
+
+
+class TestRegisteredFileLeaksNoPath:
+    """The record itself sits in the registry's frame locals, so its repr is redacted."""
+
+    def test_the_record_repr_carries_no_path(self, tmp_path: Path) -> None:
+        secret = "operator-private-engagement-2013"
+        source = _source(tmp_path, f"{secret}.mp4")
+        record = material_probe._RegisteredFile(
+            path=source, identity=material_probe._identity_of(source.stat())
+        )
+        assert repr(record) == "_RegisteredFile(<redacted>)"
+        assert secret not in repr(record)
+
+
+class _Deadline:
+    """A hard stop for a test that could hang instead of failing.
+
+    A blocked `os.open` is not something a `pytest` timeout catches on its own,
+    and the whole point of the test below is that the call must come back.
+    """
+
+    def __init__(self, seconds: float) -> None:
+        self._seconds = seconds
+
+    def __enter__(self) -> _Deadline:
+        signal.signal(signal.SIGALRM, self._expire)
+        signal.setitimer(signal.ITIMER_REAL, self._seconds)
+        return self
+
+    def __exit__(self, *_details: object) -> None:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+
+    @staticmethod
+    def _expire(_number: int, _frame: object) -> None:
+        raise AssertionError("the call did not come back")
+
+
+class TestMaterialPathRegistryDocumentIsNotAPipe:
+    """Opening a pipe waits for a writer, and nothing here would ever stop waiting.
+
+    Measured: a plain read-only open of a FIFO with no writer was still blocked
+    after a full second, while the same open with `O_NONBLOCK` came back at once
+    and reported the FIFO. This is the state directory the Executor owns, so it
+    takes something already inside a 0700 directory to arrange — but the cost of
+    being wrong is the Executor never finishing its startup, and the flag is
+    free on a regular file (measured, the same bytes in the same chunks).
+    """
+
+    def test_a_pipe_where_the_document_belongs_is_refused_not_awaited(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        os.mkfifo(_document(state))
+        with _Deadline(5.0), pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            MaterialPathRegistry(state_directory=state)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+    def test_a_directory_where_the_document_belongs_is_refused(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        _document(state).mkdir()
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            MaterialPathRegistry(state_directory=state)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+    def test_a_link_where_the_document_belongs_is_refused(self, tmp_path: Path) -> None:
+        """Following it would read somebody else's file as though it were the library."""
+        state = _state_directory(tmp_path)
+        elsewhere = tmp_path / "elsewhere.json"
+        elsewhere.write_text(
+            json.dumps({"version": MATERIAL_PATH_REGISTRY_VERSION, "entries": {}}),
+            encoding="utf-8",
+        )
+        _document(state).symlink_to(elsewhere)
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            MaterialPathRegistry(state_directory=state)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+
+class TestMaterialPathRegistryKeepsNothingItCouldNotStore:
+    """A registration that failed to persist must not be visible until the restart loses it."""
+
+    def test_a_failed_write_leaves_this_registry_unchanged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        state = _state_directory(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+
+        def refuse(*_arguments: object, **_keywords: object) -> None:
+            raise OSError(13, "Permission denied")
+
+        monkeypatch.setattr(os, "replace", refuse)
+        with pytest.raises(MaterialPathRegistryRejected):
+            registry.register(identifier, _source(tmp_path))
+        monkeypatch.undo()
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.resolve(identifier)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.NOT_REGISTERED
+
+    def test_a_failed_write_does_not_undo_what_was_stored(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        kept = uuid.uuid4()
+        registry.register(kept, source)
+
+        def refuse(*_arguments: object, **_keywords: object) -> None:
+            raise OSError(13, "Permission denied")
+
+        monkeypatch.setattr(os, "replace", refuse)
+        with pytest.raises(MaterialPathRegistryRejected):
+            registry.register(uuid.uuid4(), _source(tmp_path, "second.mp4"))
+        monkeypatch.undo()
+        assert registry.resolve(kept) == source
+
+
+class TestMaterialPathRegistryWriteLimit:
+    """The document that may be written and the one that may be read are one limit."""
+
+    def test_a_document_of_exactly_the_limit_is_written(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The accepting endpoint, which is the one that tells `>` from `>=`."""
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        registry.register(uuid.uuid4(), source)
+        exact = _document(state).stat().st_size
+        _document(state).unlink()
+        fresh = MaterialPathRegistry(state_directory=state)
+        monkeypatch.setattr(material_probe, "MAX_MATERIAL_PATH_REGISTRY_BYTES", exact)
+        identifier = uuid.uuid4()
+        fresh.register(identifier, source)
+        assert _document(state).stat().st_size == exact
+        assert fresh.resolve(identifier) == source
+
+    def test_one_byte_over_the_limit_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        registry.register(uuid.uuid4(), source)
+        exact = _document(state).stat().st_size
+        _document(state).unlink()
+        fresh = MaterialPathRegistry(state_directory=state)
+        monkeypatch.setattr(material_probe, "MAX_MATERIAL_PATH_REGISTRY_BYTES", exact - 1)
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            fresh.register(uuid.uuid4(), source)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_FULL
+        assert not _document(state).exists()

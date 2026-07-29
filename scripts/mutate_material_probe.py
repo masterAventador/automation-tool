@@ -431,9 +431,252 @@ T5_MUTATIONS: list[tuple[str, str, str]] = [
     ),
 ]
 
+T6_SELECTION = (
+    "MaterialPathRegistry or RegisteredIdentity or RegisteredFileLeaksNoPath or "
+    "MaterialFactsCannotCarryAPathInTheSource or TheProbeStaysOnThisMachine"
+)
+
+T6_MUTATIONS: list[tuple[str, str, str]] = [
+    # --- the identity that says the file is still the registered one ---
+    (
+        "identity forgets the device",
+        "        device=metadata.st_dev,\n        inode=metadata.st_ino,",
+        "        device=0,\n        inode=metadata.st_ino,",
+    ),
+    (
+        "identity forgets the inode",
+        "        inode=metadata.st_ino,\n        modified_ns=metadata.st_mtime_ns,",
+        "        inode=0,\n        modified_ns=metadata.st_mtime_ns,",
+    ),
+    (
+        "identity forgets the timestamp",
+        "        modified_ns=metadata.st_mtime_ns,\n        size_bytes=metadata.st_size,",
+        "        modified_ns=0,\n        size_bytes=metadata.st_size,",
+    ),
+    (
+        "identity forgets the length",
+        "        size_bytes=metadata.st_size,\n    )\n\n\n@dataclass",
+        "        size_bytes=0,\n    )\n\n\n@dataclass",
+    ),
+    (
+        "identity gains the access time",
+        "class _FileIdentity:",
+        "class _FileIdentity:\n    accessed_ns: int = 0",
+    ),
+    # --- the check itself, and the two reasons it can give ---
+    (
+        "resolve stops checking the identity",
+        "        if _identity_of(metadata) != entry.identity:\n"
+        "            _reject_registry(MaterialPathRegistryRejection.FILE_CHANGED)",
+        "        if False:\n"
+        "            _reject_registry(MaterialPathRegistryRejection.FILE_CHANGED)",
+    ),
+    (
+        "changed reported as missing",
+        "            _reject_registry(MaterialPathRegistryRejection.FILE_CHANGED)",
+        "            _reject_registry(MaterialPathRegistryRejection.FILE_MISSING)",
+    ),
+    (
+        "missing reported as changed",
+        "            _reject_registry(MaterialPathRegistryRejection.FILE_MISSING)",
+        "            _reject_registry(MaterialPathRegistryRejection.FILE_CHANGED)",
+    ),
+    (
+        "an unregistered material reported as missing",
+        "            _reject_registry(MaterialPathRegistryRejection.NOT_REGISTERED)",
+        "            _reject_registry(MaterialPathRegistryRejection.FILE_MISSING)",
+    ),
+    # --- a damaged document must not be rebuilt empty ---
+    (
+        "damaged document rebuilt empty",
+        "        entries = _parsed_document(payload)\n"
+        "        if entries is None:\n"
+        "            _reject_registry(MaterialPathRegistryRejection.REGISTRY_UNREADABLE)",
+        "        entries = _parsed_document(payload)\n        if entries is None:\n"
+        "            return {}",
+    ),
+    (
+        "unreadable document taken for a first run",
+        "        if isinstance(payload, MaterialPathRegistryRejection):\n"
+        "            _reject_registry(payload)",
+        "        if isinstance(payload, MaterialPathRegistryRejection):\n            return {}",
+    ),
+    (
+        "absent document refused instead of empty",
+        "        payload = _read_document(self._document)\n"
+        "        if payload is None:\n            return {}",
+        "        payload = _read_document(self._document)\n        if payload is None:\n"
+        "            _reject_registry(MaterialPathRegistryRejection.REGISTRY_UNREADABLE)",
+    ),
+    (
+        "any open failure taken for an absent document",
+        "    except FileNotFoundError:\n        return None\n"
+        "    except OSError:\n        return MaterialPathRegistryRejection.REGISTRY_UNREADABLE",
+        "    except OSError:\n        return None",
+    ),
+    (
+        "the version stamp is not checked",
+        '        or document.get("version") != MATERIAL_PATH_REGISTRY_VERSION\n',
+        "",
+    ),
+    (
+        "an entry may carry keys nothing reads",
+        "    if not isinstance(value, dict) or set(value) != _REGISTRY_ENTRY_KEYS:",
+        "    if not isinstance(value, dict) or not set(value) >= _REGISTRY_ENTRY_KEYS:",
+    ),
+    (
+        "a boolean passes for a device number",
+        "    return type(value) is int and value >= 0",
+        "    return isinstance(value, int) and value >= 0",
+    ),
+    (
+        "a negative number passes for a length",
+        "    return type(value) is int and value >= 0",
+        "    return type(value) is int",
+    ),
+    (
+        "the document's paths are not shape-checked",
+        "        return _require_path_shape(Path(value))",
+        "        return Path(value)",
+    ),
+    # --- the identifier ---
+    (
+        "any UUID version accepted",
+        "    if not isinstance(value, UUID) or value.version != 4 or value.variant != RFC_4122:",
+        "    if not isinstance(value, UUID):",
+    ),
+    # --- writing ---
+    (
+        "the registration is visible before it is stored",
+        "        self._write(_serialized(entries))",
+        "        self._entries = entries\n        self._write(_serialized(entries))",
+    ),
+    (
+        "a moved material keeps its old path",
+        "        entries[identifier] = _RegisteredFile(path=path, identity=_identity_of(metadata))",
+        "        entries.setdefault(\n"
+        "            identifier, _RegisteredFile(path=path, identity=_identity_of(metadata))\n"
+        "        )",
+    ),
+    (
+        "the scratch file is published directly",
+        "            with os.fdopen(descriptor, \"wb\") as sink:",
+        "            scratch = os.fspath(self._document)\n"
+        "            os.close(descriptor)\n"
+        "            descriptor = os.open(scratch, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)\n"
+        "            with os.fdopen(descriptor, \"wb\") as sink:",
+    ),
+    (
+        "the scratch file is left behind",
+        "            if scratch is not None:\n"
+        "                with suppress(OSError):\n                    os.unlink(scratch)",
+        "            if scratch is None:\n"
+        "                with suppress(OSError):\n                    os.unlink(scratch)",
+    ),
+    (
+        "an unwritable directory raises OSError instead",
+        "        except OSError:\n"
+        "            outcome = MaterialPathRegistryRejection.REGISTRY_UNWRITABLE",
+        "        except InterruptedError:\n"
+        "            outcome = MaterialPathRegistryRejection.REGISTRY_UNWRITABLE",
+    ),
+    # --- the byte limit, both endpoints and both directions ---
+    (
+        "registry limit `>` -> `>=`",
+        "        if len(payload) > MAX_MATERIAL_PATH_REGISTRY_BYTES:",
+        "        if len(payload) >= MAX_MATERIAL_PATH_REGISTRY_BYTES:",
+    ),
+    (
+        "registry limit off by one up",
+        "        if len(payload) > MAX_MATERIAL_PATH_REGISTRY_BYTES:",
+        "        if len(payload) > MAX_MATERIAL_PATH_REGISTRY_BYTES + 1:",
+    ),
+    (
+        "read limit `>` -> `>=`",
+        "            or metadata.st_size > MAX_MATERIAL_PATH_REGISTRY_BYTES",
+        "            or metadata.st_size >= MAX_MATERIAL_PATH_REGISTRY_BYTES",
+    ),
+    (
+        "read limit off by one up",
+        "            or metadata.st_size > MAX_MATERIAL_PATH_REGISTRY_BYTES",
+        "            or metadata.st_size > MAX_MATERIAL_PATH_REGISTRY_BYTES + 1",
+    ),
+    (
+        "the short read is not noticed",
+        "            if not chunk:\n"
+        "                return MaterialPathRegistryRejection.REGISTRY_UNREADABLE",
+        "            if not chunk:\n                break",
+    ),
+    # --- the state directory, and what may be read as one ---
+    (
+        "a file passes for the state directory",
+        "    if not isinstance(state_directory, Path) or not state_directory.is_dir():",
+        "    if not isinstance(state_directory, Path):",
+    ),
+    (
+        "a directory passes for the document",
+        "            not stat.S_ISREG(metadata.st_mode)\n",
+        "            False\n",
+    ),
+    (
+        "the document open waits for a writer",
+        "    flags = os.O_RDONLY | os.O_NONBLOCK | cast(int, getattr(os, \"O_NOFOLLOW\", 0))",
+        "    flags = os.O_RDONLY | cast(int, getattr(os, \"O_NOFOLLOW\", 0))",
+    ),
+    (
+        "the document open follows a link",
+        "    flags = os.O_RDONLY | os.O_NONBLOCK | cast(int, getattr(os, \"O_NOFOLLOW\", 0))",
+        "    flags = os.O_RDONLY | os.O_NONBLOCK",
+    ),
+    # --- the paths that must never be rendered ---
+    (
+        "the registry repr states its directory",
+        '        return "MaterialPathRegistry(<redacted>)"',
+        '        return f"MaterialPathRegistry({self._state_directory})"',
+    ),
+    (
+        "the record repr states its path",
+        '        return "_RegisteredFile(<redacted>)"',
+        '        return f"_RegisteredFile({self.path})"',
+    ),
+    (
+        "the registry rejection chains what it handled",
+        "    raise MaterialPathRegistryRejected(rejection) from None",
+        "    raise MaterialPathRegistryRejected(rejection)",
+    ),
+    # --- the structural boundary the AST test guards ---
+    (
+        "MaterialFacts gains a path",
+        "    has_audio: bool\n    audio_loudness_lufs: float | None\n    content_digest: str\n",
+        "    has_audio: bool\n    audio_loudness_lufs: float | None\n    content_digest: str\n"
+        "    source_path: Path\n",
+    ),
+    (
+        "MaterialFacts gains a path under another name",
+        "    kind: ProbedMaterialKind\n    duration_ms: int | None\n    width: int | None\n"
+        "    height: int | None\n    video_codec: str | None\n    audio_codec: str | None\n"
+        "    has_audio: bool\n",
+        "    kind: ProbedMaterialKind\n    origin: Path\n    duration_ms: int | None\n"
+        "    width: int | None\n    height: int | None\n    video_codec: str | None\n"
+        "    audio_codec: str | None\n    has_audio: bool\n",
+    ),
+    (
+        "the module reaches for the product layer",
+        "from automation_tool.protocol.safe_text import contains_control_or_bidi",
+        "import socket\n\nfrom automation_tool.protocol.safe_text import contains_control_or_bidi",
+    ),
+    # --- canary: must die ---
+    (
+        "CANARY resolve returns the wrong file",
+        "        return entry.path\n\n    def __repr__(self)",
+        "        return Path('/canary')\n\n    def __repr__(self)",
+    ),
+]
+
 GROUPS: list[tuple[str, str, list[tuple[str, str, str]]]] = [
     ("T4 the content digest", SELECTION, MUTATIONS),
     ("T5 the orchestration", T5_SELECTION, T5_MUTATIONS),
+    ("T6 the path registry", T6_SELECTION, T6_MUTATIONS),
 ]
 
 
