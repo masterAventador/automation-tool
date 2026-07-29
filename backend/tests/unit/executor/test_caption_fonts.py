@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib
 import json
+import pkgutil
 import sys
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
@@ -579,46 +581,75 @@ def _clear_coverage_cache() -> Iterator[None]:
     fonts.glyph_coverage.cache_clear()
 
 
-def _exception_types_defined_by_the_module() -> tuple[type[BaseException], ...]:
-    """Every exception class `fonts` itself defines, found rather than listed.
+def _exception_types_defined_by_the_captions_package() -> tuple[type[BaseException], ...]:
+    """Every exception class the `captions` package defines, found not listed.
 
     Derived for the same reason `test_the_refused_set_covers_every_line_boundary`
     derives its boundary set: a hand-written list is a second copy, and the way
-    it fails is silent -- a refusal added by T4, T5 or LE-10 simply would not be
+    it fails is silent -- a refusal added by a later task simply would not be
     checked, and the suite would stay green while the promise below stopped
     holding for the new class.
 
+    The walk covers the whole package rather than this one module, which is
+    the correction T4 forced: enumerating only `fonts` made the promise
+    module-wide while the docstring claimed it reached T4, T5 and LE-10, and a
+    refusal class planted in a sibling module was measured to survive the
+    entire suite. Loading every module of the package is what makes the reach
+    match the claim, and `test_the_probe_reaches_past_the_fonts_module` keeps
+    the walk from quietly collapsing back to one module.
+
     The probe cannot be `CaptionFontRejected.__subclasses__()`, which would be
     circular: a class that ought to be a subclass but is not would be absent
-    from that answer, and absence is exactly the fault being looked for. So the
-    module namespace is enumerated instead, filtered by `__module__` so the
-    exception types merely imported into it -- `TTLibError` -- stay out.
+    from that answer, and absence is exactly the fault being looked for. So
+    module namespaces are enumerated instead, filtered by `__module__` so the
+    exception types merely imported into them -- `TTLibError` -- stay out, and
+    so a class re-exported by a sibling module is counted once.
     """
-    return tuple(
-        value
-        for value in vars(fonts).values()
-        if isinstance(value, type)
-        and issubclass(value, BaseException)
-        and value.__module__ == fonts.__name__
-    )
+    package = importlib.import_module("automation_tool.executor.captions")
+    found: dict[int, type[BaseException]] = {}
+    for module_info in pkgutil.iter_modules(package.__path__):
+        module = importlib.import_module(f"{package.__name__}.{module_info.name}")
+        for value in vars(module).values():
+            if (
+                isinstance(value, type)
+                and issubclass(value, BaseException)
+                and value.__module__.startswith(f"{package.__name__}.")
+            ):
+                found[id(value)] = value
+    return tuple(found.values())
 
 
 class TestRefusalHierarchy:
-    def test_the_probe_finds_the_modules_exception_classes(self) -> None:
+    def test_the_probe_finds_the_packages_exception_classes(self) -> None:
         """Premise: an empty derivation would make the check below vacuous.
 
-        pytest reports a parametrisation with no arguments as passed, so a
-        probe that silently stopped finding anything would read as green
-        rather than as broken -- the same shape as an assertion that cannot
-        fail.
+        pytest reports a parametrisation with no arguments as skipped, which
+        is still not a failure, so a probe that silently stopped finding
+        anything would read as green rather than as broken -- the same shape
+        as an assertion that cannot fail.
         """
-        assert _exception_types_defined_by_the_module(), (
-            "no exception classes found in the fonts module; the probe is broken"
+        assert _exception_types_defined_by_the_captions_package(), (
+            "no exception classes found in the captions package; the probe is broken"
         )
+
+    def test_the_probe_reaches_past_the_fonts_module(self) -> None:
+        """Premise: a walk that only ever saw `fonts` would prove nothing new.
+
+        That is precisely the state this probe was in before T4, and it was
+        measured: a refusal class in a sibling module left all 102 cases
+        green. Counting distinct defining modules, rather than naming the
+        sibling, keeps this from turning back into the hand-written list the
+        probe exists to avoid.
+        """
+        modules = {
+            refusal.__module__ for refusal in _exception_types_defined_by_the_captions_package()
+        }
+
+        assert len(modules) > 1, f"the probe only reached {modules}"
 
     @pytest.mark.parametrize(
         "refusal",
-        _exception_types_defined_by_the_module(),
+        _exception_types_defined_by_the_captions_package(),
         ids=lambda refusal: refusal.__name__,
     )
     def test_every_refusal_is_catchable_as_one_type(self, refusal: type[BaseException]) -> None:

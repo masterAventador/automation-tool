@@ -181,8 +181,23 @@ LE-09 抢做会替它砍掉一半选项。本任务交付机制，不交付装�
   `bundle_root(bundle)`、`packaged_relative_path(font_key)`、`resolve_font_file(font_key)`；用例含六个平台分支与哨兵用例。
 - **T3 cmap 覆盖与 fallback 链**（核心）：`glyph_coverage()`（排除 `.notdef` 映射）、
   `FontChain.face_for()`、`segment_runs()`；12 条用例；对 `and`/`in`/`!=` 三处做算子变异自证。
-- **T4 PIL 渲染**：`CaptionRenderStyle`（含跨层钉子）、`_load_face`（可变字体字重修正）、
-  换行/行距/描边、RGBA 透明 PNG；19 条用例。
+- **T4a 样式值对象与字体加载**：`CaptionRenderStyle`（含跨层钉子）、`_load_face`（含可变字体字重）。
+- **T4b 排版与出图**：换行 / 行距 / 描边排版、RGBA 透明 PNG 输出，以及与 `.notdef` 差分的验收判据。
+
+  **T4 为什么拆成两半**（实施时决定，不是原计划）：理由不是「T4 太大」这种感觉，是当天的实测——
+  LE-03/04/07/09 每个 task 无论大小都要 2–3 轮审查才收口，而**审查抓到的几乎全是「作者自己
+  看不见的那一维」**。两个 task = 两道独立审查关，比一道关审一个两倍大的 diff 更可能抓住。
+  T4a 实施后这个判断得到一次即时验证：本单自查的变异体里，第一轮存活的那个（`M34`：把
+  目标字重实例从 Bold 改成 Regular）正是「断言读了它要钉的那个常量」——作者视角的盲区。
+
+  **T4a 实施时对本计划的两处更正**（详见 `docs/development/LE-09.md`）：
+  1. §0.2 说「用 `set_variation_by_axes` 设到可读字重」。**实测改用 `set_variation_by_name`**：
+     `set_variation_by_axes([])` 与 `([700, 700])` 都被静默接受、前者什么都不做，
+     而 `set_variation_by_name` 在实例不存在时抛错。计划的**判断**（默认落在 Thin、需要修正）
+     成立并被实测确认，计划的**做法**不采用；
+  2. §1.1 提到的上游跨字段守卫「字号不得高过画幅」**不在本工作树的上游代码里**——
+     它在 `smart-edit` 分支的 `d1dcd8b`，不是本树 `cebb4ad` 的祖先。跨层结论矩阵只比
+     `CaptionStyle` 一层，两边这一层逐字相同，合并后不受影响。
 - **T5 真实验收**：`.notdef` 差分三层断言 + fail-closed 反向用例 + 冻结落点结构用例；
   写 `docs/development/LE-09.md`；台账 LE-09 → `🔍 待验收` 并跑
   `scripts/check_local_editing_roadmap_counts.py`。
