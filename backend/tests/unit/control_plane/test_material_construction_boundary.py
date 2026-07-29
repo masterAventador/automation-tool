@@ -1,0 +1,286 @@
+"""`Material`'s description protection must not be reachable around the side.
+
+`Material.with_ai_description` returns `self` unchanged when a person already
+wrote the description. That rule lives in one method precisely so that no future
+describe pass has to remember it -- and one that forgets destroys a user's own
+words with model output, silently and irreversibly.
+
+Two routes go around the method, and both are ordinary Python that no test of
+behaviour would ever notice:
+
+* `dataclasses.replace(material, ai_description=...)` -- the same call the
+  method itself makes, minus the check in front of it;
+* `Material(...)` built field by field from parts of an existing one.
+
+So the guard is structural: outside `material.py`, production code may not do
+either. This is what the local-editing roadmap means by "a structural boundary
+test for the description-protection rule"; there is no behavioural test that
+can express "nobody wrote this line".
+
+**Scope is `backend/src` only.** Tests construct `Material` freely -- that is
+how a domain object gets tested at all, and LE-02's own suite would be illegal
+under a wider sweep. The rule is about production code, and the exemption below
+is about the one production caller that legitimately builds one from parts.
+
+**What this can and cannot see.** Route two is exact: naming the class is the
+only way to call its constructor, so matching the call target is sound. Route
+one is not, because `replace` takes any dataclass and AST has no types. Two
+approximations cover the realistic shapes, and both are stated here rather than
+implied:
+
+* a module that imports `Material` may not call `replace` at all -- if you can
+  name the type you are in a position to rebuild one, and the four existing
+  `replace` call sites in `backend/src` are all in modules that do not;
+* a `replace` whose first argument is *named* like a material is refused
+  wherever it appears, which catches the one shape that does not need the
+  import: `replace(material, ...)` on a value handed back by the repository.
+
+A module that obtains a `Material`, never names the type, and passes it to
+`replace` under some other identifier is not caught. Nothing static could catch
+it; recording the gap is the honest alternative to implying it is closed.
+"""
+
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+import pytest
+
+SOURCE_ROOT = Path(__file__).resolve().parents[3] / "src" / "automation_tool"
+DOMAIN_MODULE = SOURCE_ROOT / "control_plane" / "domain" / "material.py"
+
+# The single exemption, and it is a pair rather than a file: the repository may
+# construct a `Material` inside `_hydrate` and nowhere else, not even elsewhere
+# in the same module.
+#
+# The alternative the plan offered -- moving hydration into `material.py` so
+# nothing outside needs the constructor -- was rejected after writing it out. A
+# rebuild function there is a public second constructor in the very module this
+# rule protects: anyone could call it from anywhere and reach exactly the field
+# combination the rule exists to prevent, and the guard would have nothing left
+# to match on. Naming one function in one file keeps the exemption smaller than
+# the hole that would replace it.
+#
+# Hydration is also the one place where building from parts is the correct
+# operation: a stored row is not a described material being re-described, it is
+# a material being reconstituted -- and it must go through the constructor,
+# because a row is input rather than truth.
+HYDRATION_EXEMPTION = (
+    SOURCE_ROOT / "control_plane" / "infrastructure" / "database" / "material_repository.py",
+    "_hydrate",
+)
+
+PROTECTED_CLASS = "Material"
+# `dataclasses.replace` and, since 3.13, `copy.replace` -- one name covers both,
+# and the attribute form covers them however they were imported.
+REBUILD_FUNCTION = "replace"
+
+
+def _called_name(call: ast.Call) -> str | None:
+    """The bare name of what is being called, for `f()` and for `mod.f()` alike.
+
+    Matching is on the exact name, never a substring: `BilibiliPublishMaterial`
+    and `OpaqueBearerMaterial` are real classes in this package, and a
+    `str.endswith` test would report both as violations forever.
+    """
+    if isinstance(call.func, ast.Name):
+        return call.func.id
+    if isinstance(call.func, ast.Attribute):
+        return call.func.attr
+    return None
+
+
+def _imports_protected_class(tree: ast.AST) -> bool:
+    """Whether this module pulled `Material` in from anywhere.
+
+    An aliased import counts: renaming the class on the way in does not make a
+    module less able to rebuild one, and reading the alias as an exemption is
+    the kind of hole that only shows up after it has been used.
+    """
+    return any(
+        isinstance(node, ast.ImportFrom)
+        and any(alias.name == PROTECTED_CLASS for alias in node.names)
+        for node in ast.walk(tree)
+    )
+
+
+def _named_like_a_material(node: ast.expr) -> bool:
+    if isinstance(node, ast.Name):
+        return "material" in node.id.lower()
+    if isinstance(node, ast.Attribute):
+        return "material" in node.attr.lower()
+    return False
+
+
+def _exempt_calls(tree: ast.AST, function_name: str | None) -> set[int]:
+    """Identities of the `Call` nodes inside the exempted function, if any."""
+    if function_name is None:
+        return set()
+    exempt: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == function_name:
+            exempt.update(id(inner) for inner in ast.walk(node) if isinstance(inner, ast.Call))
+    return exempt
+
+
+def construction_violations(
+    source: str,
+    *,
+    path: str,
+    exempt_function: str | None = None,
+) -> list[str]:
+    """Every place in one module that builds or rebuilds a `Material`."""
+    tree = ast.parse(source)
+    imports_material = _imports_protected_class(tree)
+    exempt = _exempt_calls(tree, exempt_function)
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or id(node) in exempt:
+            continue
+        name = _called_name(node)
+        if name == PROTECTED_CLASS:
+            violations.append(f"{path}:{node.lineno}: constructs {PROTECTED_CLASS} directly")
+        elif name == REBUILD_FUNCTION and (
+            imports_material or (node.args and _named_like_a_material(node.args[0]))
+        ):
+            violations.append(f"{path}:{node.lineno}: rebuilds a {PROTECTED_CLASS} with {name}()")
+    return violations
+
+
+def test_the_exempted_hydration_function_still_exists() -> None:
+    """An exemption naming something that is gone is a permanent free pass.
+
+    Exemption lists rot exactly this way -- the entry outlives what it was
+    written for, and the next module to take that path inherits the pass. This
+    fails the moment the file is renamed or the function disappears, which
+    forces whoever moved it to re-read the reasoning above.
+    """
+    path, function_name = HYDRATION_EXEMPTION
+    assert path.is_file(), path
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    assert any(
+        isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == function_name
+        for node in ast.walk(tree)
+    ), f"{path} no longer defines {function_name}()"
+
+
+VIOLATING_SOURCES = {
+    "direct-construction": """
+from automation_tool.control_plane.domain import Material
+
+def describe(existing, text):
+    return Material(
+        material_id=existing.material_id,
+        kind=existing.kind,
+        ai_description=text,
+    )
+""",
+    "qualified-construction": """
+from automation_tool.control_plane.domain import material as material_module
+
+def describe(existing, text):
+    return material_module.Material(material_id=existing.material_id, ai_description=text)
+""",
+    "replace-in-a-module-that-imports-material": """
+from dataclasses import replace
+
+from automation_tool.control_plane.domain import Material
+
+def describe(existing: Material, text: str) -> Material:
+    return replace(existing, ai_description=text)
+""",
+    "replace-without-the-import": """
+from dataclasses import replace
+
+async def describe(repository, material_id, text):
+    material = await repository.get(material_id)
+    return replace(material, ai_description=text)
+""",
+    "qualified-replace": """
+import dataclasses
+
+async def describe(repository, material_id, text):
+    stored_material = await repository.get(material_id)
+    return dataclasses.replace(stored_material, ai_description=text)
+""",
+}
+
+
+@pytest.mark.parametrize("source", list(VIOLATING_SOURCES.values()), ids=list(VIOLATING_SOURCES))
+def test_the_checker_catches_a_module_that_goes_around_the_rule(source: str) -> None:
+    """The checker proves it can fail before it is trusted for passing.
+
+    A structural guard that has only ever been run against a clean tree is
+    indistinguishable from one that reports nothing at all -- the failure mode
+    that made this test's own subject worth writing. Each source here is a
+    plausible way the next feature would reach the field combination the rule
+    forbids.
+    """
+    assert construction_violations(source, path="synthetic.py") != []
+
+
+CLEAN_SOURCES = {
+    # The rule is about `Material`, and the exact-name matching that keeps these
+    # two out is load-bearing: both are real classes in this package.
+    "a-differently-named-material": """
+from automation_tool.control_plane.application.opaque_bearers import OpaqueBearerMaterial
+
+def issue():
+    return OpaqueBearerMaterial(secret="x")
+""",
+    "replace-on-an-unrelated-dataclass": """
+from dataclasses import replace
+
+def touch(record, status):
+    return replace(record, status=status)
+""",
+    "the-methods-the-rule-exists-to-funnel-callers-into": """
+def describe(existing, text, tags, at):
+    return existing.with_ai_description(text, tags, at)
+""",
+}
+
+
+@pytest.mark.parametrize("source", list(CLEAN_SOURCES.values()), ids=list(CLEAN_SOURCES))
+def test_the_checker_leaves_legitimate_code_alone(source: str) -> None:
+    assert construction_violations(source, path="synthetic.py") == []
+
+
+def test_the_exemption_is_what_makes_the_repository_pass() -> None:
+    """Without the exemption the repository is a violation, and it must be.
+
+    Otherwise the exemption could be deleted with nothing turning red, which
+    would mean the guard was not reaching that file in the first place.
+    """
+    path, function_name = HYDRATION_EXEMPTION
+    source = path.read_text(encoding="utf-8")
+    assert construction_violations(source, path=str(path)) != []
+    assert construction_violations(source, path=str(path), exempt_function=function_name) == []
+
+
+def test_no_module_outside_the_domain_builds_a_material_from_parts() -> None:
+    exempt_path, exempt_function = HYDRATION_EXEMPTION
+    violations: list[str] = []
+    scanned: set[Path] = set()
+    for path in sorted(SOURCE_ROOT.rglob("*.py")):
+        if path == DOMAIN_MODULE:
+            continue
+        scanned.add(path)
+        violations.extend(
+            construction_violations(
+                path.read_text(encoding="utf-8"),
+                path=str(path.relative_to(SOURCE_ROOT)),
+                exempt_function=exempt_function if path == exempt_path else None,
+            )
+        )
+    # A sweep that silently found nothing to read would pass this test while
+    # checking nothing, which is how a structural guard stops guarding.
+    assert len(scanned) > 100
+    # And the exempted file has to be among what was read. Skipping it outright
+    # would look identical from the outside while handing that whole module a
+    # free pass -- measured: making the loop `continue` past it instead of
+    # exempting one function inside it left every other test here green,
+    # including the one above that checks the exemption is load-bearing.
+    assert exempt_path in scanned
+    assert violations == []

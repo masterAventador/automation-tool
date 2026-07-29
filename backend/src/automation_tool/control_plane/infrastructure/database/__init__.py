@@ -15,6 +15,7 @@ from .bilibili_publish_repository import SqlAlchemyBilibiliArchivePublishStore
 from .customer_account_repository import SqlAlchemyCustomerAccountRepository
 from .editing_project_repository import SqlAlchemyEditingProjectRepository
 from .installation_revocation_repository import SqlAlchemyInstallationRevocationRepository
+from .material_repository import SqlAlchemyMaterialRepository
 from .platform_session_health_repository import SqlAlchemyPlatformSessionHealthRepository
 from .schema import (
     account_audit_events,
@@ -35,6 +36,7 @@ from .schema import (
     execution_attempts,
     installation_registration_challenges,
     installations,
+    materials,
     metadata,
     platform_session_gates,
     platform_session_health,
@@ -67,6 +69,7 @@ __all__ = [
     "SqlAlchemyCustomerAccountRepository",
     "SqlAlchemyEditingProjectRepository",
     "SqlAlchemyInstallationRevocationRepository",
+    "SqlAlchemyMaterialRepository",
     "SqlAlchemyPlatformSessionHealthRepository",
     "SqlAlchemyTaskCommandRepository",
     "SqlAlchemyTaskDiscoveryRepository",
@@ -92,6 +95,7 @@ __all__ = [
     "execution_attempts",
     "installation_registration_challenges",
     "installations",
+    "materials",
     "metadata",
     "platform_session_gates",
     "platform_session_health",

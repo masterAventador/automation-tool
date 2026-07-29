@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import cast
 
 from sqlalchemy import insert, select
@@ -24,6 +24,7 @@ from automation_tool.control_plane.domain import (
     OutputSpec,
 )
 
+from .hydration import normalise_timestamp
 from .schema import editing_projects
 from .session import Database
 
@@ -32,23 +33,6 @@ from .session import Database
 # dialect only wraps asyncpg's own exceptions. `session.py` and four other
 # repositories catch the same pair for the same reason.
 _CONNECTION_FAILURES = (OSError, SQLAlchemyError)
-
-
-def _timestamp(value: object) -> object:
-    """Normalise an already-valid timestamp; hand anything else on untouched.
-
-    The order matters. `.astimezone(UTC)` on a *naive* datetime does not fail --
-    it reinterprets it in the host's local timezone, moves the instant by that
-    offset and hands back something aware, which then sails through the domain's
-    check. Normalising before validating would launder exactly the value the
-    domain exists to refuse. `None` and text are worse: they would raise a bare
-    `AttributeError` from inside the repository, which is neither the domain's
-    error nor one of this module's. So the guard runs first, and only a
-    timestamp that is already aware gets converted.
-    """
-    if isinstance(value, datetime) and value.utcoffset() is not None:
-        return value.astimezone(UTC)
-    return value
 
 
 def _hydrate(row: RowMapping) -> EditingProject:
@@ -84,7 +68,7 @@ def _hydrate(row: RowMapping) -> EditingProject:
             stroke_px=cast(int, row["caption_stroke_px"]),
             line_spacing=cast(float, row["caption_line_spacing"]),
         ),
-        created_at=cast(datetime, _timestamp(row["created_at"])),
+        created_at=cast(datetime, normalise_timestamp(row["created_at"])),
     )
 
 

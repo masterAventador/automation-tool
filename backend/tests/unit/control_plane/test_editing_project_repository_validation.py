@@ -382,15 +382,18 @@ def test_hydration_refuses_a_timestamp_it_cannot_trust(created_at: object) -> No
     `AttributeError` or a wrong instant, which is neither the domain's error nor
     the repository's -- that is what this pins.
 
-    **The `null` parameter must not be copied to a nullable column.** LE-05 T2's
-    `described_at` is nullable, so `None` is a legal value there and must
-    hydrate to `described_at=None` rather than raise. Copied verbatim, this case
-    would demand that T2 reject a perfectly ordinary row -- and if T2's
-    implementation is copied from here too, both halves agree, the test passes,
-    and the bug ships green. `_timestamp()` itself needs no change: it already
-    returns `None` untouched and lets the constructor decide. What changes for a
-    nullable column is the constructor's expectation and this parameter's
-    direction.
+    **The `null` parameter must not be copied to a nullable column.** T2's
+    `materials.described_at` is nullable, so `None` is a legal value there and
+    hydrates to `described_at=None` rather than raising. Copied verbatim, this
+    case would have demanded that T2 reject a perfectly ordinary row -- and with
+    T2's implementation copied from here too, both halves would agree, the test
+    would pass, and the bug would ship green. It did not: T2 kept `None` in its
+    own parametrisation with the opposite expectation.
+
+    `normalise_timestamp()` needed no change for either column -- it returns
+    anything that is not an aware datetime untouched and lets the constructor
+    decide. It now lives in `hydration.py` so that both repositories share one
+    copy of the order it enforces.
     """
     with pytest.raises(InvalidEditingProjectModel):
         repository_module._hydrate(hydration_row(created_at=created_at))

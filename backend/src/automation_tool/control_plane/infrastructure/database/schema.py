@@ -1,6 +1,7 @@
 """Versioned SQLAlchemy schema metadata for Control Plane persistence."""
 
 from sqlalchemy import (
+    CHAR,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -19,7 +20,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from automation_tool.control_plane.application.task_target_previews import (
     TASK_TARGET_CONFIRMATION_INTENT_VERSION,
@@ -29,6 +30,7 @@ from automation_tool.control_plane.domain import (
     DOUYIN_CANDIDATE_POLICY_VERSION,
     DOUYIN_SEARCH_EXPOSURE_TEMPLATE,
     MAX_ACTION_RISK_LIMIT,
+    MAX_DESCRIPTION_CHARACTERS,
     MAX_MESSAGE_TEMPLATE_CHARACTERS,
     MAX_PROJECT_TITLE_CHARACTERS,
     MAX_SAFE_TASK_EVENT_MESSAGE_CHARACTERS,
@@ -36,6 +38,7 @@ from automation_tool.control_plane.domain import (
     MAX_TASK_EVENT_SEQUENCE,
     MAX_TASK_INTERVAL_SECONDS,
     MAX_TASK_TARGET_LIMIT,
+    MAX_TRANSCRIPT_CHARACTERS,
     TERMINAL_EXECUTION_ATTEMPT_STATUSES,
     AccountAuditActorKind,
     AccountAuditEventType,
@@ -2356,6 +2359,48 @@ editing_projects = Table(
     PrimaryKeyConstraint("project_id", name="pk_editing_projects"),
 )
 
+materials = Table(
+    "materials",
+    metadata,
+    Column("material_id", UUID(as_uuid=True), nullable=False),
+    Column("kind", String(length=16), nullable=False),
+    # Nullable because the domain says so, not because the value is optional
+    # paperwork: an image has no duration and audio has no frame size, and both
+    # are refused if they carry one. The column cannot express which absence
+    # goes with which kind, so it permits all four and `Material` decides.
+    Column("duration_ms", Integer(), nullable=True),
+    Column("width", Integer(), nullable=True),
+    Column("height", Integer(), nullable=True),
+    # Fixed width, because a SHA-256 hex digest is exactly 64 characters. Note
+    # that `CHAR` is `bpchar`: it blank-pads anything shorter and compares
+    # ignoring trailing blanks. Neither touches a digest written through the
+    # repository -- there is nothing to pad -- but a row arriving any other way
+    # comes back padded, and hydration refuses it because spaces are not hex.
+    Column("content_digest", CHAR(length=64), nullable=False),
+    Column("has_audio", Boolean(), nullable=False),
+    Column("audio_loudness_lufs", Double(), nullable=True),
+    Column("has_speech", Boolean(), nullable=False),
+    # The three JSONB columns are NOT NULL: "no speech" is an empty array, not
+    # an absent one, which keeps `[]` and NULL from both meaning nothing.
+    # PostgreSQL never looks inside these, so their shape is entirely on
+    # hydration -- see the migration's docstring.
+    Column("speech_segments_ms", JSONB(), nullable=False),
+    Column("speech_transcript", String(length=MAX_TRANSCRIPT_CHARACTERS), nullable=True),
+    Column("shot_boundaries_ms", JSONB(), nullable=False),
+    Column("ai_description", String(length=MAX_DESCRIPTION_CHARACTERS), nullable=True),
+    Column("ai_tags", JSONB(), nullable=False),
+    Column("description_source", String(length=16), nullable=False),
+    # The one genuinely optional value here: a material nobody has described
+    # yet, and one whose description a person wrote, both leave this NULL.
+    Column("described_at", DateTime(timezone=True), nullable=True),
+    PrimaryKeyConstraint("material_id", name="pk_materials"),
+    # "The same file must not be imported twice" is the half of the rule the
+    # domain cannot hold: `Material` only knows a digest's format, never what
+    # else is stored. Two callers hashing the same file concurrently both find
+    # nothing and both proceed, so the refusal has to be here.
+    UniqueConstraint("content_digest", name="uq_materials_content_digest"),
+)
+
 __all__ = [
     "account_audit_events",
     "account_installation_binding_challenges",
@@ -2374,6 +2419,7 @@ __all__ = [
     "execution_attempts",
     "installation_registration_challenges",
     "installations",
+    "materials",
     "metadata",
     "platform_session_gates",
     "platform_session_health",
