@@ -44,7 +44,12 @@ SELECTION = (
     "TestContentDigest or TestContentDigestRejectsAnUnusableSource or "
     "TestContentDigestByteLimit or TestContentDigestNeedsTheFileToHoldStill or "
     "TestContentDigestNeedsMoreThanTheInode or "
-    "TestContentDigestLeaksNoPath"
+    "TestContentDigestLeaksNoPath or "
+    # The digest's own Windows guard is asserted from the registry's platform
+    # class, because both flags are the same question. Left out of this filter
+    # the mutation for it survived while the test that kills it sat in the file
+    # unselected — a narrow `-k` is its own way of proving nothing.
+    "TestMaterialPathRegistryOnAPlatformWithoutTheseFlags"
 )
 
 # (label, old, new). The entry labelled CANARY must die; if it survives, the
@@ -81,6 +86,11 @@ MUTATIONS: list[tuple[str, str, str]] = [
         "limit value quadrupled",
         "MAX_SOURCE_FILE_BYTES: Final = 16 * 1024 * 1024 * 1024",
         "MAX_SOURCE_FILE_BYTES: Final = 64 * 1024 * 1024 * 1024",
+    ),
+    (
+        "digest O_NONBLOCK not guarded for Windows",
+        "os.O_RDONLY | cast(int, getattr(os, \"O_NONBLOCK\", 0)))",
+        "os.O_RDONLY | os.O_NONBLOCK)",
     ),
     (
         "limit read from path not descriptor",
@@ -212,8 +222,8 @@ MUTATIONS: list[tuple[str, str, str]] = [
     # --- the open itself ---
     (
         "O_NONBLOCK dropped",
-        "os.open(os.fspath(path), os.O_RDONLY | os.O_NONBLOCK)",
-        "os.open(os.fspath(path), os.O_RDONLY)",
+        "os.O_RDONLY | cast(int, getattr(os, \"O_NONBLOCK\", 0)))",
+        "os.O_RDONLY)",
     ),
     (
         "S_ISREG check deleted",
@@ -478,8 +488,8 @@ T6_MUTATIONS: list[tuple[str, str, str]] = [
     ),
     (
         "missing reported as changed",
-        "            _reject_registry(MaterialPathRegistryRejection.FILE_MISSING)",
-        "            _reject_registry(MaterialPathRegistryRejection.FILE_CHANGED)",
+        "        _reject_registry(_why_the_file_cannot_be_used(entry.path))",
+        "        _reject_registry(MaterialPathRegistryRejection.FILE_CHANGED)",
     ),
     (
         "an unregistered material reported as missing",
@@ -620,13 +630,15 @@ T6_MUTATIONS: list[tuple[str, str, str]] = [
     ),
     (
         "the document open waits for a writer",
-        "    flags = os.O_RDONLY | os.O_NONBLOCK | cast(int, getattr(os, \"O_NOFOLLOW\", 0))",
-        "    flags = os.O_RDONLY | cast(int, getattr(os, \"O_NOFOLLOW\", 0))",
+        '        | cast(int, getattr(os, "O_NONBLOCK", 0))\n'
+        '        | cast(int, getattr(os, "O_NOFOLLOW", 0))',
+        '        | cast(int, getattr(os, "O_NOFOLLOW", 0))',
     ),
     (
         "the document open follows a link",
-        "    flags = os.O_RDONLY | os.O_NONBLOCK | cast(int, getattr(os, \"O_NOFOLLOW\", 0))",
-        "    flags = os.O_RDONLY | os.O_NONBLOCK",
+        '        | cast(int, getattr(os, "O_NONBLOCK", 0))\n'
+        '        | cast(int, getattr(os, "O_NOFOLLOW", 0))',
+        '        | cast(int, getattr(os, "O_NONBLOCK", 0))',
     ),
     # --- the paths that must never be rendered ---
     (
@@ -665,11 +677,101 @@ T6_MUTATIONS: list[tuple[str, str, str]] = [
         "from automation_tool.protocol.safe_text import contains_control_or_bidi",
         "import socket\n\nfrom automation_tool.protocol.safe_text import contains_control_or_bidi",
     ),
+    # --- what resolve hands back (fix round Q1) ---
+    (
+        "resolve hands back the path alone",
+        "        return entry.path, metadata\n\n    def __repr__(self)",
+        "        return entry.path\n\n    def __repr__(self)",
+    ),
+    (
+        "resolve hands back a stat it did not compare",
+        "        if _identity_of(metadata) != entry.identity:",
+        "        metadata = entry.path.stat()\n"
+        "        if _identity_of(metadata) != entry.identity:",
+    ),
+    # --- gone against unusable (fix round Q5) ---
+    (
+        "everything unreadable reported as missing",
+        "        _reject_registry(_why_the_file_cannot_be_used(entry.path))",
+        "        _reject_registry(MaterialPathRegistryRejection.FILE_MISSING)",
+    ),
+    (
+        "any stat failure reported as missing",
+        "    except (FileNotFoundError, NotADirectoryError):",
+        "    except OSError:",
+    ),
+    (
+        "a broken path component reported as unreadable",
+        "    except (FileNotFoundError, NotADirectoryError):\n"
+        "        return MaterialPathRegistryRejection.FILE_MISSING",
+        "    except FileNotFoundError:\n"
+        "        return MaterialPathRegistryRejection.FILE_MISSING",
+    ),
+    (
+        "gone and unusable swapped",
+        "    except (FileNotFoundError, NotADirectoryError):\n"
+        "        return MaterialPathRegistryRejection.FILE_MISSING\n"
+        "    except OSError:\n        pass\n"
+        "    return MaterialPathRegistryRejection.FILE_UNREADABLE",
+        "    except (FileNotFoundError, NotADirectoryError):\n"
+        "        return MaterialPathRegistryRejection.FILE_UNREADABLE\n"
+        "    except OSError:\n        pass\n"
+        "    return MaterialPathRegistryRejection.FILE_MISSING",
+    ),
+    (
+        "the unreadable stat escapes as an OSError",
+        "    except OSError:\n        pass\n"
+        "    return MaterialPathRegistryRejection.FILE_UNREADABLE",
+        "    return MaterialPathRegistryRejection.FILE_UNREADABLE",
+    ),
+    # --- the scratch sweep (fix round Q6) ---
+    (
+        "leftovers are never swept",
+        "        self._sweep_scratch()\n        payload = _read_document(self._document)",
+        "        payload = _read_document(self._document)",
+    ),
+    (
+        "the sweep takes everything in the directory",
+        '        pattern = f".{MATERIAL_PATH_REGISTRY_FILE_NAME}.*.tmp"',
+        '        pattern = "*"',
+    ),
+    (
+        "the sweep takes the document too",
+        '        pattern = f".{MATERIAL_PATH_REGISTRY_FILE_NAME}.*.tmp"',
+        '        pattern = f"*{MATERIAL_PATH_REGISTRY_FILE_NAME}*"',
+    ),
+    (
+        "a leftover that will not go stops the registry",
+        "            for leftover in self._state_directory.glob(pattern):\n"
+        "                with suppress(OSError):\n                    leftover.unlink()",
+        "            for leftover in self._state_directory.glob(pattern):\n"
+        "                leftover.unlink()",
+    ),
+    # --- the Windows-absent flags (fix round Q3) ---
+    (
+        "document O_NONBLOCK not guarded for Windows",
+        '        | cast(int, getattr(os, "O_NONBLOCK", 0))\n'
+        '        | cast(int, getattr(os, "O_NOFOLLOW", 0))',
+        '        | os.O_NONBLOCK\n        | cast(int, getattr(os, "O_NOFOLLOW", 0))',
+    ),
+    (
+        "document O_NOFOLLOW not guarded for Windows",
+        '        | cast(int, getattr(os, "O_NONBLOCK", 0))\n'
+        '        | cast(int, getattr(os, "O_NOFOLLOW", 0))',
+        '        | cast(int, getattr(os, "O_NONBLOCK", 0))\n        | os.O_NOFOLLOW',
+    ),
+    # --- the AST guard must see past a block (fix round Q4) ---
+    (
+        "MaterialFacts gains a path inside a block",
+        "    has_audio: bool\n    audio_loudness_lufs: float | None\n    content_digest: str\n",
+        "    has_audio: bool\n    audio_loudness_lufs: float | None\n    content_digest: str\n"
+        "    if True:\n        source_path: Path\n",
+    ),
     # --- canary: must die ---
     (
         "CANARY resolve returns the wrong file",
-        "        return entry.path\n\n    def __repr__(self)",
-        "        return Path('/canary')\n\n    def __repr__(self)",
+        "        return entry.path, metadata\n\n    def __repr__(self)",
+        "        return Path('/canary'), metadata\n\n    def __repr__(self)",
     ),
 ]
 

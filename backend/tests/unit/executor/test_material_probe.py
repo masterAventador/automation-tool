@@ -3746,7 +3746,7 @@ class TestMaterialPathRegistryHoldsTheMapping:
         registry = MaterialPathRegistry(state_directory=state)
         identifier = uuid.uuid4()
         registry.register(identifier, source)
-        assert registry.resolve(identifier) == source
+        assert registry.resolve(identifier)[0] == source
 
     def test_an_unregistered_material_has_no_path(self, tmp_path: Path) -> None:
         registry = MaterialPathRegistry(state_directory=_state_directory(tmp_path))
@@ -3760,7 +3760,7 @@ class TestMaterialPathRegistryHoldsTheMapping:
         source = _source(tmp_path)
         identifier = uuid.uuid4()
         MaterialPathRegistry(state_directory=state).register(identifier, source)
-        assert MaterialPathRegistry(state_directory=state).resolve(identifier) == source
+        assert MaterialPathRegistry(state_directory=state).resolve(identifier)[0] == source
 
     def test_the_first_run_starts_empty_rather_than_failing(self, tmp_path: Path) -> None:
         state = _state_directory(tmp_path)
@@ -3795,7 +3795,7 @@ class TestMaterialPathRegistryRepeatRegistration:
         first = _document(state).read_bytes()
         registry.register(identifier, source)
         assert _document(state).read_bytes() == first
-        assert registry.resolve(identifier) == source
+        assert registry.resolve(identifier)[0] == source
 
     def test_registering_the_same_material_at_a_new_path_moves_it(self, tmp_path: Path) -> None:
         """A material the user moved and re-imported must follow, or it is lost forever.
@@ -3810,7 +3810,7 @@ class TestMaterialPathRegistryRepeatRegistration:
         identifier = uuid.uuid4()
         registry.register(identifier, first)
         registry.register(identifier, second)
-        assert registry.resolve(identifier) == second
+        assert registry.resolve(identifier)[0] == second
         assert os.fspath(first) not in _document(state).read_text(encoding="utf-8")
 
     def test_two_materials_may_name_one_file(self, tmp_path: Path) -> None:
@@ -3821,8 +3821,8 @@ class TestMaterialPathRegistryRepeatRegistration:
         left, right = uuid.uuid4(), uuid.uuid4()
         registry.register(left, source)
         registry.register(right, source)
-        assert registry.resolve(left) == source
-        assert registry.resolve(right) == source
+        assert registry.resolve(left)[0] == source
+        assert registry.resolve(right)[0] == source
 
 
 class TestMaterialPathRegistryRejectsAnUnusableSource:
@@ -3914,7 +3914,7 @@ class TestMaterialPathRegistryIdentifiers:
         source = _source(tmp_path)
         domain_identifier = MaterialId.new()
         registry.register(domain_identifier.uuid, source)
-        assert registry.resolve(domain_identifier.uuid) == source
+        assert registry.resolve(domain_identifier.uuid)[0] == source
         assert str(MaterialId.parse(str(domain_identifier.uuid))) == str(domain_identifier)
 
 
@@ -3985,7 +3985,7 @@ class TestMaterialPathRegistryNoticesTheFileMoved:
         identifier = uuid.uuid4()
         registry.register(identifier, source)
         source.read_bytes()
-        assert registry.resolve(identifier) == source
+        assert registry.resolve(identifier)[0] == source
 
     def test_re_registering_accepts_the_file_as_it_is_now(self, tmp_path: Path) -> None:
         """A re-import means the caller has just re-probed; the record follows it."""
@@ -3997,7 +3997,7 @@ class TestMaterialPathRegistryNoticesTheFileMoved:
         source.unlink()
         source.write_bytes(b"\x04" * 64)
         registry.register(identifier, source)
-        assert registry.resolve(identifier) == source
+        assert registry.resolve(identifier)[0] == source
 
 
 class TestRegisteredIdentityAgreesWithTheProbesOwnRule:
@@ -4206,7 +4206,7 @@ class TestMaterialPathRegistryByteLimit:
             "MAX_MATERIAL_PATH_REGISTRY_BYTES",
             _document(state).stat().st_size,
         )
-        assert MaterialPathRegistry(state_directory=state).resolve(identifier) == source
+        assert MaterialPathRegistry(state_directory=state).resolve(identifier)[0] == source
 
     def test_one_byte_over_the_limit_is_refused(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -4259,7 +4259,7 @@ class TestMaterialPathRegistryWritesAtomically:
         assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNWRITABLE
         assert _document(state).read_bytes() == before
         monkeypatch.undo()
-        assert MaterialPathRegistry(state_directory=state).resolve(kept) == first
+        assert MaterialPathRegistry(state_directory=state).resolve(kept)[0] == first
 
     def test_a_failed_rename_leaves_no_scratch_file_behind(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -4382,10 +4382,36 @@ def _class_body(source: str, name: str) -> list[ast.stmt]:
 _PLACE_WORDS = ("path", "dir", "file", "location")
 
 
-def _place_named_members(body: list[ast.stmt]) -> list[str]:
-    """Every name bound in the class body that reads as somewhere on disk."""
-    names: list[str] = []
+def _class_namespace(body: list[ast.stmt]) -> list[ast.stmt]:
+    """Every statement that runs in the class body's own namespace.
+
+    Not the body's direct children: a declaration inside `if` / `try` / `with` /
+    `for` / `while` binds in exactly the same namespace, and measured, one under
+    `if True:` becomes a real dataclass field whose default `repr` prints the
+    path. Reading only the top level therefore reads something other than the
+    class.
+
+    It stops at `def` and `class`, which open namespaces of their own — a local
+    called `source_path` inside a method is not a field, and a check that
+    flagged it would be wrong in the direction nobody reports.
+    """
+    found: list[ast.stmt] = []
     for statement in body:
+        found.append(statement)
+        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        for child in ast.iter_child_nodes(statement):
+            if isinstance(child, ast.stmt):
+                found.extend(_class_namespace([child]))
+            elif isinstance(child, ast.ExceptHandler):
+                found.extend(_class_namespace(child.body))
+    return found
+
+
+def _place_named_members(body: list[ast.stmt]) -> list[str]:
+    """Every name bound in the class namespace that reads as somewhere on disk."""
+    names: list[str] = []
+    for statement in _class_namespace(body):
         for target in _bound_names(statement):
             if any(word in target.lower() for word in _PLACE_WORDS):
                 names.append(target)
@@ -4393,9 +4419,9 @@ def _place_named_members(body: list[ast.stmt]) -> list[str]:
 
 
 def _path_annotated_members(body: list[ast.stmt]) -> list[str]:
-    """Every name in the class body annotated as a path, whatever it is called."""
+    """Every name in the class namespace annotated as a path, whatever it is called."""
     names: list[str] = []
-    for statement in body:
+    for statement in _class_namespace(body):
         if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
             annotation = ast.unparse(statement.annotation)
             if "Path" in annotation or "PathLike" in annotation:
@@ -4407,9 +4433,22 @@ def _bound_names(statement: ast.stmt) -> list[str]:
     if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
         return [statement.target.id]
     if isinstance(statement, ast.Assign):
-        return [target.id for target in statement.targets if isinstance(target, ast.Name)]
-    if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
+        # A tuple or list target binds every name in it, and only the first was
+        # being read: `a_path, b = 1, 2` parses as one `Tuple` target, not two
+        # `Name`s.
+        return [name for target in statement.targets for name in _target_names(target)]
+    if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
         return [statement.name]
+    return []
+
+
+def _target_names(target: ast.expr) -> list[str]:
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, ast.Starred):
+        return _target_names(target.value)
+    if isinstance(target, ast.Tuple | ast.List):
+        return [name for element in target.elts for name in _target_names(element)]
     return []
 
 
@@ -4446,6 +4485,21 @@ class TestMaterialFactsCannotCarryAPathInTheSource:
             ("    home_dir = Path('/tmp')", "name"),
             ("    def file_of(self) -> str: ...", "name"),
             ("    where: os.PathLike[str]", "annotation"),
+            # Bound in the class namespace but not a direct child of the class
+            # body. Measured: a declaration under `if True:` becomes a real
+            # dataclass field and the default `repr` prints the path, so reading
+            # only the body's top level is not reading the class.
+            ("    if True:\n        source_path: Path", "both"),
+            ("    if False:\n        pass\n    else:\n        origin: Path", "annotation"),
+            ("    try:\n        dir_x: int\n    except Exception:\n        pass", "name"),
+            ("    try:\n        pass\n    finally:\n        where: Path", "annotation"),
+            ("    with open('x') as handle:\n        origin: Path", "annotation"),
+            ("    for _ in ():\n        file_of = 1", "name"),
+            ("    while False:\n        home_dir = 1", "name"),
+            # A tuple target binds every name in it, and only the first was read.
+            ("    a_path, b = 1, 2", "name"),
+            ("    b, *rest_of_the_files = 1, 2", "name"),
+            ("    [c_dir, d] = 1, 2", "name"),
         ],
     )
     def test_the_check_catches_a_violation_it_is_shown(
@@ -4457,6 +4511,26 @@ class TestMaterialFactsCannotCarryAPathInTheSource:
         by_annotation = _path_annotated_members(body)
         assert bool(by_name) == (caught_by in {"name", "both"})
         assert bool(by_annotation) == (caught_by in {"annotation", "both"})
+
+    @pytest.mark.parametrize(
+        "declaration",
+        [
+            "    def helper(self) -> None:\n        local_path = 1",
+            "    def helper(self) -> None:\n        inner: Path = Path('/x')",
+            "    class Nested:\n        source_path: Path",
+        ],
+    )
+    def test_the_check_does_not_reach_into_another_namespace(self, declaration: str) -> None:
+        """The other direction: a greedy check would be just as wrong, and quieter.
+
+        A local inside a method and a field of a nested class are not fields of
+        this one. Without this, "recurse into everything" would pass the tests
+        above while flagging code that is fine — and the first person to hit a
+        false positive deletes the check.
+        """
+        body = _class_body(f"class MaterialFacts:\n    kind: int\n{declaration}\n", "MaterialFacts")
+        assert _place_named_members(body) == []
+        assert _path_annotated_members(body) == []
 
 
 class TestTheProbeStaysOnThisMachine:
@@ -4692,7 +4766,7 @@ class TestMaterialPathRegistryKeepsNothingItCouldNotStore:
         with pytest.raises(MaterialPathRegistryRejected):
             registry.register(uuid.uuid4(), _source(tmp_path, "second.mp4"))
         monkeypatch.undo()
-        assert registry.resolve(kept) == source
+        assert registry.resolve(kept)[0] == source
 
 
 class TestMaterialPathRegistryWriteLimit:
@@ -4713,7 +4787,7 @@ class TestMaterialPathRegistryWriteLimit:
         identifier = uuid.uuid4()
         fresh.register(identifier, source)
         assert _document(state).stat().st_size == exact
-        assert fresh.resolve(identifier) == source
+        assert fresh.resolve(identifier)[0] == source
 
     def test_one_byte_over_the_limit_is_refused(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -4730,3 +4804,258 @@ class TestMaterialPathRegistryWriteLimit:
             fresh.register(uuid.uuid4(), source)
         assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_FULL
         assert not _document(state).exists()
+
+
+class TestMaterialPathRegistryHandsBackWhatItChecked:
+    """A path alone is a fact that has already expired by the time it is used.
+
+    `_require_source_file` returns the stat it took for exactly this reason:
+    what it approved and what a caller later opens are two different moments,
+    and only a caller holding both can tell they were the same file. `resolve`
+    compares a stat against the registered identity and then had nothing to show
+    for it — so a consumer could pass the check and still open a file swapped
+    immediately afterwards, with no error anywhere. It now hands the stat back,
+    so the consumer can carry the window forward with `_held_still`.
+    """
+
+    def test_it_returns_the_stat_it_compared(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        path, metadata = registry.resolve(identifier)
+        assert path == source
+        assert material_probe._identity_of(metadata) == material_probe._identity_of(source.stat())
+
+    def test_a_consumer_can_close_its_own_window_with_what_it_got(self, tmp_path: Path) -> None:
+        """The shape T7's consumers are meant to use, exercised here so it is real."""
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        path, before = registry.resolve(identifier)
+        assert material_probe._held_still(before, path.stat())
+        source.unlink()
+        source.write_bytes(b"\x07" * 64)
+        assert not material_probe._held_still(before, path.stat())
+
+
+class TestMaterialPathRegistrySeparatesGoneFromUnusable:
+    """Sending the user to find a file that is sitting right there is the wrong answer.
+
+    Splitting `FILE_MISSING` from `FILE_CHANGED` was justified by the next step
+    differing; the same argument applies again one level down. A file whose
+    permissions were changed, or that stopped being a regular file, is still
+    where it was — telling the library it is missing produces a search that
+    cannot succeed.
+    """
+
+    def test_a_file_that_cannot_be_read_is_not_reported_missing(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        source.chmod(0o000)
+        try:
+            assert source.stat().st_size > 0
+            with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+                registry.resolve(identifier)
+        finally:
+            source.chmod(0o600)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.FILE_UNREADABLE
+
+    def test_a_path_that_stopped_being_a_regular_file_is_not_reported_missing(
+        self, tmp_path: Path
+    ) -> None:
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        source.unlink()
+        os.mkfifo(source)
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.resolve(identifier)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.FILE_UNREADABLE
+
+    def test_a_deleted_file_is_still_reported_missing(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        source.unlink()
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.resolve(identifier)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.FILE_MISSING
+
+    def test_a_path_whose_parent_stopped_being_a_directory_is_reported_missing(
+        self, tmp_path: Path
+    ) -> None:
+        state = _state_directory(tmp_path)
+        folder = tmp_path / "album"
+        folder.mkdir()
+        source = _source(folder)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        source.unlink()
+        folder.rmdir()
+        folder.write_bytes(b"not a folder any more")
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.resolve(identifier)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.FILE_MISSING
+
+    def test_a_file_behind_an_unreachable_directory_is_not_reported_missing(
+        self, tmp_path: Path
+    ) -> None:
+        """The stat itself is refused here, so the answer cannot come from what it said."""
+        state = _state_directory(tmp_path)
+        folder = tmp_path / "album"
+        folder.mkdir()
+        source = _source(folder)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        folder.chmod(0o000)
+        try:
+            with pytest.raises(PermissionError):
+                source.stat()
+            with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+                registry.resolve(identifier)
+        finally:
+            folder.chmod(0o700)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.FILE_UNREADABLE
+
+    def test_neither_answer_names_the_file(self, tmp_path: Path) -> None:
+        secret = "operator-private-baptism-2012"
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path, f"{secret}.mp4")
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        source.chmod(0o000)
+        try:
+            with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+                registry.resolve(identifier)
+        finally:
+            source.chmod(0o600)
+        assert excinfo.value.__context__ is None
+        assert secret not in _rendered_traceback(excinfo.value)
+
+
+class TestMaterialPathRegistrySweepsItsOwnLeftovers:
+    """A scratch file outlives only a killed process, and nothing ever removed it.
+
+    `_write` cleans up after itself on every path it can still run on, but a
+    `SIGKILL` between `mkstemp` and `os.replace` leaves one behind and the next
+    start had no reason to look. Three kills left three files, growing without
+    bound in the directory the registry promises holds one document.
+    """
+
+    def test_a_leftover_scratch_file_is_removed_at_startup(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        identifier = uuid.uuid4()
+        MaterialPathRegistry(state_directory=state).register(identifier, source)
+        leftovers = [
+            state / f".{MATERIAL_PATH_REGISTRY_FILE_NAME}.{index}.tmp" for index in range(3)
+        ]
+        for leftover in leftovers:
+            leftover.write_bytes(b"half a document")
+        registry = MaterialPathRegistry(state_directory=state)
+        assert sorted(item.name for item in state.iterdir()) == [MATERIAL_PATH_REGISTRY_FILE_NAME]
+        assert registry.resolve(identifier)[0] == source
+
+    def test_the_sweep_takes_only_its_own(self, tmp_path: Path) -> None:
+        """Somebody else's file in the state directory is not this module's to delete."""
+        state = _state_directory(tmp_path)
+        strangers = [
+            state / "ledger.sqlite3",
+            state / ".other-tool.json.1.tmp",
+            state / f"{MATERIAL_PATH_REGISTRY_FILE_NAME}.tmp",
+            state / f".{MATERIAL_PATH_REGISTRY_FILE_NAME}.keep",
+        ]
+        for stranger in strangers:
+            stranger.write_bytes(b"not mine")
+        MaterialPathRegistry(state_directory=state)
+        assert sorted(item.name for item in state.iterdir()) == sorted(
+            stranger.name for stranger in strangers
+        )
+
+    def test_one_leftover_that_will_not_go_does_not_spare_the_others(self, tmp_path: Path) -> None:
+        """Each is attempted on its own, so one stubborn file does not shelter the rest.
+
+        Without the per-file handler the first failure abandons the loop, and
+        every leftover behind it survives every start from then on — the
+        unbounded growth this sweep exists to stop, restored by one exception.
+        """
+        state = _state_directory(tmp_path)
+        for index in range(3):
+            (state / f".{MATERIAL_PATH_REGISTRY_FILE_NAME}.{index}.tmp").write_bytes(b"half")
+        original = Path.unlink
+        refused: list[str] = []
+
+        def refuse_the_first(self: Path, **keywords: object) -> None:
+            if not refused:
+                refused.append(self.name)
+                raise OSError(13, "Permission denied")
+            original(self)
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(Path, "unlink", refuse_the_first)
+            MaterialPathRegistry(state_directory=state)
+        assert len(refused) == 1
+        assert [item.name for item in state.iterdir()] == refused
+
+    def test_a_leftover_that_cannot_be_removed_does_not_stop_the_registry(
+        self, tmp_path: Path
+    ) -> None:
+        """The sweep is tidying, not a precondition — it must never be why nothing starts."""
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        identifier = uuid.uuid4()
+        MaterialPathRegistry(state_directory=state).register(identifier, source)
+
+        def refuse(_path: object) -> None:
+            raise OSError(13, "Permission denied")
+
+        (state / f".{MATERIAL_PATH_REGISTRY_FILE_NAME}.0.tmp").write_bytes(b"half")
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(Path, "unlink", refuse)
+            registry = MaterialPathRegistry(state_directory=state)
+        assert registry.resolve(identifier)[0] == source
+
+
+class TestMaterialPathRegistryOnAPlatformWithoutTheseFlags:
+    """Windows has neither flag, and a missing one must not be an `AttributeError`.
+
+    Windows is a shipping target, and an `AttributeError` out of `_read_document`
+    is not a rejection code — nothing catching `MaterialPathRegistryRejected`
+    would see it. The `O_NOFOLLOW` beside it was already guarded this way; this
+    is the same guard on the same line.
+    """
+
+    @pytest.mark.parametrize("flag", ["O_NONBLOCK", "O_NOFOLLOW"])
+    def test_the_document_still_reads_without_the_flag(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str
+    ) -> None:
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        identifier = uuid.uuid4()
+        MaterialPathRegistry(state_directory=state).register(identifier, source)
+        monkeypatch.delattr(os, flag, raising=True)
+        assert not hasattr(os, flag)
+        assert MaterialPathRegistry(state_directory=state).resolve(identifier)[0] == source
+
+    def test_the_digest_still_reads_without_the_flag(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The same omission one function over, found by the same question."""
+        source = _source(tmp_path, payload=_positional_bytes(4096))
+        monkeypatch.delattr(os, "O_NONBLOCK", raising=True)
+        assert not hasattr(os, "O_NONBLOCK")
+        assert read_content_digest(source) == hashlib.sha256(source.read_bytes()).hexdigest()

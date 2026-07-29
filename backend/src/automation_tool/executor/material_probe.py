@@ -946,7 +946,11 @@ def _digest_stable_file(path: Path, expected: os.stat_result) -> str | MaterialP
     # three entry points with no subprocess timeout behind it to end the wait.
     # On a regular file the flag changes nothing — measured, the same bytes in
     # the same chunks.
-    descriptor = os.open(os.fspath(path), os.O_RDONLY | os.O_NONBLOCK)
+    #
+    # Through `getattr` because Windows has no `O_NONBLOCK`, and Windows is a
+    # shipping target: `os.O_NONBLOCK` would raise a bare `AttributeError` here,
+    # which is not one of the reasons this module promises to fail with.
+    descriptor = os.open(os.fspath(path), os.O_RDONLY | cast(int, getattr(os, "O_NONBLOCK", 0)))
     try:
         # Taken from the descriptor rather than from the path, so everything
         # below is about the file actually being read. A path stat leaves room
@@ -1153,6 +1157,12 @@ class MaterialPathRegistryRejection(StrEnum):
     # second by importing it again, and telling the user the wrong one sends
     # them looking for a file that is sitting right there.
     FILE_MISSING = "file_missing"
+    # And split again for the same reason one level down: a file whose
+    # permissions changed, or that stopped being a regular file, is still
+    # exactly where the user left it. Reporting that as missing starts a search
+    # that cannot succeed — the same wrong instruction `SOURCE_NOT_AT_REST` was
+    # split out of `UNREADABLE` to stop giving.
+    FILE_UNREADABLE = "file_unreadable"
     FILE_CHANGED = "file_changed"
     REGISTRY_UNREADABLE = "registry_unreadable"
     REGISTRY_UNWRITABLE = "registry_unwritable"
@@ -1413,12 +1423,28 @@ class MaterialPathRegistry:
         # visible to this process either, or a restart would appear to lose it.
         self._entries = entries
 
-    def resolve(self, material_id: UUID) -> Path:
+    def resolve(self, material_id: UUID) -> tuple[Path, os.stat_result]:
         """The file this material was made from, if it is still that file.
 
         The check is not optional and not a separate call, because a caller that
         could take the path without it would be back to using facts about one
         file against another.
+
+        The stat is handed back for `_require_source_file`'s reason, which
+        applies here with a longer window in front of it: what this approved and
+        what the caller later opens are two different moments, and only a caller
+        holding both can tell they were the same file. Returning the path alone
+        made the check something that had already expired when it was read — a
+        consumer could pass it and open a file swapped immediately afterwards,
+        with nothing surfacing as an error. With the stat in hand the consumer
+        carries the window forward itself, through `_held_still`.
+
+        **The path that comes back is still the user's, and must be treated as
+        one.** Nothing about having been registered makes it safer than the
+        path that was imported: whoever consumes it opens it through
+        `_require_source_file` like any other, which the probing chain already
+        does. The registry's own trust boundary is the private state directory,
+        not the contents of what it stores.
         """
         identifier = _usable_identifier(material_id)
         if identifier is None:
@@ -1427,20 +1453,21 @@ class MaterialPathRegistry:
         if entry is None:
             _reject_registry(MaterialPathRegistryRejection.NOT_REGISTERED)
         # `_require_source_file` refuses a vanished path, an unreadable one and
-        # anything that is no longer a regular file. All three mean the same
-        # thing to the library — the file it was told about is not there to be
-        # used — and it is reduced to that inside the handler so the `OSError`
-        # underneath, which carries the path, is not left on the chain.
+        # anything that is no longer a regular file, and gives all three the
+        # same reason — so the difference the library needs is worked out
+        # separately below. Reduced to a code inside the handler so the
+        # `OSError` underneath, which carries the path, is not left on the
+        # chain.
         metadata: os.stat_result | None
         try:
             _, metadata = _require_source_file(entry.path)
         except MaterialProbeRejected:
             metadata = None
         if metadata is None:
-            _reject_registry(MaterialPathRegistryRejection.FILE_MISSING)
+            _reject_registry(_why_the_file_cannot_be_used(entry.path))
         if _identity_of(metadata) != entry.identity:
             _reject_registry(MaterialPathRegistryRejection.FILE_CHANGED)
-        return entry.path
+        return entry.path, metadata
 
     def __repr__(self) -> str:
         return "MaterialPathRegistry(<redacted>)"
@@ -1461,6 +1488,7 @@ class MaterialPathRegistry:
         failure. `FileNotFoundError` is what separates them, so a permission
         error can never be mistaken for a fresh start.
         """
+        self._sweep_scratch()
         payload = _read_document(self._document)
         if payload is None:
             return {}
@@ -1470,6 +1498,29 @@ class MaterialPathRegistry:
         if entries is None:
             _reject_registry(MaterialPathRegistryRejection.REGISTRY_UNREADABLE)
         return entries
+
+    def _sweep_scratch(self) -> None:
+        """Remove the scratch files of writes that were killed before they finished.
+
+        `_write` clears up after itself on every path it can still run on, but a
+        `SIGKILL` between `mkstemp` and `os.replace` leaves one behind and
+        nothing afterwards had any reason to look — measured, three kills left
+        three files and an ordinary start removed none of them. Unbounded growth
+        in the directory this class promises holds one document.
+
+        Only names this class writes: the pattern is the `mkstemp` prefix and
+        suffix, so a neighbour's file in the shared state directory is not this
+        module's to delete.
+
+        Tidying, never a precondition. Every failure is swallowed, because a
+        leftover nobody can remove must not be the reason the library will not
+        open.
+        """
+        pattern = f".{MATERIAL_PATH_REGISTRY_FILE_NAME}.*.tmp"
+        with suppress(OSError):
+            for leftover in self._state_directory.glob(pattern):
+                with suppress(OSError):
+                    leftover.unlink()
 
     def _write(self, payload: bytes) -> None:
         """Publish a whole document or none of it.
@@ -1523,8 +1574,38 @@ class MaterialPathRegistry:
             _reject_registry(outcome)
 
 
+def _why_the_file_cannot_be_used(path: Path) -> MaterialPathRegistryRejection:
+    """Whether the file is gone, or is sitting there and cannot be used.
+
+    A reason rather than a raised rejection, so the caller raises after leaving
+    its handler; `OSError.filename` is the operator's path.
+
+    `FileNotFoundError` is what says nothing is there, and `NotADirectoryError`
+    says the same thing about a component of the path — both send the user to
+    find the file. Everything else, permissions above all, means it has not
+    moved: measured, a file at mode 000 still stats while `os.access` refuses
+    it, which is exactly the case `_require_source_file` folds in with the
+    vanished one.
+    """
+    try:
+        path.stat()
+    except (FileNotFoundError, NotADirectoryError):
+        return MaterialPathRegistryRejection.FILE_MISSING
+    except OSError:
+        pass
+    return MaterialPathRegistryRejection.FILE_UNREADABLE
+
+
 def _require_state_directory(state_directory: object) -> Path:
-    """The bootstrap's private state directory, which must already be one."""
+    """The bootstrap's private state directory, which must already be one.
+
+    Deliberately lighter than `local_artifact._require_private_directory`, which
+    also refuses linked ancestors and checks the mode and owner. That is not
+    reuse of a shared helper — it is another module's private one — and the
+    stronger check belongs with whoever wires this into the Executor's startup,
+    where the same guarantee is already being made about the state root for the
+    ledger. Registered as an open question rather than quietly matched.
+    """
     if not isinstance(state_directory, Path) or not state_directory.is_dir():
         _reject_registry(MaterialPathRegistryRejection.REGISTRY_UNREADABLE)
     return state_directory
@@ -1551,10 +1632,27 @@ def _read_document(document: Path) -> bytes | MaterialPathRegistryRejection | No
     # between a pipe left in the state directory and an Executor that never
     # finishes starting. On a regular file it changes nothing, measured.
     #
-    # `O_NOFOLLOW` because the document is ours: a link where it belongs means
-    # someone is redirecting what we read, and following it would be reading
-    # somebody else's file as though it were the library.
-    flags = os.O_RDONLY | os.O_NONBLOCK | cast(int, getattr(os, "O_NOFOLLOW", 0))
+    # `O_NOFOLLOW` is cheap depth and nothing more. It is tempting to justify it
+    # as defence against someone redirecting what we read, but that argument
+    # does not survive being followed: anyone who can put a link here can write
+    # the document itself, and a document naming `/etc/passwd` is accepted
+    # without complaint — measured. There is no path restriction that would
+    # help either, because the operator's media legitimately lives anywhere.
+    #
+    # **The load-bearing boundary is the directory: 0600 inside the App's
+    # private state root.** Whoever can write there already has the App. This
+    # flag only refuses the final component; every ancestor may still be a link,
+    # so it is not even a complete version of the thing it is not relied upon
+    # for.
+    #
+    # Both flags go through `getattr`: neither exists on Windows, which is a
+    # shipping target, and an `AttributeError` out of here is not a rejection
+    # code — nothing catching `MaterialPathRegistryRejected` would see it.
+    flags = (
+        os.O_RDONLY
+        | cast(int, getattr(os, "O_NONBLOCK", 0))
+        | cast(int, getattr(os, "O_NOFOLLOW", 0))
+    )
     try:
         descriptor = os.open(document, flags)
     except FileNotFoundError:
