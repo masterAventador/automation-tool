@@ -139,7 +139,7 @@ def _render_once(
     allowed_assets: list[str],
     frame_count: int,
     budget_seconds: int = SHORT_RENDER_BUDGET_SECONDS,
-    window_end_millis: int = 3000,
+    spec_overrides: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """One real sandboxed render; returns the success event and frame digests."""
     frames = workspace / "frames"
@@ -169,8 +169,7 @@ def _render_once(
             maxDurationSeconds=budget_seconds,
             maxMemoryMegabytes=2048,
             maxOutputBytes=256 * 1024 * 1024,
-            sourceStartMillis=0,
-            sourceEndMillis=window_end_millis,
+            **(spec_overrides or {}),
         )
         session.send_line(sandbox_command_line(job_id, specification))
         event = session.read_event()
@@ -221,13 +220,16 @@ def run_item_render_sweep(
     # 撒钱币都在后半段，于是三秒窗里它是静止的，被静帧门禁正确地拒了（2026-07-29
     # 实测，PC-19 之前这条 sweep 是 134/134 全过的）。窗口按目录声明的时长开；
     # 25 个 component 不声明时长（PC-01：duration 只在 109 个 block 上），回退 3 秒。
-    catalog_durations = {
-        entry["name"]: entry.get("duration")
-        for entry in json.loads(
-            (ROOT / "contracts/quality/motion-catalog.v1.json").read_text(
-                encoding="utf-8"
-            )
-        )["items"]
+    catalog_items = json.loads(
+        (ROOT / "contracts/quality/motion-catalog.v1.json").read_text(encoding="utf-8")
+    )["items"]
+    catalog_durations = {entry["name"]: entry.get("duration") for entry in catalog_items}
+    # 画布同理（PC-05：渲染画布随请求走，零件在自己声明的舞台上渲）。控制实验
+    # 2026-07-29：apple-money-count 在 1920×1080 下五个 seek 点五个画面，在模板的
+    # 640×360 下前三秒是同一张——模板画布看到的是它舞台的静止角落，静帧门禁拒得对。
+    # 25 个 component 不声明尺寸，保持模板画布。
+    catalog_dimensions = {
+        entry["name"]: entry.get("dimensions") for entry in catalog_items
     }
     for index, item in enumerate(manifest["items"], start=1):
         name = item["name"]
@@ -239,6 +241,18 @@ def run_item_render_sweep(
         if len(allowed) > 128:
             raise RuntimeError(f"{name}: allowlist exceeds the sandbox maximum")
         declared_seconds = catalog_durations.get(name)
+        declared_dimensions = catalog_dimensions.get(name)
+        overrides: dict[str, object] = {
+            "sourceStartMillis": 0,
+            "sourceEndMillis": int(declared_seconds * 1000) if declared_seconds else 3000,
+        }
+        if declared_dimensions:
+            overrides["canvas"] = {
+                # Factor 1：零件的舞台就是输出分辨率（PC-05 的装配同一条规则）。
+                "deviceScaleFactor": 1,
+                "height": declared_dimensions["height"],
+                "width": declared_dimensions["width"],
+            }
         rendered = _render_once(
             browser,
             chromium_major,
@@ -246,9 +260,7 @@ def run_item_render_sweep(
             entries[0],
             allowed,
             SWEEP_FRAMES,
-            window_end_millis=(
-                int(declared_seconds * 1000) if declared_seconds else 3000
-            ),
+            spec_overrides=overrides,
         )
         results[name] = {
             "frames": rendered["frames"],
