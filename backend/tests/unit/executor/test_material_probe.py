@@ -2643,11 +2643,13 @@ class TestContentDigestRejectsAnUnusableSource:
 
 
 # Hashing throughput of the packaged interpreter, measured on this repository's
-# temporary directory over a real 512 MiB file: 0.24 s, or 2.08 GiB/s. A 16 GiB
-# read measures slower — 8.7 s, or 1.83 GiB/s, once it stops fitting the cache —
-# so the figure below is the optimistic one, which is the right direction for a
-# budget that must not be quietly exceeded.
-_MEASURED_HASH_GIB_PER_SECOND = 2.08
+# temporary directory. A real 512 MiB file ran at 2.08 GiB/s; a 16 GiB read —
+# the size the budget is actually about — ran at 1.83 GiB/s, once it stops
+# fitting the cache. The slower of the two is the one used: the budget divides
+# by this rate, so a faster figure yields a shorter predicted time and quietly
+# admits a larger limit. Measured, the ceiling below tolerates 54.9 GiB at
+# 1.83 GiB/s against 62.4 GiB at 2.08 GiB/s.
+_MEASURED_HASH_GIB_PER_SECOND = 1.83
 
 
 class TestContentDigestByteLimit:
@@ -2667,8 +2669,8 @@ class TestContentDigestByteLimit:
     def test_the_limit_stays_inside_its_stated_time_budget(self) -> None:
         """The other direction: a limit is only a bound if it bounds something.
 
-        At the rate above the shipped value is worth 7.7 s of hashing, and 8.7 s
-        when actually measured end to end. Thirty is the ceiling this holds it
+        At the rate above the shipped value is worth 8.7 s of hashing, which is
+        also what it measured end to end. Thirty is the ceiling this holds it
         to — still a small part of what probing one material may cost, since the
         measuring pass is allowed fifteen minutes, and low enough that raising
         the limit fourfold has to be argued for here rather than done quietly.
@@ -2940,21 +2942,25 @@ class TestContentDigestNeedsMoreThanTheInode:
 
         waiter = threading.Thread(target=blocking_open, daemon=True)
         waiter.start()
-        time.sleep(0.3)
-        assert not returned["blocking"], "a plain read-only open of an empty FIFO returned"
-
-        descriptor = os.open(fifo, os.O_RDONLY | os.O_NONBLOCK)
         try:
-            assert not stat.S_ISREG(os.fstat(descriptor).st_mode)
+            time.sleep(0.3)
+            assert not returned["blocking"], "a plain read-only open of an empty FIFO returned"
+            descriptor = os.open(fifo, os.O_RDONLY | os.O_NONBLOCK)
+            try:
+                assert not stat.S_ISREG(os.fstat(descriptor).st_mode)
+            finally:
+                os.close(descriptor)
         finally:
-            os.close(descriptor)
-
-        # Release the waiting thread rather than leaving it parked for the run.
-        writer = os.open(fifo, os.O_WRONLY)
-        try:
-            waiter.join(timeout=5.0)
-        finally:
-            os.close(writer)
+            # Released even when an assertion above fails. An earlier version of
+            # this test released the thread only on the way out of a passing run,
+            # then failed before reaching it on an unrelated `NameError` — and a
+            # thread parked in `open(2)` outlives the session that started it.
+            # That one sat for five hours before somebody else killed it.
+            writer = os.open(fifo, os.O_WRONLY)
+            try:
+                waiter.join(timeout=5.0)
+            finally:
+                os.close(writer)
         assert returned["blocking"]
 
     def test_rejects_a_path_that_is_no_longer_a_regular_file_when_opened(
@@ -2969,7 +2975,27 @@ class TestContentDigestNeedsMoreThanTheInode:
         """
         fifo = tmp_path / "pipe.mp4"
         os.mkfifo(fifo)
-        assert material_probe._digest_stable_file(fifo, os.stat(fifo)) is None
+        outcome: dict[str, str | None] = {}
+
+        def call_it() -> None:
+            outcome["result"] = material_probe._digest_stable_file(fifo, os.stat(fifo))
+
+        # Run in a thread it can be given up on. Losing `O_NONBLOCK` makes this
+        # call wait for a writer that never comes, and a hang is not a test
+        # result: there is no `pytest-timeout` in this repository, so an
+        # unguarded call would take the whole session down with it rather than
+        # going red. Measured once for real, at five hours.
+        worker = threading.Thread(target=call_it, daemon=True)
+        worker.start()
+        worker.join(timeout=10.0)
+        if worker.is_alive():
+            writer = os.open(fifo, os.O_WRONLY)
+            try:
+                worker.join(timeout=5.0)
+            finally:
+                os.close(writer)
+            pytest.fail("the digest blocked opening a FIFO — the open has lost O_NONBLOCK")
+        assert outcome["result"] is None
 
     def test_rejects_a_file_swapped_between_the_guard_and_the_open(self, tmp_path: Path) -> None:
         """Same window, the other outcome: still a regular file, but a different one.
@@ -2990,11 +3016,17 @@ class TestContentDigestNeedsMoreThanTheInode:
         nanoseconds, but network filesystems commonly keep whole seconds — so a
         change finishing inside one tick moves nothing the clock can show.
 
-        Restoring the timestamp with `os.utime` does not reproduce that: measured,
-        APFS writes the truncation's own timestamp back *after* the restore, so
-        the clock moves anyway and this would pass on the strength of the very
-        check it is meant to stand in for. Freezing what the descriptor reports
-        is what actually takes the clock out of the answer.
+        Restoring the timestamp with `os.utime` from the writing thread does not
+        reproduce it, and the reason is a race rather than the filesystem:
+        `os.utime` does stick — measured, 5 trials out of 5 sequentially, and the
+        path always settles restored even concurrently — but this reader takes
+        its closing `fstat` the moment the loop ends, and a truncation is what
+        ends the loop. Measured, that sample landed before the writer's `utime`
+        in 3 of 5 trials, and whether the timestamp check fired tracked that
+        ordering exactly. Run against a build with the byte count removed, the
+        `utime` version rejected 6 times out of 10 — so it was flaky, not
+        quietly passing for the wrong reason. Freezing what the descriptor
+        reports takes the clock out of the answer instead of racing it.
         """
         _freeze_the_descriptor_clock(monkeypatch)
 
