@@ -86,6 +86,14 @@ python_version = "3.12"
 strict = true
 warn_unused_configs = true
 
+# fontTools ships no py.typed marker, so strict mode cannot follow it. Scoped
+# to that one package deliberately: it is the only untyped import in the tree,
+# and Pillow -- the other new face-handling dependency -- does ship py.typed,
+# so caption rendering stays fully checked.
+[[tool.mypy.overrides]]
+module = "fontTools.*"
+ignore_missing_imports = true
+
 [tool.coverage.run]
 branch = true
 source = ["automation_tool"]

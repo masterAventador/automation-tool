@@ -7,9 +7,12 @@ import re
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Final
+
+from fontTools.ttLib import TTFont, TTLibError
 
 # The bundles carrying the faces the caption renderer draws with. A bundle is
 # the unit the rights register packs a face into, and it is also the namespace
@@ -93,6 +96,17 @@ class CaptionFontRejected(RuntimeError):
 
 class CaptionFontUnavailable(CaptionFontRejected):
     """A registered face is missing from disk or cannot be located."""
+
+
+class CaptionGlyphUnavailable(CaptionFontRejected):
+    """No face in the chain draws a character, so rendering fails closed.
+
+    The alternative is to draw whatever the face puts at `.notdef`, which for
+    Noto Sans CJK SC is a filled box. That box leaves every downstream check
+    green -- the PNG has ink, its dimensions are right, ffprobe counts the
+    frames -- while the viewer sees tofu. This is the last point at which the
+    problem is still detectable, so it is refused here.
+    """
 
 
 def _build_cache_root() -> Path:
@@ -220,3 +234,91 @@ def resolve_font_file(font_key: str) -> Path:
             f"caption font unavailable: {font_key} is not in the packaged font directory"
         )
     return path
+
+
+# One entry per registered face is enough: a chain is a handful of faces and
+# the register is closed, so nothing benefits from a larger table.
+COVERAGE_CACHE_SIZE: Final = len(REGISTERED_CAPTION_FONTS)
+
+
+@lru_cache(maxsize=COVERAGE_CACHE_SIZE)
+def glyph_coverage(font_key: str) -> frozenset[int]:
+    """The codepoints a face draws, taken from its character map.
+
+    Coverage is cmap membership and nothing more. It deliberately does not
+    look at whether the glyph paints anything: a space is mapped to a glyph
+    with no contours, and judging by ink would report every space as missing
+    and push it onto the fallback chain.
+
+    Nor is there a filter for entries pointing at `.notdef`. Such an entry
+    cannot exist in a file -- in cmap format 4 "maps to glyph 0" and "not
+    mapped" are the same bytes -- and `TestFontToolsNotdefAssumption` pins
+    that rather than defending against it with a branch no test could reach.
+
+    Memoised because reading a real face's cmap costs about 25 ms, and this is
+    consulted once per character per face.
+    """
+    path = resolve_font_file(font_key)
+    try:
+        with TTFont(str(path), lazy=True) as face:
+            return frozenset(face.getBestCmap())
+    except (
+        TTLibError,  # not an sfnt, or a damaged one
+        KeyError,  # parses, but carries no cmap table
+        OSError,  # unreadable, or removed since it was resolved
+        ImportError,  # a WOFF2 face with no brotli to decompress it
+    ) as error:
+        raise CaptionFontUnavailable(
+            f"caption font unavailable: {font_key} could not be read"
+        ) from error
+
+
+@dataclass(frozen=True, slots=True)
+class FontChain:
+    """Faces in preference order; the first that covers a character draws it."""
+
+    keys: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.keys:
+            raise CaptionFontRejected("caption font chain rejected: the chain is empty")
+        if len(set(self.keys)) != len(self.keys):
+            raise CaptionFontRejected("caption font chain rejected: a face is repeated")
+        # Validate every key up front. Checking lazily would let a chain build
+        # cleanly and then fail on whichever character first needed the bad
+        # face, which points the blame at the caption rather than the setting.
+        for font_key in self.keys:
+            _registered_font(font_key)
+
+    def face_for(self, character: str) -> str:
+        """The first face covering this character, or refuse."""
+        codepoint = ord(character)
+        for font_key in self.keys:
+            if codepoint in glyph_coverage(font_key):
+                return font_key
+        # The codepoint, never the character: caption text is user content and
+        # must stay out of logs (CLAUDE.md 7). A codepoint is still enough for
+        # a caller to say exactly which character it could not draw.
+        raise CaptionGlyphUnavailable(
+            f"caption glyph unavailable: no packaged face draws U+{codepoint:04X}"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TextRun:
+    """A maximal stretch of text drawn by a single face."""
+
+    font_key: str
+    text: str
+
+
+def segment_runs(text: str, chain: FontChain) -> tuple[TextRun, ...]:
+    """Split text into per-face runs, merging neighbours that share a face."""
+    runs: list[TextRun] = []
+    for character in text:
+        font_key = chain.face_for(character)
+        if runs and runs[-1].font_key == font_key:
+            runs[-1] = TextRun(font_key, runs[-1].text + character)
+        else:
+            runs.append(TextRun(font_key, character))
+    return tuple(runs)
