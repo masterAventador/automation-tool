@@ -8,6 +8,7 @@ import pkgutil
 import sys
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
+from types import MappingProxyType
 from typing import Any
 
 import pytest
@@ -109,6 +110,24 @@ def test_every_packaged_name_is_a_bare_file_name() -> None:
         assert PurePosixPath(name).name == name
         assert not PurePosixPath(name).is_absolute()
         assert ".." not in name
+
+
+def test_every_bundle_is_a_bare_directory_name() -> None:
+    """A bundle is joined onto a root exactly the way a packaged name is.
+
+    Its sibling above has had this since T1 and this has not, which was
+    registered as a gap rather than fixed at the time because both values come
+    from a closed set written in this module -- the blast radius today is
+    zero. It is still the same shape: `_packaged_bundle_directory` joins the
+    bundle into a path, and a value that traverses would walk out of the font
+    directory just as a packaged name would. LE-20 adds faces, and with them
+    bundles, so the guard is worth having before rather than after.
+    """
+    for registered in fonts.REGISTERED_CAPTION_FONTS.values():
+        bundle = registered.bundle
+        assert PurePosixPath(bundle).name == bundle
+        assert not PurePosixPath(bundle).is_absolute()
+        assert ".." not in bundle
 
 
 def test_the_registry_cannot_be_mutated_at_runtime() -> None:
@@ -274,6 +293,47 @@ class TestBundleLayout:
     def test_an_unknown_bundle_is_refused(self) -> None:
         with pytest.raises(fonts.CaptionFontUnavailable):
             fonts.bundle_root("no-such-bundle")
+
+    def test_a_frozen_run_answers_an_unknown_bundle_with_a_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The two run modes do disagree here, and this says exactly where.
+
+        The case above only covers a source checkout, where an unknown bundle
+        has no known location and is refused. A frozen run has a location for
+        every bundle -- the package root -- so it answers a path instead. That
+        asymmetry was registered as a gap rather than as a defect, and this
+        pair is what keeps it visible: it is stated here and bounded by the
+        case below.
+        """
+        monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+
+        assert fonts.bundle_root("no-such-bundle") == (
+            tmp_path / fonts.PACKAGED_FONT_DIRECTORY_NAME / "no-such-bundle"
+        )
+
+    def test_an_unknown_bundle_still_fails_closed_in_a_frozen_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """And the terminal answer is the same one either way.
+
+        Which is what makes the asymmetry above tolerable rather than a second
+        code path: a caller does not ask for a bundle, it asks for a font key,
+        and a key whose bundle nothing carries is refused with the same
+        exception in both modes. Asserted at the point a caller actually
+        stands, because that is where "the two modes behave differently" would
+        have to be true to matter.
+        """
+        monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+        stray = fonts.RegisteredCaptionFont(packaged_name="stray.ttf", bundle="no-such-bundle")
+        monkeypatch.setattr(
+            fonts,
+            "REGISTERED_CAPTION_FONTS",
+            MappingProxyType({**fonts.REGISTERED_CAPTION_FONTS, "stray-face": stray}),
+        )
+
+        with pytest.raises(fonts.CaptionFontUnavailable):
+            fonts.resolve_font_file("stray-face")
 
     @pytest.mark.parametrize(
         "font_key", ["../../etc/passwd", "helvetica", "Noto", "noto\n", "", b"noto"]
