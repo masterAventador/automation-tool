@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import Final, Never
 
+MAX_PROJECT_TITLE_CHARACTERS: Final = 200
 MIN_OUTPUT_DIMENSION: Final = 128
 MAX_OUTPUT_DIMENSION: Final = 4096
 MIN_OUTPUT_FPS: Final = 12
@@ -16,7 +17,7 @@ MAX_CAPTION_STROKE_PX: Final = 20
 MIN_CAPTION_LINE_SPACING: Final = 1.0
 MAX_CAPTION_LINE_SPACING: Final = 3.0
 
-_FONT_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
+_FONT_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,63}\Z")
 
 
 class InvalidEditingProjectModel(ValueError):
@@ -95,6 +96,7 @@ __all__ = [
     "MAX_CAPTION_STROKE_PX",
     "MAX_OUTPUT_DIMENSION",
     "MAX_OUTPUT_FPS",
+    "MAX_PROJECT_TITLE_CHARACTERS",
     "MIN_CAPTION_FONT_PX",
     "MIN_CAPTION_LINE_SPACING",
     "MIN_OUTPUT_DIMENSION",

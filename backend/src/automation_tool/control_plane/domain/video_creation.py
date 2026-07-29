@@ -18,8 +18,8 @@ MAX_SCENES: Final = 128
 MAX_ARTIFACT_REFERENCES: Final = 256
 MAX_ARTIFACT_BYTES: Final = 16 * 1024 * 1024 * 1024
 
-_LANGUAGE_PATTERN = re.compile(r"^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|\d{3}))?$")
-_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_LANGUAGE_PATTERN = re.compile(r"^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|\d{3}))?\Z")
+_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}\Z")
 
 
 class InvalidVideoDomainModel(ValueError):

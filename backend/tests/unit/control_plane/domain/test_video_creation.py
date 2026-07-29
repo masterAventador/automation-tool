@@ -236,6 +236,44 @@ def test_content_brief_rejects_invalid_or_unbounded_fields(field: str, value: ob
         ContentBrief(**values)  # type: ignore[arg-type]
 
 
+def test_language_rejects_a_trailing_newline() -> None:
+    """`_LANGUAGE_PATTERN.fullmatch` requires consuming the whole string, so
+    this is already rejected today — but only because the call site uses
+    `fullmatch` rather than `match`. Pinned separately so the guard does not
+    quietly start depending on that choice of verb.
+    """
+    source = _artifact()
+    brief = _brief(source)
+    with pytest.raises(InvalidVideoDomainModel):
+        ContentBrief(
+            brief.brief_id,
+            brief.prompt,
+            "zh-CN\n",
+            brief.target_duration_ms,
+            brief.aspect_ratio,
+            brief.source_artifact_ids,
+            brief.created_at,
+        )
+
+
+def test_artifact_sha256_rejects_a_trailing_newline() -> None:
+    """`_SHA256_PATTERN.fullmatch` requires consuming the whole string, so
+    this is already rejected today — but only because the call site uses
+    `fullmatch` rather than `match`. Pinned separately so the guard does not
+    quietly start depending on that choice of verb.
+    """
+    with pytest.raises(InvalidVideoDomainModel):
+        Artifact(
+            ArtifactId.new(),
+            ArtifactRole.SOURCE_IMAGE,
+            "image/png",
+            1,
+            SHA256 + "\n",
+            (),
+            NOW,
+        )
+
+
 def test_text_boundaries_allow_layout_but_reject_controls_and_wrong_id_type() -> None:
     source = _artifact()
     brief = _brief(source)

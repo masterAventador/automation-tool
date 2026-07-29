@@ -249,6 +249,16 @@ def test_clip_structural_bounds_fail_closed(field: str, value: object) -> None:
         _media_clip(**{field: value})
 
 
+def test_clip_id_rejects_a_trailing_newline() -> None:
+    """`_LOCAL_ID_PATTERN.fullmatch` requires consuming the whole string, so
+    this is already rejected today — but only because the call site uses
+    `fullmatch` rather than `match`. Pinned separately so the guard does not
+    quietly start depending on that choice of verb.
+    """
+    with pytest.raises(InvalidTimelineModel):
+        _media_clip(clip_id="clip-1\n")
+
+
 def test_a_transition_cannot_be_as_long_as_or_longer_than_its_own_clip() -> None:
     """A transition covering the whole clip means the clip never plays on its own."""
     with pytest.raises(InvalidTimelineModel):

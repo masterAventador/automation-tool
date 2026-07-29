@@ -55,6 +55,10 @@ def test_demo_environment_ids_accept_only_canonical_bounded_slugs(valid_value: s
         "-customer-a",
         "customer-a-",
         "a" * 65,
+        # A trailing newline is the one shape anchors alone would let through:
+        # Python's `$` matches just before it, so this value only stays out
+        # while the pattern ends in `\Z` and the call stays `fullmatch`.
+        "customer-a\n",
         None,
         1,
     ),

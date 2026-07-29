@@ -20,7 +20,7 @@ MAX_TAG_CHARACTERS: Final = 32
 MAX_SHOT_BOUNDARIES: Final = 4_096
 MAX_SPEECH_SEGMENTS: Final = 4_096
 
-_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}\Z")
 
 
 class InvalidMaterialModel(ValueError):

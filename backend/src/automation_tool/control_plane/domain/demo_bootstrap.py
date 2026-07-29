@@ -7,7 +7,7 @@ from enum import StrEnum
 
 MAX_DEMO_BOOTSTRAP_LIFETIME = timedelta(days=7)
 _ENVIRONMENT_PATTERN = re.compile(
-    r"(?:[a-z0-9]|[a-z0-9][a-z0-9-]{0,62}[a-z0-9])",
+    r"^(?:[a-z0-9]|[a-z0-9][a-z0-9-]{0,62}[a-z0-9])\Z",
 )
 
 

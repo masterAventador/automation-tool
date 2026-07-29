@@ -167,6 +167,16 @@ def test_content_digest_must_be_lowercase_sha256(digest: str) -> None:
         _video(content_digest=digest)
 
 
+def test_content_digest_rejects_a_trailing_newline() -> None:
+    """`_SHA256_PATTERN.fullmatch` requires consuming the whole string, so this
+    is already rejected today — but only because the call site uses
+    `fullmatch` rather than `match`. Pinned separately so the guard does not
+    quietly start depending on that choice of verb.
+    """
+    with pytest.raises(InvalidMaterialModel):
+        _video(content_digest="a" * 64 + "\n")
+
+
 def test_material_is_immutable() -> None:
     material = _video()
     with pytest.raises(FrozenInstanceError):

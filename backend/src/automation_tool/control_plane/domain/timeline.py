@@ -23,7 +23,7 @@ MAX_CLIP_TEXT_CHARACTERS: Final = 2_000
 MIN_GAIN_DB: Final = -60.0
 MAX_GAIN_DB: Final = 12.0
 
-_LOCAL_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
+_LOCAL_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,63}\Z")
 
 
 class InvalidTimelineModel(ValueError):
