@@ -171,7 +171,9 @@ describe("Task run production-path acceptance", () => {
     await browser.$("button=返回工作台").click();
     await openAutomationRuns();
     await openTask(preparation.emergencyTaskId);
-    await browser.$("button=紧急停止").click();
+    // 同第 129 行：顶栏也有一个全局「紧急停止」，必须限定到任务区域。
+    // 修那处时只看了那一条分支，没搜整个文件——这里是同一对的第二处。
+    await browser.$(".task-run-content").$("button=紧急停止").click();
     await browser.$("button=确认紧停").click();
     await waitForRenderedText("紧停命令已提交", "结果待确认");
   });
