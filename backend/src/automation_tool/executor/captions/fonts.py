@@ -98,6 +98,16 @@ class CaptionFontUnavailable(CaptionFontRejected):
     """A registered face is missing from disk or cannot be located."""
 
 
+class CaptionTextRejected(CaptionFontRejected):
+    """Text arrived in a shape no face could be asked to draw.
+
+    Subclasses the module's rejection root so a caller can still catch one
+    type at its boundary, while separating the two causes: a face problem is
+    something wrong with the installation, this is something wrong with what
+    the caller passed in.
+    """
+
+
 class CaptionGlyphUnavailable(CaptionFontRejected):
     """No face in the chain draws a character, so rendering fails closed.
 
@@ -240,6 +250,12 @@ def resolve_font_file(font_key: str) -> Path:
 # the register is closed, so nothing benefits from a larger table.
 COVERAGE_CACHE_SIZE: Final = len(REGISTERED_CAPTION_FONTS)
 
+# The C0 controls and DEL. No face maps them, so without naming them here a
+# line break would come back as a missing glyph and blame the fonts for a
+# caller that had not split its text into lines yet. Everything above this
+# range -- U+200B, U+00AD, U+3000 -- is ordinary text the faces do cover.
+UNDRAWABLE_CODEPOINTS: Final[frozenset[int]] = frozenset(range(0x00, 0x20)) | {0x7F}
+
 
 @lru_cache(maxsize=COVERAGE_CACHE_SIZE)
 def glyph_coverage(font_key: str) -> frozenset[int]:
@@ -261,7 +277,7 @@ def glyph_coverage(font_key: str) -> frozenset[int]:
     path = resolve_font_file(font_key)
     try:
         with TTFont(str(path), lazy=True) as face:
-            return frozenset(face.getBestCmap())
+            character_map = face.getBestCmap()
     except (
         TTLibError,  # not an sfnt, or a damaged one
         KeyError,  # parses, but carries no cmap table
@@ -271,6 +287,15 @@ def glyph_coverage(font_key: str) -> frozenset[int]:
         raise CaptionFontUnavailable(
             f"caption font unavailable: {font_key} could not be read"
         ) from error
+    # `getBestCmap` answers None when the face has a cmap table but no Unicode
+    # subtable in it -- a symbol face, or a Mac Roman-only one. That is a
+    # stated outcome rather than an exception, so it needs its own check;
+    # iterating it would raise TypeError from inside here instead.
+    if character_map is None:
+        raise CaptionFontUnavailable(
+            f"caption font unavailable: {font_key} has no Unicode character map"
+        )
+    return frozenset(character_map)
 
 
 @dataclass(frozen=True, slots=True)
@@ -293,6 +318,12 @@ class FontChain:
     def face_for(self, character: str) -> str:
         """The first face covering this character, or refuse."""
         codepoint = ord(character)
+        if codepoint in UNDRAWABLE_CODEPOINTS:
+            raise CaptionTextRejected(
+                f"caption text rejected: U+{codepoint:04X} is a control character, "
+                "not something a face draws; line breaks and tabs have to be "
+                "resolved by layout before text is segmented"
+            )
         for font_key in self.keys:
             if codepoint in glyph_coverage(font_key):
                 return font_key
@@ -313,7 +344,13 @@ class TextRun:
 
 
 def segment_runs(text: str, chain: FontChain) -> tuple[TextRun, ...]:
-    """Split text into per-face runs, merging neighbours that share a face."""
+    """Split one line into per-face runs, merging neighbours that share a face.
+
+    One line: the caller resolves line breaks and tabs first, and a control
+    character reaching here is refused rather than dropped. Dropping would
+    turn "a\\nb" into "ab" -- a wrong caption that still renders, still sizes
+    correctly and still passes every check downstream of it.
+    """
     runs: list[TextRun] = []
     for character in text:
         font_key = chain.face_for(character)

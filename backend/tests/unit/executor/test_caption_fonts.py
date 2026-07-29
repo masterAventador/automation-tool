@@ -655,6 +655,38 @@ class TestGlyphCoverage:
         with pytest.raises(fonts.CaptionFontUnavailable):
             fonts.glyph_coverage(_LATIN)
 
+    def test_a_face_with_no_unicode_subtable_is_reported_as_unavailable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A cmap table with no Unicode subtable makes `getBestCmap()` return None.
+
+        Distinct from having no cmap at all: this one parses, answers, and
+        answers `None`. Iterating that is a TypeError from inside coverage --
+        a crash rather than a stated font problem, which is the shape every
+        other handler here exists to prevent.
+
+        Not reachable through today's closed register, but a `(3, 0)` symbol
+        face is what icon fonts carry, and the shipped Noto CJK already has a
+        non-Unicode `(1, 25)` subtable of its own. LE-20's job is to add
+        faces, so this becomes reachable exactly when it does.
+        """
+        _stage_synthetic_faces(tmp_path, monkeypatch, {_LATIN: [ord("A")]})
+        registered = fonts.REGISTERED_CAPTION_FONTS[_LATIN]
+        path = tmp_path / registered.bundle / registered.packaged_name
+        symbol_only = TTFont(str(path))
+        subtable = symbol_only["cmap"].tables[0]
+        subtable.platformID, subtable.platEncID = 3, 0
+        symbol_only["cmap"].tables = [subtable]
+        symbol_only.save(str(path))
+        symbol_only.close()
+
+        # Premise: the fixture really does drive fontTools to answer None.
+        with TTFont(str(path), lazy=True) as face:
+            assert face.getBestCmap() is None
+
+        with pytest.raises(fonts.CaptionFontUnavailable):
+            fonts.glyph_coverage(_LATIN)
+
     def test_a_face_that_disappears_after_resolution_is_reported_as_unavailable(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -727,13 +759,30 @@ class TestFontToolsNotdefAssumption:
         This pins the assumption instead of defending against it with a branch
         no test could reach. If a future fontTools starts preserving such a
         mapping, this turns red and `glyph_coverage` needs revisiting.
+
+        Both formats are exercised, because they are dropped for different
+        reasons and could stop being dropped independently. Format 12 is the
+        one that matters most: it carries every astral codepoint the shipped
+        CJK face covers, so a regression confined to it would let astral
+        characters be judged covered and then drawn as tofu -- precisely what
+        the whole design is built to prevent.
         """
+        astral = 0x20BB7
+        second_astral = 0x20BB8
         path = tmp_path / "notdef.ttf"
-        _synthesise_face(path, inked=[ord("A")])
+        _synthesise_face(path, inked=[ord("A"), astral])
 
         face = TTFont(str(path))
+        formats = {subtable.format for subtable in face["cmap"].tables}
+        # Premise: an astral codepoint is what forces a format 12 subtable to
+        # exist at all. Without it this test would only ever reach format 4.
+        assert formats == {4, 12}, formats
+
         for subtable in face["cmap"].tables:
             subtable.cmap[ord("B")] = ".notdef"
+            if subtable.format == 12:
+                # Only format 12 can hold this; format 4 raises OverflowError.
+                subtable.cmap[second_astral] = ".notdef"
         face.save(path)
         face.close()
 
@@ -741,7 +790,9 @@ class TestFontToolsNotdefAssumption:
             character_map = reloaded.getBestCmap()
 
         assert ord("A") in character_map
-        assert ord("B") not in character_map
+        assert astral in character_map
+        assert ord("B") not in character_map, "format 4 preserved a .notdef mapping"
+        assert second_astral not in character_map, "format 12 preserved a .notdef mapping"
 
 
 class TestFontChain:
@@ -796,6 +847,56 @@ class TestFontChain:
 
         assert "U+1F600" in str(refusal.value)
         assert "😀" not in str(refusal.value)
+
+    @pytest.mark.parametrize("character", ["\n", "\t", "\r", "\x00", "\x7f"])
+    def test_a_control_character_is_refused_as_text_not_as_a_missing_glyph(
+        self, character: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        r"""Line breaks and tabs are layout, and layout is resolved before this.
+
+        They are not covered by any face, so without this they would come back
+        as "no packaged face draws U+000A" -- which blames the fonts for what
+        is really a caller that handed over unsplit text, and reads to a user
+        as though the caption were unrenderable.
+
+        Refusing rather than skipping: skipping `\n` would render "a\nb" as
+        "ab", a wrong caption that every downstream check still passes. That
+        is the silent failure this module exists to avoid.
+        """
+        _stage_synthetic_faces(tmp_path, monkeypatch, {_LATIN: [ord("A")], _CJK: []})
+        chain = fonts.FontChain((_LATIN, _CJK))
+
+        with pytest.raises(fonts.CaptionTextRejected) as refusal:
+            chain.face_for(character)
+
+        assert f"U+{ord(character):04X}" in str(refusal.value)
+        assert "no packaged face draws" not in str(refusal.value)
+
+    def test_a_space_is_drawable(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """U+0020 sits immediately above the control range and must stay out.
+
+        Off-by-one at this boundary would refuse every caption containing a
+        space, which is very nearly every caption.
+        """
+        _stage_synthetic_faces(
+            tmp_path, monkeypatch, {_LATIN: [], _CJK: []}, blank={_LATIN: [ord(" ")]}
+        )
+        chain = fonts.FontChain((_LATIN, _CJK))
+
+        assert chain.face_for(" ") == _LATIN
+
+    def test_a_zero_width_space_is_not_treated_as_a_control_character(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only the C0 range and DEL are layout; format effectors are text.
+
+        U+200B and U+00AD are covered by the real faces, so refusing them here
+        would reject captions the renderer can in fact draw.
+        """
+        _stage_synthetic_faces(tmp_path, monkeypatch, {_LATIN: [0x200B], _CJK: []})
+        chain = fonts.FontChain((_LATIN, _CJK))
+
+        assert chain.face_for("​") == _LATIN
 
     def test_an_empty_chain_is_rejected(self) -> None:
         with pytest.raises(fonts.CaptionFontRejected):
@@ -859,3 +960,15 @@ class TestSegmentRuns:
     ) -> None:
         with pytest.raises(fonts.CaptionGlyphUnavailable):
             fonts.segment_runs("A😀B", chain)
+
+    def test_multi_line_text_is_refused_rather_than_silently_joined(
+        self, chain: fonts.FontChain
+    ) -> None:
+        """The precondition T4's wrapping has to satisfy, enforced not assumed.
+
+        T4 owns line breaking and must split before calling here. Stating that
+        only in a docstring would leave every multi-line caption failing with
+        a font error the day someone forgets.
+        """
+        with pytest.raises(fonts.CaptionTextRejected):
+            fonts.segment_runs("AB\n中文", chain)
