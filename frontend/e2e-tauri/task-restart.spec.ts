@@ -97,8 +97,14 @@ describe("T3-20 hidden App restart recovery acceptance", () => {
     await waitForSignal(upPath);
     await browser.$("button=重新检查").click();
     await openAutomationRuns();
-    await waitForRenderedText(taskId ?? "", "已取消");
-    await browser.$(`button=${taskId}`).click();
+    // 列表的行名改版后是创建时刻，不再印 UUID；标识作为惰性的 `data-task-id` 还在。
+    // 详情页仍印完整 UUID，所以下一句按文本等的断言不动。
+    await browser.waitUntil(
+      async () => browser.$(`button[data-task-id="${taskId}"]`).isExisting(),
+      { timeout: 90_000, timeoutMsg: `运行记录里没有出现任务 ${taskId}` },
+    );
+    await waitForRenderedText("已取消");
+    await browser.$(`button[data-task-id="${taskId}"]`).click();
     await waitForRenderedText("任务运行详情", taskId ?? "", "已取消", "任务已取消");
     assert.equal(/产品登录|注册账号|账号登录/.test(await browser.$("body").getText()), false);
   });
