@@ -92,6 +92,13 @@ _CJK_ASTRAL_CODEPOINTS: Final = 2590
 # packaged Chinese face stopped short of it.
 _EXTENSION_B_IDEOGRAPH: Final = "\U00020bb7"
 
+# LATIN SMALL LETTER DOTLESS I: covered by the latin face and by neither
+# Chinese one, which makes it the fallback chain's own case. Twelve codepoints
+# have that property on the packaged set and only nine of them put down ink;
+# this one puts down the most (198 pixels at 54 px), so a comparison against
+# the face's own rendering has something to compare.
+_LATIN_ONLY_CHARACTER: Final = "\u0131"  # LATIN SMALL LETTER DOTLESS I
+
 # Ink counts for "ABCDEFG" at 48 px from the one packaged variable face,
 # measured in the T4a round. The gap is the point: at its default axis
 # position the face is Thin, and a caption drawn there has ink, has the right
@@ -118,23 +125,34 @@ _ACCEPTANCE_TEXT: Final = (
 )
 _ACCEPTANCE_FRAME: Final = (1080, 1920)
 _ACCEPTANCE_LINES: Final = 3
+# 49 written characters, with the tab expanded to the next four-column stop.
+_ACCEPTANCE_CHARACTERS: Final = 51
 
 # A Chinese line with a latin line under it, and the latin line carries a
 # descender on purpose.
 #
 # The defect this shape exists to catch shrinks the canvas by the difference
 # between the two faces' ascents, so it is only visible if the caption's ink
-# reaches into the bottom of the canvas. Measured on the packaged faces at
-# every size from 12 to 48 px: with "AV" the last line leaves 3 to 11 empty
-# rows below it -- more than the ascent difference at most sizes, so the
+# reaches into the bottom of the canvas. With "AV" the last line leaves 3 to
+# 11 empty rows below it -- more than that difference at most sizes, so the
 # shortened canvas would clip nothing and the case would pass on the defect.
-# With a descender the gap closes to 1 row, and at 13 and 14 px it closes
-# **exactly to zero** -- the ink's last row is the canvas's last row. Those
-# two sizes are therefore the natural boundary for this shape, and are
-# parametrised alongside an ordinary working size.
+# A descender closes the gap.
 _MIXED_METRIC_CAPTION: Final = "中文\nAy"
-_ZERO_SLACK_SIZES: Final = (13, 14)
-_MIXED_METRIC_SIZES: Final = (*_ZERO_SLACK_SIZES, 48)
+
+# The sizes at which the defect has no room at all to hide in.
+#
+# The quantity that matters is the one the T4b round recorded in
+# `docs/development/LE-09.md`: `aₙ + dₙ - a₀`, the last line's own line box
+# less the first line's ascent, which is exactly the slack the shortened
+# canvas has to eat before it starts cutting ink. At 48 px it is +3 px.
+# Swept over 12-200 px on the packaged faces, **13 and 14 px are the only two
+# sizes where it is 0**.
+#
+# Deliberately not "the ink's last row is the canvas's last row", which was
+# the first way this was written: that is true at ten sizes between 12 and 48
+# and so says nothing about 13 and 14 in particular.
+_ZERO_MARGIN_SIZES: Final = (13, 14)
+_MIXED_METRIC_SIZES: Final = (*_ZERO_MARGIN_SIZES, 48)
 
 _TRANSPARENT: Final = (0, 0, 0, 0)
 _WHITE: Final = (255, 255, 255, 255)
@@ -237,36 +255,59 @@ def _glyph_clusters(image: Image.Image) -> list[bytes]:
     return clusters
 
 
+def _drawn_alone(face: ImageFont.FreeTypeFont, text: str, font_px: int, stroke_px: int) -> bytes:
+    """One character on its own transparent canvas, cropped to its ink.
+
+    Drawn with a bare `ImageDraw.text` call and literal colours rather than
+    through the renderer, so a reference built from this does not move when
+    the thing it is a reference for moves. Cropping to the ink discards where
+    it landed and keeps its shape, which is what the comparisons here are
+    about.
+
+    Answers `b""` for a character that puts down nothing -- a space, a
+    zero-width joiner. That is a real answer rather than a missing one: what
+    the callers ask is whether a character came out as the face's "I cannot
+    draw this" glyph, and drawing nothing is not that.
+    """
+    size = font_px * 4
+    canvas = Image.new("RGBA", (size, size), _TRANSPARENT)
+    ImageDraw.Draw(canvas).text(
+        (size // 4, size * 3 // 4),
+        text,
+        font=face,
+        anchor="ls",
+        fill=_WHITE,
+        stroke_width=stroke_px,
+        stroke_fill=_BLACK,
+    )
+    box = canvas.getchannel("A").getbbox()
+    return b"" if box is None else canvas.crop(box).tobytes()
+
+
 def _notdef_clusters(font_px: int, stroke_px: int) -> list[bytes]:
     """What each packaged face draws for a character it cannot draw.
 
-    The acceptance criterion this task was given, and the reason "the PNG has
-    ink" was rejected as one: the Chinese face answers a missing codepoint
-    with a filled box that has plenty of ink, and a latin face answers it with
-    nothing at all, so ink alone is blind in both directions. U+10FFFF is
-    guaranteed to be in no character map.
+    Measured on the three packaged faces: **all of them draw a filled box**,
+    the Chinese ones at 52x62 and the latin one at 38x52 (54 px, 4 px stroke).
+    That is the whole reason "the PNG has ink" was rejected as an acceptance
+    criterion -- a caption made entirely of these satisfies it. Ink is blind
+    in the other direction too, since a face that had no such glyph would
+    answer a missing codepoint with nothing at all and the criterion would
+    then read a blank caption as a failure to draw rather than as tofu; but
+    that second case is a fact about other fonts, not about these three.
+    U+10FFFF is guaranteed to be in no character map.
 
-    Drawn with a bare `ImageDraw.text` call and literal colours rather than
-    through the renderer, so this reference does not move when the thing it is
-    a reference for moves.
+    The empty answer is therefore **not reachable with today's register** and
+    is skipped rather than collected, as a guard for a face that a later
+    round adds: a hypothetical no-tofu face contributes no reference, and the
+    callers must not compare against `b""` -- every blank character in a
+    caption would match it.
     """
     clusters: list[bytes] = []
     for font_key in fonts.REGISTERED_CAPTION_FONTS:
-        face = render._load_face(font_key, font_px)
-        size = font_px * 4
-        canvas = Image.new("RGBA", (size, size), _TRANSPARENT)
-        ImageDraw.Draw(canvas).text(
-            (size // 4, size * 3 // 4),
-            "\U0010ffff",
-            font=face,
-            anchor="ls",
-            fill=_WHITE,
-            stroke_width=stroke_px,
-            stroke_fill=_BLACK,
-        )
-        box = canvas.getchannel("A").getbbox()
-        if box is not None:
-            clusters.append(canvas.crop(box).tobytes())
+        drawn = _drawn_alone(render._load_face(font_key, font_px), "\U0010ffff", font_px, stroke_px)
+        if drawn:
+            clusters.append(drawn)
     return clusters
 
 
@@ -334,6 +375,55 @@ class TestRealFaceCoverage:
             )
         assert "U+2764" in str(refusal.value)
         assert list(tmp_path.iterdir()) == []
+
+    def test_a_character_the_chinese_faces_lack_is_drawn_by_the_latin_one(
+        self, tmp_path: Path
+    ) -> None:
+        """The fallback chain doing its job, on real faces and through the entry.
+
+        The plan books this as T5's main case and until now it was covered
+        only on synthetic faces plus, indirectly, by mixed-metric layout. What
+        makes it worth a real-face case of its own is that the substitution is
+        invisible in the output: the caption has ink, the right size and no
+        tofu whichever face drew it, so nothing else here would notice the
+        chain silently collapsing to the style's own face.
+
+        U+0131, dotless i, is in the latin face's character map and in neither
+        Chinese face's -- one of twelve such codepoints, and among those the
+        ones with ink are chosen from. The style names the **Chinese** face,
+        so drawing it at all means the chain fell through.
+
+        Drawn on its own so the page carries exactly one blob, which is what
+        lets the drawn ink be compared with the latin face's own rendering
+        rather than merely asserted to exist.
+        """
+        assert ord(_LATIN_ONLY_CHARACTER) in fonts.glyph_coverage(_LATIN)
+        for font_key in (_CJK_BOLD, _CJK_REGULAR):
+            assert ord(_LATIN_ONLY_CHARACTER) not in fonts.glyph_coverage(font_key)
+
+        style = render.CaptionRenderStyle(
+            font_key=_CJK_BOLD, font_px=_INK_SAMPLE_PX, stroke_px=0, line_spacing=1.0
+        )
+        assert render._fallback_chain(style.font_key).face_for(_LATIN_ONLY_CHARACTER) == _LATIN
+
+        destination = render.render_caption(
+            _LATIN_ONLY_CHARACTER,
+            style,
+            frame_width=_ACCEPTANCE_FRAME[0],
+            frame_height=_ACCEPTANCE_FRAME[1],
+            destination=tmp_path / "caption.png",
+        )
+        with Image.open(destination) as opened:
+            image = opened.convert("RGBA")
+        clusters = _glyph_clusters(image)
+        assert len(clusters) == 1
+
+        latin = render._load_face(_LATIN, style.font_px)
+        assert clusters[0] == _drawn_alone(latin, _LATIN_ONLY_CHARACTER, style.font_px, 0)
+        assert clusters[0] != _drawn_alone(latin, "\U0010ffff", style.font_px, 0)
+        assert clusters[0] != _drawn_alone(
+            render._load_face(_CJK_BOLD, style.font_px), "\U0010ffff", style.font_px, 0
+        )
 
     def test_the_chinese_face_reaches_past_the_basic_plane(self) -> None:
         """Format 12 is being read, and Extension B is inside it.
@@ -607,21 +697,25 @@ class TestRealMixedMetricLayout:
         assert rows[-1][1] <= image.height
         assert rows[-1][1] > height_if_measured_from_the_last_line
 
-    @pytest.mark.parametrize("font_px", _ZERO_SLACK_SIZES)
-    def test_the_caption_ends_exactly_where_the_canvas_does(
-        self, tmp_path: Path, font_px: int
-    ) -> None:
-        """At these two sizes the canvas has no room to spare at all.
+    @pytest.mark.parametrize("font_px", _ZERO_MARGIN_SIZES)
+    def test_these_sizes_leave_the_defect_nowhere_to_hide(self, font_px: int) -> None:
+        """`aₙ + dₙ - a₀` is zero here, and only here.
 
-        Which is what makes them worth naming: at every other size measured
-        there is a row or more of empty canvas under the last line, and a
-        height that came out one short would still look fine. Here it would
-        not. If a face swap or a metrics change moves this, the sizes above
-        stop being the boundary they were chosen for -- so the property is
-        asserted rather than left as a comment on the choice.
+        That quantity is the slack: the canvas-height defect shortens the page
+        by `a₀ - aₙ`, and what stands between the shortened page and the
+        caption's ink is the last line's own descent. At 48 px the sum leaves
+        +3 px of room. Swept across 12-200 px on the packaged faces, these two
+        sizes are the only ones where it leaves none, which is why the case
+        above is parametrised on them.
+
+        Asserted rather than left as a comment, because it is a fact about the
+        packaged faces: a face swap or a metrics change moves it, and the
+        sizes above would then quietly stop being the boundary they were
+        chosen for.
         """
-        image, _ = self._draw(tmp_path, font_px)
-        assert _ink_rows(image)[-1][1] == image.height
+        chinese_ascent, _ = render._load_face(_CJK_BOLD, font_px).getmetrics()
+        latin_ascent, latin_descent = render._load_face(_LATIN, font_px).getmetrics()
+        assert latin_ascent + latin_descent - chinese_ascent == 0
 
 
 class TestTheDrawnCaption:
@@ -674,15 +768,33 @@ class TestTheDrawnCaption:
         assert _WHITE in colours
         assert _BLACK in colours
 
-    def test_no_drawn_glyph_is_the_face_saying_it_cannot_draw(self, tmp_path: Path) -> None:
-        """Layer three, and the only one of the three with any teeth.
+    def test_the_drawn_page_is_not_a_page_of_tofu(self, tmp_path: Path) -> None:
+        """Layer three, on the page as it was actually written to disk.
 
         Ink says nothing: the Chinese face answers a codepoint it does not
-        have with a filled box carrying about a thousand ink pixels, and every
+        have with a filled box carrying thousands of ink pixels, and every
         downstream check -- dimensions, ffprobe frame counts, "the PNG is not
         empty" -- passes on a caption made entirely of them. So each blob of
-        ink is compared against what each packaged face draws for a codepoint
-        no face has.
+        ink on the page is compared against what each packaged face draws for
+        a codepoint no face has.
+
+        **This reaches a caption made of tofu and not a caption with tofu in
+        it**, and the limit is the clustering rather than the criterion: a
+        blob is a run of ink columns, and at this style's 4 px stroke the
+        glyphs touch, so 45 drawn characters come back as 12 blobs. A blob of
+        several glyphs can never equal a single-glyph reference.
+
+        Measured, by replacing each character of the caption in turn with an
+        uncovered codepoint: of the 48 placements, **46 pass here unnoticed**.
+        The 2 that are caught are the two where a space sits beside the box
+        and leaves it a blob of its own. Dropping the stroke does not fix it
+        either -- at stroke 0 the same caption yields 46 blobs for 45
+        characters, because a glyph whose ink has a vertical gap splits in
+        two.
+
+        The case below is the one that reaches a single bad glyph. This one is
+        kept because it is the only check that reads the bytes that were
+        written to disk rather than re-deriving what should have been.
         """
         with Image.open(self._render(tmp_path)) as opened:
             image = opened.convert("RGBA")
@@ -693,6 +805,44 @@ class TestTheDrawnCaption:
         assert clusters
         for cluster in clusters:
             assert cluster not in notdef
+
+    def test_no_single_character_of_the_caption_is_drawn_as_tofu(self) -> None:
+        """The differential at the granularity a defect actually appears at.
+
+        One wrong glyph in a line of good ones is the likely shape -- a cmap
+        that disagrees with the glyph data, or a face added by LE-20 that
+        covers less than it claims -- and the page-level check above cannot
+        see it, because neighbouring glyphs merge into one blob.
+
+        So the comparison is made per character, through the same chain the
+        renderer segments with: for every character, the face that will draw
+        it is asked what it draws, and that has to differ from what the same
+        face draws for a codepoint it does not have. This is the renderer's
+        own decision being checked -- `segment_runs` picks the face, and
+        `draw.text` then draws exactly these glyphs with exactly that face --
+        rather than a second opinion about it.
+
+        The tab is expanded first and the text split with `str.splitlines()`,
+        for the same reason `render_caption` does both: `segment_runs` refuses
+        a tab, and doing it differently here would be testing a different
+        input from the one the renderer sees.
+        """
+        style = self._style()
+        chain = render._fallback_chain(style.font_key)
+        checked = 0
+        for line in _ACCEPTANCE_TEXT.splitlines():
+            for run in fonts.segment_runs(line.expandtabs(render.CAPTION_TAB_WIDTH), chain):
+                face = render._load_face(run.font_key, style.font_px)
+                notdef = _drawn_alone(face, "\U0010ffff", style.font_px, style.stroke_px)
+                assert notdef, f"{run.font_key} drew nothing for U+10FFFF; the reference is broken"
+                for character in run.text:
+                    drawn = _drawn_alone(face, character, style.font_px, style.stroke_px)
+                    assert drawn != notdef, f"U+{ord(character):04X} came out as tofu"
+                    checked += 1
+        # Every character of the caption, tab expanded to four columns. Pinned
+        # so a segmentation that quietly dropped most of the text would not
+        # leave this case passing on whatever survived.
+        assert checked == _ACCEPTANCE_CHARACTERS
 
     @pytest.mark.parametrize(
         ("text", "refusal", "detail"),
