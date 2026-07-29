@@ -317,8 +317,9 @@ def glyph_coverage(font_key: str) -> frozenset[int]:
     # cut further back it arrives as `struct.error` out of `sstruct.unpack`.
     # What a font parser raises on malformed input is not enumerable from the
     # outside, so the honest shape is to catch broadly and answer in this
-    # module's own type. The block is two third-party calls and nothing else,
-    # which is what keeps the width from swallowing a fault of our own;
+    # module's own type. The block holds nothing but calls into fontTools --
+    # the reader's construction, the cmap read, and the context manager's exit
+    # -- which is what keeps the width from swallowing a fault of our own;
     # `BaseException` is deliberately not caught, so an interrupt still gets
     # out.
     except Exception as error:

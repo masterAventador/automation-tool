@@ -138,19 +138,31 @@ def _stage_face(
 
 
 def _redirect_installed_font_search(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point PIL's basename search at a directory of our own, and name it.
+    """Point PIL's user-level font search at a directory of our own, and name it.
 
     When FreeType refuses a file, `ImageFont.truetype` catches its own
     `OSError` and walks the platform's font directories for a file of the same
-    base name. Every platform it searches takes its user-level directory from
-    the environment -- `HOME` on macOS, `WINDIR` on Windows, `XDG_DATA_HOME`
-    and `XDG_DATA_DIRS` on Linux -- so redirecting those is what lets a case
-    below decide for itself whether a collision exists.
+    base name. The user-level one of those comes out of the environment on
+    every platform -- `HOME` on macOS, `WINDIR` on Windows, `XDG_DATA_HOME`
+    and `XDG_DATA_DIRS` on Linux -- which is what lets a case below stage a
+    collision of its own rather than hoping for one.
 
-    Without this the two "will not load" cases were green only because no font
-    of the packaged name happened to sit in the search path of the machine
-    they ran on; this one has 267 faces in `~/Library/Fonts` alone, and adding
-    faces is LE-20's deliverable.
+    **This does not empty the search path on macOS.** PIL's darwin branch is
+    `["/Library/Fonts", "/System/Library/Fonts", expanduser("~/Library/Fonts")]`
+    and only the third follows `HOME`; the first two are hard-coded and are
+    still walked. So:
+
+    * the case that stages a collision is unaffected -- it only needs PIL to
+      answer with a face other than the packaged one, which its own premise
+      assertion states outright;
+    * the two cases that want *no* collision are still machine-dependent. What
+      changed is the direction: the biggest source of same-named faces is out
+      of the way (267 in `~/Library/Fonts` here against 372 files under
+      `/System/Library/Fonts`), and if a system directory ever does hold one,
+      the premise assertion in those cases goes red and says so instead of the
+      case quietly covering the other branch. Closing it properly would mean
+      faking `sys.platform`, which buys determinism by testing a platform this
+      is not running on.
 
     The returned directory is not created: a case that wants the collision
     creates it and writes a face there, and a case that wants no collision
@@ -626,10 +638,17 @@ class TestLoadFace:
         path = _stage_face(tmp_path, monkeypatch, contents=contents)
         _redirect_installed_font_search(tmp_path, monkeypatch)
 
-        # Premise: with the search path emptied, PIL really does refuse rather
-        # than answering with some other file of the same name. That is what
-        # makes this the case covering the `OSError` handler; the substitution
-        # it would otherwise take is the case below.
+        # Premise: with the user font directory redirected away, PIL really
+        # does refuse rather than answering with some other file of the same
+        # name. That is what makes this the case covering the `OSError`
+        # handler; the substitution it would otherwise take is the case below.
+        #
+        # This line has no hold on production code -- no mutant is killed by
+        # it, and deleting it leaves the suite green. What it guards is the
+        # environment: the macOS system font directories cannot be redirected
+        # (see `_redirect_installed_font_search`), so if one of them ever
+        # holds this base name, this goes red and says which case stopped
+        # meaning what it says, instead of the branch silently changing.
         with pytest.raises(OSError):
             ImageFont.truetype(path, 48)
 
