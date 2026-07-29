@@ -84,8 +84,13 @@ describe("B5-13/B5-14 platform Session production-path acceptance", () => {
       const session = await browser.tauri.execute(({ core }) =>
         core.invoke("get_douyin_platform_session"),
       );
+      // 登出命令有多个错误路径（紧停失败、重启失败、CompleteDouyinLogout 状态
+      // 不符、投影轮询超时），页面上只留一条警告——没有它的原文，五个布尔量
+      // 分不清是哪条路（2026-07-29 已经为此白跑一轮）。
+      const alerts = await browser.$$(".ant-alert").map((alert) => alert.getText());
       throw new Error(
         `safe logout did not render authoritative missing state: ${JSON.stringify({
+          failureAlerts: alerts,
           authoritativeSession: session,
           logoutStillPending: !(await logout.isEnabled()),
           rendersMissing: text.includes("需要登录"),
