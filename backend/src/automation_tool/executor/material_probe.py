@@ -208,6 +208,29 @@ class MaterialProbeRejection(StrEnum):
     # path, a real IO error), and a path that names something other than a
     # regular file. A FIFO is the sharpest case of the difference — waiting for
     # one to come to rest waits forever.
+    #
+    # **This covers only a part-written file whose header already parses, and
+    # the commonest layout is not that.** Measured against the packaged tools
+    # with a 60-second clip: an MP4 written the default way puts `moov` at 90%
+    # of the file, so while it is being written ffprobe cannot read it at all
+    # and the probe ends at `UNDECODABLE` — three trials out of three, the
+    # header never having been reached. Only `+faststart`, which moves `moov`
+    # to offset 36, gets far enough for the file to be seen moving:
+    # `SOURCE_NOT_AT_REST`, three out of three. Browsers and yt-dlp write the
+    # default layout, so the ordinary half-finished download lands on
+    # `UNDECODABLE` — which is the same wrong instruction this member exists to
+    # remove, one layer further down.
+    #
+    # It is not fixable here. Telling a truncated container from a corrupt one
+    # needs ffprobe's English diagnostics, and those name the file (§7); the
+    # exit status is identical. So **anything consuming these must treat
+    # `UNDECODABLE` as possibly-not-finished-yet as well**, rather than as
+    # proof the file is permanently broken.
+    #
+    # A third shape escapes both, measured: once the writer has stopped, a
+    # truncated `+faststart` file is not moving and its header parses, so it is
+    # probed successfully and yields facts and a digest for the prefix. Nothing
+    # here can tell that from a genuinely short material.
     SOURCE_NOT_AT_REST = "source_not_at_rest"
     UNSAFE_PATH = "unsafe_path"
     UNDECODABLE = "undecodable"
@@ -1017,11 +1040,33 @@ def probe_material(tools: PackagedMediaTools, source: Path) -> MaterialFacts:
     the length and the timestamp where they were, is invisible — the same
     residual the digest's own checks have, for the same reason.
 
+    How much residual is left depends on the filesystem, and on the main
+    platform it is small: measured over 3000 create/delete cycles, APFS handed
+    out 3000 distinct inode numbers and reused none, so a file replaced by
+    another cannot come back wearing the same identity. What is left is one
+    shape — the same inode rewritten in place and its length and timestamp put
+    back. `st_ctime_ns` would close most of that, since it moves on a write
+    even when `st_mtime_ns` is restored, but it also moves for things that are
+    not changes to the content at all: an xattr written by a Spotlight importer
+    or a virus scanner touching a file mid-probe would refuse a material that
+    nobody edited. Refusing what is fine is worse here than missing the rare
+    forgery, so it is left out deliberately rather than overlooked.
+
     Nothing here takes a lock, so a probe spending its whole budget — the
     reading pass, then up to fifteen minutes measuring, then the digest — blocks
     no other work.
     """
     path, before = _require_source_file(source)
+    # The size is already in hand, and no tool could say anything that changes
+    # what it earns. Left to the digest alone this was the cheapest rejection in
+    # the module reached last, behind a reading pass and a measuring pass that
+    # may run for fifteen minutes — the opposite of the ordering argued for
+    # above. The digest's own check stays and stays authoritative: this one
+    # reads a path, and a path can name a different file by the time it is
+    # opened. Both compare against `MAX_SOURCE_FILE_BYTES`, so the early exit
+    # cannot drift into a second, different limit.
+    if before.st_size > MAX_SOURCE_FILE_BYTES:
+        _reject(MaterialProbeRejection.FILE_TOO_LARGE)
     streams = read_stream_facts(tools, path)
     audio = read_audio_facts(tools, path, streams)
     content_digest = read_content_digest(path)

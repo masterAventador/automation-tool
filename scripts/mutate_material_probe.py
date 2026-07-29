@@ -168,9 +168,14 @@ MUTATIONS: list[tuple[str, str, str]] = [
         "        outcome = MaterialProbeRejection.UNSAFE_PATH\n    if isinstance(",
     ),
     (
+        # Anchored on the descriptor-level check specifically: the orchestration
+        # gained a second `FILE_TOO_LARGE` rejection, and a bare anchor now
+        # matches both.
         "reason FILE_TOO_LARGE -> PROBE_FAILED",
-        "_reject(MaterialProbeRejection.FILE_TOO_LARGE)",
-        "_reject(MaterialProbeRejection.PROBE_FAILED)",
+        "        if opened.st_size > MAX_SOURCE_FILE_BYTES:\n"
+        "            _reject(MaterialProbeRejection.FILE_TOO_LARGE)",
+        "        if opened.st_size > MAX_SOURCE_FILE_BYTES:\n"
+        "            _reject(MaterialProbeRejection.PROBE_FAILED)",
     ),
     (
         "outcome discriminated on the wrong type",
@@ -336,6 +341,42 @@ T5_MUTATIONS: list[tuple[str, str, str]] = [
         "held-still arguments swapped",
         "_held_still(before, after)",
         "_held_still(after, before)",
+    ),
+    # The whole stat result compared instead of the three fields. It dies, but
+    # in the loosening direction only: `stat_result.__eq__` compares the
+    # 10-tuple, whose time fields are whole seconds, so the millisecond rewrite
+    # slips past it. What it also does — refuse a material for having been read,
+    # once the access time crosses a second boundary — is what
+    # `test_a_source_whose_access_time_moved_is_still_probed` exists to catch.
+    (
+        "whole stat compared instead of the three fields",
+        "    return (\n"
+        "        _names_the_same_file(before, after)\n"
+        "        and before.st_mtime_ns == after.st_mtime_ns\n"
+        "        and before.st_size == after.st_size\n"
+        "    )",
+        "    return before == after",
+    ),
+    # --- the size is refused before anything is spent on it ---
+    (
+        "up-front size check deleted",
+        "    if before.st_size > MAX_SOURCE_FILE_BYTES:\n"
+        "        _reject(MaterialProbeRejection.FILE_TOO_LARGE)\n",
+        "",
+    ),
+    (
+        "up-front size check `>` -> `>=`",
+        "    if before.st_size > MAX_SOURCE_FILE_BYTES:",
+        "    if before.st_size >= MAX_SOURCE_FILE_BYTES:",
+    ),
+    (
+        "up-front size check moved behind the reading pass",
+        "    if before.st_size > MAX_SOURCE_FILE_BYTES:\n"
+        "        _reject(MaterialProbeRejection.FILE_TOO_LARGE)\n"
+        "    streams = read_stream_facts(tools, path)",
+        "    streams = read_stream_facts(tools, path)\n"
+        "    if before.st_size > MAX_SOURCE_FILE_BYTES:\n"
+        "        _reject(MaterialProbeRejection.FILE_TOO_LARGE)",
     ),
     # --- what the facts are assembled from ---
     ("facts kind hard-wired", "kind=streams.kind,", "kind=ProbedMaterialKind.VIDEO,"),

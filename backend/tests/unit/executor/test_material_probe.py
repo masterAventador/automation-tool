@@ -3358,7 +3358,6 @@ class TestProbeMaterialNeedsOneFileAllTheWayThrough:
 
     def _probe_while_disturbed(
         self,
-        tmp_path: Path,
         tools: PackagedMediaTools,
         monkeypatch: pytest.MonkeyPatch,
         source: Path,
@@ -3388,7 +3387,7 @@ class TestProbeMaterialNeedsOneFileAllTheWayThrough:
             stamp = source.stat().st_mtime_ns + 1_000_000
             os.utime(source, ns=(stamp, stamp))
 
-        excinfo = self._probe_while_disturbed(tmp_path, tools, monkeypatch, source, bump_the_clock)
+        excinfo = self._probe_while_disturbed(tools, monkeypatch, source, bump_the_clock)
         assert _rejection(excinfo) is MaterialProbeRejection.SOURCE_NOT_AT_REST
 
     def test_rejects_a_source_that_grows_between_the_steps(
@@ -3408,9 +3407,7 @@ class TestProbeMaterialNeedsOneFileAllTheWayThrough:
                 handle.write(b"x" * 16)
             os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
 
-        excinfo = self._probe_while_disturbed(
-            tmp_path, tools, monkeypatch, source, grow_without_the_clock
-        )
+        excinfo = self._probe_while_disturbed(tools, monkeypatch, source, grow_without_the_clock)
         assert _rejection(excinfo) is MaterialProbeRejection.SOURCE_NOT_AT_REST
 
     def test_rejects_a_source_replaced_by_a_twin_between_the_steps(
@@ -3431,22 +3428,122 @@ class TestProbeMaterialNeedsOneFileAllTheWayThrough:
             os.replace(twin, source)
             os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
 
-        excinfo = self._probe_while_disturbed(
-            tmp_path, tools, monkeypatch, source, replace_with_a_twin
-        )
+        excinfo = self._probe_while_disturbed(tools, monkeypatch, source, replace_with_a_twin)
         assert _rejection(excinfo) is MaterialProbeRejection.SOURCE_NOT_AT_REST
 
     def test_a_source_nobody_touches_is_probed_to_the_end(
         self, tmp_path: Path, tools: PackagedMediaTools, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The guard has to let the ordinary case through, and reading is not a change.
+        """The guard has to let the ordinary case through.
 
-        macOS updates `st_atime` when a file is read, so a check that compared
-        whole stat results rather than the three fields would reject every
-        material it was handed.
+        Only that. All three steps are stubbed here, so the file is never opened
+        and nothing about it moves — which is why the access-timestamp rule
+        below needs a case of its own rather than resting on this one.
         """
         _record_the_steps(monkeypatch)
         assert probe_material(tools, _source(tmp_path)).content_digest == "c" * 64
+
+    def test_a_source_whose_access_time_moved_is_still_probed(
+        self, tmp_path: Path, tools: PackagedMediaTools, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Being read is not being changed, and the check must not say otherwise.
+
+        Every step reads the file, and a read moves `st_atime` — measured, an
+        ordinary `read_bytes()` moves `st_atime_ns` on this filesystem. So a
+        check written as `before == after` would turn reading the material into
+        grounds for refusing it.
+
+        Measured, that comparison is wrong in both directions at once:
+
+        - it is **too loose**, because `stat_result.__eq__` compares the
+          10-tuple, whose time fields are whole seconds (`tuple[7]` is an
+          `int`); a sub-second change is invisible to it, which is what the
+          millisecond rewrite above catches it on;
+        - it is **too tight**, and intermittently so: the access time only
+          differs once a read pushes it over a second boundary. Measured, a
+          0.4 s bump leaves two stat results equal and a 1.4 s bump does not.
+          Intermittent is the worse failure — a probe that refuses one material
+          in a while, depending on where the clock happened to be, is far harder
+          to diagnose than one that refuses them all.
+
+        The step here is a full second so the case is deterministic rather than
+        dependent on where in the current second the test started, and only the
+        access time moves, so no other term can decide it.
+
+        This is not the only thing holding the rule: measured, adding an
+        explicit `st_atime_ns` comparison turns 10 tests in this file red, every
+        one of them a case where a real tool or the digest actually reads the
+        file. This one states the rule where it can be read.
+        """
+        source = _source(tmp_path)
+
+        def touch_the_access_time() -> None:
+            stat_result = source.stat()
+            os.utime(source, ns=(stat_result.st_atime_ns + 1_000_000_000, stat_result.st_mtime_ns))
+
+        _record_the_steps(monkeypatch, disturbs=touch_the_access_time)
+        assert probe_material(tools, source).content_digest == "c" * 64
+
+
+class TestProbeMaterialRefusesAnOversizedSourceUpFront:
+    """A file too big to hash is too big before either tool is started.
+
+    The size is in hand from the opening guard's stat, and the reason it earns
+    is fixed from that moment — nothing ffprobe or ffmpeg could say would change
+    it. Leaving the only size check in the digest meant the cheapest rejection
+    in the module was reached last, behind a reading pass and a measuring pass
+    that is allowed fifteen minutes, which contradicts the ordering the
+    orchestration argues for everywhere else.
+
+    The descriptor-level check stays where it is and stays authoritative: this
+    one reads a path, and between a path stat and the open that follows it the
+    file can change. So this is an early exit, not the guarantee. Both read the
+    same `MAX_SOURCE_FILE_BYTES`, which is what keeps two checks from drifting
+    into two different limits.
+    """
+
+    def test_rejects_a_file_over_the_limit_without_starting_either_tool(
+        self, tmp_path: Path
+    ) -> None:
+        """The rejection is free, and the empty argv log is what says so.
+
+        Measured before the early exit existed: the reason was already
+        `FILE_TOO_LARGE`, so the reason alone proves nothing here — both tools
+        had run to completion first, and the log held their arguments.
+        """
+        source = _sparse_source(tmp_path, MAX_SOURCE_FILE_BYTES + 1)
+        probe_tools = _orchestration_tools(
+            tmp_path, _probe_json([_video_stream(), _audio_stream()])
+        )
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            probe_material(probe_tools, source)
+        assert _rejection(excinfo) is MaterialProbeRejection.FILE_TOO_LARGE
+        assert _argv_log(tmp_path) == []
+
+    def test_accepts_a_source_of_exactly_the_limit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The accepting endpoint, which is the one that tells `>` from `>=`.
+
+        The limit is moved rather than the fixture grown, as the digest's own
+        endpoint tests do: at the shipped value this would hash 16 GiB.
+        """
+        monkeypatch.setattr(material_probe, "MAX_SOURCE_FILE_BYTES", 4096)
+        probe_tools = _orchestration_tools(tmp_path, _probe_json([_video_stream()]))
+        source = _source(tmp_path, payload=_positional_bytes(4096))
+        assert probe_material(probe_tools, source).content_digest == (
+            hashlib.sha256(source.read_bytes()).hexdigest()
+        )
+
+    def test_rejects_one_byte_over_the_moved_limit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(material_probe, "MAX_SOURCE_FILE_BYTES", 4096)
+        probe_tools = _orchestration_tools(tmp_path, _probe_json([_video_stream()]))
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            probe_material(probe_tools, _source(tmp_path, payload=_positional_bytes(4097)))
+        assert _rejection(excinfo) is MaterialProbeRejection.FILE_TOO_LARGE
+        assert _argv_log(tmp_path) == []
 
 
 class TestProbeMaterialAgainstThePackagedBinaries:
