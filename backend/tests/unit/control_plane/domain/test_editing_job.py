@@ -388,3 +388,15 @@ def test_succeeding_demands_a_real_artifact_id() -> None:
 def test_failing_demands_a_real_failure_code() -> None:
     with pytest.raises(InvalidEditingJobModel):
         _job().start(_UPDATED).fail("render_failed", _UPDATED)  # type: ignore[arg-type]
+
+
+def test_the_domain_package_exports_the_editing_project_and_job() -> None:
+    from automation_tool.control_plane import domain
+    from automation_tool.control_plane.domain import editing_job, editing_project
+
+    assert domain.EditingProject is editing_project.EditingProject
+    assert domain.OutputSpec is editing_project.OutputSpec
+    assert domain.CaptionStyle is editing_project.CaptionStyle
+    assert domain.EditingJob is editing_job.EditingJob
+    assert domain.EditingJobStateMachine is editing_job.EditingJobStateMachine
+    assert set(domain.EditingJobFailureCode) == set(editing_job.EditingJobFailureCode)

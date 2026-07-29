@@ -42,7 +42,7 @@
 | --- | --- | --- | --- | --- |
 | LE-02 | Material 素材库领域对象 | `Material`（kind/时长/分辨率/内容摘要/has_audio/响度/镜头边界/AI 描述与标签）、`MaterialId`、校验与去重规则；用户改过的描述不被 AI 覆盖 | LE-01 | ✅ 已完成 |
 | LE-03 | Timeline 重写（含 Material 尺寸形状决策） | `TimelineClip` 补 `source_in_ms`/`source_out_ms`/`gain_db`；`TimelineTrackKind` 拆成 visual/narration/ambient/music/caption；首期锁死"取片时长等于占位时长"（不变速）并有拒绝用例；**顺带决定 `Material.width`/`height` 对音频素材的形状**——当前音频被强制要求填 [1,8192] 的宽高，属强制荒谬而非可选荒谬，改成 `int | None` 按 kind 分叉是形状变更，LE-02 终审建议单独决策而非顺手折进去 | LE-02 | ✅ 已完成 |
-| LE-04 | 剪辑项目与任务状态机 | `EditingProject`、`EditingJob`、状态转换与非法转换拒绝、失败码归类；不含任何供应商概念；并把 `Timeline` 接到 `EditingProject`（LE-03 有意未加 owner 字段）；接入时会先碰到前端 `video-editing-dto.ts` 的契约形状（见 LE-17 行三处 drift），本任务不处理前端，仅提前知会；**`EditingProject` 必须承载输出规格**——输出画幅、帧率与字幕样式基线（字号/描边/行距/字体）。LE-03 终审发现这三样是渲染必需项却无人认领：`Timeline` 没有、创作线放在 `ContentBrief.aspect_ratio` 而剪辑线无对应物、全库 `caption_style|font_size|stroke_width` 零命中，而 LE-10 的完成定义要求 ffprobe 断言分辨率与帧数、LE-09 承诺字幕换行描边行距可控、LE-20 承诺用户可选字体。这正是本线立项要防的「装配缺口掉进任务之间的缝里」 | LE-03 | 🚧 实现中 |
+| LE-04 | 剪辑项目与任务状态机 | `EditingProject`、`EditingJob`、状态转换与非法转换拒绝、失败码归类；不含任何供应商概念；并把 `Timeline` 接到 `EditingProject`（LE-03 有意未加 owner 字段）；接入时会先碰到前端 `video-editing-dto.ts` 的契约形状（见 LE-17 行三处 drift），本任务不处理前端，仅提前知会；**`EditingProject` 必须承载输出规格**——输出画幅、帧率与字幕样式基线（字号/描边/行距/字体）。LE-03 终审发现这三样是渲染必需项却无人认领：`Timeline` 没有、创作线放在 `ContentBrief.aspect_ratio` 而剪辑线无对应物、全库 `caption_style|font_size|stroke_width` 零命中，而 LE-10 的完成定义要求 ffprobe 断言分辨率与帧数、LE-09 承诺字幕换行描边行距可控、LE-20 承诺用户可选字体。这正是本线立项要防的「装配缺口掉进任务之间的缝里」 | LE-03 | ✅ 已完成 |
 
 ### 3.3 Control Plane 装配（2 项）
 
@@ -57,8 +57,8 @@
 | --- | --- | --- | --- | --- |
 | LE-07 | 素材探测 | Local Executor 侧用随包 ffprobe 读时长/分辨率/编码，`silencedetect` 判有无有效音频与响度，内容摘要去重；路径映射只存本机不上报 Control Plane | LE-02 | ⬜ 未开始 |
 | LE-08 | 自适应抽帧 | `select='eq(n,0)+gt(scene,TH)'` 场景检测抽帧、长镜头按时间补抽、按时长分档封顶、超限时保切点降采样；产出 768px JPEG 并断言帧数与文件存在 | LE-07 | ⬜ 未开始 |
-| LE-09 | 字幕渲染与 fallback 机制 | PIL 渲染字幕 PNG；`fontTools` 读 cmap 实现缺字 fallback **机制**；换行、描边、行距可控。**验收判据不是「PNG 非空」——LE-09 调研实测证明那条零捕捉力**：中文字体渲染不在 cmap 的 `😀` 会画出 1226 个非零像素的实心方框（与 `.notdef` 逐字节相同），而拉丁字体渲染 `中` 画的是空白；豆腐块有墨、缺字无墨，非空断言两头都抓不住。**正确判据是与 `.notdef` 位图差分**（`font.getmask(chr(0x10FFFF))`）。**只用生产在册的 Noto Sans CJK SC 加一个在册拉丁字体验证 fallback 链路本身**，字体扩充与装配属于 LE-20，两者不得互相阻塞。**缺字且整条链都没有时 fail closed**（抛异常、带码位不带原文、不留半成品文件），不画替代符号——画了会让所有下游断言照常通过，正是 T108 事故的形状 | LE-01 | ⬜ 未开始 |
-| LE-10 | 视频渲染管线 | trim(in/out) → scale/crop → fps 归一 → concat → `xfade` 转场 → 字幕 overlay；补齐 `ffmpeg-toolchain.v1.json` 的 `required_capabilities.filters` 声明（xfade/select/scdet 等，**无需重建 ffmpeg**）；产出 mp4 并以 ffprobe 断言编码/分辨率/帧数/时长 | LE-03,LE-09 | ⬜ 未开始 |
+| LE-09 | 字幕渲染与 fallback 机制 | PIL 渲染字幕 PNG；`fontTools` 读 cmap 实现缺字 fallback **机制**；换行、描边、行距可控。**验收判据不是「PNG 非空」——LE-09 调研实测证明那条零捕捉力**：中文字体渲染不在 cmap 的 `😀` 会画出 1226 个非零像素的实心方框（与 `.notdef` 逐字节相同），而拉丁字体渲染 `中` 画的是空白；豆腐块有墨、缺字无墨，非空断言两头都抓不住。**正确判据是与 `.notdef` 位图差分**（`font.getmask(chr(0x10FFFF))`）。**只用生产在册的 Noto Sans CJK SC 加一个在册拉丁字体验证 fallback 链路本身**，字体扩充与装配属于 LE-20，两者不得互相阻塞。**缺字且整条链都没有时 fail closed**（抛异常、带码位不带原文、不留半成品文件），不画替代符号——画了会让所有下游断言照常通过，正是 T108 事故的形状。**字幕样式基线（字号/描边/行距/字体键）已由 `EditingProject.caption_style`（`CaptionStyle`）承载，LE-09 消费它而不是自己定义** | LE-01 | ⬜ 未开始 |
+| LE-10 | 视频渲染管线 | trim(in/out) → scale/crop → fps 归一 → concat → `xfade` 转场 → 字幕 overlay；补齐 `ffmpeg-toolchain.v1.json` 的 `required_capabilities.filters` 声明（xfade/select/scdet 等，**无需重建 ffmpeg**）；产出 mp4 并以 ffprobe 断言编码/分辨率/帧数/时长。**输出画幅与帧率已由 `EditingProject.output`（`OutputSpec`）承载，ffprobe 断言的目标值取自它** | LE-03,LE-09 | ⬜ 未开始 |
 | LE-11 | 音频管线 | 旁白/原声/BGM 三轨；`sidechaincompress` 以旁白为 sidechain 自动闪避；`has_audio` 为假时不排 ambient 轨；采样率归一；断言输出音轨时长与成片一致；**必须实现设计 §5.3 的「原声处理方式」三态开关**（自动闪避 / 固定音量 / 静音，默认自动闪避）。LE-03 终审指出模型只有 `gain_db`（对应三态里的基准音量那一维），三态本身表达不出来：静音可靠不排 ambient clip 表达，但「固定音量」需要一条**既不被旁白压、也不作为 sidechain 源**的音频通路，而五种轨道里没有这样一条——NARRATION 是 sidechain 源，AMBIENT 与 MUSIC 按 §5 都要过 `sidechaincompress`。本任务需决定：加第六种轨道、给 clip 加处理方式字段、还是收窄设计承诺 | LE-10 | ⬜ 未开始 |
 | LE-12 | Worker 生命周期与任务控制 | Tauri 调度渲染 Worker：随机 loopback、高熵会话令牌、健康检查、进度上报、取消与紧停、崩溃恢复、App 退出后任务恢复；`cargo test` 覆盖 | LE-11 | ⬜ 未开始 |
 
@@ -99,14 +99,14 @@
 任务总数与各状态计数由 `scripts/check_local_editing_roadmap_counts.py` 守护，只在此处记录一次：
 
 - 任务总数：24
-- ✅ 已完成：3
+- ✅ 已完成：4
 - 🔍 待验收：0
-- 🧪 RED / 🚧 实现中：1
+- 🧪 RED / 🚧 实现中：0
 - ⬜ 未开始：20
 
 ## 5. 当前下一步
 
-**LE-04 剪辑项目与任务状态机。** LE-03 已完成，`Timeline` 全族（`TimelineId`/`TimelineTrackKind`/`TransitionKind`/`TimelineTransition`/`TimelineClip`/`TimelineTrack`/`Timeline`）已从 `video_creation.py` 退役，唯一定义收敛到 `domain/timeline.py`，创作线与剪辑线的 `RenderJob.timeline_id` 共用同一个 `TimelineId`。
+**LE-05 数据库迁移与仓储。** LE-04 已完成，`EditingProject`/`EditingJob` 两个聚合根、`OutputSpec`/`CaptionStyle` 值对象、六态状态机与八个失败码均已实现并接入 `domain/__init__.py` 转出口；`Timeline` 已接上 `project_id`。LE-05 需要项目/素材/时间轴/任务表的迁移与 SQLAlchemy 仓储，并在同任务内补齐 Material 描述保护的结构性边界测试。
 
 ## 7. 已知问题：用户可见文案门禁当前为红
 
