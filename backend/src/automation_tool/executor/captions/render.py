@@ -106,10 +106,14 @@ class CaptionRenderStyle:
     Here the caller is one process away and inside the product, so the message
     names the field -- otherwise locating a bad setting means bisecting it.
 
-    One upstream guard is deliberately not mirrored: the project aggregate
-    also refuses a font size taller than the output frame. That comparison
-    needs the frame, and a style is handed no frame; inventing one here would
-    mean guessing. It stays where the two values meet.
+    One guard is deliberately not made here: nothing compares a font size
+    against the output frame. That comparison needs the frame, and a style is
+    handed no frame; inventing one would mean guessing, so it belongs where
+    the two values meet. Which is to say it is made nowhere yet -- the project
+    aggregate on the LE-04 line carries such a check on a branch this tree
+    does not descend from, and LE-10 assembles a style locally without
+    reaching that aggregate at all. `docs/development/LE-09.md` books it to
+    T4b, the first step that holds a frame.
 
     Whether the key names a face that is actually installed is likewise not
     asked here -- `fonts.resolve_font_file` answers that at the point where
@@ -170,17 +174,44 @@ def _pin_variable_weight(face: ImageFont.FreeTypeFont, font_key: str) -> ImageFo
     produce it -- the one variable face carries the instance -- but adding
     faces is exactly LE-20's deliverable, and PIL's own answer there is a bare
     `ValueError` that would surface as neither a font nor a style problem.
+
+    The instance is matched byte for byte, so a face naming its weights
+    `"bold"`, `"SemiBold"` or `"Bold Italic"` is refused rather than drawn
+    with. That fails closed and says why, which is the right way round, but it
+    is a live constraint on LE-20 rather than a theoretical one and is
+    recorded as such in that handover.
     """
     try:
         instances = face.get_variation_names()
     except OSError:
+        # The one signal that means "no axes here", and read narrowly on
+        # purpose: widening it hands back a face at its axis defaults, which
+        # for the packaged variable face is Thin -- ink, right dimensions,
+        # every downstream check green, and a caption nobody can read. That is
+        # what this function exists to prevent, so it must not be reachable
+        # from a signal that means something else.
         return face
+    except Exception as error:
+        raise fonts.CaptionFontUnavailable(
+            f"caption font unavailable: {font_key} could not be asked for its named instances"
+        ) from error
     if PINNED_WEIGHT_INSTANCE.encode() not in instances:
         raise fonts.CaptionFontUnavailable(
             f"caption font unavailable: {font_key} is a variable face with no "
             f"{PINNED_WEIGHT_INSTANCE} instance"
         )
-    face.set_variation_by_name(PINNED_WEIGHT_INSTANCE)
+    try:
+        face.set_variation_by_name(PINNED_WEIGHT_INSTANCE)
+    except Exception as error:
+        # Naming the instance is not the last call into FreeType: PIL re-reads
+        # the names and then calls `setvarname`, and it carries a workaround
+        # in that method for a FreeType "unknown error" bug, so a refusal here
+        # is the library's measured behaviour. It arrives as a bare `OSError`,
+        # which is the shape this module converts everywhere else.
+        raise fonts.CaptionFontUnavailable(
+            f"caption font unavailable: {font_key} could not be pinned to its "
+            f"{PINNED_WEIGHT_INSTANCE} instance"
+        ) from error
     return face
 
 
@@ -214,7 +245,8 @@ def _load_face(font_key: str, font_px: int) -> ImageFont.FreeTypeFont:
     # The path comes from the register, never from the key: `resolve_font_file`
     # matches the pattern, looks the key up in a closed set and joins only the
     # file name it finds there. That is this module's whole reason for taking
-    # a key rather than a path.
+    # a key rather than a path -- but choosing the path is only half of it, and
+    # the check below is the other half.
     path = fonts.resolve_font_file(font_key)
     try:
         face = ImageFont.truetype(path, font_px)
@@ -224,4 +256,23 @@ def _load_face(font_key: str, font_px: int) -> ImageFont.FreeTypeFont:
         raise fonts.CaptionFontUnavailable(
             f"caption font unavailable: {font_key} could not be loaded"
         ) from error
+    # `ImageFont.truetype` catches its own `OSError` and walks the platform's
+    # font directories for a file of the same base name, so the handler above
+    # fires only when that search comes up empty: a packaged face FreeType
+    # refuses is otherwise answered with whatever the machine has installed.
+    # Measured on three ways of breaking the packaged file -- corrupt bytes,
+    # mode 000, truncation -- each of which came back as a different family.
+    #
+    # That is not a cosmetic substitution. `REGISTERED_CAPTION_FONTS` doubles
+    # as the rights list, so the replacement is a face with no clearance to be
+    # printed into a customer's video, and falling back to a system resource
+    # when a packaged one cannot be verified is what CLAUDE.md 5 forbids.
+    #
+    # Comparing the paths is exact and costs no filesystem call: PIL stores the
+    # argument it was constructed with, so a face that came out of the search
+    # carries the string it walked to rather than the `Path` asked for here.
+    if face.path != path:
+        raise fonts.CaptionFontUnavailable(
+            f"caption font unavailable: {font_key} did not load from the packaged file"
+        )
     return _pin_variable_weight(face, font_key)

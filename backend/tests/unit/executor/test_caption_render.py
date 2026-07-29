@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Final
@@ -56,6 +57,7 @@ def _synthesise_face(
     *,
     instances: Sequence[tuple[str, int]] = (),
     widen_at_maximum: bool = False,
+    family_name: str = "Synth",
 ) -> None:
     """Write a minimal face, optionally a variable one.
 
@@ -71,6 +73,9 @@ def _synthesise_face(
     so the outline actually thickens towards the top of the axis -- without
     them every instance would draw identical ink and a test could only observe
     that a name was set, not that anything happened.
+
+    `family_name` exists so a face staged somewhere other than the packaged
+    location can be told apart from the packaged one by name alone.
     """
     builder = FontBuilder(unitsPerEm=1000, isTTF=True)
     builder.setupGlyphOrder([".notdef", "A"])
@@ -86,7 +91,7 @@ def _synthesise_face(
 
     builder.setupHorizontalMetrics({".notdef": (700, 100), "A": (700, 100)})
     builder.setupHorizontalHeader(ascent=800, descent=-200)
-    builder.setupNameTable({"familyName": "Synth", "styleName": "Thin"})
+    builder.setupNameTable({"familyName": family_name, "styleName": "Thin"})
     builder.setupOS2()
     builder.setupPost()
 
@@ -130,6 +135,39 @@ def _stage_face(
         path.write_bytes(contents)
     monkeypatch.setattr(fonts, "bundle_root", lambda bundle: tmp_path / bundle)
     return path
+
+
+def _redirect_installed_font_search(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point PIL's basename search at a directory of our own, and name it.
+
+    When FreeType refuses a file, `ImageFont.truetype` catches its own
+    `OSError` and walks the platform's font directories for a file of the same
+    base name. Every platform it searches takes its user-level directory from
+    the environment -- `HOME` on macOS, `WINDIR` on Windows, `XDG_DATA_HOME`
+    and `XDG_DATA_DIRS` on Linux -- so redirecting those is what lets a case
+    below decide for itself whether a collision exists.
+
+    Without this the two "will not load" cases were green only because no font
+    of the packaged name happened to sit in the search path of the machine
+    they ran on; this one has 267 faces in `~/Library/Fonts` alone, and adding
+    faces is LE-20's deliverable.
+
+    The returned directory is not created: a case that wants the collision
+    creates it and writes a face there, and a case that wants no collision
+    leaves it absent.
+    """
+    searched = tmp_path / "installed-fonts"
+    if sys.platform == "win32":
+        monkeypatch.setenv("WINDIR", str(searched))
+        return searched / "fonts"
+    if sys.platform == "darwin":
+        monkeypatch.setenv("HOME", str(searched))
+        return searched / "Library/Fonts"
+    # `XDG_DATA_DIRS` as well: PIL falls back to /usr/local/share:/usr/share
+    # when it is unset, which is not ours to empty.
+    monkeypatch.setenv("XDG_DATA_HOME", str(searched))
+    monkeypatch.setenv("XDG_DATA_DIRS", str(searched))
+    return searched / "fonts"
 
 
 def _ink(face: ImageFont.FreeTypeFont, text: str = "A") -> int:
@@ -463,6 +501,92 @@ class TestLoadFace:
         assert face.getname()[1] == "Bold"
         assert _ink(face) > _ink(regular) > _ink(unpinned)
 
+    def test_a_variable_face_keeps_the_size_it_was_asked_for(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The size assertion above only ever reaches the static path.
+
+        A static face returns from `_pin_variable_weight` before any variation
+        call, so `test_a_registered_key_loads_at_the_requested_size` says
+        nothing about what pinning a weight does to the size. Measured,
+        `set_variation_by_name` leaves it alone -- so there is no bug here
+        today, only an unpinned property on the path that actually mutates the
+        face.
+        """
+        _stage_face(tmp_path, monkeypatch, instances=[("Thin", 100), ("Bold", 700)])
+
+        assert render._load_face(_REGISTERED_KEY, 64).size == 64
+
+    def test_a_face_that_faults_on_the_variation_query_is_not_taken_for_a_static_one(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`OSError` is the one signal that means "this face has no axes".
+
+        That reading is narrow on purpose: a face with no `fvar` answers
+        `OSError` to every variation call, and nothing else does. Widening it
+        was measured to survive the suite as it stood before this case existed
+        -- `except OSError` changed to `except BaseException` left all 158
+        cases green -- and what widening costs is a face handed back at its
+        axis defaults, which for the
+        packaged variable face is Thin. Ink, right dimensions, every
+        downstream check green, and a caption the viewer cannot read: the
+        exact failure `PINNED_WEIGHT_INSTANCE` exists to prevent.
+        """
+        _stage_face(tmp_path, monkeypatch, instances=[("Thin", 100), ("Bold", 700)])
+
+        def _fault(face: ImageFont.FreeTypeFont) -> list[bytes]:
+            raise RuntimeError("FreeType answered something other than OSError")
+
+        monkeypatch.setattr(ImageFont.FreeTypeFont, "get_variation_names", _fault)
+
+        with pytest.raises(fonts.CaptionFontUnavailable, match=_REGISTERED_KEY):
+            render._load_face(_REGISTERED_KEY, 48)
+
+    def test_a_face_that_refuses_to_be_pinned_is_reported_as_unavailable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Naming the instance is not the last FreeType call on this path.
+
+        `set_variation_by_name` re-reads the named instances and then calls
+        `setvarname`, and PIL carries a workaround inside that method for a
+        FreeType "unknown error" bug -- so a refusal there is measured
+        behaviour of the library, not a hypothetical. It surfaces as a bare
+        `OSError`, which without this would leave `_load_face` answering with
+        something that is neither a font problem nor a style problem: the
+        shape every other handler in this module exists to convert.
+        """
+        _stage_face(tmp_path, monkeypatch, instances=[("Thin", 100), ("Bold", 700)])
+
+        def _refuse(face: ImageFont.FreeTypeFont, name: str | bytes) -> None:
+            raise OSError("unknown freetype error")
+
+        monkeypatch.setattr(ImageFont.FreeTypeFont, "set_variation_by_name", _refuse)
+
+        with pytest.raises(fonts.CaptionFontUnavailable, match=_REGISTERED_KEY):
+            render._load_face(_REGISTERED_KEY, 48)
+
+    @pytest.mark.parametrize("method", ["get_variation_names", "set_variation_by_name"])
+    def test_an_interrupt_during_pinning_is_not_turned_into_a_font_problem(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, method: str
+    ) -> None:
+        """Both envelopes catch `Exception`, which is the point of the width.
+
+        Catching `BaseException` instead was measured to leave the whole suite
+        green, and what it would cost is a Ctrl-C during a render answered as
+        "caption font unavailable" and swallowed -- in a loop over a caption
+        track, a run that will not stop. The width exists to convert what a
+        third-party font call raises, not to take the process's own exits.
+        """
+        _stage_face(tmp_path, monkeypatch, instances=[("Thin", 100), ("Bold", 700)])
+
+        def _interrupt(*_args: object, **_kwargs: object) -> None:
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(ImageFont.FreeTypeFont, method, _interrupt)
+
+        with pytest.raises(KeyboardInterrupt):
+            render._load_face(_REGISTERED_KEY, 48)
+
     def test_a_variable_face_without_that_instance_is_reported_as_unavailable(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -472,11 +596,22 @@ class TestLoadFace:
         renderer as neither a font problem nor a style problem -- the same
         shape as the `TypeError` that a cmap-less face used to raise out of
         coverage judgement.
+
+        The message is asserted, not just the type, because the envelope round
+        `set_variation_by_name` would answer this case too: deleting the check
+        above it was measured to leave a type-only assertion green. What is
+        lost then is which of the two things went wrong -- "this face has no
+        such instance" is a gap in the packaged asset an operator can act on,
+        "this face refused to be pinned" is a fault in the library. The phrase
+        matched names the branch without naming the weight, so it does not
+        turn into an assertion that reads the constant it is pinning.
         """
         _stage_face(tmp_path, monkeypatch, instances=[("Thin", 100), ("Light", 300)])
 
-        with pytest.raises(fonts.CaptionFontUnavailable, match=_REGISTERED_KEY):
+        with pytest.raises(fonts.CaptionFontUnavailable, match="variable face with no") as refusal:
             render._load_face(_REGISTERED_KEY, 48)
+
+        assert _REGISTERED_KEY in str(refusal.value)
 
     @pytest.mark.parametrize(
         ("label", "contents"),
@@ -489,6 +624,14 @@ class TestLoadFace:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, label: str, contents: bytes
     ) -> None:
         path = _stage_face(tmp_path, monkeypatch, contents=contents)
+        _redirect_installed_font_search(tmp_path, monkeypatch)
+
+        # Premise: with the search path emptied, PIL really does refuse rather
+        # than answering with some other file of the same name. That is what
+        # makes this the case covering the `OSError` handler; the substitution
+        # it would otherwise take is the case below.
+        with pytest.raises(OSError):
+            ImageFont.truetype(path, 48)
 
         with pytest.raises(fonts.CaptionFontUnavailable, match=_REGISTERED_KEY) as refusal:
             render._load_face(_REGISTERED_KEY, 48)
@@ -496,6 +639,48 @@ class TestLoadFace:
         # The key names the setting an operator can fix; the path is a local
         # filesystem detail and stays out of the message (CLAUDE.md 7).
         assert str(path) not in str(refusal.value)
+
+    def test_a_face_that_will_not_load_is_not_replaced_by_an_installed_one(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A refused packaged face must not be answered from the user's disk.
+
+        `ImageFont.truetype` catches its own `OSError` and searches the
+        platform's font directories for a file of the same base name, so a
+        packaged face FreeType will not open does not fail closed: PIL returns
+        an unrelated face from the machine and the caption is drawn with it.
+        Three ways of breaking the packaged file -- corrupt bytes, mode 000,
+        truncation -- were each measured to come back as a different family.
+
+        Two things make that worse than a wrong-looking caption.
+        `REGISTERED_CAPTION_FONTS` is also the rights list
+        (`asset-rights-policy.v1.json`, `defaultDecision: "deny"`), so the
+        substitute is a face the product has no clearance to print into a
+        customer's video. And it is CLAUDE.md 5's shape exactly: a packaged
+        resource that cannot be verified is not to be replaced by whatever the
+        system happens to have.
+
+        The collision is staged rather than hoped for. The case has to mean
+        the same thing on a machine with no fonts installed and on one with
+        hundreds, and the two cases above were passing only because this
+        machine has none of the packaged names.
+        """
+        path = _stage_face(tmp_path, monkeypatch, contents=b"not a font at all" * 8)
+        installed = _redirect_installed_font_search(tmp_path, monkeypatch)
+        installed.mkdir(parents=True)
+        _synthesise_face(installed / path.name, family_name="SomeoneElsesFont")
+
+        # Premise: the staged collision is really what PIL reaches for. If the
+        # decoy were never found this case would pass on the `OSError` handler
+        # instead, and prove nothing about substitution.
+        substituted = ImageFont.truetype(path, 48)
+        assert Path(str(substituted.path)) != path
+
+        with pytest.raises(fonts.CaptionFontUnavailable, match=_REGISTERED_KEY) as refusal:
+            render._load_face(_REGISTERED_KEY, 48)
+
+        assert str(path) not in str(refusal.value)
+        assert str(installed) not in str(refusal.value)
 
     def test_a_missing_face_is_reported_as_unavailable(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

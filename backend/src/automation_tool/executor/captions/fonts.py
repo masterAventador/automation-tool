@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Final
 
-from fontTools.ttLib import TTFont, TTLibError
+from fontTools.ttLib import TTFont
 
 # The bundles carrying the faces the caption renderer draws with. A bundle is
 # the unit the rights register packs a face into, and it is also the namespace
@@ -91,7 +91,15 @@ MOTION_CATALOG_OVERLAY_SOURCE_DIRECTORY: Final = "assets/motion-catalog-overlay/
 
 
 class CaptionFontRejected(RuntimeError):
-    """A caption font could not be resolved, loaded or used."""
+    """The package's rejection root: a caption could not be drawn as asked.
+
+    The name is narrower than what it covers. `render.CaptionStyleRejected`
+    is a settings problem rather than a font one, and later steps will add
+    more; the class is still the right root because what a caller needs is one
+    type at its boundary and a subclass to tell the causes apart.
+    `TestRefusalHierarchy` enforces that over every exception class the
+    package defines, not over a list.
+    """
 
 
 class CaptionFontUnavailable(CaptionFontRejected):
@@ -101,7 +109,7 @@ class CaptionFontUnavailable(CaptionFontRejected):
 class CaptionTextRejected(CaptionFontRejected):
     """Text arrived in a shape no face could be asked to draw.
 
-    Subclasses the module's rejection root so a caller can still catch one
+    Subclasses the package's rejection root so a caller can still catch one
     type at its boundary, while separating the two causes: a face problem is
     something wrong with the installation, this is something wrong with what
     the caller passed in.
@@ -295,12 +303,25 @@ def glyph_coverage(font_key: str) -> frozenset[int]:
     try:
         with TTFont(str(path), lazy=True) as face:
             character_map = face.getBestCmap()
-    except (
-        TTLibError,  # not an sfnt, or a damaged one
-        KeyError,  # parses, but carries no cmap table
-        OSError,  # unreadable, or removed since it was resolved
-        ImportError,  # a WOFF2 face with no brotli to decompress it
-    ) as error:
+    # Every `Exception`, not the causes that were known when this was written:
+    #
+    #   TTLibError    not an sfnt, or a damaged one
+    #   KeyError      parses, but carries no cmap table
+    #   OSError       unreadable, or removed since it was resolved
+    #   ImportError   a WOFF2 face with no brotli to decompress it
+    #
+    # A truncated face -- the ordinary product of a partial download or an
+    # interrupted build, and so the failure LE-20's assembly step can actually
+    # produce -- escaped all four. It reaches `SFNTDirectoryEntry.loadData`,
+    # whose length check is a bare `assert`, and arrives as `AssertionError`;
+    # cut further back it arrives as `struct.error` out of `sstruct.unpack`.
+    # What a font parser raises on malformed input is not enumerable from the
+    # outside, so the honest shape is to catch broadly and answer in this
+    # module's own type. The block is two third-party calls and nothing else,
+    # which is what keeps the width from swallowing a fault of our own;
+    # `BaseException` is deliberately not caught, so an interrupt still gets
+    # out.
+    except Exception as error:
         raise CaptionFontUnavailable(
             f"caption font unavailable: {font_key} could not be read"
         ) from error

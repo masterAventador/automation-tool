@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
-from fontTools.ttLib import TTFont
+from fontTools.ttLib import TTFont, TTLibError
 
 from automation_tool.executor.captions import fonts
 
@@ -601,9 +601,20 @@ def _exception_types_defined_by_the_captions_package() -> tuple[type[BaseExcepti
     The probe cannot be `CaptionFontRejected.__subclasses__()`, which would be
     circular: a class that ought to be a subclass but is not would be absent
     from that answer, and absence is exactly the fault being looked for. So
-    module namespaces are enumerated instead, filtered by `__module__` so the
-    exception types merely imported into them -- `TTLibError` -- stay out, and
-    so a class re-exported by a sibling module is counted once.
+    module namespaces are enumerated instead, filtered by `__module__` so an
+    exception type merely imported into a module is not counted as one the
+    package defines, and so a class re-exported by a sibling module is counted
+    once. `TTLibError` was the live example of the first half until
+    `glyph_coverage` moved to a broad catch and stopped needing the import;
+    the filter stays because without it the next such import would be counted
+    as ours and then asserted to subclass our root.
+
+    One gap, recorded rather than closed because nothing can reach it today:
+    `pkgutil.iter_modules` does not yield `__init__`, and the `__module__`
+    filter demands a dot after the package name, so a refusal class defined in
+    `captions/__init__.py` itself would be missed twice over. That file is
+    deliberately empty (CLAUDE.md 9.2 -- what `__init__` re-exports is what
+    gets packaged), and a future sub-package would need a recursive walk.
     """
     package = importlib.import_module("automation_tool.executor.captions")
     found: dict[int, type[BaseException]] = {}
@@ -722,6 +733,45 @@ class TestGlyphCoverage:
         with pytest.raises(fonts.CaptionFontUnavailable):
             fonts.glyph_coverage(_LATIN)
 
+    @pytest.mark.parametrize("label", ["cut inside the cmap table", "cut inside the directory"])
+    def test_a_truncated_face_is_reported_as_unavailable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, label: str
+    ) -> None:
+        """A partial file parses far enough to fail deep, past the named types.
+
+        Distinct from unparsable bytes, which fail at the sfnt header and come
+        back as `TTLibError`. A file whose table directory survives but whose
+        table data is short fails at `sfnt.SFNTDirectoryEntry.loadData`, whose
+        length check is a bare `assert` -- so the failure arrives as
+        `AssertionError`, and cutting further back arrives as `struct.error`.
+        Neither is in the list of causes this handler was written from, and a
+        truncated face is the ordinary product of a partial download or an
+        interrupted build: exactly the failure LE-20's assembly step can
+        produce.
+        """
+        _stage_synthetic_faces(tmp_path, monkeypatch, {_LATIN: [ord("A")]})
+        registered = fonts.REGISTERED_CAPTION_FONTS[_LATIN]
+        path = tmp_path / registered.bundle / registered.packaged_name
+        whole = path.read_bytes()
+        if label == "cut inside the cmap table":
+            with TTFont(str(path), lazy=True) as face:
+                entry = face.reader.tables["cmap"]
+            # One byte short of the table the coverage read needs.
+            path.write_bytes(whole[: entry.offset + entry.length - 1])
+        else:
+            # Short of the 12-byte header plus one 16-byte directory entry.
+            path.write_bytes(whole[:20])
+
+        # Premise: this really does escape the causes the handler names. If a
+        # later fontTools raised one of them instead, the broad catch could be
+        # narrowed again -- and this is where that would be noticed.
+        with pytest.raises(BaseException) as raw, TTFont(str(path), lazy=True) as face:
+            face.getBestCmap()
+        assert not isinstance(raw.value, TTLibError | KeyError | OSError | ImportError)
+
+        with pytest.raises(fonts.CaptionFontUnavailable):
+            fonts.glyph_coverage(_LATIN)
+
     def test_a_face_with_no_character_map_is_reported_as_unavailable(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -806,6 +856,28 @@ class TestGlyphCoverage:
         monkeypatch.setattr(fonts, "TTFont", _no_brotli)
 
         with pytest.raises(fonts.CaptionFontUnavailable):
+            fonts.glyph_coverage(_LATIN)
+
+    def test_an_interrupt_is_not_turned_into_a_font_problem(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The catch is `Exception`, and the gap below it is the point.
+
+        Widening it to `BaseException` was measured to leave the whole suite
+        green, so the promise that an interrupt still gets out was stated in
+        comment and enforced nowhere. What it costs is a Ctrl-C during a
+        render reported as "caption font unavailable" and then swallowed:
+        coverage is consulted once per character per face, so a run that will
+        not stop.
+        """
+        _stage_synthetic_faces(tmp_path, monkeypatch, {_LATIN: [ord("A")]})
+
+        def _interrupt(*_args: object, **_kwargs: object) -> TTFont:
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(fonts, "TTFont", _interrupt)
+
+        with pytest.raises(KeyboardInterrupt):
             fonts.glyph_coverage(_LATIN)
 
     def test_an_unregistered_key_is_refused(self) -> None:
