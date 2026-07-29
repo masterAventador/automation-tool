@@ -35,9 +35,13 @@ def _reject() -> Never:
     raise InvalidEditingProjectModel
 
 
-def _validate_text(value: object, *, maximum: int, optional: bool = False) -> None:
-    if value is None and optional:
-        return
+def _validate_text(value: object, *, maximum: int) -> None:
+    """Bounded, trimmed, layout-only text.
+
+    Sibling modules carry an `optional=` flag on their copy of this helper;
+    this one deliberately does not. Nothing here has an optional text field,
+    and a parameter no caller passes is a branch no test can reach honestly.
+    """
     if not isinstance(value, str) or not value or value != value.strip() or len(value) > maximum:
         _reject()
     for character in value:

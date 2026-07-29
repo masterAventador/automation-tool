@@ -254,16 +254,3 @@ def test_project_title_length_bound_is_inclusive() -> None:
     assert len(_project(title="国" * MAX_PROJECT_TITLE_CHARACTERS).title) == (
         MAX_PROJECT_TITLE_CHARACTERS
     )
-
-
-def test_validate_text_accepts_a_missing_value_when_optional() -> None:
-    """`title` is required, so `EditingProject` never passes `optional=True`.
-
-    The branch has no caller in this module yet — a future optional field
-    will be its first real user (mirroring how `MAX_PROJECT_TITLE_CHARACTERS`
-    moved from T1 to its first real caller here). Exercised directly so it
-    is not carried as untested dead code in the meantime.
-    """
-    from automation_tool.control_plane.domain.editing_project import _validate_text
-
-    _validate_text(None, maximum=10, optional=True)
