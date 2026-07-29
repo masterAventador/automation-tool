@@ -273,6 +273,14 @@ def test_a_cancelled_job_carries_neither() -> None:
         ("job_id", "not-an-id"),
         ("project_id", "not-an-id"),
         ("timeline_id", "not-an-id"),
+        # Sibling resource ids: structurally valid, wrong type. A bare string
+        # is rejected however wide the guard is, so only these pin its
+        # narrowness -- and these three fields sit side by side with the same
+        # underlying representation, so a repository hydrating columns in the
+        # wrong order is exactly what the narrowness is for.
+        ("job_id", ArtifactId.new()),
+        ("project_id", TimelineId.new()),
+        ("timeline_id", EditingProjectId.new()),
         ("timeline_revision", 0),
         ("timeline_revision", 1.0),
         ("timeline_revision", True),
@@ -289,6 +297,23 @@ def test_a_cancelled_job_carries_neither() -> None:
 def test_job_structural_bounds_fail_closed(field: str, value: object) -> None:
     with pytest.raises(InvalidEditingJobModel):
         _job(**{field: value})
+
+
+def test_the_output_reference_is_narrow_too() -> None:
+    """Kept out of the table above on purpose.
+
+    Under the default QUEUED status `_validate_facts_match_status` refuses any
+    output at all, so a wrong-typed one there would prove the fact coupling,
+    not the type narrowness. Only a SUCCEEDED job reaches the isinstance guard.
+    """
+    with pytest.raises(InvalidEditingJobModel):
+        _job(status=EditingJobStatus.SUCCEEDED, output_artifact_id=TimelineId.new())
+
+
+def test_invalid_model_is_a_value_error() -> None:
+    """The API layer maps `ValueError` to 4xx; a silently widened base turns a
+    domain rejection into a 500. Its sibling transition error already has this."""
+    assert issubclass(InvalidEditingJobModel, ValueError)
 
 
 def test_a_job_cannot_be_updated_before_it_was_created() -> None:
