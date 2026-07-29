@@ -329,6 +329,17 @@ def probe_material(tools: PackagedMediaTools, path: Path) -> MaterialFacts: ...
 
 ### T7 真实素材验收 + 填满 `Material`（依赖变基）
 
+**本 Task 额外承接的两项**（从前序 Task 显式推迟而来，不靠人记得）：
+
+1. **枚举元测试**——遍历 `MaterialProbeRejection` 全部成员，断言每个都至少被一条用例实际抛出过。
+   推迟到此处是因为成员到 T4 才齐全（T2 加了 `UNDECODABLE` / `PROBE_CRASHED` 等，T3 加
+   `SILENT_AUDIO`，T4 加体积上限相关成员），在 T2 写只能覆盖一半。
+2. **产物 → `Material` 真实构造用例**——审查指出：目前音频无画幅、图片无时长**只由「手抄的常量
+   加手写的断言」保证**，仓库里没有任何用例真的拿探测产物去建一个 `Material`。
+   注意跨层常量一致性测试**拦不住形状组合问题**：两份限值一模一样，也挡不住「视频被判成图片」
+   这类 kind / 时长 / 画幅的组合错误（T2 的 Critical 正是此类）。故本 Task 必须逐条素材实际构造
+   `Material`，而不只是比对上限数值。
+
 **RED / 验收**：`test_material_probe_media.py`，session 级 fixture 用**随包 ffmpeg** 现场生成 6 个素材（实测总耗时约 1 秒）：
 
 | 素材 | 规格 |
@@ -339,6 +350,8 @@ def probe_material(tools: PackagedMediaTools, path: Path) -> MaterialFacts: ...
 | `audio.m4a` | 纯音频 2s |
 | `image.png` | 800×600 |
 | `corrupt.mp4` | 取 `sound.mp4` 前 5000 字节 |
+| `pipe_av.mkv` | 管道输出的 Matroska，容器不报时长（T2 Critical 的形状）|
+| `shot.jpg` | JPEG，容器 `image2` 且自报 0.04 秒时长 |
 
 断言：
 

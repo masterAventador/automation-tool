@@ -47,6 +47,7 @@ if [ -f "$d/.probe-argv" ]; then
 fi
 if [ -f "$d/.probe-sleep" ]; then sleep "$(cat "$d/.probe-sleep")"; fi
 if [ -f "$d/.probe-signal" ]; then kill -9 $$; fi
+if [ -f "$d/.probe-drain" ]; then cat > "$d/.probe-stdin"; fi
 if [ -f "$d/.probe-stderr" ]; then cat "$d/.probe-stderr" >&2; fi
 if [ -f "$d/.probe-stdout" ]; then cat "$d/.probe-stdout"; fi
 if [ -f "$d/.probe-exit" ]; then exit "$(cat "$d/.probe-exit")"; fi
@@ -76,6 +77,7 @@ def _ffprobe_stub(
     sleep: str = "",
     huge: bool = False,
     signal: bool = False,
+    drain_stdin: bool = False,
     argv_log: bool = False,
 ) -> Path:
     """A real executable standing in for ffprobe.
@@ -92,6 +94,8 @@ def _ffprobe_stub(
         (directory / ".probe-stderr").write_text(stderr, encoding="utf-8")
     if signal:
         (directory / ".probe-signal").write_text("1", encoding="ascii")
+    if drain_stdin:
+        (directory / ".probe-drain").write_text("1", encoding="ascii")
     if huge:
         (directory / ".probe-stdout").write_bytes(b"x" * (MAX_PROBE_OUTPUT_BYTES + 1024))
     elif stdout:
@@ -119,6 +123,7 @@ def _probe_json(
     streams: list[dict[str, Any]],
     *,
     duration: Any = "3.000000",
+    format_name: Any = "mov,mp4,m4a,3gp,3g2,mj2",
     omit_format: bool = False,
     omit_streams: bool = False,
 ) -> str:
@@ -126,7 +131,7 @@ def _probe_json(
     if not omit_streams:
         payload["streams"] = streams
     if not omit_format:
-        fmt: dict[str, Any] = {"format_name": "mov,mp4,m4a,3gp,3g2,mj2"}
+        fmt: dict[str, Any] = {"format_name": format_name}
         if duration is not None:
             fmt["duration"] = duration
         payload["format"] = fmt
@@ -390,12 +395,79 @@ class TestReadStreamFactsKind:
         assert facts.kind is ProbedMaterialKind.VIDEO
         assert facts.audio_codec is None
 
-    def test_reads_an_image_as_having_no_duration(self, tmp_path: Path) -> None:
-        facts = _facts_from(tmp_path, _probe_json([_video_stream()], duration=None))
+    def test_reads_a_still_image_from_a_picture_container(self, tmp_path: Path) -> None:
+        facts = _facts_from(
+            tmp_path,
+            _probe_json([_video_stream(codec_name="png")], duration=None, format_name="png_pipe"),
+        )
         assert facts.kind is ProbedMaterialKind.IMAGE
         assert facts.duration_ms is None
         assert facts.width == 640
         assert facts.height == 360
+
+    def test_reads_a_still_image_that_reports_a_frame_duration(self, tmp_path: Path) -> None:
+        """A JPEG comes back as `image2` carrying one frame's worth of duration.
+
+        Measured with the packaged ffprobe: `shot.jpg` reports
+        `format_name: image2` and `duration: 0.040000`. Treating a stated
+        duration as proof of motion turned that still into a 40 ms video.
+        """
+        facts = _facts_from(
+            tmp_path,
+            _probe_json(
+                [_video_stream(codec_name="mjpeg")],
+                duration="0.040000",
+                format_name="image2",
+            ),
+        )
+        assert facts.kind is ProbedMaterialKind.IMAGE
+        assert facts.duration_ms is None
+
+    def test_treats_a_non_text_container_name_as_motion(self, tmp_path: Path) -> None:
+        """ffprobe output is untrusted, so the container name may not be text."""
+        facts = _facts_from(tmp_path, _probe_json([_video_stream()], format_name=7))
+        assert facts.kind is ProbedMaterialKind.VIDEO
+        assert facts.duration_ms == 3000
+
+    def test_rejects_a_video_whose_container_states_no_duration(self, tmp_path: Path) -> None:
+        """A real recording, not a still. It must not be quietly reshaped into one.
+
+        Measured: ffmpeg writing Matroska to a pipe cannot seek back to fill the
+        duration in, so `MediaRecorder` WebM and piped MKV arrive exactly like
+        this. Judging by the missing duration filed a 2-second H.264 clip as a
+        picture while `video_codec` said `h264` right beside it.
+        """
+        excinfo = _reject_from(
+            tmp_path,
+            stdout=_probe_json(
+                [_video_stream(), _audio_stream()], duration=None, format_name="matroska,webm"
+            ),
+        )
+        assert _rejection(excinfo) is MaterialProbeRejection.UNUSABLE_DURATION
+
+    def test_rejects_a_silent_video_whose_container_states_no_duration(
+        self, tmp_path: Path
+    ) -> None:
+        """The branch that used to be accepted outright, with no error anywhere.
+
+        With no audio stream `Material` had nothing left to object to, so the
+        clip became a permanent still in the library.
+        """
+        excinfo = _reject_from(
+            tmp_path,
+            stdout=_probe_json([_video_stream()], duration=None, format_name="matroska,webm"),
+        )
+        assert _rejection(excinfo) is MaterialProbeRejection.UNUSABLE_DURATION
+
+    def test_treats_a_picture_container_carrying_audio_as_motion(self, tmp_path: Path) -> None:
+        """`Material` forbids a picture with sound, so this may not be filed as one."""
+        excinfo = _reject_from(
+            tmp_path,
+            stdout=_probe_json(
+                [_video_stream(), _audio_stream()], duration=None, format_name="png_pipe"
+            ),
+        )
+        assert _rejection(excinfo) is MaterialProbeRejection.UNUSABLE_DURATION
 
     def test_reads_audio_with_no_frame_size(self, tmp_path: Path) -> None:
         """`Material` forbids a frame size on audio, so probing must not invent one."""
@@ -456,7 +528,7 @@ class TestReadStreamFactsProbeFailure:
         output the dying process had already written.
         """
         excinfo = _reject_from(tmp_path, stdout=_probe_json([_video_stream()]), signal=True)
-        assert _rejection(excinfo) is MaterialProbeRejection.UNDECODABLE
+        assert _rejection(excinfo) is MaterialProbeRejection.PROBE_CRASHED
 
     def test_accepts_output_exactly_at_the_size_limit(self, tmp_path: Path) -> None:
         facts = _facts_from(
@@ -479,6 +551,18 @@ class TestReadStreamFactsProbeFailure:
 
     def test_rejects_output_that_is_not_json(self, tmp_path: Path) -> None:
         excinfo = _reject_from(tmp_path, stdout="not json at all")
+        assert _rejection(excinfo) is MaterialProbeRejection.PROBE_FAILED
+
+    def test_rejects_an_empty_object_reported_as_success(self, tmp_path: Path) -> None:
+        """The exact payload ffprobe prints when it fails, but with a success code.
+
+        Today that pairing cannot happen — a failing ffprobe always exits
+        non-zero. This pins the behaviour anyway, because the empty object is
+        what a future ffprobe would most plausibly start returning for a file it
+        cannot describe, and the answer must stay a rejection rather than an
+        all-`None` fact.
+        """
+        excinfo = _reject_from(tmp_path, stdout="{}", exit_code=0)
         assert _rejection(excinfo) is MaterialProbeRejection.PROBE_FAILED
 
     def test_rejects_output_missing_the_streams_key(self, tmp_path: Path) -> None:
@@ -621,6 +705,11 @@ class TestReadStreamFactsCodecName:
         excinfo = _reject_from(tmp_path, stdout=_probe_json([_video_stream(codec_name="h26‮4")]))
         assert _rejection(excinfo) is MaterialProbeRejection.PROBE_FAILED
 
+    def test_accepts_a_codec_name_at_the_length_limit(self, tmp_path: Path) -> None:
+        name = "h" * MAX_CODEC_NAME_CHARACTERS
+        facts = _facts_from(tmp_path, _probe_json([_video_stream(codec_name=name)]))
+        assert facts.video_codec == name
+
     def test_rejects_an_overlong_codec_name(self, tmp_path: Path) -> None:
         excinfo = _reject_from(
             tmp_path,
@@ -718,7 +807,58 @@ class TestReadStreamFactsInvocation:
         assert "tags" not in entries
 
 
+class TestReadStreamFactsProcessBoundary:
+    def test_leaves_the_parent_stdin_untouched(self, tmp_path: Path) -> None:
+        """The executor's own stdin carries Tauri's bootstrap and command stream.
+
+        A child inheriting it could eat bytes out of that protocol channel, so
+        the probe is handed `DEVNULL`. The stub actively drains whatever it is
+        given; the sentinel therefore survives only if the child never saw it.
+        """
+        sentinel = b"BOOTSTRAP-SENTINEL\n"
+        seeded = tmp_path / "stdin.bin"
+        seeded.write_bytes(sentinel)
+        tools = _tools(tmp_path, stdout=_probe_json([_video_stream()]), drain_stdin=True)
+        source = _source(tmp_path)
+        saved = os.dup(0)
+        try:
+            with seeded.open("rb") as handle:
+                os.dup2(handle.fileno(), 0)
+                read_stream_facts(tools, source)
+                assert os.read(0, len(sentinel)) == sentinel
+        finally:
+            os.dup2(saved, 0)
+            os.close(saved)
+        assert (tmp_path / ".probe-stdin").read_bytes() == b""
+
+
 class TestReadStreamFactsLeaksNothing:
+    def test_no_traceback_frame_retains_the_probe_diagnostic(self, tmp_path: Path) -> None:
+        """Capturing stderr keeps the path alive in a frame long after the raise.
+
+        `CompletedProcess` renders its captured streams, so a crash reporter
+        walking `f_locals` would carry the operator's private path off the
+        machine even though nothing ever reads that field.
+        """
+        secret = "operator-private-holiday-2019"
+        diagnostic = f"/private/var/folders/ab/{secret}.mp4: Invalid data found"
+        tools = _tools(tmp_path, stdout="{}", exit_code=1, stderr=diagnostic)
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_stream_facts(tools, _source(tmp_path))
+        module_file = material_probe.__file__
+        traceback = excinfo.value.__traceback__
+        inspected = 0
+        while traceback is not None:
+            frame = traceback.tb_frame
+            # Only the module's own frames: this test's frame naturally holds
+            # the diagnostic it just wrote, which says nothing about the module.
+            if frame.f_code.co_filename == module_file:
+                inspected += 1
+                for value in frame.f_locals.values():
+                    assert secret not in repr(value)
+            traceback = traceback.tb_next
+        assert inspected, "no material_probe frame was inspected"
+
     def test_rejection_carries_neither_path_nor_probe_diagnostics(self, tmp_path: Path) -> None:
         """ffprobe names the file in its diagnostics; none of it may reach the caller."""
         secret = "operator-private-name"

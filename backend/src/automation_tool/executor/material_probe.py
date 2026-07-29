@@ -35,6 +35,11 @@ MAX_MATERIAL_DIMENSION: Final = 8192
 
 _PROBE_ENTRIES: Final = "format=duration,format_name:stream=codec_type,codec_name,width,height"
 
+# Container names ffprobe reports for a single still picture, measured with the
+# packaged build: PNG and BMP demux as `*_pipe`, a JPEG as `image2`.
+_PICTURE_CONTAINER_SUFFIX: Final = "_pipe"
+_PICTURE_CONTAINER_NAMES: Final = frozenset({"image2"})
+
 
 class MaterialProbeRejection(StrEnum):
     """Why one file cannot become a material.
@@ -52,6 +57,7 @@ class MaterialProbeRejection(StrEnum):
     TOO_LONG = "too_long"
     UNUSABLE_FRAME_SIZE = "unusable_frame_size"
     FRAME_TOO_LARGE = "frame_too_large"
+    PROBE_CRASHED = "probe_crashed"
     PROBE_FAILED = "probe_failed"
 
 
@@ -219,13 +225,29 @@ def _run_probe(ffprobe: Path, source: Path) -> dict[str, object]:
                 "--",
                 os.fspath(source),
             ],
+            # The executor's own stdin carries Tauri's bootstrap handshake and
+            # command stream; a child inheriting it could consume bytes out of
+            # that protocol channel.
             stdin=subprocess.DEVNULL,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            # Discarded at the pipe rather than captured and ignored. ffprobe
+            # names the offending file in every diagnostic, and a captured
+            # stream stays reachable through `CompletedProcess` in the frame
+            # that raised — where a crash reporter walking `f_locals` would
+            # carry the operator's private path off the machine. Discarding it
+            # also removes the one stream with no size limit.
+            stderr=subprocess.DEVNULL,
             timeout=PROBE_TIMEOUT_SECONDS,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
         _reject(MaterialProbeRejection.PROBE_FAILED)
+    if completed.returncode < 0:
+        # POSIX reports a signalled child as a negative code. Telling the user
+        # their file is unreadable would send them to replace a file that is
+        # fine; the packaged tool is what died. Free to distinguish — no
+        # diagnostic text is involved, so nothing here drifts with locale.
+        _reject(MaterialProbeRejection.PROBE_CRASHED)
     if completed.returncode != 0:
         # Measured: unsupported data, a truncated container and an empty file
         # all yield exactly `exit=1` with `stdout={}`. Reading stdout without
@@ -243,6 +265,18 @@ def _run_probe(ffprobe: Path, source: Path) -> dict[str, object]:
     if not isinstance(payload, dict):
         _reject(MaterialProbeRejection.PROBE_FAILED)
     return payload
+
+
+def _is_picture_container(format_name: object) -> bool:
+    """Whether ffprobe named a container that holds one still picture.
+
+    Measured with the packaged ffprobe: PNG and BMP demux as `png_pipe` and
+    `bmp_pipe`, while a JPEG comes back as `image2`. Every timed container seen
+    so far (`mov,mp4,...`, `matroska,webm`) is named without that suffix.
+    """
+    return isinstance(format_name, str) and (
+        format_name.endswith(_PICTURE_CONTAINER_SUFFIX) or format_name in _PICTURE_CONTAINER_NAMES
+    )
 
 
 def _first_stream(streams: list[object], codec_type: str) -> dict[str, object] | None:
@@ -308,11 +342,19 @@ def read_stream_facts(tools: PackagedMediaTools, source: Path) -> MediaStreamFac
     audio = _first_stream(streams, "audio")
     duration_text = container.get("duration")
     if video is not None:
-        # A still image reports a video stream with no `duration` key at all —
-        # measured against the packaged ffprobe, which gives a PNG
-        # `format_name: png_pipe` and omits duration entirely. Absence is the
-        # signal; a zero would not be.
-        kind = ProbedMaterialKind.IMAGE if duration_text is None else ProbedMaterialKind.VIDEO
+        # The container says whether this is a picture; the duration does not.
+        # Both directions were measured wrong before this read `format_name`:
+        # ffmpeg writing Matroska to a pipe cannot seek back to fill the
+        # duration in, so a real 2-second H.264 clip arrives with no duration
+        # and was filed as a still, while a JPEG arrives as `image2` *carrying*
+        # a 0.040000 duration and was filed as a 40 ms video. Requiring no audio
+        # as well keeps a picture container with a sound track — which
+        # `Material` forbids outright — from being filed as one.
+        kind = (
+            ProbedMaterialKind.IMAGE
+            if audio is None and _is_picture_container(container.get("format_name"))
+            else ProbedMaterialKind.VIDEO
+        )
     elif audio is not None:
         kind = ProbedMaterialKind.AUDIO
     else:
