@@ -367,7 +367,23 @@ export function Workbench({
           <ul className="recent-task-list">
             {projectedTasks.slice(0, 5).map((task) => (
               <li key={task.taskId}>
-                <Button type="link" onClick={() => onOpenTask(task.taskId)}>
+                {/*
+                 * The row is named by when it was created, which is the only
+                 * fact in the projection a person can read — but that name is
+                 * only second-resolution, so two Tasks created in the same
+                 * second are indistinguishable to anything that needs to point
+                 * at one: automation, diagnostics, a support conversation.
+                 *
+                 * The identifier therefore stays, as an inert attribute rather
+                 * than as the label. `aria-label` would have replaced the
+                 * readable name for a screen reader, which trades one problem
+                 * for another.
+                 */}
+                <Button
+                  type="link"
+                  data-task-id={task.taskId}
+                  onClick={() => onOpenTask(task.taskId)}
+                >
                   {taskDisplayName(task)}
                 </Button>
                 <Tag color={statusColor(task.status)}>{STATUS_LABELS[task.status]}</Tag>

@@ -34,6 +34,14 @@ async function waitForRenderedText(...expected: string[]): Promise<string> {
   return latestText;
 }
 
+/** 等某一条任务出现在列表里，按它的标识而不是按它的显示名。 */
+async function waitForTaskRow(taskId: string): Promise<void> {
+  await browser.waitUntil(
+    async () => browser.$(`button[data-task-id="${taskId}"]`).isExisting(),
+    { timeout: 90_000, timeoutMsg: `运行记录里没有出现任务 ${taskId}` },
+  );
+}
+
 async function openCreatePage(): Promise<void> {
   await openTaskCreate();
   await expect(await browser.$("h2")).toHaveText("新建运营任务");
@@ -79,19 +87,24 @@ describe("T3-19 hidden App lifecycle acceptance", () => {
     await browser.$("button=返回工作台").click();
     // 「返回工作台」把页面切到自动化中心而不是运行记录列表。
     await openAutomationRuns();
-    await waitForRenderedText(controlledTaskId);
+    await waitForTaskRow(controlledTaskId);
     await openCreatePage();
     const succeededTaskId = await createTask("T3-19 成功链路");
     await waitForRenderedText("已成功", "任务完成", "100%");
 
     await browser.refresh();
-    await waitForRenderedText(
-      controlledTaskId,
-      succeededTaskId,
-      "已取消",
-      "已成功",
-    );
-    await browser.$(`button=${succeededTaskId}`).click();
+    // 改版把默认落地页换成了 AI 助理，所以刷新之后停的不再是运行记录。
+    // 这一段要证的是「任务在重新加载之后仍然在」，不是「重新加载之后还停在原页」
+    // ——所以先按用户会走的路导航回去，再断言持久化。
+    await waitForStartup();
+    await openAutomationRuns();
+    // 列表里的行现在按创建时刻命名（`07-29 12:01:54 的任务`），不再印 UUID
+    // ——那是有意的可读性改动。任务标识仍在，作为惰性的 `data-task-id`，
+    // 所以这里改成按标识找行，再顺带断言两条的终态都还在。
+    await waitForTaskRow(controlledTaskId);
+    await waitForTaskRow(succeededTaskId);
+    await waitForRenderedText("已取消", "已成功");
+    await browser.$(`button[data-task-id="${succeededTaskId}"]`).click();
     await waitForRenderedText("任务运行详情", succeededTaskId, "任务完成", "100%");
     assert.equal(/产品登录|注册账号|账号登录/.test(await browser.$("body").getText()), false);
   });
