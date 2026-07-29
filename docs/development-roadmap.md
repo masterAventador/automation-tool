@@ -366,6 +366,7 @@
 | H8-20 | 后台检查与下载 | App 启动、有界轮询和用户“检查更新”共用同一检查入口；后台下载、签名验证、断点/失败恢复；新包原子覆盖旧缓存 | H8-19 | ✅ 已完成 |
 | H8-21 | 安装与重启协调 | 立即安装先安全退出主 App；暂缓在启动/轮询继续提示；强更下载后下次启动静默进入安装 | H8-20 | ✅ 已完成 |
 | H8-22 | 更新 UI 与双平台验收 | 通用设置/提示 UI；真实签名包从 App 原入口在 macOS、Windows 完成升级、跳过、覆盖和强更验收 | H8-21 | 🔍 待 Developer ID/公证与 Windows Authenticode |
+| H8-23 | 仓储连接失败脱敏收口 | `except SQLAlchemyError` 接不住两类真实故障：连接被拒是 asyncio 的 `OSError`（消息带 host 与端口），认证/权限/连接数上限是 asyncpg 的 `PostgresError`（消息带角色名与库名），两者都不是 `SQLAlchemyError` 子类，会原样抵达调用方并进日志，违反本文件 §4.1 与 CLAUDE.md §7。改为 `(OSError, SQLAlchemyError)` + catch-all 收口，并为每处补真实拒绝连接与真实错密码的用例——现有用例一律注入 `SQLAlchemyError`，照不出这个缺口。AST 实测范围：`backend/src` 下 6 个文件 17 处 try（`account_device`、`account_session`、`customer_account`、`task_discovery`、`task_target_result`、`workbench_metrics` 六个仓储），`session.py` 与另外 6 个仓储已正确收口，不在范围内。发现于 LE-05 T1，证据见 `docs/development/LE-05.md` | H8-11 | ⬜ 未开始 |
 
 ## 14. Wave 9：双平台安装包与本地候选版
 

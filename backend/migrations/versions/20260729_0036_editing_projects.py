@@ -21,6 +21,25 @@ Cross-aggregate invariants are a different matter and do go into the schema:
 0038 and 0039 add the composite foreign key and the partial unique index that
 no domain object can enforce, because no domain object can see both sides.
 
+**This is the opposite of what 0032 and 0034 did**, and the difference is
+deliberate rather than drift. Those two migrations packed the cloud-editing
+tables with check constraints -- `ck_aliyun_editing_intents_prepared_shape` and
+its neighbours -- because those tables had no domain object behind them: the
+rows arrived from a vendor API and the constraints were the only validation
+there was. `editing_projects` is the other way round; every row goes through
+`EditingProject.__post_init__` on the way in and on the way back out. Whoever
+next adds a table here has to pick one of these two shapes on purpose, not by
+copying whichever neighbour they happened to open.
+
+One duplicated literal is knowingly left behind: `caption_font_key` is
+`varchar(64)` here, while the domain expresses the same limit as the `{0,63}`
+repetition inside `_FONT_KEY_PATTERN`. Nothing checks that the two agree.
+Widening the pattern without widening the column turns a validation error into
+a `StringDataRightTruncation` at insert time. `title` does not have this problem
+-- `schema.py` imports `MAX_PROJECT_TITLE_CHARACTERS` -- but a migration is a
+frozen historical record and must not import a constant that can later change
+underneath it, so the number is spelled out on both sides here.
+
 Revision ID: 20260729_0036
 Revises: 20260728_0035
 """

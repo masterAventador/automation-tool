@@ -43,10 +43,30 @@
 7. **`materials.content_digest` 加 UNIQUE 约束**，仓储提供 `find_by_digest`。域层只管
    格式（SHA-256 hex），「同内容不重复入库」这半边由 DB 唯一性承担。重复登记的
    仓储行为：抛模块异常（带 digest 不带路径），不做 upsert——素材是否复用由调用方决定。
-8. **仓储 house 风格**（`workbench_metrics_repository.py` 是范例）：构造器 isinstance
-   守卫；入参 isinstance 守卫；`except SQLAlchemyError: raise <模块>Rejected from None`
-   （**`from None` 是必须的**——LE-07 实测过异常链把私有路径带进日志）；不写 SQL 字符串，
-   全走 Core 表达式。
+8. **仓储 house 风格**：构造器 isinstance 守卫；入参 isinstance 守卫；不写 SQL 字符串，
+   全走 Core 表达式。异常映射按下面这套形状，**`from None` 每一条都是必须的**——LE-07
+   实测过异常链把私有路径带进日志：
+
+   ```python
+   except IntegrityError:        raise <模块>AlreadyRegistered from None
+   except (OSError, SQLAlchemyError): raise <模块>Unavailable from None
+   except Exception:             raise <模块>Unavailable from None
+   ```
+
+   > **本条原文写的是「`except SQLAlchemyError: raise <模块>Rejected from None`」，
+   > 由 T1 实测推翻，2026-07-29 就地更正。** 两处错：
+   >
+   > - **捕获面不够。** 连接被拒是 asyncio 的 `ConnectionRefusedError`（`OSError`），
+   >   认证失败是 asyncpg 的 `InvalidPasswordError`（`PostgresError` → `Exception`），
+   >   两者都不是 `SQLAlchemyError` 子类，会带着 host:port 或角色名穿过去。house 里
+   >   `(OSError, SQLAlchemyError)` 有五处先例（`task_event_convergence_repository.py:723`
+   >   等），catch-all 尾巴的先例是 `bilibili_publish_repository.py:158-163`；
+   > - **范例选错了。** `workbench_metrics_repository.py` 是只读投影，没有重复键路径，
+   >   所以它一个 `Rejected` 就够用；带 `save` 的仓储照抄它，会把「已存在」「不存在」
+   >   「库挂了」压成同一个异常，调用方无法判断能否重试，LE-06 也没法分 409/404/503。
+   >   带写入的仓储按 `customer_account_repository.py:162-165` 的两分法，异常命名对齐
+   >   `customer_accounts.py`（`AlreadyExists` / `NotFound` / `PersistenceUnavailable` /
+   >   `DataRejected`，共用一个私有 `_XxxFailure` 基类）。
 9. **Material 描述保护的结构性边界测试**（台账明令）：AST 测试禁止 `material.py` 之外
    的模块对 `Material` 调 `dataclasses.replace(` 或直接构造 `Material(...)`。
    **样板 `test_shipped_package_boundary.py` 不在本分支**（台账 LE-05 行已登记），
@@ -145,10 +165,21 @@ RED 清单（不变式三条全部走**违例注入**）：
 
 ### T5 收口
 
-`alembic_head.py` 对齐 `0039`；`docs/development/LE-05.md` 补齐（RED/GREEN/失败矩阵/
+`docs/development/LE-05.md` 补齐（RED/GREEN/失败矩阵/
 违例注入的实跑输出/变异清单）；台账 LE-05 →（集成测试全绿则）`✅ 已完成`——LE-05 是
 纯后端，按 CLAUDE.md §8「后端端点可在服务端任务完成真实 PostgreSQL 门禁」，正式 App
 纵向验收归 LE-06/LE-17 登记；全量 `pytest -q` + 门禁脚本；计数脚本。
+
+`alembic_head.py` **不需要对齐版本号**：它用 `ScriptDirectory.get_heads()` 从已提交的
+迁移脚本解析，并在头数不等于 1 时报错。原文要求「对齐 `0039`」与该文件现状不符，
+T1 实测后删除。
+
+**T5 的 final gate 必须跑整个 `tests/integration` 目录，不许挑子集。** 依据是结构而不是
+某一次的红：`conftest.py` 的 `postgresql_url` 是 `scope="session"` 的单个实例，而大量
+用例在开头 `delete()` 共享表（`installations`、`tasks` 等）——同一个库、跨文件互删，
+换一个子集组合就换一套前置数据。所以子集全绿只说明「这批一起跑没事」，不构成回归证据。
+（T1 期间审查者报告过某子集 8 failed 并判为既有互扰；T1 实跑的两个子集均全绿、未复现，
+故此处不引用那个数字——上面的结构理由本身已经足够。）
 
 ## 失败矩阵（§9 适用行）
 
