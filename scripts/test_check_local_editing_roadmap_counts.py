@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from check_local_editing_roadmap_counts import (  # noqa: E402
     MAX_CONCURRENT_WORK_LINES,
+    _TASK_ROW_CELLS,
 )
 
 # These read the ledger's *current* counts instead of a hardcoded snapshot: a
@@ -149,3 +150,53 @@ def test_status_cross_check_mismatch_fails(tmp_path: Path) -> None:
     result = _run(broken)
     assert result.returncode != 0
     assert "已完成" in result.stdout + result.stderr
+
+
+def test_a_task_row_that_lost_its_dependency_cell_fails(tmp_path: Path) -> None:
+    """删掉「依赖」格，每一个计数都还是对的——所以计数守不住这件事。
+
+    `_iter_task_rows` 取 `fields[-1]`，少一格时「当前状态」正好滑进「依赖」
+    的位置，状态照样读得到，小节计数、总数、状态分布全部依旧一致。这不是
+    假想：`d1dcd8b` 就是这样把 LE-05、LE-09、LE-10 三行的依赖整格删掉的，
+    而门禁全绿。台账是「任务定义、**依赖**和当前下一步的唯一事实源」，
+    当时 LE-05 恰恰是「当前下一步」，它的依赖格是空的。
+    """
+    text = _LEDGER.read_text(encoding="utf-8")
+    row = next(
+        candidate.group(0)
+        for candidate in _NOT_STARTED_ROW.finditer(text)
+        if len(candidate.group(0).strip("|").split("|")) == _TASK_ROW_CELLS
+    )
+    cells = row.strip("|").split("|")
+    maimed = "|" + "|".join(cells[:-2] + cells[-1:]) + "|"
+
+    broken = tmp_path / "roadmap.md"
+    broken.write_text(text.replace(row, maimed), encoding="utf-8")
+
+    result = _run(broken)
+    assert result.returncode != 0
+    assert "格" in result.stdout + result.stderr
+
+
+def test_an_unescaped_pipe_inside_a_cell_fails(tmp_path: Path) -> None:
+    """裸竖线在 GFM 里照样切格，代码跨度不豁免——所以它也是列数缺陷。
+
+    与上一条同一个守卫的另一侧：`| LE-03 | ... `int | None` ... |` 渲染出来
+    是六列，多出来的那格是文字被劈开的碎片。多一列和少一列都说明这一行的
+    格子边界不是作者以为的那样。
+    """
+    text = _LEDGER.read_text(encoding="utf-8")
+    row = next(
+        candidate.group(0)
+        for candidate in _NOT_STARTED_ROW.finditer(text)
+        if len(candidate.group(0).strip("|").split("|")) == _TASK_ROW_CELLS
+    )
+    cells = row.strip("|").split("|")
+    split_open = "|" + "|".join([*cells[:1], "`int | None`", *cells[1:]]) + "|"
+
+    broken = tmp_path / "roadmap.md"
+    broken.write_text(text.replace(row, split_open), encoding="utf-8")
+
+    result = _run(broken)
+    assert result.returncode != 0
+    assert "格" in result.stdout + result.stderr

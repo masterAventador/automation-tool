@@ -19,6 +19,7 @@ _DEFAULT_LEDGER = Path(__file__).resolve().parents[1] / "docs/local-video-editin
 
 _SECTION = re.compile(r"^### (\d+\.\d+) .*?（(\d+) 项）$", re.MULTILINE)
 _TASK_ROW = re.compile(r"^\| (LE-\d+) \|", re.MULTILINE)
+_CELL_SPLIT = re.compile(r"(?<!\\)\|")
 _TOTAL = re.compile(r"^- 任务总数：(\d+)$", re.MULTILINE)
 _NOT_STARTED = re.compile(r"^- ⬜ 未开始：(\d+)$", re.MULTILINE)
 _DONE = re.compile(r"^- ✅ 已完成：(\d+)$", re.MULTILINE)
@@ -35,6 +36,13 @@ MAX_CONCURRENT_WORK_LINES = 3
 
 # 表格「当前状态」列里出现的字面值。RED 与实现中在表格里是两个不同状态，但
 # 进度区把它们合并声明成同一个「🧪 RED / 🚧 实现中」桶。
+# 任务行的格子数：ID | 任务 | 交付与验收 | 依赖 | 当前状态。
+# 少一格与多一格是同一个缺陷的两侧：少是有内容被整格删掉（`d1dcd8b` 删过
+# LE-05/LE-09/LE-10 三行的依赖，而计数全绿——因为 `_iter_task_rows` 取
+# `fields[-1]`，状态正好滑进依赖的位置），多是单元格里有裸竖线把文字劈开
+# 了（GFM 的代码跨度**不豁免** `|`，`` `int | None` `` 照样切格）。
+_TASK_ROW_CELLS = 5
+
 _STATUS_NOT_STARTED = "⬜ 未开始"
 _STATUS_RED = "🧪 RED"
 _STATUS_IN_PROGRESS = "🚧 实现中"
@@ -53,15 +61,18 @@ def _fail(message: str) -> None:
     print(f"FAIL: {message}")
 
 
-def _iter_task_rows(text: str) -> list[tuple[str, str]]:
-    """Return (task_id, 当前状态) for every task row line in the ledger."""
-    rows: list[tuple[str, str]] = []
+def _iter_task_rows(text: str) -> list[tuple[str, str, int]]:
+    """Return (task_id, 当前状态, 格子数) for every task row line in the ledger."""
+    rows: list[tuple[str, str, int]] = []
     for line in text.splitlines():
         match = _TASK_ROW.match(line)
         if match is None:
             continue
-        fields = [field.strip() for field in line.strip().split("|")[1:-1]]
-        rows.append((match.group(1), fields[-1]))
+        # 按 GFM 的规则切：只有**未转义**的竖线才分格，`\|` 是单元格内容。
+        # 朴素的 `split("|")` 会把 `` `int \| None` `` 也劈开，于是「转义了
+        # 竖线」和「忘了转义」在守卫眼里一模一样——那这条守卫就白加了。
+        fields = [field.strip() for field in _CELL_SPLIT.split(line.strip())[1:-1]]
+        rows.append((match.group(1), fields[-1], len(fields)))
     return rows
 
 
@@ -90,6 +101,17 @@ def check(text: str) -> list[str]:
     declared_total = int(total_match.group(1))
 
     task_rows = _iter_task_rows(text)
+
+    # 先于所有计数：格子数不对时，「当前状态」读到的可能是别的列的内容，
+    # 后面每一个计数都建立在一个错的读数上，而它们照样能自洽。
+    for task_id, _, cells in task_rows:
+        if cells != _TASK_ROW_CELLS:
+            problems.append(
+                f"{task_id} 行有 {cells} 格，应为 {_TASK_ROW_CELLS} 格"
+                "（ID｜任务｜交付与验收｜依赖｜当前状态）；"
+                "少格是有内容被整格删掉，多格是单元格里有未转义的竖线"
+            )
+
     all_rows = len(task_rows)
     if declared_total != all_rows:
         problems.append(f"任务总数写 {declared_total}，全文实际 {all_rows} 行")
@@ -120,12 +142,12 @@ def check(text: str) -> list[str]:
     # 真的匹配表格内容——只检查总数相加对不上远远不够，声明的数字本身可能和
     # 表格完全脱节（真实事故：VE 线 8 行全标 ✅ 已完成，但产品路径从未装配）。
     unknown_statuses = sorted(
-        {status for _, status in task_rows} - _KNOWN_ROW_STATUSES
+        {status for _, status, _ in task_rows} - _KNOWN_ROW_STATUSES
     )
     if unknown_statuses:
         problems.append(f"表格里出现未知状态：{unknown_statuses}")
 
-    actual_status_counter = Counter(status for _, status in task_rows)
+    actual_status_counter = Counter(status for _, status, _ in task_rows)
     actual_counts = {
         "已完成": actual_status_counter[_STATUS_DONE],
         "待验收": actual_status_counter[_STATUS_PENDING_ACCEPT],

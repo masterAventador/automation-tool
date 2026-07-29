@@ -302,9 +302,15 @@ def test_job_structural_bounds_fail_closed(field: str, value: object) -> None:
 def test_the_output_reference_is_narrow_too() -> None:
     """Kept out of the table above on purpose.
 
-    Under the default QUEUED status `_validate_facts_match_status` refuses any
-    output at all, so a wrong-typed one there would prove the fact coupling,
-    not the type narrowness. Only a SUCCEEDED job reaches the isinstance guard.
+    The isinstance disjunct runs unconditionally for every status -- it sits
+    in the `or` chain at the top of `__post_init__`, well before
+    `_validate_facts_match_status`. What is status-dependent is whether it is
+    the *only* thing rejecting: under QUEUED, "a non-terminal job may not
+    carry an artifact" refuses any output at all, so deleting the isinstance
+    guard would still leave the job rejected and the mutant would survive.
+    SUCCEEDED is the one status where the fact check accepts a non-empty
+    output, which makes the isinstance guard the sole rejecter and this
+    assertion the thing that kills the mutant.
     """
     with pytest.raises(InvalidEditingJobModel):
         _job(status=EditingJobStatus.SUCCEEDED, output_artifact_id=TimelineId.new())
@@ -391,6 +397,18 @@ def test_failing_demands_a_real_failure_code() -> None:
 
 
 def test_the_domain_package_exports_the_editing_project_and_job() -> None:
+    """`__all__` is the load-bearing half, not the module attribute.
+
+    `mypy` runs `strict = true`, which implies `no_implicit_reexport`, and 62
+    call sites already consume this package as `from ...domain import <name>`.
+    A name that is imported into `__init__.py` but missing from `__all__`
+    resolves fine at runtime -- so attribute assertions stay green -- while
+    every consumer gets `does not explicitly export attribute`. That break
+    would surface in LE-05, whose prerequisite LE-04 would by then be marked
+    done with a green re-export guard. The subset assertions cover all 22
+    names without a list to maintain, because both submodules declare their
+    own `__all__`.
+    """
     from automation_tool.control_plane import domain
     from automation_tool.control_plane.domain import editing_job, editing_project
 
@@ -399,4 +417,10 @@ def test_the_domain_package_exports_the_editing_project_and_job() -> None:
     assert domain.CaptionStyle is editing_project.CaptionStyle
     assert domain.EditingJob is editing_job.EditingJob
     assert domain.EditingJobStateMachine is editing_job.EditingJobStateMachine
-    assert set(domain.EditingJobFailureCode) == set(editing_job.EditingJobFailureCode)
+    # `set(X) == set(X)` would be a tautology here: a working re-export makes
+    # both sides the same object. `is` also catches an alias or same-membered
+    # copy standing in for it.
+    assert domain.EditingJobFailureCode is editing_job.EditingJobFailureCode
+
+    assert set(editing_project.__all__) <= set(domain.__all__)
+    assert set(editing_job.__all__) <= set(domain.__all__)
