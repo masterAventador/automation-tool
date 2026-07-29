@@ -1,8 +1,10 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ConfigProvider } from "antd";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { AppUpdateGateway } from "../features/app-updates/contracts";
 import type { PublishWorkspaceGateway } from "../features/publishing/publish-workspace-gateway";
 import type {
   MaterialVideoStudioGateway,
@@ -695,5 +697,80 @@ describe("finished video handed to the publishing page", () => {
 
     expect(screen.queryByRole("group", { name: "待发布视频" })).toBeNull();
     expect(screen.queryByRole("button", { name: /发布到/ })).toBeNull();
+  });
+});
+
+/**
+ * 强制更新只有打开「设置」才看得见——AI-first 改版留下的一个真缺陷。
+ *
+ * `AppUpdateCenter` 的设计是：提示用的 Modal **无条件**渲染，`showSettings`
+ * 只额外加一张管理卡。也就是说它挂在哪里，提示就只能在哪里弹。改版把它挪进了
+ * 设置页那一支 `showingSettings ? … : …`，于是提示的可见性被绑在了「用户此刻
+ * 正好在设置页」上。
+ *
+ * 可选更新如此已经不好，**强制更新**如此是真问题：用户可以永远不打开设置，
+ * 而那条更新的语义正是「不更新就不能继续用」。
+ *
+ * 由 H8-21 的桌面验收发现（它开机后直接等「发现新版本」，等了 25 秒没等到）。
+ * 这条把复现压到组件层，跑得起来也定位得准。
+ */
+/**
+ * Ant Design's Modal leaves a hidden pre-render behind, so the first node
+ * carrying the title is not the one on screen — `AppUpdateCenter.test.tsx`
+ * already learnt this and takes the last match while retrying past the
+ * animation. Same shape here rather than a second way of asking.
+ */
+async function expectVisibleHeading(name: string): Promise<void> {
+  await waitFor(() => {
+    expect(screen.getAllByRole("heading", { name }).at(-1)).toBeVisible();
+  });
+}
+
+describe("app update prompt visibility", () => {
+  function promptingGateway(action: "prompt" | "forced"): AppUpdateGateway {
+    const release = {
+      version: "0.2.0",
+      channel: "stable",
+      policy: action === "forced" ? "forced" : "optional",
+      notes: "",
+      publishedAt: "2026-07-29T00:00:00Z",
+      artifact: {
+        target: "darwin",
+        arch: "aarch64",
+        sha256: "b".repeat(64),
+        sizeBytes: 2048,
+      },
+    } as const;
+    return {
+      getState: vi.fn().mockResolvedValue({ state: "ready", release, action }),
+      checkNow: vi.fn().mockResolvedValue({ state: "ready", release, action }),
+      decide: vi.fn().mockResolvedValue({ state: "installation_launched", release }),
+    };
+  }
+
+  it("offers an optional update without the user opening 设置", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <QueryClientProvider client={queryClient}>
+          <WorkbenchShell appUpdateGateway={promptingGateway("prompt")} />
+        </QueryClientProvider>
+      </ConfigProvider>,
+    );
+
+    await expectVisibleHeading("发现新版本 0.2.0");
+  });
+
+  it("shows a forced update without the user opening 设置", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <QueryClientProvider client={queryClient}>
+          <WorkbenchShell appUpdateGateway={promptingGateway("forced")} />
+        </QueryClientProvider>
+      </ConfigProvider>,
+    );
+
+    await expectVisibleHeading("必须更新到 0.2.0");
   });
 });

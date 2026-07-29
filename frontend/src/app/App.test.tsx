@@ -182,7 +182,16 @@ describe("desktop startup", () => {
     expect(screen.getByRole("heading", { name: "App 更新" })).toBeVisible();
     expect(screen.getByText("当前已是最新版本")).toBeVisible();
     expect(platformAdapter.getExecutorStatus).toHaveBeenCalledTimes(1);
-    expect(appUpdateGateway.getState).toHaveBeenCalledTimes(1);
+    // Twice, and both are wanted. The shell mounts its own `AppUpdateCenter`
+    // while the user is anywhere but 设置, because the update prompt has to
+    // exist wherever they are standing — a forced update the user only learns
+    // about by opening settings is one they can decline forever by not going
+    // there. That instance asks once at startup; the settings page's own
+    // instance asks again when it mounts, which is also what it did before.
+    //
+    // What this assertion guards is unchanged: neither instance polls or
+    // re-asks while it is on screen.
+    expect(appUpdateGateway.getState).toHaveBeenCalledTimes(2);
   });
 
   /**

@@ -585,6 +585,26 @@ export function WorkbenchShell({
 
   return (
     <Layout className="desktop-shell">
+      {/*
+       * The update prompt has to exist wherever the user is standing.
+       *
+       * `AppUpdateCenter` renders its prompt Modal unconditionally and adds the
+       * management card only when `showSettings`. So mounting it *only* inside
+       * the settings page — which is what this shell did until 2026-07-29 —
+       * makes the prompt's visibility depend on the user happening to be on
+       * that page. Bad for an optional update and wrong for a forced one, whose
+       * whole meaning is "you cannot keep using this until you update".
+       *
+       * Exactly one instance is mounted at a time: this one while the user is
+       * anywhere else, the settings one (which also draws the card) while they
+       * are there. Two would mean two subscriptions and two modals.
+       *
+       * Found by H8-21's desktop acceptance, which waits for 发现新版本 right
+       * after startup and sat there for 25 seconds.
+       */}
+      {showingSettings ? null : (
+        <AppUpdateCenter gateway={appUpdateGateway} showSettings={false} />
+      )}
       <Layout.Sider className="desktop-sidebar" width={184} theme="dark">
         <div className="desktop-brand">
           <div className="brand-mark brand-mark--small" aria-hidden="true">

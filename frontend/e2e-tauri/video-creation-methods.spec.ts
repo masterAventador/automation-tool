@@ -55,7 +55,12 @@ describe("VF-07 production App creation method acceptance", () => {
     await expect(materialMethod).toHaveAttribute("aria-pressed", "false");
     await expect(motionMethod).toHaveAttribute("aria-pressed", "true");
     await expect(studio).toHaveText(expect.stringContaining("已选择：品牌动效成片"));
-    await expect(await studio.$("button=打开完整制作界面")).not.toBeEnabled();
+    // Same vanished opener as in `video-studio.spec.ts`: `OperationsWorkspace`
+    // renders `VideoStudio` with `embedded` unconditionally, which replaces the
+    // button with a notice. What this line was really guarding — that choosing
+    // 品牌动效成片 does not offer the material-montage opener — is now true by
+    // construction, so what is left to assert is that it is not there at all.
+    assert.equal(await studio.$("button=打开完整制作界面").isExisting(), false);
 
     const body = await browser.$("body").getText();
     assert.doesNotMatch(body, /moneyprinter|hyperframes|b-roll/i);
