@@ -50,10 +50,14 @@ describe("H8-16F hidden App original-caller MVP journey", () => {
 
     await browser.$("button=开始目标发现").click();
     try {
+      // 改版后的账号与平台页上没有「平台状态」这四个字（它只是任务详情页里
+      // 按钮的文案），旧条件在交接成功的页面上也永远为假——2026-07-29 补采
+      // facts 后坐实：交接其实发生了（startButtonExists=false、登录正常在屏），
+      // 是 spec 在等一个不存在的字符串。锚到页头标题 + 真实状态文案。
       await browser.waitUntil(
         async () => {
-          const text = await body.getText();
-          return text.includes("平台状态") && text.includes("登录正常");
+          const heading = await browser.$("h2").getText();
+          return heading === "账号与平台" && (await body.getText()).includes("登录正常");
         },
         {
           timeout: 180_000,

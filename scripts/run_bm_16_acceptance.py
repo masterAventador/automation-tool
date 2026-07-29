@@ -73,6 +73,7 @@ def _run(
 
 def run_deterministic_gates() -> None:
     _run([sys.executable, "scripts/test_bm_16_acceptance_contract.py"])
+    _run([sys.executable, "scripts/test_motion_catalog_render_exclusions.py"])
     _run([sys.executable, "scripts/check_third_party_sources.py"])
     _run([sys.executable, "scripts/check_motion_catalog.py"])
     _run([sys.executable, "scripts/check_motion_catalog_ui_projection.py"])
@@ -234,8 +235,26 @@ def run_item_render_sweep(
     catalog_dimensions = {
         entry["name"]: entry.get("dimensions") for entry in catalog_items
     }
+    # 25 个渲染不出来的项根因全部在内容/上游侧（PC-21 §18.6 逐类定性），按
+    # 带原因的豁免清单跳过——清单卫生由 test_motion_catalog_render_exclusions
+    # 守着（真实存在、类别封闭、理由非空），不是无声截断：跳过逐项打印，
+    # 收尾核对「渲染 + 豁免 = 134」。内容修好一项就从清单划掉一项。
+    exclusions: dict[str, dict[str, str]] = json.loads(
+        (
+            ROOT / "contracts/quality/motion-catalog-standalone-render-exclusions.v1.json"
+        ).read_text(encoding="utf-8")
+    )["items"]
+    excluded_count = 0
     for index, item in enumerate(manifest["items"], start=1):
         name = item["name"]
+        if name in exclusions:
+            excluded_count += 1
+            print(
+                f"[bm-16] item {index}/134 excluded"
+                f" ({exclusions[name]['class']}): {name}",
+                flush=True,
+            )
+            continue
         files = list(item["files"])
         entries = [candidate for candidate in files if candidate.endswith(".html")]
         if not entries:
@@ -284,8 +303,14 @@ def run_item_render_sweep(
             "blockedRequests": rendered["event"]["blockedRequests"],
         }
         print(f"[bm-16] item {index}/134 rendered: {name}", flush=True)
-    if len(results) != 134:
+    if len(results) + excluded_count != 134:
         raise RuntimeError("BM-16 sweep must cover exactly 134 items")
+    if excluded_count != len(exclusions):
+        raise RuntimeError("BM-16 exclusion list names items the manifest lacks")
+    print(
+        f"[bm-16] item sweep: {len(results)} rendered, {excluded_count} excluded",
+        flush=True,
+    )
     distinct = {digest for entry in results.values() for digest in entry["frames"]}
     if len(distinct) < 40:
         raise RuntimeError(
