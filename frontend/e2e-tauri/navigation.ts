@@ -188,3 +188,40 @@ export async function openSettings(): Promise<void> {
   await openWorkbenchSection("设置");
   await expect(await browser.$("h2")).toHaveText("设置");
 }
+
+/** The two creation-method cards, with their comparison rows opened.
+ *
+ * The redesign folded the ten comparison rows into a collapse panel on each
+ * card, shut by default — the reason is written next to it in
+ * `VideoStudio.tsx`: opening them pushes the page back to 1240px. A spec that
+ * reads the rows without opening them reads a one-line summary instead and
+ * reports the copy as missing.
+ *
+ * Two traps this helper exists to hold in one place, both paid for once
+ * already:
+ *
+ * * `card.$("//…")` searches from the *document root*, not from the card, so
+ *   the second iteration toggles the first card again and shuts it. It has to
+ *   be `.//`;
+ * * the collapse is animated, so the rows are not in the DOM at the moment the
+ *   click returns.
+ */
+export async function openCreationMethodCards(
+  studio: ReturnType<typeof browser.$>,
+): Promise<ReturnType<typeof browser.$>[]> {
+  const cards = await studio.$$("article.video-method-card");
+  const opened: ReturnType<typeof browser.$>[] = [];
+  for (let index = 0; index < (await cards.length); index += 1) {
+    const card = cards[index]!;
+    const toggle = await card.$(".//*[contains(@class,'ant-collapse-header')]");
+    if (await toggle.isExisting()) {
+      await toggle.click();
+      await browser.waitUntil(
+        async () => (await card.getText()).includes("最适合"),
+        { timeout: 10_000, timeoutMsg: "制作方式卡片的详细说明没有展开" },
+      );
+    }
+    opened.push(card);
+  }
+  return opened;
+}

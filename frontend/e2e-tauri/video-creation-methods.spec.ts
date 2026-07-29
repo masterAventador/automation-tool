@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
 import {
+  openCreationMethodCards,
   openMaterialVideoStudio,
   waitForStartup,
 } from "./navigation";
@@ -36,6 +37,10 @@ describe("VF-07 production App creation method acceptance", () => {
       "网络消耗",
       "数据与隐私",
     ] as const;
+    // The rows live inside each card's collapse panel, shut by default since the
+    // redesign — reading them without opening them reads a one-line summary and
+    // reports every label as missing (measured 2026-07-29: 0 of 2 for all ten).
+    await openCreationMethodCards(studio);
     for (const label of comparisonLabels) {
       const matches = await studio.$$(`dt=${label}`);
       assert.equal(matches.length, 2, `${label} must be explained by both methods`);
