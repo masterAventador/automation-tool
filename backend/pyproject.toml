@@ -48,6 +48,14 @@ dev = [
 ]
 executor = [
     "playwright==1.61.0",
+    # Captions are drawn by PIL and overlaid by ffmpeg: the shipped ffmpeg has
+    # no freetype/libass, so drawtext/subtitles/ass are all unavailable (see
+    # the local smart edit design 5.2). fontTools reads each face's cmap to
+    # decide which face draws a character, and brotli is what lets it read the
+    # WOFF2 faces -- FreeType decompresses those on its own, fontTools does not.
+    "pillow",
+    "fonttools",
+    "brotli",
 ]
 
 [tool.uv]
