@@ -8,7 +8,7 @@
 - 每个任务的提交、RED/GREEN、失败矩阵、验收证据与边界单独写入 `docs/development/<任务ID>.md`
 - **禁止**把完成记录、测试命令明细或历史证据追加回本文件
 - 本线任务不向 `docs/development-roadmap.md` 或 `docs/embedded-browser-video-studio-roadmap.md` 双写状态
-- 同一时间最多一个任务处于 `🧪 RED` 或 `🚧 实现中`
+- **每条工作线**同一时间最多一个任务处于 `🧪 RED` 或 `🚧 实现中`。2026-07-29 起经用户授权开三条并行线，各自独占一棵 worktree（`wt/smart-edit` 走 Control Plane 线、`wt/le-07-probe` 走素材探测、`wt/le-09-captions` 走字幕渲染）；三条线依赖互不重叠、改动文件零交集
 
 ## 1. 为什么装配单独立项
 
