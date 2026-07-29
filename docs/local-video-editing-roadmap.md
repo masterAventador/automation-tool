@@ -10,13 +10,13 @@
 - 本线任务不向 `docs/development-roadmap.md` 或 `docs/embedded-browser-video-studio-roadmap.md` 双写状态
 - 同一时间最多一个任务处于 `🧪 RED` 或 `🚧 实现中`
 
-## 1. 与既有 VE 线的关系
+## 1. 为什么装配单独立项
 
-`docs/embedded-browser-video-studio-roadmap.md` 中的 VE-01～VE-08（独立视频剪辑，阿里云 IMS 路线）**整条废弃**，由本线取代。废弃原因与证据见设计文档 §1。
+**LE-05、LE-06、LE-17 是独立立项的装配任务，不是某个功能任务的附属步骤。**
 
-VE 线的核心问题不是实现质量，而是**分层实现完成但从未装配到产品路径**：领域层可用、pytest 够得着，但 Control Plane 无 REST API、前端注入的是 sessionStorage 草稿网关、提交按钮固定抛错。台账把 8 项全标 ✅，而 `docs/development/VE-08.md` 遗留项里登记的装配缺口没有落成任何待办任务行。
+理由来自本仓库出过的一次真实事故：领域层写完、pytest 够得着、台账全标 ✅，但 Control Plane 没有 REST API、前端注入的是 sessionStorage 草稿网关、提交按钮固定抛错——**分层实现完成，从未装配到产品路径**，而装配缺口没有落成任何一行待办任务，掉进了任务之间的缝里。台账因此长期显示「完成」，而用户打开正式包发现整块功能不可用。
 
-**本线 LE-05、LE-06、LE-16 就是为了不重犯这个错误而单独立项的装配任务**——它们不是某个功能任务的附属步骤。
+所以本线把「让它真的跑在产品路径上」当成独立交付物来排期，而不是指望它顺带发生。同样的理由，LE-22、LE-23 要求在**正式安装包**上验收，而不是在测试构建上。
 
 ## 2. 状态图例
 
@@ -42,7 +42,7 @@ VE 线的核心问题不是实现质量，而是**分层实现完成但从未装
 | --- | --- | --- | --- | --- |
 | LE-02 | Material 素材库领域对象 | `Material`（kind/时长/分辨率/内容摘要/has_audio/响度/镜头边界/AI 描述与标签）、`MaterialId`、校验与去重规则；用户改过的描述不被 AI 覆盖 | LE-01 | ✅ 已完成 |
 | LE-03 | Timeline 重写（含 Material 尺寸形状决策） | `TimelineClip` 补 `source_in_ms`/`source_out_ms`/`gain_db`；`TimelineTrackKind` 拆成 visual/narration/ambient/music/caption；首期锁死"取片时长等于占位时长"（不变速）并有拒绝用例；**顺带决定 `Material.width`/`height` 对音频素材的形状**——当前音频被强制要求填 [1,8192] 的宽高，属强制荒谬而非可选荒谬，改成 `int | None` 按 kind 分叉是形状变更，LE-02 终审建议单独决策而非顺手折进去 | LE-02 | ✅ 已完成 |
-| LE-04 | 剪辑项目与任务状态机 | `EditingProject`、`EditingJob`、状态转换与非法转换拒绝、失败码归类；不含任何供应商概念；并把 `Timeline` 接到 `EditingProject`（LE-03 有意未加 owner 字段）；接入时会先碰到前端 `video-editing-dto.ts` 的契约形状（见 LE-17 行三处 drift），本任务不处理前端，仅提前知会；**`EditingProject` 必须承载输出规格**——输出画幅、帧率与字幕样式基线（字号/描边/行距/字体）。LE-03 终审发现这三样是渲染必需项却无人认领：`Timeline` 没有、创作线放在 `ContentBrief.aspect_ratio` 而剪辑线无对应物、全库 `caption_style|font_size|stroke_width` 零命中，而 LE-10 的完成定义要求 ffprobe 断言分辨率与帧数、LE-09 承诺字幕换行描边行距可控、LE-20 承诺用户可选字体。这正是本线立项要防的「装配缺口掉进任务之间的缝里」 | LE-03 | ⬜ 未开始 |
+| LE-04 | 剪辑项目与任务状态机 | `EditingProject`、`EditingJob`、状态转换与非法转换拒绝、失败码归类；不含任何供应商概念；并把 `Timeline` 接到 `EditingProject`（LE-03 有意未加 owner 字段）；接入时会先碰到前端 `video-editing-dto.ts` 的契约形状（见 LE-17 行三处 drift），本任务不处理前端，仅提前知会；**`EditingProject` 必须承载输出规格**——输出画幅、帧率与字幕样式基线（字号/描边/行距/字体）。LE-03 终审发现这三样是渲染必需项却无人认领：`Timeline` 没有、创作线放在 `ContentBrief.aspect_ratio` 而剪辑线无对应物、全库 `caption_style|font_size|stroke_width` 零命中，而 LE-10 的完成定义要求 ffprobe 断言分辨率与帧数、LE-09 承诺字幕换行描边行距可控、LE-20 承诺用户可选字体。这正是本线立项要防的「装配缺口掉进任务之间的缝里」 | LE-03 | 🚧 实现中 |
 
 ### 3.3 Control Plane 装配（2 项）
 
@@ -101,8 +101,8 @@ VE 线的核心问题不是实现质量，而是**分层实现完成但从未装
 - 任务总数：24
 - ✅ 已完成：3
 - 🔍 待验收：0
-- 🧪 RED / 🚧 实现中：0
-- ⬜ 未开始：21
+- 🧪 RED / 🚧 实现中：1
+- ⬜ 未开始：20
 
 ## 5. 当前下一步
 
