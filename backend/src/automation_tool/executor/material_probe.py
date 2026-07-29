@@ -213,13 +213,23 @@ class MaterialProbeRejection(StrEnum):
     # the commonest layout is not that.** Measured against the packaged tools
     # with a 60-second clip: an MP4 written the default way puts `moov` at 90%
     # of the file, so while it is being written ffprobe cannot read it at all
-    # and the probe ends at `UNDECODABLE` — three trials out of three, the
-    # header never having been reached. Only `+faststart`, which moves `moov`
-    # to offset 36, gets far enough for the file to be seen moving:
-    # `SOURCE_NOT_AT_REST`, three out of three. Browsers and yt-dlp write the
-    # default layout, so the ordinary half-finished download lands on
-    # `UNDECODABLE` — which is the same wrong instruction this member exists to
-    # remove, one layer further down.
+    # and the probe ends at `UNDECODABLE`, the header never having been
+    # reached. Only `+faststart`, which moves `moov` to offset 36, gets far
+    # enough for the file to be seen moving: 20 trials out of 20 came back
+    # `SOURCE_NOT_AT_REST`. Browsers and yt-dlp write the default layout, so
+    # the ordinary half-finished download lands on `UNDECODABLE` — the same
+    # wrong instruction this member exists to remove, one layer further down.
+    #
+    # Two qualifications on that, both measured. The 20 trials are a rate and
+    # not a guarantee: what is detected is the file *moving across the probe's
+    # span*, so a writer that finishes before the opening stat leaves a
+    # complete file, which is probed correctly, and one that finishes wholly
+    # inside the residual window below leaves nothing to notice. And
+    # `+faststart` describes the finished file, not the one being written —
+    # ffmpeg relocates `moov` in a finalizing pass, so an encoder writing that
+    # flag in real time still has the default layout while it runs: five
+    # trials out of five gave `UNDECODABLE`. The flag helps a file being
+    # copied or downloaded, never one being recorded.
     #
     # It is not fixable here. Telling a truncated container from a corrupt one
     # needs ffprobe's English diagnostics, and those name the file (§7); the
@@ -227,10 +237,23 @@ class MaterialProbeRejection(StrEnum):
     # `UNDECODABLE` as possibly-not-finished-yet as well**, rather than as
     # proof the file is permanently broken.
     #
-    # A third shape escapes both, measured: once the writer has stopped, a
-    # truncated `+faststart` file is not moving and its header parses, so it is
-    # probed successfully and yields facts and a digest for the prefix. Nothing
-    # here can tell that from a genuinely short material.
+    # A third shape escapes both, and it is the worst of the three: once the
+    # writer has stopped, a truncated `+faststart` file is not moving and its
+    # header parses, so it is probed successfully — and what comes back is
+    # **the whole material's facts, not the surviving prefix's**. The duration
+    # is read from a header written before the content it describes. Measured
+    # at three truncation points of a 60-second clip: 75%, 50% and 25% each
+    # state 60000 ms, 320x240 and the same codecs as the complete file — every
+    # field but the digest identical to it — while at 25% only 268 of the 1500
+    # frames actually decode.
+    #
+    # So it is indistinguishable from the *complete* material, not from a short
+    # one, and neither consequence surfaces as an error. Anything choosing a
+    # range inside that duration can choose one with no frames behind it. And
+    # the digest, which is the dedup key, is the one field that does differ —
+    # so a half-finished download is filed as a second material whose duration,
+    # frame size and codecs match the complete one exactly. A consumer must not
+    # read "different digest" as "different material".
     SOURCE_NOT_AT_REST = "source_not_at_rest"
     UNSAFE_PATH = "unsafe_path"
     UNDECODABLE = "undecodable"

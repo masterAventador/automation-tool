@@ -3471,7 +3471,7 @@ class TestProbeMaterialNeedsOneFileAllTheWayThrough:
         access time moves, so no other term can decide it.
 
         This is not the only thing holding the rule: measured, adding an
-        explicit `st_atime_ns` comparison turns 10 tests in this file red, every
+        explicit `st_atime_ns` comparison turns 12 tests in this file red, every
         one of them a case where a real tool or the digest actually reads the
         file. This one states the rule where it can be read.
         """
