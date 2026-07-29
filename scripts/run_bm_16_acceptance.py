@@ -45,7 +45,11 @@ from test_motion_video_render_sandbox import (
 ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE = ROOT / ".local/embedded-browser-video-studio/bm-16-evidence"
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
-SWEEP_FRAMES = 2
+# 2 帧（0 与 D/2）会被周期性动画混叠：transitions-radial 在 t=0 与 t=10 逐字节
+# 同帧（实拍对照：0/5/10/15 四点三个不同摘要），两点采样正好踩在同相位上被静帧
+# 门禁误拒。4 帧落在 0、D/4、D/2、3D/4，同一零件三个不同摘要能过；采样永远证明
+# 不了「所有帧都动」，只把碰撞概率压到目录现有零件实测不再触发。
+SWEEP_FRAMES = 4
 STYLE_FRAMES = 3
 DETERMINISM_FRAMES = 30
 # Every render now pays a one-off warm-up (seek to zero, bounded image decode,
