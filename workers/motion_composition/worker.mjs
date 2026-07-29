@@ -662,6 +662,7 @@ async function renderVerify(renderBrowser, jobId) {
         "--use-mock-keychain",
         "--password-store=basic",
         "--disable-gpu",
+        "--enable-unsafe-swiftshader",
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-component-update",
@@ -892,6 +893,12 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         "--use-mock-keychain",
         "--password-store=basic",
         "--disable-gpu",
+        // Without this, a GPU-less Chromium 149 has no WebGL at all: the
+        // SwiftShader software fallback is refused, a shader composition takes
+        // its no-GL branch and renders one static page, and the static-frame
+        // gate below refuses the job. SwiftShader keeps rendering on the CPU,
+        // so the byte-identical-frames requirement above still holds.
+        "--enable-unsafe-swiftshader",
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-component-update",
