@@ -430,7 +430,11 @@ def main() -> None:
                 dump_douyin_tree(private_app_data, "spec-failure")
                 # PC-25：删除流程五阶段已进固定事件日志，与执行器生命周期事件
                 # 同轴——日志尾部就是完整时间线。
-                for log_path in sorted(private_app_data.glob("logs/desktop-*.log"))[-1:]:
+                top = sorted(entry.name for entry in private_app_data.iterdir()) if private_app_data.is_dir() else "(app-data absent)"
+                logs_dir = private_app_data / "logs"
+                logs = sorted(entry.name for entry in logs_dir.iterdir()) if logs_dir.is_dir() else "(logs absent)"
+                print(f"[B5-13] app-data top={top} logs={logs}")
+                for log_path in sorted(private_app_data.glob("logs/desktop-*"))[-1:]:
                     lines = log_path.read_text(errors="replace").splitlines()
                     for line in lines[-40:]:
                         print(f"[B5-13] desktop-log {line}")
