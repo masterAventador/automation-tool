@@ -33,10 +33,13 @@ PROBE_TIMEOUT_SECONDS: float = 30.0
 MEASURE_TIMEOUT_SECONDS: float = 15 * 60.0
 # The report is `ametadata`'s output, whose size follows the sound track's
 # duration rather than its content: ebur128 states one running loudness per
-# 100 ms window, measured at 576 bytes per second of sound. At
-# `MAX_MATERIAL_DURATION_MS` that is 8.3 MB, so the limit below is that rounded
-# up — a file at the duration limit passes, and anything writing faster than the
-# channel's fixed cadence is stopped.
+# 100 ms window. Measured on a real pass at the duration limit — four hours of
+# sound — that is 9,085,156 bytes, or 8.66 MiB. Extrapolating from a minute
+# would have said 7.91 MiB: the block a window costs grows as the frame counter
+# and the timestamps take more digits, worth 9.5% over that span. The limit
+# below leaves room for the measured figure, so a file at the duration limit
+# passes and anything writing faster than the channel's fixed cadence is
+# stopped.
 MAX_MEASURE_OUTPUT_BYTES: Final = 16 * 1024 * 1024
 # How often the report is measured while ffmpeg is still writing it. Reading
 # the size after the process exits says what it wrote; it does not bound what it
@@ -115,17 +118,26 @@ _MEASURE_FILTERS: Final = ",".join(
         # earns its place again the moment anyone raises the level to look.
         "ebur128=peak=none:framelog=quiet:metadata=1",
         # Downstream of ebur128, and that order is load-bearing. ebur128 asks
-        # libavfilter for frames of exactly one window, so the decoder's frames
-        # are merged to that length on the way in — and merging keeps only the
-        # first frame's metadata (`av_frame_copy_props(buf, frame0)`). An AAC
-        # frame is 1024 samples against a window's 4410, so roughly three events
-        # in four written upstream of ebur128 never reach the sink. Measured with
-        # silencedetect in front, over 24 ordinary files carrying four seconds of
-        # audible tone: 7 were rejected outright as silent, all of them AAC — a
-        # FLAC or PCM frame is already a window or more, so nothing of theirs is
-        # ever the frame that gets dropped. The closest pair is a 0.30 s lead
-        # that passed against a 0.31 s lead that did not. Behind ebur128 the
-        # frames are already the fixed length and all 24 come back right.
+        # libavfilter for frames of exactly one window — 4410 samples at
+        # 44.1 kHz — so the decoder's frames are merged to that length on the way
+        # in, and merging keeps only the first frame's metadata
+        # (`av_frame_copy_props(buf, frame0)`). A whole frame is therefore
+        # swallowed, metadata and all, whenever one group takes two of them: that
+        # needs a decoded frame no longer than half a window, and nothing else.
+        #
+        # It is the block length that decides this, not the codec. Measured at
+        # 44.1 kHz: AAC decodes to 1024 samples, PCM s16le to 4096, FLAC to 4608
+        # by default — but a FLAC written with a 512, 1024 or 2048-sample block
+        # decodes to that, and upstream of ebur128 those fail exactly like AAC
+        # (8/8, 8/8 and 7/8 of eight silence positions rejected outright as
+        # silent, against 0/8 at 4096). Nothing here produces the operator's
+        # files, so "our encoder happens to use long blocks" protects nobody.
+        #
+        # Measured with silencedetect in front, over 24 ordinary files carrying
+        # four seconds of audible tone: 7 were rejected as silent, the closest
+        # pair being a 0.30 s lead that passed against a 0.31 s lead that did
+        # not. Behind ebur128 the frames are already the fixed length and every
+        # one of those files comes back right.
         f"silencedetect=noise={SILENCE_NOISE_FLOOR_DB}dB:d={SILENCE_MINIMUM_SECONDS}",
         # ebur128 states six numbers per window and one of them is used.
         # Dropping the other five is what keeps the channel's size proportional

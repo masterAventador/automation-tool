@@ -221,10 +221,16 @@ def _measure_log(
     """Reproduce the metadata channel `ametadata=mode=print` writes.
 
     Copied from a measured report: one header line per frame that carries
-    metadata, then one line per key on it, the duration ahead of the end. A span
-    silencedetect closes states both; the span it leaves open at EOF states only
-    a start, because the end of a track is not a frame and there is nothing left
-    to attach the closing metadata to.
+    metadata, then one line per key on it. Which key comes first is not fixed:
+    measured across six tail lengths, 0.02 s, 0.05 s and 0.09 s state the end
+    ahead of the duration while 0.13 s, 0.31 s and 0.55 s state them the other
+    way round. Nothing that reads this depends on the order — every key is
+    matched as a whole line of its own — so the shape below is one of the two
+    and not the shape.
+
+    A span silencedetect closes states both; the span it leaves open at EOF
+    states only a start, because the end of a track is not a frame and there is
+    nothing left to attach the closing metadata to.
     """
     lines: list[str] = []
     frame = 0
@@ -1414,10 +1420,11 @@ class TestReadAudioFactsInvocation:
 
         ebur128 asks libavfilter for frames of exactly one window, so the
         decoder's frames are merged before it sees them and merging keeps only
-        the first frame's metadata. Measured with silencedetect in front, over 24
-        ordinary files holding four seconds of audible tone: 7 came back rejected
-        as silent, every one of them AAC. Downstream it sees frames that are
-        already the fixed length and all 24 come back right.
+        the first frame's metadata, so a whole frame goes whenever one group
+        takes two — which needs a decoded frame no longer than half a window.
+        Measured with silencedetect in front, over 24 ordinary files holding four
+        seconds of audible tone: 7 came back rejected as silent. Downstream it
+        sees frames that are already the fixed length and all 24 come back right.
         """
         _audio_from(tmp_path, _measure_log(), argv_log=True)
         argv = (tmp_path / ".probe-argv").read_text(encoding="utf-8").splitlines()
@@ -2228,11 +2235,17 @@ class TestSilenceBoundariesThatMissTheLoudnessGrid:
     `ebur128` asks libavfilter for 100 ms frames so it can state a reading per
     window, so the decoder's own frames are merged to that length before it sees
     them — and merging keeps only the first frame's metadata
-    (`av_frame_copy_props(buf, frame0)`). Any filter *upstream* of it therefore
-    loses every event that did not land on a frame boundary: an AAC frame is
-    1024 samples against a window's 4410, so about three events in four
-    disappear. A FLAC or PCM frame is already a window or more, which is why the
-    codec a file happens to use decides whether it survives.
+    (`av_frame_copy_props(buf, frame0)`). A whole frame is swallowed, metadata
+    and all, exactly when one group takes two of them, which needs a decoded
+    frame no longer than half a window.
+
+    The block length decides that, not the codec. Measured at 44.1 kHz against a
+    4410-sample window: AAC decodes to 1024, PCM s16le to 4096, FLAC to 4608 by
+    default — but FLAC written with 512, 1024 or 2048-sample blocks decodes to
+    that, and upstream of ebur128 those lose events exactly like AAC (8/8, 8/8
+    and 7/8 of eight silence positions rejected as silent, against 0/8 at 4096).
+    The operator's files are not written by anything here, so a long default
+    block in our own encoder protects nobody.
 
     What disappears here is the `silence_end` that proves sound resumed, and
     without it a file reads exactly like one that is silent to EOF — which for
