@@ -774,3 +774,80 @@ describe("app update prompt visibility", () => {
     await expectVisibleHeading("必须更新到 0.2.0");
   });
 });
+
+/**
+ * 打开过一条任务之后，「查看运行记录」就再也回不到列表了。
+ *
+ * `selectedTaskId` 全文件只有一处写入（`openTask`），**从来没有被清空过**。
+ * 而运行记录页的渲染是：
+ *
+ *   showingTaskRun && selectedTaskId !== null  →  任务运行详情
+ *   showingTaskRun                             →  运行记录列表
+ *
+ * 于是用户只要点开过任何一条任务，这一页在本次会话里就永远停在那一条上，
+ * 唯一的出路是重启 App。而「返回工作台」只做了 setActivePage("automation")，
+ * 没有清掉选中。
+ *
+ * 由 T3-18 的桌面验收发现：它取消完第一条任务、点「返回工作台」、再进运行记录，
+ * 然后要打开第二条——而页面还停在第一条的详情上，列表里一行都没有。
+ * 那条 spec 为此红了三轮，因为「没等到某一行」这句话说不出「页面根本不是列表」。
+ */
+function taskSourceWithOneTask() {
+  const task = {
+    taskId: "6f2f0a4e-9a6f-4c1e-9a0a-1f5c0f9d3b21",
+    status: "succeeded",
+    revision: 3,
+    lastEventSequence: 4,
+    createdAt: "2026-07-29T05:00:00Z",
+    updatedAt: "2026-07-29T05:00:30Z",
+  } as const;
+  return {
+    getTask: vi.fn(async () => task),
+    listTasks: vi.fn(async () => ({ items: [task], nextCursor: null })),
+    // 只在 abort 时 resolve。初版立即 resolve，消费方于是不停重订阅，
+    // 直接把 node 跑成 heap out of memory——这条假的必须和真实现同语义。
+    streamTaskEvents: vi.fn(
+      async (
+        _taskId: string,
+        afterSequence: number,
+        _onEvent: unknown,
+        options: { signal?: AbortSignal } = {},
+      ) =>
+        new Promise((resolve) => {
+          options.signal?.addEventListener(
+            "abort",
+            () => resolve({ lastSequence: afterSequence, terminal: false }),
+            { once: true },
+          );
+        }),
+    ),
+  } as unknown as Parameters<typeof WorkbenchShell>[0]["taskSource"];
+}
+
+describe("run records reachability", () => {
+  it("returns to the list after leaving a task, not to the task just left", async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkbenchShell taskSource={taskSourceWithOneTask()} />
+      </QueryClientProvider>,
+    );
+
+    await user.click(screen.getByRole("menuitem", { name: "自动化" }));
+    await user.click(screen.getByRole("button", { name: "查看运行记录" }));
+    expect(await screen.findByRole("heading", { name: "运行记录", level: 2 })).toBeVisible();
+
+    // 打开任意一条任务，再返回。
+    //
+    // 这里**不能**写「没有任务就 return」——初版就是那么写的，于是在没有任务数据的
+    // 默认外壳上直接绿了，而缺陷原封不动。那是一条不可能失败的用例，比没有更糟。
+    const rows = await screen.findAllByRole("button", { name: /的任务$/ });
+    await user.click(rows[0]!);
+    await user.click(await screen.findByRole("button", { name: "返回工作台" }));
+
+    // 再次进入运行记录：应当是列表，而不是刚才那条任务的详情。
+    await user.click(screen.getByRole("button", { name: "查看运行记录" }));
+    expect(await screen.findByRole("heading", { name: "运行记录", level: 2 })).toBeVisible();
+  });
+});

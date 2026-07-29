@@ -781,7 +781,21 @@ export function WorkbenchShell({
                   discoveryGateway={taskDiscoveryGateway}
                   taskTargetPreviewSource={taskTargetPreviewSource}
                   taskTargetResultSource={taskTargetResultSource}
-                  onBack={() => setActivePage("automation")}
+                  /*
+                   * 离开一条任务时把选中一起清掉。
+                   *
+                   * `selectedTaskId` 此前只有 `openTask` 一处写入、从不清空，而这一页
+                   * 的渲染是「有选中就显示详情、否则显示列表」——于是用户只要点开过
+                   * 任何一条任务，「查看运行记录」在本次会话里就永远停在那一条上，
+                   * 列表再也回不去，唯一的出路是重启 App。
+                   *
+                   * 由 T3-18 的桌面验收发现：它取消完第一条任务、返回、再进运行记录
+                   * 要打开第二条，而页面还停在第一条的详情上。
+                   */
+                  onBack={() => {
+                    setSelectedTaskId(null);
+                    setActivePage("automation");
+                  }}
                   onOpenPlatformSession={() => openPlatformPage(false)}
                   onPlatformLoginRequired={() => openPlatformPage(true)}
                 />
