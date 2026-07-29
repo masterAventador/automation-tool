@@ -86,17 +86,19 @@ class EditingJobNotFound(_EditingJobPersistenceFailure):
 
 
 class EditingJobStale(_EditingJobPersistenceFailure):
-    """The stored row is no longer the one this update was computed from.
+    """The stored row is no longer the version this update was computed from.
 
-    Two predicates can refuse an update and both mean this. The row's
-    `updated_at` may already be at or past the one being written, so the caller
-    is replaying or has been overtaken. Or the row's `status` may not be one the
-    requested state can legally be reached from -- a job the caller believes is
-    cancelling has already succeeded, say -- in which case the transition was
-    checked against a snapshot that has since stopped being true.
+    `update` is a compare-and-set: it names the `status` and `updated_at` the
+    caller read and touches only a row that still carries both. This is the
+    answer when the row has moved on -- someone else wrote it, or the caller is
+    replaying a write that already landed. The stored row is left untouched.
 
-    They are one outcome because they are one instruction: reload the job and
-    decide again. Both leave the stored row untouched.
+    Note what this is *not*. It does not mean the requested transition was
+    illegal: an inconsistent `(previous, changed)` pair is
+    `EditingJobDataRejected`, because no reload can fix it and this exception's
+    whole instruction is "read it again". And it is not a promise that the
+    transition was legal from where the row actually is -- the caller does not
+    get to know what the row became, only that it is not what they read.
 
     **For the layers above:** this is 409 rather than 404, and it must not be
     collapsed into `EditingJobNotFound`. A caller told "not found" about a job

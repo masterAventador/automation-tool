@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from datetime import datetime
-from types import MappingProxyType
 from typing import Any, Final, Never, cast
 
 from sqlalchemy import insert, select, update
@@ -64,26 +62,21 @@ _FOREIGN_KEY_VIOLATION: Final = "23503"
 _PRIMARY_KEY: Final = "pk_editing_jobs"
 _QUEUED_INDEX: Final = "uq_editing_jobs_queued_timeline_revision"
 
-# For each state, the states an update may move a row *out of*. Derived from the
-# domain's own graph rather than written out: a hand-kept copy drifts the first
-# time an edge changes, and it drifts silently in the dangerous direction, since
-# a source left behind after its edge was removed lets an illegal transition
-# reach the database.
+# The row split into what an update may rewrite and what it may not. `update`
+# writes only the mutable half, which is what makes the identity columns and
+# `created_at` write-once as a matter of structure rather than of convention.
 #
-# `QUEUED` maps to the empty tuple, which is correct rather than an oversight --
-# nothing transitions *to* queued, because a render that lost its worker cannot
-# resume and re-running it is a new job. An update carrying a queued job
-# therefore matches no row at all; `save` is the only way a row becomes queued.
-_SOURCE_STATUSES: Final[Mapping[EditingJobStatus, tuple[str, ...]]] = MappingProxyType(
-    {
-        target: tuple(
-            source.value
-            for source in EditingJobStatus
-            if EditingJobStateMachine.can_transition(source, target)
-        )
-        for target in EditingJobStatus
-    }
+# Naming both halves rather than just one is the point. The reason `update`
+# originally wrote every column was to stop a field added to the domain from
+# being stored on insert and then silently dropped by every update after it --
+# a real failure, recorded on `materials`. A named split keeps that guarantee
+# without the cost: a test asserts these two sets partition both
+# `_column_values` and the table's own columns, so a new field cannot be added
+# without being classified as one or the other.
+_IDENTITY_COLUMNS: Final = frozenset(
+    {"job_id", "project_id", "timeline_id", "timeline_revision", "created_at"}
 )
+_MUTABLE_COLUMNS: Final = frozenset({"status", "failure_code", "output_artifact_id", "updated_at"})
 
 
 def _refuse_integrity_violation(error: IntegrityError) -> Never:
@@ -184,15 +177,13 @@ def _hydrate(row: RowMapping) -> EditingJob:
 
 
 def _column_values(job: EditingJob) -> dict[str, object]:
-    """The full row, shared by both writers.
+    """The full row, as `save` writes it and as `_mutable_values` filters it.
 
-    `update` rewrites every column rather than the handful a transition can
-    change, and this one function is why: a column set kept separately for
-    inserts and updates drifts the moment a field is added to the domain, and it
-    drifts silently in the worst direction -- stored once, then dropped on every
-    write after. Writing the identity columns to the values they already hold
-    costs nothing, and the composite foreign key is re-checked on the update
-    anyway, so they cannot be rewritten into something that does not exist.
+    One function for both writers, so that a field added to the domain cannot be
+    stored on insert and then silently dropped by every update after it. What
+    keeps the update honest is not that it writes everything -- it does not --
+    but that `_IDENTITY_COLUMNS` and `_MUTABLE_COLUMNS` are asserted to
+    partition exactly these keys.
     """
     return {
         "job_id": job.job_id.uuid,
@@ -207,6 +198,11 @@ def _column_values(job: EditingJob) -> dict[str, object]:
         "created_at": job.created_at,
         "updated_at": job.updated_at,
     }
+
+
+def _mutable_values(job: EditingJob) -> dict[str, object]:
+    """Only the columns a transition is allowed to move."""
+    return {name: value for name, value in _column_values(job).items() if name in _MUTABLE_COLUMNS}
 
 
 class SqlAlchemyEditingJobRepository:
@@ -260,60 +256,83 @@ class SqlAlchemyEditingJobRepository:
             # reach the caller verbatim. The same tail guards every method here.
             raise EditingJobPersistenceUnavailable from None
 
-    async def update(self, job: EditingJob) -> None:
-        """Rewrite one job's row, if the row is still the one it was computed from.
+    async def update(self, previous: EditingJob, changed: EditingJob) -> None:
+        """Move a job on, if its row is still the exact version `previous` is.
 
-        Two predicates travel with the statement, and neither is a check this
-        code could do first and then act on. Reading the row and deciding in
-        Python has the identical defect that `save` avoids by not looking before
-        it inserts: two callers both read the same old row and both conclude
-        they may proceed. Only the database sees one statement at a time -- and
-        not because they share a transaction. Measured on this database,
-        `transaction_isolation` is `read committed`, so every statement takes a
-        fresh snapshot; what makes the guard hold is that it is *inside* the
-        UPDATE.
+        This is a compare-and-set, and it takes two arguments because that is
+        what a compare-and-set needs: `previous` is the job as it was read, and
+        the statement only touches a row that still looks like it. A caller that
+        cannot produce the version it read has no business writing.
 
-        **`updated_at` must have moved forward**, and equality is refused. A
-        write carrying the instant already stored is either a replay or a caller
-        that never reloaded; absorbing it here would make the repository answer
-        for idempotence, which belongs to the state machine.
+        **An earlier version of this method compared `updated_at` with `<` and
+        that was wrong.** The mistake is worth recording because it looked like
+        an optimistic-concurrency check and was not one: a live caller's new
+        timestamp is `now()`, which is always later than whatever is stored, so
+        the predicate passed for *every* caller. It rejected replays and clocks
+        running backwards, and nothing else. Paired with a check that the row's
+        status was a legal source for the new one, it still let this through --
+        reproduced on a real database:
 
-        **The row's `status` must be one this job's state can legally be reached
-        from.** `EditingJob`'s transition methods check that against the object
-        in the caller's hand, and a snapshot goes stale: a reconciliation pass
-        holding a `CANCELLING` job may legally call `fail(WORKER_LOST)` long
-        after the worker actually succeeded, and its later timestamp sails past
-        the first predicate. Without this second one a rendered video would be
-        marked failed and its artifact orphaned. The permitted sources come from
-        `EditingJobStateMachine` rather than a list kept here, so the two cannot
-        disagree.
+        1. the row is `QUEUED`; a scheduler reads it;
+        2. another instance dispatches the job, so the row becomes `RUNNING`;
+        3. the scheduler, still holding the `QUEUED` snapshot, calls
+           `fail(INVALID_TIMELINE)`. `QUEUED -> FAILED` is a legal edge, so the
+           domain builds it; `RUNNING` is in `pred(FAILED)`, so the source check
+           passed; the timestamp was later, so that check passed too. **It
+           landed.** The worker then finished and was refused as stale, leaving
+           an mp4 on disk, a row saying `failed`, and a NULL artifact.
+
+        A source-status check cannot close that: it asks whether the transition
+        is legal from where the row is, and "stale but still legal" is exactly
+        the case it says yes to. Every target with two or more possible
+        predecessors had the same opening. Comparing the version instead of the
+        direction closes all of them at once, because `previous`'s `status` and
+        `updated_at` together are the version.
+
+        Legality is checked in Python, before the statement, and answers
+        `EditingJobDataRejected`. It belongs there: an inconsistent
+        `(previous, changed)` pair is a caller that built one from something
+        other than the other, which no reload can fix -- so `EditingJobStale`
+        would be the wrong instruction. Nothing is lost by moving it out of SQL,
+        because the CAS pins the row's status to `previous`'s anyway.
 
         `rowcount == 0` then has two meanings, and the follow-up read is a
         best-effort attempt to say which. It is **not** the second half of the
-        guard: both predicates were applied in full by the UPDATE, in one
+        guard: the comparison was applied in full by the UPDATE, in one
         statement, before this read runs at all. Another connection that deletes
         the row and commits in between makes it invisible here, same transaction
-        or not. Both answers are safe inside that window -- a row that really was
-        deleted is `EditingJobNotFound`, a row still present is
-        `EditingJobStale`, and both tell the caller to stop and reload. Only the
-        label on a concurrently deleted row can come out wrong. Collapsing the
-        two would not be safe: it would tell a caller a running job does not
-        exist.
+        or not -- measured, `transaction_isolation` is `read committed`, so every
+        statement takes a fresh snapshot. Both answers are safe inside that
+        window: a row that really was deleted is `EditingJobNotFound`, a row
+        still present is `EditingJobStale`, and both tell the caller to stop and
+        reload. Only the label on a concurrently deleted row can come out wrong.
+        Collapsing the two would not be safe -- it would tell a caller a running
+        job does not exist.
 
-        The `IntegrityError` clause is not copied from `save` for symmetry.
-        Because the whole row is rewritten, an update names the timeline, the
-        revision and the project again, and PostgreSQL re-checks the composite
-        foreign key and the partial index on every one of them.
+        The `IntegrityError` clause is kept although **no row can reach it
+        today**: this writes only `_MUTABLE_COLUMNS`, and none of those four
+        carries a constraint an update could break. The composite foreign key
+        covers columns this statement does not touch, and the partial index only
+        indexes queued rows, which no update can produce (nothing transitions
+        *to* queued). It stays because the alternative is the dangerous failure
+        mode -- a constraint violation reported as an unavailable database, which
+        invites a retry that can never succeed -- and because that reachability
+        argument is one column classification away from changing.
         """
-        if not isinstance(job, EditingJob):
+        if (
+            not isinstance(previous, EditingJob)
+            or not isinstance(changed, EditingJob)
+            or previous.job_id != changed.job_id
+            or not EditingJobStateMachine.can_transition(previous.status, changed.status)
+        ):
             raise EditingJobDataRejected
-        values = _column_values(job)
+        values = _mutable_values(changed)
         statement = (
             update(editing_jobs)
             .where(
-                editing_jobs.c.job_id == job.job_id.uuid,
-                editing_jobs.c.updated_at < job.updated_at,
-                editing_jobs.c.status.in_(_SOURCE_STATUSES[job.status]),
+                editing_jobs.c.job_id == changed.job_id.uuid,
+                editing_jobs.c.status == previous.status.value,
+                editing_jobs.c.updated_at == previous.updated_at,
             )
             .values(**values)
         )
@@ -330,7 +349,7 @@ class SqlAlchemyEditingJobRepository:
                     if matched
                     else (
                         await session.execute(
-                            select(editing_jobs).where(editing_jobs.c.job_id == job.job_id.uuid)
+                            select(editing_jobs).where(editing_jobs.c.job_id == changed.job_id.uuid)
                         )
                     )
                     .mappings()

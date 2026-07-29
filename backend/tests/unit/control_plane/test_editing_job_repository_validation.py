@@ -195,6 +195,39 @@ def make_job(
     )
 
 
+def job_in_state(status: EditingJobStatus, *, updated_at: datetime = UPDATED_AT) -> EditingJob:
+    """A job in one state, carrying exactly the facts that state requires.
+
+    `EditingJob` refuses a succeeded job with no artifact and a failed one with
+    no code, so a fixture parametrised over states cannot simply vary `status`.
+    """
+    return make_job(
+        status=status,
+        failure_code=(
+            EditingJobFailureCode.WORKER_LOST if status is EditingJobStatus.FAILED else None
+        ),
+        output_artifact_id=(ArtifactId.new() if status is EditingJobStatus.SUCCEEDED else None),
+        updated_at=updated_at,
+    )
+
+
+def started_pair(job_id: EditingJobId | None = None) -> tuple[EditingJob, EditingJob]:
+    """A legal `(previous, changed)` pair: one queued job and its dispatch.
+
+    `update` takes both because it is a compare-and-set -- `previous` is the
+    version the caller read, and the statement only touches a row that still
+    looks like it.
+    """
+    previous = make_job(job_id)
+    return previous, make_job(
+        previous.job_id,
+        previous.project_id,
+        previous.timeline_id,
+        status=EditingJobStatus.RUNNING,
+        updated_at=previous.updated_at + timedelta(seconds=1),
+    )
+
+
 def hydration_row(**overrides: object) -> RowMapping:
     """A row shaped the way asyncpg really hands one back.
 
@@ -237,7 +270,9 @@ async def test_repository_refuses_foreign_argument_types() -> None:
         with pytest.raises(EditingJobDataRejected):
             await repository.save(cast(EditingJob, object()))
         with pytest.raises(EditingJobDataRejected):
-            await repository.update(cast(EditingJob, object()))
+            await repository.update(make_job(), cast(EditingJob, object()))
+        with pytest.raises(EditingJobDataRejected):
+            await repository.update(cast(EditingJob, object()), make_job())
         with pytest.raises(EditingJobDataRejected):
             await repository.get(cast(EditingJobId, job.job_id.uuid))
         with pytest.raises(EditingJobDataRejected):
@@ -273,7 +308,7 @@ async def test_an_unreachable_database_is_refused_without_leaking_the_connection
         with pytest.raises(EditingJobPersistenceUnavailable) as saved:
             await repository.save(job)
         with pytest.raises(EditingJobPersistenceUnavailable) as updated:
-            await repository.update(make_job(job.job_id, status=EditingJobStatus.RUNNING))
+            await repository.update(*started_pair(job.job_id))
         with pytest.raises(EditingJobPersistenceUnavailable) as loaded:
             await repository.get(job.job_id)
         for captured in (saved, updated, loaded):
@@ -299,7 +334,7 @@ async def test_a_database_error_is_refused_without_leaking_its_message() -> None
         with pytest.raises(EditingJobPersistenceUnavailable) as saved:
             await repository.save(job)
         with pytest.raises(EditingJobPersistenceUnavailable) as updated:
-            await repository.update(make_job(job.job_id, status=EditingJobStatus.RUNNING))
+            await repository.update(*started_pair(job.job_id))
         with pytest.raises(EditingJobPersistenceUnavailable) as loaded:
             await repository.get(job.job_id)
         for captured in (saved, updated, loaded):
@@ -344,7 +379,7 @@ async def test_an_authentication_failure_is_refused_without_leaking_the_role() -
         with pytest.raises(EditingJobPersistenceUnavailable) as saved:
             await repository.save(job)
         with pytest.raises(EditingJobPersistenceUnavailable) as updated:
-            await repository.update(make_job(job.job_id, status=EditingJobStatus.RUNNING))
+            await repository.update(*started_pair(job.job_id))
         with pytest.raises(EditingJobPersistenceUnavailable) as loaded:
             await repository.get(job.job_id)
         for captured in (saved, updated, loaded):
@@ -513,7 +548,7 @@ async def test_an_update_that_violates_a_constraint_is_refused_the_same_way() ->
             FailingSessions(integrity_error("23503", None, "Key (le05-private-detail) ...")),
         )
         with pytest.raises(EditingJobTimelineRevisionMissing) as captured:
-            await repository.update(make_job(status=EditingJobStatus.RUNNING))
+            await repository.update(*started_pair())
         assert "le05-private-detail" not in "".join(traceback.format_exception(captured.value))
         assert captured.value.__cause__ is None
     finally:
@@ -586,8 +621,12 @@ async def test_a_serialisation_failure_is_not_reported_as_an_unavailable_databas
             raise SerialiserFailure("le05_leaked_serialiser_detail")
 
         monkeypatch.setattr(repository_module, "_column_values", explode)
+        previous, changed = started_pair()
         with pytest.raises(SerialiserFailure):
-            await getattr(repository, method)(make_job(status=EditingJobStatus.RUNNING))
+            if method == "save":
+                await repository.save(changed)
+            else:
+                await repository.update(previous, changed)
     finally:
         await database.close()
 
@@ -622,7 +661,7 @@ async def test_an_update_that_matched_nothing_says_which_of_the_two_it_was(
         repository = repository_module.SqlAlchemyEditingJobRepository(database)
         object.__setattr__(database, "_sessions", StubSessions(row, rowcount=0))
         with pytest.raises(expected):
-            await repository.update(make_job(status=EditingJobStatus.RUNNING))
+            await repository.update(*started_pair())
     finally:
         await database.close()
 
@@ -633,40 +672,116 @@ async def test_an_update_that_matched_its_row_returns_quietly() -> None:
     try:
         repository = repository_module.SqlAlchemyEditingJobRepository(database)
         object.__setattr__(database, "_sessions", StubSessions(None, rowcount=1))
-        await repository.update(make_job(status=EditingJobStatus.RUNNING))
+        await repository.update(*started_pair())
     finally:
         await database.close()
 
 
-def test_the_statuses_an_update_will_accept_are_read_off_the_state_machine() -> None:
-    """The predicate's source set is derived, not a second copy of the graph.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("previous_status", "changed_status"),
+    [
+        (EditingJobStatus.RUNNING, EditingJobStatus.QUEUED),
+        (EditingJobStatus.QUEUED, EditingJobStatus.SUCCEEDED),
+        (EditingJobStatus.QUEUED, EditingJobStatus.CANCELLED),
+        (EditingJobStatus.SUCCEEDED, EditingJobStatus.FAILED),
+        (EditingJobStatus.FAILED, EditingJobStatus.RUNNING),
+        (EditingJobStatus.CANCELLED, EditingJobStatus.SUCCEEDED),
+        (EditingJobStatus.RUNNING, EditingJobStatus.RUNNING),
+    ],
+    ids=[
+        "back-into-the-queue",
+        "queued-straight-to-succeeded",
+        "queued-straight-to-cancelled",
+        "out-of-a-terminal-state",
+        "out-of-another-terminal-state",
+        "out-of-a-third-terminal-state",
+        "a-state-to-itself",
+    ],
+)
+async def test_a_pair_that_is_not_a_legal_transition_is_a_caller_error(
+    previous_status: EditingJobStatus, changed_status: EditingJobStatus
+) -> None:
+    """`DataRejected` rather than `Stale`, and the difference is the instruction.
 
-    Written out by hand it would be a duplicate of `_TRANSITIONS` that drifts the
-    first time an edge changes, and the drift is silent in the safe-looking
-    direction: a source left in the list after its edge is removed lets an
-    illegal transition land in the database.
+    A `(previous, changed)` pair that is not an edge of the graph means the
+    caller built one of them from something other than the other. No reload
+    fixes that, so `Stale` -- whose whole meaning is "read it again and decide"
+    -- would send the caller round a loop forever.
 
-    The empty case is deliberate rather than an oversight. Nothing transitions
-    *to* `QUEUED` -- a render that lost its worker cannot resume, so re-running
-    it is a new job -- which means an `update` carrying a queued job matches no
-    row at all. That is the right answer: the only way a row becomes queued is
-    `save`.
+    Checked in Python rather than as a SQL predicate. Nothing is lost by moving
+    it out of the statement, because the compare-and-set already pins the row's
+    status to `previous`'s; what is gained is that a caller error stops being
+    reported as a concurrency outcome. `a-state-to-itself` is here because the
+    graph has no self-loops: a replayed write is not a transition.
     """
-    for target in EditingJobStatus:
-        sources = repository_module._SOURCE_STATUSES[target]
-        assert sources == tuple(
-            source.value
-            for source in EditingJobStatus
-            if EditingJobStateMachine.can_transition(source, target)
+    database = unreachable_database()
+    try:
+        repository = repository_module.SqlAlchemyEditingJobRepository(database)
+        # A session that would report success, so a missing guard shows up as a
+        # write that went through rather than as an incidental failure.
+        object.__setattr__(database, "_sessions", StubSessions(None, rowcount=1))
+        previous = job_in_state(previous_status)
+        changed = make_job(
+            previous.job_id,
+            previous.project_id,
+            previous.timeline_id,
+            status=changed_status,
+            failure_code=(
+                EditingJobFailureCode.WORKER_LOST
+                if changed_status is EditingJobStatus.FAILED
+                else None
+            ),
+            output_artifact_id=(
+                ArtifactId.new() if changed_status is EditingJobStatus.SUCCEEDED else None
+            ),
+            updated_at=previous.updated_at + timedelta(seconds=1),
         )
-        for source in EditingJobStatus:
-            assert (source.value in sources) is EditingJobStateMachine.can_transition(
-                source, target
-            )
-    assert repository_module._SOURCE_STATUSES[EditingJobStatus.QUEUED] == ()
-    assert repository_module._SOURCE_STATUSES[EditingJobStatus.SUCCEEDED] == (
-        EditingJobStatus.RUNNING.value,
-        EditingJobStatus.CANCELLING.value,
+        assert not EditingJobStateMachine.can_transition(previous_status, changed_status)
+        with pytest.raises(EditingJobDataRejected):
+            await repository.update(previous, changed)
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_an_update_refuses_a_pair_naming_two_different_jobs() -> None:
+    """A compare-and-set needs the version of *this* row, not another one's."""
+    database = unreachable_database()
+    try:
+        repository = repository_module.SqlAlchemyEditingJobRepository(database)
+        object.__setattr__(database, "_sessions", StubSessions(None, rowcount=1))
+        previous, changed = started_pair()
+        stranger = make_job(EditingJobId.new(), status=EditingJobStatus.QUEUED)
+        with pytest.raises(EditingJobDataRejected):
+            await repository.update(stranger, changed)
+        with pytest.raises(EditingJobDataRejected):
+            await repository.update(previous, make_job(EditingJobId.new()))
+    finally:
+        await database.close()
+
+
+def test_the_two_column_sets_partition_the_row_exactly() -> None:
+    """The guarantee that survived narrowing the update.
+
+    `update` writes only `_MUTABLE_COLUMNS`, which is what makes the identity
+    columns and `created_at` write-once structurally. The risk in narrowing it is
+    the one `materials` recorded: a field added to the domain gets stored on
+    insert and silently dropped by every update after. This assertion is what
+    replaces "write everything" -- a new column has to be classified, or it
+    belongs to neither set and this fails.
+
+    Compared against the table as well as the serialiser, so that a column added
+    to `schema.py` and forgotten in `_column_values` is caught too.
+    """
+    assert repository_module._IDENTITY_COLUMNS.isdisjoint(repository_module._MUTABLE_COLUMNS)
+    partition = repository_module._IDENTITY_COLUMNS | repository_module._MUTABLE_COLUMNS
+    assert partition == set(repository_module._column_values(make_job()))
+    assert partition == {column.name for column in editing_jobs.columns}
+    # And the filter really drops the identity half rather than passing
+    # everything through.
+    assert set(repository_module._mutable_values(make_job())) == (
+        repository_module._MUTABLE_COLUMNS
     )
 
 

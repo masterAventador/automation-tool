@@ -64,6 +64,7 @@ from automation_tool.control_plane.domain import (
     EditingJob,
     EditingJobFailureCode,
     EditingJobId,
+    EditingJobStateMachine,
     EditingJobStatus,
     EditingProject,
     EditingProjectId,
@@ -790,7 +791,7 @@ async def test_leaving_the_queue_frees_the_slot_for_the_next_render(
         await repository.save(first)
 
         started = first.start(UPDATED_AT + timedelta(seconds=1))
-        await repository.update(started)
+        await repository.update(first, started)
         assert (await repository.get(first.job_id)).status is EditingJobStatus.RUNNING
 
         second = make_job(EditingJobId.new(), project_id, timeline_id)
@@ -802,21 +803,24 @@ async def test_leaving_the_queue_frees_the_slot_for_the_next_render(
 
 
 @pytest.mark.asyncio
-async def test_an_update_rewrites_every_column_of_its_row(
+async def test_an_update_writes_the_mutable_half_of_exactly_one_row(
     postgresql_url: str,
     alembic_runner: AlembicRunner,
 ) -> None:
-    """One column set for insert and update, so neither can drift from the other.
+    """Two things a compare-and-set has to get right, and the fixture for each.
 
-    A narrower update would store a field on insert and silently drop it on
-    every write after, which is the failure `materials` recorded when its
-    description columns were split out. Here the whole row is written, including
-    the identity columns -- writing them to their own values costs nothing and
-    means a column added to the domain later cannot be missed by one of the two.
+    The **neighbour** carries the same `status` and the same `updated_at` as the
+    job under test, on a different revision. That is what makes it able to catch
+    an update whose `WHERE` lost its `job_id`: the other two predicates are the
+    version, so a job_id-less statement matches every row that happens to be at
+    the same version, and a neighbour differing in either column would not
+    collide. Measured -- with the neighbour merely `RUNNING` instead of
+    version-identical, dropping the `job_id` predicate left the whole suite
+    green.
 
-    The neighbouring job is here to catch an update whose `WHERE` lost its
-    identifier: without it, a statement touching every row would pass every
-    assertion about the row under test.
+    The **stored row** is compared column by column afterwards, which is where
+    the mutable/identity split shows up: `update` writes four columns, and the
+    identity columns keep the values `save` gave them.
     """
     alembic_runner(postgresql_url, "upgrade", "head")
     database = Database.from_url(postgresql_url)
@@ -826,21 +830,21 @@ async def test_an_update_rewrites_every_column_of_its_row(
         project_id = EditingProjectId.new()
         timeline_id = TimelineId.new()
         await store_scene(database, project_id, timeline_id)
+        await store_timeline(database, timeline_id, project_id, REVISION + 1)
         job = make_job(EditingJobId.new(), project_id, timeline_id)
         await repository.save(job)
-        neighbour = make_job(
-            EditingJobId.new(),
-            project_id,
-            timeline_id,
-            status=EditingJobStatus.RUNNING,
-        )
+        # Same status, same instant, different row: the version this update
+        # names belongs to two rows, and only one of them may move.
+        neighbour = make_job(EditingJobId.new(), project_id, timeline_id, revision=REVISION + 1)
         await repository.save(neighbour)
+        assert neighbour.status is job.status
+        assert neighbour.updated_at == job.updated_at
 
         started = job.start(UPDATED_AT + timedelta(seconds=1))
-        await repository.update(started)
+        await repository.update(job, started)
         artifact = ArtifactId.new()
         succeeded = started.succeed(artifact, UPDATED_AT + timedelta(seconds=2))
-        await repository.update(succeeded)
+        await repository.update(started, succeeded)
 
         assert await repository.get(job.job_id) == succeeded
         assert await stored_row(database, job.job_id.uuid) == row_values(
@@ -858,34 +862,117 @@ async def test_an_update_rewrites_every_column_of_its_row(
 
 
 @pytest.mark.asyncio
+async def test_an_update_cannot_move_a_job_to_another_timeline_revision(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    """The identity columns are write-once because `update` does not name them.
+
+    This used to be a registered leftover: when `update` wrote every column, a
+    caller that built its own `EditingJob` could re-point a stored job at a
+    different -- and still perfectly valid -- timeline revision, and the composite
+    foreign key had nothing to object to. Narrowing the statement to
+    `_MUTABLE_COLUMNS` closes it structurally, and this is the test that says so.
+
+    Note what is *not* the safety net here. An earlier note in `LE-05.md` claimed
+    the partial unique index would stop a re-pointed job from occupying an
+    occupied queue slot; that was wrong, because no update can produce a queued
+    row at all, so the index never sees one. The only constraint that ever
+    covered these columns is the foreign key, and it cannot tell one valid
+    revision from another.
+
+    `previous` is the genuine stored version, so the compare-and-set matches and
+    the write really does happen -- what has to hold is that it lands on the four
+    mutable columns and nowhere else. Measured: with the statement widened back
+    to every column, this is the only test that goes red.
+    """
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyEditingJobRepository(database)
+    try:
+        await reset_data(database)
+        project_id = EditingProjectId.new()
+        other_project = EditingProjectId.new()
+        timeline_id = TimelineId.new()
+        other_timeline = TimelineId.new()
+        await store_scene(database, project_id, timeline_id)
+        # A second, entirely legitimate destination: same project, next revision,
+        # plus a whole other project and timeline. Every one of these is a row
+        # the foreign key would accept.
+        await store_timeline(database, timeline_id, project_id, REVISION + 1)
+        await store_project(database, other_project)
+        await store_timeline(database, other_timeline, other_project, REVISION)
+
+        job = make_job(EditingJobId.new(), project_id, timeline_id)
+        await repository.save(job)
+
+        # Built by hand rather than through a transition method, which is the
+        # only way to reach this: the domain's own methods never touch these
+        # columns.
+        repointed = EditingJob(
+            job_id=job.job_id,
+            project_id=other_project,
+            timeline_id=other_timeline,
+            timeline_revision=REVISION,
+            status=EditingJobStatus.RUNNING,
+            failure_code=None,
+            output_artifact_id=None,
+            created_at=CREATED_AT - timedelta(days=1),
+            updated_at=UPDATED_AT + timedelta(seconds=1),
+        )
+        await repository.update(job, repointed)
+
+        # The status moved; nothing else did.
+        stored = await stored_row(database, job.job_id.uuid)
+        assert stored == row_values(
+            job.job_id.uuid,
+            project_id.uuid,
+            timeline_id.uuid,
+            status=EditingJobStatus.RUNNING.value,
+            updated_at=UPDATED_AT + timedelta(seconds=1),
+        )
+        assert stored["timeline_id"] == timeline_id.uuid
+        assert stored["project_id"] == project_id.uuid
+        assert stored["timeline_revision"] == REVISION
+        assert stored["created_at"] == CREATED_AT
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("shift", "accepted"),
     [
         (timedelta(microseconds=-1), False),
-        (timedelta(0), False),
-        (timedelta(microseconds=1), True),
+        (timedelta(0), True),
+        (timedelta(microseconds=1), False),
     ],
-    ids=["one-tick-earlier", "the-same-instant", "one-tick-later"],
+    ids=["one-tick-before-the-version", "the-version-itself", "one-tick-after-the-version"],
 )
-async def test_an_update_requires_its_timestamp_to_have_moved_forward(
+async def test_an_update_matches_only_the_exact_version_it_was_read_from(
     postgresql_url: str,
     alembic_runner: AlembicRunner,
     shift: timedelta,
     accepted: bool,
 ) -> None:
-    """Both endpoints and one microsecond either side of them.
+    """The compare-and-set endpoint, and one microsecond either side of it.
 
-    The endpoint itself -- an `updated_at` equal to the stored one -- is
-    **refused**, which is a decision rather than an accident. A replayed write
-    carrying the same instant is either a duplicate or a caller that never
-    reloaded; accepting it would let a repository silently absorb the retry that
-    the state machine is supposed to answer for. A microsecond is the smallest
-    step `timestamptz` records, so these three cases sit either side of the only
-    line there is.
+    This is an equality, so the accepted case sits *between* the two rejected
+    ones rather than beyond them -- the shape of the boundary is what changed
+    when the comparison stopped being `<`. A microsecond is the smallest step
+    `timestamptz` records, so these three sit either side of the only line there
+    is.
+
+    An earlier version required the *new* timestamp to be later than the stored
+    one, which reads like an optimistic-concurrency check and is not one: a live
+    caller's timestamp is `now()` and therefore always later, so it passed for
+    everybody and only ever caught replays. See `update`'s docstring for the data
+    loss that got through it, and the per-edge table below.
 
     The comparison is a predicate inside the UPDATE rather than a read followed
     by a decision, because reading first has the identical defect one level
-    down: two callers both read the old timestamp and both conclude they may
+    down: two callers both read the same version and both conclude they may
     proceed. Only the database sees one statement at a time.
     """
     alembic_runner(postgresql_url, "upgrade", "head")
@@ -899,28 +986,277 @@ async def test_an_update_requires_its_timestamp_to_have_moved_forward(
         job = make_job(EditingJobId.new(), project_id, timeline_id)
         await repository.save(job)
 
-        # Built through the domain and then re-timed, so the only thing under
-        # test is the timestamp: the transition itself is legal in all three.
-        started = job.start(UPDATED_AT + timedelta(seconds=1))
-        candidate = make_job(
-            job.job_id,
-            project_id,
-            timeline_id,
-            status=EditingJobStatus.RUNNING,
-            updated_at=UPDATED_AT + shift,
-        )
-        assert candidate.status is started.status
+        # The base the caller claims to have read, moved off the stored version
+        # by one tick in each direction. `changed` is a legal transition in all
+        # three cases, so the timestamp is the only thing under test.
+        base = make_job(job.job_id, project_id, timeline_id, updated_at=UPDATED_AT + shift)
+        changed = base.start(UPDATED_AT + timedelta(seconds=1))
 
         if accepted:
-            await repository.update(candidate)
-            assert (await repository.get(job.job_id)) == candidate
+            await repository.update(base, changed)
+            assert (await repository.get(job.job_id)) == changed
         else:
             with pytest.raises(EditingJobStale):
-                await repository.update(candidate)
+                await repository.update(base, changed)
             assert (await repository.get(job.job_id)) == job
     finally:
         await reset_data(database)
         await database.close()
+
+
+# Every `(snapshot, row)` pair where the snapshot is stale, the row is something
+# else, and the transition out of the snapshot is nonetheless legal. These are
+# exactly the openings the old source-status predicate could not close: it asked
+# whether the move was legal from where the row is, and each of these is a case
+# where it is.
+#
+# Read as: the caller holds `snapshot`, the row has since become `row`, and the
+# caller applies the transition reaching `target`. The first row of the table is
+# the one the reviewer reproduced -- a rendered video marked failed.
+STALE_BUT_LEGAL: dict[str, tuple[EditingJobStatus, EditingJobStatus, EditingJobStatus]] = {
+    "queued-snapshot-running-row-failed": (
+        EditingJobStatus.QUEUED,
+        EditingJobStatus.RUNNING,
+        EditingJobStatus.FAILED,
+    ),
+    "queued-snapshot-cancelling-row-failed": (
+        EditingJobStatus.QUEUED,
+        EditingJobStatus.CANCELLING,
+        EditingJobStatus.FAILED,
+    ),
+    "running-snapshot-cancelling-row-failed": (
+        EditingJobStatus.RUNNING,
+        EditingJobStatus.CANCELLING,
+        EditingJobStatus.FAILED,
+    ),
+    "queued-snapshot-running-row-cancelling": (
+        EditingJobStatus.QUEUED,
+        EditingJobStatus.RUNNING,
+        EditingJobStatus.CANCELLING,
+    ),
+    "running-snapshot-cancelling-row-succeeded": (
+        EditingJobStatus.RUNNING,
+        EditingJobStatus.CANCELLING,
+        EditingJobStatus.SUCCEEDED,
+    ),
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("snapshot_status", "row_status", "target_status"),
+    list(STALE_BUT_LEGAL.values()),
+    ids=list(STALE_BUT_LEGAL),
+)
+async def test_a_stale_snapshot_is_refused_even_when_its_transition_is_legal(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+    snapshot_status: EditingJobStatus,
+    row_status: EditingJobStatus,
+    target_status: EditingJobStatus,
+) -> None:
+    """The whole of F1, enumerated rather than argued.
+
+    Every target with two or more possible predecessors had an opening, because
+    "the row's status is a legal source for the new state" is true of a stale
+    snapshot just as often as of a current one. Comparing the version instead of
+    the direction closes all of them, and each is asserted rather than reasoned
+    about, because reasoning is what produced the hole.
+
+    Each case walks the row to `row_status` through the sanctioned methods, keeps
+    the earlier snapshot, and applies a transition that the graph really does
+    allow from that snapshot. Under a compare-and-set every one is `Stale`, and
+    the row is left exactly as the concurrent writer left it.
+    """
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyEditingJobRepository(database)
+    try:
+        await reset_data(database)
+        project_id = EditingProjectId.new()
+        timeline_id = TimelineId.new()
+        await store_scene(database, project_id, timeline_id)
+        queued = make_job(EditingJobId.new(), project_id, timeline_id)
+        await repository.save(queued)
+
+        # Walk to the snapshot the stale caller will hold, then on to what the
+        # row really becomes. Every step is a legal edge applied through the
+        # domain's own methods.
+        snapshot = await walk_to(repository, queued, snapshot_status, 1)
+        row_state = await walk_to(repository, snapshot, row_status, 10)
+        assert row_state.status is row_status
+        assert snapshot.status is snapshot_status
+
+        stale_move = transition_to(snapshot, target_status, UPDATED_AT + timedelta(seconds=30))
+        # The transition really is legal from the snapshot, and its timestamp
+        # really is later than the row's -- so the old pair of predicates would
+        # both have passed.
+        assert EditingJobStateMachine.can_transition(snapshot.status, target_status)
+        assert stale_move.updated_at > row_state.updated_at
+        assert EditingJobStateMachine.can_transition(row_state.status, target_status) or (
+            row_state.status is target_status
+        )
+
+        with pytest.raises(EditingJobStale):
+            await repository.update(snapshot, stale_move)
+
+        assert await repository.get(queued.job_id) == row_state
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_the_version_is_the_status_and_the_timestamp_together(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    """Why the compare-and-set names two columns rather than just the timestamp.
+
+    `EditingJob` allows a transition whose `updated_at` equals its predecessor's
+    -- `_moved_to` refuses only a timestamp that goes *backwards*. So two
+    successive states of one job can share an instant, and when they do the
+    timestamp alone stops identifying a version: the row moved on and the column
+    the comparison reads did not change.
+
+    This walks a job from queued to running **at the same instant**, then has a
+    stale caller apply `fail()` from the queued snapshot. With only `updated_at`
+    in the comparison the row still matches and the write lands -- the same class
+    of loss as the scheduler chain below, reached through a narrower door. With
+    the status in the comparison too, the version is the pair, and it does not.
+
+    A microsecond-wide race is not the reason this matters. Nothing forces these
+    timestamps to come from a clock at all: a caller that computes one instant
+    for a batch of transitions produces this shape every time.
+    """
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyEditingJobRepository(database)
+    try:
+        await reset_data(database)
+        project_id = EditingProjectId.new()
+        timeline_id = TimelineId.new()
+        await store_scene(database, project_id, timeline_id)
+        queued = make_job(EditingJobId.new(), project_id, timeline_id)
+        await repository.save(queued)
+
+        # Same instant, which the domain permits.
+        running = queued.start(UPDATED_AT)
+        assert running.updated_at == queued.updated_at
+        await repository.update(queued, running)
+        assert (await repository.get(queued.job_id)).status is EditingJobStatus.RUNNING
+
+        stale = queued.fail(
+            EditingJobFailureCode.INVALID_TIMELINE, UPDATED_AT + timedelta(seconds=1)
+        )
+        with pytest.raises(EditingJobStale):
+            await repository.update(queued, stale)
+
+        reloaded = await repository.get(queued.job_id)
+        assert reloaded == running
+        assert reloaded.failure_code is None
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_a_scheduler_holding_a_queued_snapshot_cannot_fail_a_running_render(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    """The chain that got through the first version of this guard, end to end.
+
+    Reproduced on a real database before the fix and kept as the regression:
+
+    1. the row is `QUEUED`; a scheduler reads it;
+    2. another instance dispatches the job, so the row becomes `RUNNING`;
+    3. the scheduler, still holding the `QUEUED` snapshot, decides the timeline
+       is unusable and calls `fail(INVALID_TIMELINE)`. Every call is the
+       sanctioned one -- `QUEUED -> FAILED` is a real edge, so the domain builds
+       the object without complaint.
+
+    Under the old predicates this **landed**: `RUNNING` was a legal source for
+    `FAILED`, and the new timestamp was later than the stored one. The worker
+    that really was rendering then finished and was refused as stale, leaving an
+    mp4 on disk, a row saying `failed`, and a NULL artifact -- data loss produced
+    entirely through sanctioned calls.
+
+    What this asserts is both halves: the stale write is refused, **and** the
+    worker's own completion still lands. A guard that refused both would pass the
+    first assertion while making the system useless.
+    """
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyEditingJobRepository(database)
+    try:
+        await reset_data(database)
+        project_id = EditingProjectId.new()
+        timeline_id = TimelineId.new()
+        await store_scene(database, project_id, timeline_id)
+        queued = make_job(EditingJobId.new(), project_id, timeline_id)
+        await repository.save(queued)
+
+        running = queued.start(UPDATED_AT + timedelta(seconds=1))
+        await repository.update(queued, running)
+
+        abandoned = queued.fail(
+            EditingJobFailureCode.INVALID_TIMELINE, UPDATED_AT + timedelta(seconds=2)
+        )
+        with pytest.raises(EditingJobStale):
+            await repository.update(queued, abandoned)
+
+        artifact = ArtifactId.new()
+        finished = running.succeed(artifact, UPDATED_AT + timedelta(seconds=3))
+        await repository.update(running, finished)
+
+        reloaded = await repository.get(queued.job_id)
+        assert reloaded == finished
+        assert reloaded.status is EditingJobStatus.SUCCEEDED
+        assert reloaded.output_artifact_id == artifact
+        assert reloaded.failure_code is None
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+def transition_to(job: EditingJob, status: EditingJobStatus, at: datetime) -> EditingJob:
+    """Apply the sanctioned method reaching `status`, so no object is forged."""
+    if status is EditingJobStatus.RUNNING:
+        return job.start(at)
+    if status is EditingJobStatus.CANCELLING:
+        return job.request_cancel(at)
+    if status is EditingJobStatus.SUCCEEDED:
+        return job.succeed(ArtifactId.new(), at)
+    if status is EditingJobStatus.FAILED:
+        return job.fail(EditingJobFailureCode.WORKER_LOST, at)
+    if status is EditingJobStatus.CANCELLED:
+        return job.confirm_cancelled(at)
+    raise AssertionError(status)
+
+
+async def walk_to(
+    repository: SqlAlchemyEditingJobRepository,
+    job: EditingJob,
+    status: EditingJobStatus,
+    second: int,
+) -> EditingJob:
+    """Move a stored job to `status`, one legal edge at a time."""
+    if job.status is status:
+        return job
+    route = {
+        EditingJobStatus.CANCELLING: [EditingJobStatus.CANCELLING],
+        EditingJobStatus.RUNNING: [EditingJobStatus.RUNNING],
+        EditingJobStatus.SUCCEEDED: [EditingJobStatus.SUCCEEDED],
+        EditingJobStatus.FAILED: [EditingJobStatus.FAILED],
+        EditingJobStatus.CANCELLED: [EditingJobStatus.CANCELLED],
+    }[status]
+    current = job
+    for offset, step in enumerate(route):
+        moved = transition_to(current, step, UPDATED_AT + timedelta(seconds=second + offset))
+        await repository.update(current, moved)
+        current = moved
+    return current
 
 
 @pytest.mark.asyncio
@@ -942,15 +1278,9 @@ async def test_updating_a_job_that_was_never_stored_is_not_found(
         timeline_id = TimelineId.new()
         await store_scene(database, project_id, timeline_id)
 
+        absent = make_job(EditingJobId.new(), project_id, timeline_id)
         with pytest.raises(EditingJobNotFound) as refused:
-            await repository.update(
-                make_job(
-                    EditingJobId.new(),
-                    project_id,
-                    timeline_id,
-                    status=EditingJobStatus.RUNNING,
-                )
-            )
+            await repository.update(absent, absent.start(UPDATED_AT + timedelta(seconds=1)))
         assert not isinstance(refused.value, EditingJobStale)
     finally:
         await reset_data(database)
@@ -993,11 +1323,11 @@ async def test_a_stale_snapshot_cannot_undo_a_render_that_already_finished(
         queued = make_job(EditingJobId.new(), project_id, timeline_id)
         await repository.save(queued)
         cancelling = queued.request_cancel(UPDATED_AT + timedelta(seconds=1))
-        await repository.update(cancelling)
+        await repository.update(queued, cancelling)
 
         artifact = ArtifactId.new()
         finished = cancelling.succeed(artifact, UPDATED_AT + timedelta(seconds=2))
-        await repository.update(finished)
+        await repository.update(cancelling, finished)
 
         # The reconciliation pass, still holding the snapshot from step 1 and
         # carrying a later timestamp than the worker's.
@@ -1006,7 +1336,7 @@ async def test_a_stale_snapshot_cannot_undo_a_render_that_already_finished(
         )
         assert abandoned.updated_at > finished.updated_at
         with pytest.raises(EditingJobStale):
-            await repository.update(abandoned)
+            await repository.update(cancelling, abandoned)
 
         reloaded = await repository.get(queued.job_id)
         assert reloaded == finished
@@ -1025,12 +1355,11 @@ async def test_a_job_cannot_be_pushed_back_into_the_queue_by_an_update(
 ) -> None:
     """Nothing transitions *to* queued, so no update may write that state.
 
-    A render that lost its worker cannot resume -- ffmpeg has no checkpoint --
-    so re-running it is a new job. That is a domain rule, and this is the row
-    that would otherwise carry it back: an `update` naming a queued job matches
-    no row, whatever the timestamp says. It also keeps the third invariant
-    honest, since a job walked back into the queue would occupy a slot the index
-    could not have refused at insert time.
+    A render that lost its worker cannot resume -- ffmpeg has no checkpoint -- so
+    re-running it is a new job. The answer is `DataRejected` rather than `Stale`
+    because the pair itself is impossible: `RUNNING -> QUEUED` is not an edge of
+    the graph, so no reload could ever make this write valid, and `Stale` would
+    send the caller round a loop.
     """
     alembic_runner(postgresql_url, "upgrade", "head")
     database = Database.from_url(postgresql_url)
@@ -1042,16 +1371,18 @@ async def test_a_job_cannot_be_pushed_back_into_the_queue_by_an_update(
         await store_scene(database, project_id, timeline_id)
         job = make_job(EditingJobId.new(), project_id, timeline_id)
         await repository.save(job)
-        await repository.update(job.start(UPDATED_AT + timedelta(seconds=1)))
+        running = job.start(UPDATED_AT + timedelta(seconds=1))
+        await repository.update(job, running)
 
-        with pytest.raises(EditingJobStale):
+        with pytest.raises(EditingJobDataRejected):
             await repository.update(
+                running,
                 make_job(
                     job.job_id,
                     project_id,
                     timeline_id,
                     updated_at=UPDATED_AT + timedelta(seconds=2),
-                )
+                ),
             )
         assert (await repository.get(job.job_id)).status is EditingJobStatus.RUNNING
     finally:
@@ -1209,7 +1540,7 @@ async def test_wrong_credentials_are_refused_without_leaking_the_identity(
         with pytest.raises(EditingJobPersistenceUnavailable) as saved:
             await repository.save(job)
         with pytest.raises(EditingJobPersistenceUnavailable) as updated:
-            await repository.update(job.start(UPDATED_AT + timedelta(seconds=1)))
+            await repository.update(job, job.start(UPDATED_AT + timedelta(seconds=1)))
         with pytest.raises(EditingJobPersistenceUnavailable) as loaded:
             await repository.get(job.job_id)
         for captured in (saved, updated, loaded):
@@ -1236,7 +1567,10 @@ async def test_the_repository_refuses_arguments_before_it_reaches_the_database(
         with pytest.raises(EditingJobDataRejected):
             await repository.save(cast(EditingJob, object()))
         with pytest.raises(EditingJobDataRejected):
-            await repository.update(cast(EditingJob, object()))
+            await repository.update(
+                make_job(EditingJobId.new(), EditingProjectId.new(), TimelineId.new()),
+                cast(EditingJob, object()),
+            )
     finally:
         await database.close()
 
@@ -1269,11 +1603,19 @@ async def test_migration_creates_the_declared_shape_and_drops_it(
                 .mappings()
                 .all()
             }
+            # Filtered to the constraint kinds that carry a rule, and then
+            # compared for *equality*. A `>=` here would pass a database holding
+            # a constraint `schema.py` has never heard of -- which is the
+            # autogenerate drift this assertion exists to catch, in the one
+            # direction a subset test cannot see. The filter keeps PostgreSQL's
+            # internal not-null entries (`contype = 'n'` on newer servers) from
+            # making the comparison depend on the server version.
             constraints = set(
                 await session.scalars(
                     text(
                         "select conname from pg_constraint where conrelid = "
-                        "'public.editing_jobs'::regclass"
+                        "'public.editing_jobs'::regclass "
+                        "and contype in ('p', 'f', 'u', 'c')"
                     )
                 )
             )
@@ -1291,7 +1633,7 @@ async def test_migration_creates_the_declared_shape_and_drops_it(
             )
         assert revision == HEAD_REVISION
         assert columns == EXPECTED_COLUMNS
-        assert constraints >= EXPECTED_CONSTRAINTS
+        assert constraints == EXPECTED_CONSTRAINTS
         # The composite key, read back as PostgreSQL stores it. Column order is
         # part of it: the target is `timelines`'s superkey, which spells its
         # three columns in this order, and a reference in any other order is a

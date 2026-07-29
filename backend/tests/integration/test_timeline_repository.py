@@ -1204,6 +1204,14 @@ async def test_migration_creates_the_declared_shape_and_drops_it(
             )
         assert revision == HEAD_REVISION
         assert columns == EXPECTED_COLUMNS
+        # `>=` rather than `==`, which is one-directional: it catches a
+        # constraint this file expects and the database lacks, and **not** a
+        # constraint the database has and `schema.py` has never heard of -- the
+        # second being exactly the autogenerate drift these assertions exist to
+        # catch. T4's equivalent is compared for equality over
+        # `contype in ('p','f','u','c')`; tightening this one belongs with the
+        # task that owns `timelines`, and is registered as a leftover in
+        # `LE-05.md` rather than changed from another task's fix round.
         assert constraints >= EXPECTED_CONSTRAINTS
         # `schema.py` and the migration each declare all of this separately, and
         # this assertion is the only thing comparing the two: every other test
