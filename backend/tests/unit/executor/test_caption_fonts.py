@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -138,3 +139,302 @@ def test_the_default_caption_face_is_registered_and_carries_chinese() -> None:
         fonts.REGISTERED_CAPTION_FONTS[fonts.DEFAULT_CAPTION_FONT_KEY].bundle
         == fonts.MATERIAL_VIDEO_WORKER_BUNDLE
     )
+
+
+def _staged_bundle_roots(tmp_path: Path) -> dict[str, Path]:
+    """One directory per bundle, each holding that bundle's faces.
+
+    This is the shape both run modes produce: the package collapses the
+    bundles under its own root, a checkout leaves them where each bundle
+    already keeps them. Either way a face is found as bundle -> root -> name.
+    """
+    roots: dict[str, Path] = {}
+    for registered in fonts.REGISTERED_CAPTION_FONTS.values():
+        root = tmp_path / registered.bundle
+        root.mkdir(exist_ok=True)
+        (root / registered.packaged_name).write_bytes(b"")
+        roots[registered.bundle] = root
+    return roots
+
+
+class TestFontKeyPattern:
+    def test_the_pattern_matches_the_control_plane_contract(self) -> None:
+        """Copied across the deployment boundary, so pinned rather than shared.
+
+        The Executor may not import a Control Plane domain module
+        (CLAUDE.md 4.3). A test may reach across; production code may not.
+        """
+        from automation_tool.control_plane.domain import editing_project
+
+        assert fonts.FONT_KEY_PATTERN.pattern == editing_project._FONT_KEY_PATTERN.pattern
+
+
+class TestBundleLayout:
+    def test_every_registered_bundle_has_a_source_location(self) -> None:
+        """A registered face with no known bundle root is unreachable."""
+        for registered in fonts.REGISTERED_CAPTION_FONTS.values():
+            assert fonts.bundle_root(registered.bundle).name
+
+    def test_source_locations_agree_with_the_rights_register(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`path` in the register is the discriminant between the two kinds.
+
+        An entry carrying `path` is committed in the repository and is found
+        there; an entry without one is fetched at build time by digest and
+        lives in the build cache, never in the tree. That single field is why
+        the two kinds resolve differently, and this test is what keeps the
+        code's idea of "where" tied to the register's.
+        """
+        monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+        cleared = _cleared_faces(_rights_document())
+
+        for registered in fonts.REGISTERED_CAPTION_FONTS.values():
+            entry = cleared[registered.packaged_name]
+            resolved = fonts.bundle_root(registered.bundle) / registered.packaged_name
+            declared_path = entry.get("path")
+            if declared_path is None:
+                # Fetched by digest into the build cache: it must not be
+                # looked for inside the checkout, because it is never there.
+                assert _REPOSITORY_ROOT not in resolved.parents
+            else:
+                assert resolved == _REPOSITORY_ROOT / declared_path
+                assert resolved.is_file(), resolved
+
+    def test_the_packaged_layout_is_one_directory_per_bundle(self) -> None:
+        """The relative path LE-20 has to satisfy, and the only statement of it."""
+        assert fonts.packaged_relative_path("big-shoulders-display") == PurePosixPath(
+            "fonts/motion-catalog-overlay/big-shoulders-display-latin.woff2"
+        )
+        assert fonts.packaged_relative_path("noto-sans-cjk-sc-bold") == PurePosixPath(
+            "fonts/material-video-worker/NotoSansCJKsc-Bold.ttf"
+        )
+
+    def test_every_registered_face_has_a_packaged_relative_path(self) -> None:
+        """LE-20's factory gate is a loop over this; nothing may be missing."""
+        seen = set()
+        for font_key in fonts.REGISTERED_CAPTION_FONTS:
+            relative = fonts.packaged_relative_path(font_key)
+            assert not relative.is_absolute()
+            assert ".." not in relative.parts
+            assert relative.parts[0] == fonts.PACKAGED_FONT_DIRECTORY_NAME
+            seen.add(relative)
+        assert len(seen) == len(fonts.REGISTERED_CAPTION_FONTS)
+
+    def test_a_frozen_run_resolves_exactly_the_packaged_relative_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Resolution and the published layout must not be able to disagree.
+
+        LE-20 will assert files exist at `packaged_relative_path`; the renderer
+        opens whatever `resolve_font_file` returns. If those two drift, the
+        gate passes on files nothing reads -- the same two-sources-of-truth
+        fault the registry itself was just fixed for.
+        """
+        monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+
+        for font_key, registered in fonts.REGISTERED_CAPTION_FONTS.items():
+            staged = tmp_path / fonts.packaged_relative_path(font_key)
+            staged.parent.mkdir(parents=True, exist_ok=True)
+            staged.write_bytes(b"")
+
+            assert fonts.resolve_font_file(font_key) == staged
+            assert fonts.bundle_root(registered.bundle) == staged.parent
+
+    def test_an_unknown_bundle_is_refused(self) -> None:
+        with pytest.raises(fonts.CaptionFontUnavailable):
+            fonts.bundle_root("no-such-bundle")
+
+
+class TestResolveFontFile:
+    def test_a_registered_key_resolves_under_its_own_bundle_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        roots = _staged_bundle_roots(tmp_path)
+        monkeypatch.setattr(fonts, "bundle_root", lambda bundle: roots[bundle])
+
+        resolved = fonts.resolve_font_file("noto-sans-cjk-sc-bold")
+
+        assert resolved == roots[fonts.MATERIAL_VIDEO_WORKER_BUNDLE] / "NotoSansCJKsc-Bold.ttf"
+
+    def test_faces_from_different_bundles_resolve_under_different_roots(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The single-root design this replaced got exactly this wrong."""
+        roots = _staged_bundle_roots(tmp_path)
+        monkeypatch.setattr(fonts, "bundle_root", lambda bundle: roots[bundle])
+
+        cjk = fonts.resolve_font_file("noto-sans-cjk-sc-bold")
+        latin = fonts.resolve_font_file("big-shoulders-display")
+
+        assert cjk.parent != latin.parent
+
+    def test_every_registered_key_resolves(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        roots = _staged_bundle_roots(tmp_path)
+        monkeypatch.setattr(fonts, "bundle_root", lambda bundle: roots[bundle])
+
+        for font_key in fonts.REGISTERED_CAPTION_FONTS:
+            assert fonts.resolve_font_file(font_key).is_file()
+
+    @pytest.mark.parametrize(
+        "font_key",
+        [
+            "Noto-Sans-CJK-SC-Bold",
+            "noto sans cjk sc bold",
+            "noto/sans",
+            "../../etc/passwd",
+            "/etc/passwd",
+            "1noto",
+            "-noto",
+            "",
+            "n" * 65,
+            "noto-sans-cjk-sc-bold\n",
+        ],
+    )
+    def test_a_malformed_key_is_refused(self, font_key: str) -> None:
+        with pytest.raises(fonts.CaptionFontRejected):
+            fonts.resolve_font_file(font_key)
+
+    @pytest.mark.parametrize("font_key", [b"noto", None, 7, ["noto"]])
+    def test_a_non_string_key_is_refused(self, font_key: object) -> None:
+        with pytest.raises(fonts.CaptionFontRejected):
+            fonts.resolve_font_file(font_key)  # type: ignore[arg-type]
+
+    def test_a_key_at_the_maximum_length_clears_the_pattern(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """64 characters is the boundary the Control Plane accepts."""
+        monkeypatch.setattr(fonts, "bundle_root", lambda bundle: tmp_path)
+
+        with pytest.raises(fonts.CaptionFontRejected) as rejection:
+            fonts.resolve_font_file("n" * 64)
+
+        assert "unregistered" in str(rejection.value)
+
+    def test_a_wellformed_but_unregistered_key_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(fonts, "bundle_root", lambda bundle: tmp_path)
+
+        with pytest.raises(fonts.CaptionFontRejected):
+            fonts.resolve_font_file("helvetica")
+
+    def test_an_unresolvable_key_never_reaches_the_filesystem(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The closed register, not the pattern, is what enforces this.
+
+        A traversal string is not a key in the map, so the lookup misses
+        before any path exists. Deleting the pattern guard leaves this green,
+        which is why the guard has its own test below.
+        """
+
+        def _explode(bundle: str) -> Path:
+            raise AssertionError("no bundle root may be consulted for an unknown key")
+
+        monkeypatch.setattr(fonts, "bundle_root", _explode)
+
+        for font_key in ("../../etc/passwd", "helvetica"):
+            with pytest.raises(fonts.CaptionFontRejected):
+                fonts.resolve_font_file(font_key)
+
+    def test_a_malformed_key_is_not_echoed_back_in_the_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """This is the pattern guard's real job, and the one that can regress.
+
+        The unregistered-key branch names the key so an operator can see which
+        setting is wrong. That is only safe because the pattern already ran: a
+        key reaching it is `[a-z][a-z0-9-]{0,63}` and cannot carry a path, a
+        newline or a quote. Without the guard a traversal string would be
+        echoed straight into the message, putting untrusted input in a log --
+        which CLAUDE.md 7 forbids outright.
+        """
+        monkeypatch.setattr(fonts, "bundle_root", lambda bundle: tmp_path)
+
+        for font_key in ("../../etc/passwd", "noto-sans-cjk-sc-bold\n", "a'; DROP TABLE"):
+            with pytest.raises(fonts.CaptionFontRejected) as rejection:
+                fonts.resolve_font_file(font_key)
+            assert font_key not in str(rejection.value)
+
+    def test_a_missing_face_is_reported_as_unavailable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(fonts, "bundle_root", lambda bundle: tmp_path)
+
+        with pytest.raises(fonts.CaptionFontUnavailable) as rejection:
+            fonts.resolve_font_file("noto-sans-cjk-sc-bold")
+
+        assert "noto-sans-cjk-sc-bold" in str(rejection.value)
+
+    def test_a_directory_in_place_of_a_face_is_reported_as_unavailable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "NotoSansCJKsc-Bold.ttf").mkdir()
+        monkeypatch.setattr(fonts, "bundle_root", lambda bundle: tmp_path)
+
+        with pytest.raises(fonts.CaptionFontUnavailable):
+            fonts.resolve_font_file("noto-sans-cjk-sc-bold")
+
+
+class TestBuildCacheRootBranches:
+    """Each platform branch, asserted on its own.
+
+    coverage.py scores one `if` as one branch, so a run that never takes the
+    last return can still report full coverage. Only one case per branch
+    proves each is reachable and correct.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+        monkeypatch.delenv(fonts.BUILD_CACHE_OVERRIDE_VARIABLE, raising=False)
+        monkeypatch.delenv("LOCALAPPDATA", raising=False)
+        monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+        # `HOME` rather than a patched `Path.home`: `expanduser` reads the
+        # environment directly, so patching only the method would leave the
+        # override branch expanding `~` against this machine's real home.
+        monkeypatch.setenv("HOME", "/home/u")
+
+    def _fetched_bundle_root(self) -> Path:
+        return fonts.bundle_root(fonts.MATERIAL_VIDEO_WORKER_BUNDLE)
+
+    def test_an_explicit_override_wins(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(fonts.BUILD_CACHE_OVERRIDE_VARIABLE, "~/custom")
+
+        assert self._fetched_bundle_root() == Path("/home/u/custom/subtitle-fonts")
+
+    def test_macos_uses_library_caches(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(sys, "platform", "darwin")
+
+        assert self._fetched_bundle_root().parent == Path(
+            "/home/u/Library/Caches/automation-tool-build"
+        )
+
+    def test_windows_uses_local_appdata(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setenv("LOCALAPPDATA", "/appdata")
+
+        assert self._fetched_bundle_root().parent == Path("/appdata/automation-tool-build")
+
+    def test_windows_without_local_appdata_falls_back(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sys, "platform", "win32")
+
+        assert self._fetched_bundle_root().parent == Path(
+            "/home/u/AppData/Local/automation-tool-build"
+        )
+
+    def test_linux_honours_xdg_cache_home(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setenv("XDG_CACHE_HOME", "/xdg")
+
+        assert self._fetched_bundle_root().parent == Path("/xdg/automation-tool-build")
+
+    def test_linux_without_xdg_uses_dot_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(sys, "platform", "linux")
+
+        assert self._fetched_bundle_root().parent == Path("/home/u/.cache/automation-tool-build")
