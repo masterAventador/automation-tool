@@ -9,8 +9,11 @@ stays on this side of the boundary.
 
 from __future__ import annotations
 
+import json
+import math
 import os
 import stat
+import subprocess
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -18,7 +21,19 @@ from typing import Final, Never
 
 from automation_tool.protocol.safe_text import contains_control_or_bidi
 
-MAX_TOOL_PATH_CHARACTERS: Final = 4096
+MAX_PATH_CHARACTERS: Final = 4096
+MAX_CODEC_NAME_CHARACTERS: Final = 64
+MAX_PROBE_OUTPUT_BYTES: Final = 1024 * 1024
+PROBE_TIMEOUT_SECONDS: float = 30.0
+
+# Mirrored from `control_plane.domain.material` rather than imported: the
+# executor does not depend on the product layer (`CLAUDE.md` §4.3). Probing that
+# accepted a wider range than `Material` would hand the caller facts that cannot
+# be stored, so a cross-layer test pins these to the domain's own limits.
+MAX_MATERIAL_DURATION_MS: Final = 4 * 60 * 60 * 1000
+MAX_MATERIAL_DIMENSION: Final = 8192
+
+_PROBE_ENTRIES: Final = "format=duration,format_name:stream=codec_type,codec_name,width,height"
 
 
 class MaterialProbeRejection(StrEnum):
@@ -31,6 +46,25 @@ class MaterialProbeRejection(StrEnum):
 
     UNREADABLE = "unreadable"
     UNSAFE_PATH = "unsafe_path"
+    UNDECODABLE = "undecodable"
+    NO_USABLE_STREAM = "no_usable_stream"
+    UNUSABLE_DURATION = "unusable_duration"
+    TOO_LONG = "too_long"
+    UNUSABLE_FRAME_SIZE = "unusable_frame_size"
+    FRAME_TOO_LARGE = "frame_too_large"
+    PROBE_FAILED = "probe_failed"
+
+
+class ProbedMaterialKind(StrEnum):
+    """Mirrors `control_plane.domain.material.MaterialKind` by value.
+
+    Declared here rather than imported for the same boundary reason as the
+    limits above; a cross-layer test asserts the two stay identical.
+    """
+
+    VIDEO = "video"
+    IMAGE = "image"
+    AUDIO = "audio"
 
 
 class MaterialProbeRejected(RuntimeError):
@@ -60,6 +94,20 @@ def _has_symlink_component(path: Path) -> bool:
     return False
 
 
+def _require_path_shape(path: object) -> Path:
+    """Reject a path on its text alone, before anything touches the filesystem."""
+    if not isinstance(path, Path):
+        _reject(MaterialProbeRejection.UNSAFE_PATH)
+    encoded = os.fspath(path)
+    if (
+        not path.is_absolute()
+        or len(encoded) > MAX_PATH_CHARACTERS
+        or contains_control_or_bidi(encoded)
+    ):
+        _reject(MaterialProbeRejection.UNSAFE_PATH)
+    return path
+
+
 def _require_tool(path: object) -> None:
     """Re-check a path the Rust caller already authorized.
 
@@ -69,15 +117,7 @@ def _require_tool(path: object) -> None:
     variable that could redirect a test build somewhere a shipped build would
     never look.
     """
-    if not isinstance(path, Path):
-        _reject(MaterialProbeRejection.UNSAFE_PATH)
-    encoded = os.fspath(path)
-    if (
-        not path.is_absolute()
-        or len(encoded) > MAX_TOOL_PATH_CHARACTERS
-        or contains_control_or_bidi(encoded)
-    ):
-        _reject(MaterialProbeRejection.UNSAFE_PATH)
+    tool = _require_path_shape(path)
     # Both calls below touch the filesystem, so both can raise. `is_symlink()`
     # swallows only ENOENT/ENOTDIR/EBADF/ELOOP (`pathlib._IGNORED_ERRNOS`) —
     # ENAMETOOLONG propagates, and a component over NAME_MAX is reachable well
@@ -87,13 +127,34 @@ def _require_tool(path: object) -> None:
     # `_reject` raises a `RuntimeError` subclass, so the symlink rejection
     # passes through this `except` untouched.
     try:
-        if _has_symlink_component(path):
+        if _has_symlink_component(tool):
             _reject(MaterialProbeRejection.UNSAFE_PATH)
-        metadata = path.stat(follow_symlinks=False)
+        metadata = tool.stat(follow_symlinks=False)
     except OSError:
         _reject(MaterialProbeRejection.UNREADABLE)
-    if not stat.S_ISREG(metadata.st_mode) or not os.access(path, os.X_OK):
+    if not stat.S_ISREG(metadata.st_mode) or not os.access(tool, os.X_OK):
         _reject(MaterialProbeRejection.UNREADABLE)
+
+
+def _require_source_file(path: object) -> Path:
+    """Check a file the user chose to import.
+
+    Unlike the tools, a symlink is fine here: user media legitimately lives
+    behind one, and there is no integrity claim to protect — the supply-chain
+    reason for rejecting links applies to the packaged binaries, not to the
+    operator's own library. The stat therefore follows links, and requiring a
+    regular file at the end of the chain is what keeps a FIFO or character
+    device out, either of which would leave ffprobe blocked instead of
+    returning a fact.
+    """
+    source = _require_path_shape(path)
+    try:
+        metadata = source.stat()
+    except OSError:
+        _reject(MaterialProbeRejection.UNREADABLE)
+    if not stat.S_ISREG(metadata.st_mode) or not os.access(source, os.R_OK):
+        _reject(MaterialProbeRejection.UNREADABLE)
+    return source
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -125,9 +186,159 @@ class PackagedMediaTools:
         return "PackagedMediaTools(<redacted>)"
 
 
+@dataclass(frozen=True, slots=True)
+class MediaStreamFacts:
+    """What ffprobe knows about one file. Deliberately carries no path."""
+
+    kind: ProbedMaterialKind
+    duration_ms: int | None
+    width: int | None
+    height: int | None
+    video_codec: str | None
+    audio_codec: str | None
+
+
+def _run_probe(ffprobe: Path, source: Path) -> dict[str, object]:
+    """Ask ffprobe for exactly the entries used, and trust nothing it says.
+
+    Only `-show_entries` is passed: adding `-show_format`/`-show_streams` makes
+    the selection additive and drags in `tags`, which is attacker-controlled
+    metadata carried inside the file.
+    """
+    try:
+        completed = subprocess.run(
+            [
+                os.fspath(ffprobe),
+                "-v",
+                "error",
+                "-print_format",
+                "json",
+                "-show_entries",
+                _PROBE_ENTRIES,
+                # Stops a name beginning with "-" from being read as an option.
+                "--",
+                os.fspath(source),
+            ],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=PROBE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        _reject(MaterialProbeRejection.PROBE_FAILED)
+    if completed.returncode != 0:
+        # Measured: unsupported data, a truncated container and an empty file
+        # all yield exactly `exit=1` with `stdout={}`. Reading stdout without
+        # checking this first would parse that `{}` into an empty mapping and
+        # invent defaults from it. The three cannot be told apart without
+        # matching ffprobe's English diagnostics, and that text names the file,
+        # so it is never read back.
+        _reject(MaterialProbeRejection.UNDECODABLE)
+    if len(completed.stdout) > MAX_PROBE_OUTPUT_BYTES:
+        _reject(MaterialProbeRejection.PROBE_FAILED)
+    try:
+        payload = json.loads(completed.stdout)
+    except ValueError:
+        _reject(MaterialProbeRejection.PROBE_FAILED)
+    if not isinstance(payload, dict):
+        _reject(MaterialProbeRejection.PROBE_FAILED)
+    return payload
+
+
+def _first_stream(streams: list[object], codec_type: str) -> dict[str, object] | None:
+    for stream in streams:
+        if isinstance(stream, dict) and stream.get("codec_type") == codec_type:
+            return stream
+    return None
+
+
+def _duration_ms(text: object) -> int:
+    if not isinstance(text, str):
+        _reject(MaterialProbeRejection.UNUSABLE_DURATION)
+    try:
+        seconds = float(text)
+    except ValueError:
+        _reject(MaterialProbeRejection.UNUSABLE_DURATION)
+    # Guards `round()` as much as the value: it raises on both infinity and NaN.
+    if not math.isfinite(seconds):
+        _reject(MaterialProbeRejection.UNUSABLE_DURATION)
+    milliseconds = round(seconds * 1000)
+    # `Material` needs at least 1 ms, which also covers every negative value.
+    if milliseconds < 1:
+        _reject(MaterialProbeRejection.UNUSABLE_DURATION)
+    if milliseconds > MAX_MATERIAL_DURATION_MS:
+        _reject(MaterialProbeRejection.TOO_LONG)
+    return milliseconds
+
+
+def _frame_edge(stream: dict[str, object], key: str) -> int:
+    value = stream.get(key)
+    # `type(...) is not int` rather than `isinstance`: `bool` is an `int`
+    # subclass, and `True` must not pass for a pixel count.
+    if type(value) is not int or value < 1:
+        _reject(MaterialProbeRejection.UNUSABLE_FRAME_SIZE)
+    if value > MAX_MATERIAL_DIMENSION:
+        _reject(MaterialProbeRejection.FRAME_TOO_LARGE)
+    return value
+
+
+def _codec_name(stream: dict[str, object]) -> str:
+    value = stream.get("codec_name")
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > MAX_CODEC_NAME_CHARACTERS
+        or contains_control_or_bidi(value)
+    ):
+        _reject(MaterialProbeRejection.PROBE_FAILED)
+    return value
+
+
+def read_stream_facts(tools: PackagedMediaTools, source: Path) -> MediaStreamFacts:
+    """Read duration, frame size and codecs for one file with the packaged ffprobe."""
+    tools.revalidate()
+    path = _require_source_file(source)
+    payload = _run_probe(tools.ffprobe_path, path)
+    streams = payload.get("streams")
+    container = payload.get("format")
+    if not isinstance(streams, list) or not isinstance(container, dict):
+        _reject(MaterialProbeRejection.PROBE_FAILED)
+
+    video = _first_stream(streams, "video")
+    audio = _first_stream(streams, "audio")
+    duration_text = container.get("duration")
+    if video is not None:
+        # A still image reports a video stream with no `duration` key at all —
+        # measured against the packaged ffprobe, which gives a PNG
+        # `format_name: png_pipe` and omits duration entirely. Absence is the
+        # signal; a zero would not be.
+        kind = ProbedMaterialKind.IMAGE if duration_text is None else ProbedMaterialKind.VIDEO
+    elif audio is not None:
+        kind = ProbedMaterialKind.AUDIO
+    else:
+        _reject(MaterialProbeRejection.NO_USABLE_STREAM)
+
+    return MediaStreamFacts(
+        kind=kind,
+        duration_ms=None if kind is ProbedMaterialKind.IMAGE else _duration_ms(duration_text),
+        # `Material` forbids a frame size on audio, so none is invented here.
+        width=None if video is None else _frame_edge(video, "width"),
+        height=None if video is None else _frame_edge(video, "height"),
+        video_codec=None if video is None else _codec_name(video),
+        audio_codec=None if audio is None else _codec_name(audio),
+    )
+
+
 __all__ = [
-    "MAX_TOOL_PATH_CHARACTERS",
+    "MAX_CODEC_NAME_CHARACTERS",
+    "MAX_MATERIAL_DIMENSION",
+    "MAX_MATERIAL_DURATION_MS",
+    "MAX_PATH_CHARACTERS",
+    "MAX_PROBE_OUTPUT_BYTES",
     "MaterialProbeRejected",
     "MaterialProbeRejection",
+    "MediaStreamFacts",
     "PackagedMediaTools",
+    "ProbedMaterialKind",
+    "read_stream_facts",
 ]
