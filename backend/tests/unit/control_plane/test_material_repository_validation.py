@@ -255,13 +255,29 @@ async def test_an_unreachable_database_is_refused_without_leaking_the_connection
 
 @pytest.mark.asyncio
 async def test_a_database_error_is_refused_without_leaking_its_message() -> None:
+    """The sentinel is `le05_...` rather than a plain word, and that matters.
+
+    The obvious spelling of this test hides the message inside
+    `SQLAlchemyError("private database failure")` and asserts that `"private"`
+    does not appear. But `traceback.format_exception` renders a `File "..."`
+    line for every frame, so that assertion also matches any *path* containing
+    the word -- and on macOS a temporary directory is under `/private/tmp`.
+    Measured while validating T3: running from a clone in a scratchpad turned
+    the identical assertion red with nothing leaking at all, which is a false
+    alarm arriving precisely when the signal is being relied on.
+
+    This is not the assertion being loosened. The old spelling happened to catch
+    a path leak as well, but by accident rather than by design, and the accident
+    cost more than it was worth. `LEAKED_TOKENS` in this file already follows
+    the rule a sentinel has to meet: it cannot occur by coincidence.
+    """
     database = unreachable_database()
     try:
         repository = repository_module.SqlAlchemyMaterialRepository(database)
         object.__setattr__(
             database,
             "_sessions",
-            FailingSessions(SQLAlchemyError("private database failure")),
+            FailingSessions(SQLAlchemyError("le05_leaked_database_failure")),
         )
         material = make_material()
         with pytest.raises(MaterialPersistenceUnavailable) as loaded:
@@ -273,7 +289,9 @@ async def test_a_database_error_is_refused_without_leaking_its_message() -> None
         with pytest.raises(MaterialPersistenceUnavailable) as updated:
             await repository.update_description(material)
         for captured in (loaded, saved, found, updated):
-            assert "private" not in "".join(traceback.format_exception(captured.value))
+            assert "le05_leaked_database_failure" not in "".join(
+                traceback.format_exception(captured.value)
+            )
             assert captured.value.__cause__ is None
     finally:
         await database.close()

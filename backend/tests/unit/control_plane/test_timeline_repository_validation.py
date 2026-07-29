@@ -55,7 +55,7 @@ from automation_tool.control_plane.domain import (
     TimelineTransition,
     TransitionKind,
 )
-from automation_tool.control_plane.infrastructure.database import Database
+from automation_tool.control_plane.infrastructure.database import Database, hydration
 from automation_tool.control_plane.infrastructure.database import (
     timeline_repository as repository_module,
 )
@@ -877,9 +877,9 @@ def test_an_unrecognised_enumeration_value_is_refused_by_the_parser_itself(
     the only honest place to assert it is the parser.
     """
     with pytest.raises(InvalidTimelineModel):
-        repository_module._enumeration_member(TimelineTrackKind, stored)
+        hydration.enumeration_member(TimelineTrackKind, stored, InvalidTimelineModel)
     with pytest.raises(InvalidTimelineModel):
-        repository_module._enumeration_member(TransitionKind, stored)
+        hydration.enumeration_member(TransitionKind, stored, InvalidTimelineModel)
 
 
 def test_the_enumeration_parser_returns_the_member_not_its_text() -> None:
@@ -888,9 +888,12 @@ def test_the_enumeration_parser_returns_the_member_not_its_text() -> None:
     Identity rather than equality: a `StrEnum` member compares equal to its own
     text, so `== "visual"` would hold for the bare string this exists to reject.
     """
-    parsed = repository_module._enumeration_member(TimelineTrackKind, "visual")
+    parsed = hydration.enumeration_member(TimelineTrackKind, "visual", InvalidTimelineModel)
     assert parsed is TimelineTrackKind.VISUAL
-    assert repository_module._enumeration_member(TransitionKind, "fade") is TransitionKind.FADE
+    assert (
+        hydration.enumeration_member(TransitionKind, "fade", InvalidTimelineModel)
+        is TransitionKind.FADE
+    )
 
 
 def test_the_serialiser_and_the_reader_agree_on_every_key() -> None:

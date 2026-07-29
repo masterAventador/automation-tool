@@ -2437,6 +2437,69 @@ timelines = Table(
     UniqueConstraint("timeline_id", "revision", "project_id", name="uq_timelines_revision_project"),
 )
 
+editing_jobs = Table(
+    "editing_jobs",
+    metadata,
+    Column("job_id", UUID(as_uuid=True), nullable=False),
+    # Carried here as well as on the timeline. The redundancy is deliberate --
+    # every read of a job needs its project without a join -- and it is exactly
+    # why the two have to be made to agree; see the foreign key below.
+    Column("project_id", UUID(as_uuid=True), nullable=False),
+    Column("timeline_id", UUID(as_uuid=True), nullable=False),
+    Column("timeline_revision", Integer(), nullable=False),
+    # Wide enough for every member of the two enumerations with room to spare.
+    # The domain owns the values; a unit test asserts the longest member of each
+    # still fits, so a width narrowed below what the domain can produce fails
+    # there rather than as a truncation on whichever job hits it first.
+    Column("status", String(length=16), nullable=False),
+    # Both nullable because most states carry neither, which is all a column can
+    # say. *Which* absence belongs to which state -- a succeeded job has an
+    # artifact and no failure code, a failed one the reverse, every other state
+    # neither -- is `EditingJob._validate_facts_match_status`, and hydration is
+    # where a stored row has to meet it.
+    Column("failure_code", String(length=32), nullable=True),
+    Column("output_artifact_id", UUID(as_uuid=True), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    PrimaryKeyConstraint("job_id", name="pk_editing_jobs"),
+    # One key holding two rules that no domain object can hold, because no
+    # aggregate here references another: that the revision a job names really
+    # exists, and that the project it claims is the project that revision
+    # belongs to. A plain foreign key on `project_id` alone would be satisfied
+    # by any stored project, including the wrong one, and an application check
+    # comparing the two is one that two concurrent callers both pass.
+    #
+    # The target is `uq_timelines_revision_project`, which exists for this and
+    # nothing else: PostgreSQL requires a foreign key's referenced columns to be
+    # covered by a unique constraint spelling exactly those columns, and
+    # `pk_timelines` covers only two of the three. The order here matches that
+    # constraint's declared order, and a reference in any other order is one
+    # PostgreSQL refuses to create.
+    ForeignKeyConstraint(
+        ["timeline_id", "timeline_revision", "project_id"],
+        ["timelines.timeline_id", "timelines.revision", "timelines.project_id"],
+        name="fk_editing_jobs_timeline_revision",
+    ),
+)
+
+# At most one render of a revision may be waiting to start. Two callers asking
+# to render the same cut is a duplicate request rather than two pieces of work,
+# and looking for an existing one before inserting is a check both of them pass.
+#
+# **The predicate is load-bearing, not a refinement.** Without it this would be
+# a plain unique index and a revision could be rendered exactly once ever: a
+# failed render could not be retried and a cancelled one could not be resumed,
+# because the finished row would still occupy the slot. Restricting it to queued
+# rows is what makes the slot free itself as soon as the job starts, finishes or
+# is cancelled.
+Index(
+    "uq_editing_jobs_queued_timeline_revision",
+    editing_jobs.c.timeline_id,
+    editing_jobs.c.timeline_revision,
+    unique=True,
+    postgresql_where=editing_jobs.c.status == "queued",
+)
+
 __all__ = [
     "account_audit_events",
     "account_installation_binding_challenges",
@@ -2451,6 +2514,7 @@ __all__ = [
     "device_credentials",
     "device_sessions",
     "douyin_search_exposure_definitions",
+    "editing_jobs",
     "editing_projects",
     "execution_attempts",
     "installation_registration_challenges",

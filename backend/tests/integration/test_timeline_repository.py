@@ -1226,9 +1226,12 @@ async def test_migration_creates_the_declared_shape_and_drops_it(
         # `schema.py` left the whole suite green -- and T4 is the next task to
         # run autogenerate, against the very constraint it depends on.
         # `Table.constraints` is typed as holding the `Constraint` base, which
-        # declares no `.columns`; the narrowing is asserted rather than cast so
-        # that a constraint kind without one shows up as a failure here instead
-        # of being quietly skipped by an `isinstance` filter.
+        # declares no `.columns`. Every concrete constraint class in SQLAlchemy
+        # 2.0.51 does have one, so this narrowing never actually fires today; it
+        # is asserted rather than written as an `isinstance` filter so that a
+        # constraint kind without one would surface here instead of being
+        # quietly skipped. What does the work below is the dictionary
+        # comparison.
         declared_constraints: dict[str, tuple[str, list[str]]] = {}
         for constraint in timelines.constraints:
             assert isinstance(constraint, ColumnCollectionConstraint), constraint

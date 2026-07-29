@@ -1,15 +1,53 @@
 """Conversions every repository needs on the way back out of a stored row.
 
-Extracted from `editing_project_repository.py` when the material repository
-needed the same guard. Two copies of a rule about when *not* to convert is the
-duplication most likely to drift: one of them gets "simplified" into the
-straightforward version, and the simplification is silent because the
-straightforward version passes every test written against the other copy.
+Each function lands here on its second user, never in anticipation of one:
+`normalise_timestamp` came out of `editing_project_repository.py` when the
+material repository needed the same guard, and `enumeration_member` out of
+`timeline_repository.py` when the editing job repository did.
+
+Both are rules about when *not* to convert, which is the duplication most
+likely to drift: one copy gets "simplified" into the straightforward version --
+`.astimezone(UTC)` without the guard, `members(stored)` without the lookup --
+and the simplification is silent, because the straightforward version passes
+every test written against the other copy.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from enum import StrEnum
+
+
+def enumeration_member[MemberT: StrEnum](
+    members: type[MemberT], stored: object, refusal: type[Exception]
+) -> MemberT:
+    """Parse a stored string back into a member, or refuse the row.
+
+    Leaving the raw text on the object is the failure LE-04 recorded on
+    `EditingJobStatus`: a bare string silently loses every `is` comparison
+    against a member, and it loses them in the direction that reads as "carry
+    on". `EditingJobStateMachine.is_terminal` answers `False` for the string
+    `"succeeded"`, and a finished render would quietly go on looking unfinished.
+
+    Compares against the members rather than calling `members(stored)`, which is
+    the obvious spelling and does not type-check here: through `type[MemberT]`
+    the call resolves to `StrEnum.__new__`, which is annotated as taking `str`,
+    while what arrives from a stored row is `object`. Casting it to `str` to get
+    past that would be a claim about the one value most likely to be something
+    else -- `None`, a number, a nested object. Equality is honest about
+    accepting anything, and it is the same lookup by value that calling the
+    enumeration would have performed.
+
+    The refusal is a parameter because each persistence module answers with its
+    own domain error, and a caller should not have to catch two exceptions to
+    mean "this row is not a timeline" or "this row is not an editing job". It is
+    raised as a class, so every one of them has to keep taking no arguments --
+    which is what stops an offending value being attached on the way out.
+    """
+    for member in members:
+        if member.value == stored:
+            return member
+    raise refusal
 
 
 def normalise_timestamp(value: object) -> object:
@@ -34,4 +72,4 @@ def normalise_timestamp(value: object) -> object:
     return value
 
 
-__all__ = ["normalise_timestamp"]
+__all__ = ["enumeration_member", "normalise_timestamp"]

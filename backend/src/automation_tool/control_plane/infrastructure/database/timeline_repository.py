@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import fields
 from datetime import datetime
-from enum import StrEnum
 from typing import Any, Final, Never, cast
 
 from sqlalchemy import Select, insert, select
@@ -32,7 +31,7 @@ from automation_tool.control_plane.domain import (
     TransitionKind,
 )
 
-from .hydration import normalise_timestamp
+from .hydration import enumeration_member, normalise_timestamp
 from .schema import timelines
 from .session import Database
 
@@ -95,30 +94,6 @@ def _refuse_integrity_violation(error: IntegrityError) -> Never:
     raise TimelineDataRejected from None
 
 
-def _enumeration_member[MemberT: StrEnum](members: type[MemberT], stored: object) -> MemberT:
-    """Parse a stored string back into a member, or refuse the row.
-
-    Leaving the raw text on the object is the failure LE-04 recorded on
-    `EditingJobStatus`: a bare string silently loses every `is` comparison
-    against a member, and it loses them in the direction that reads as "carry
-    on". `kind is TimelineTrackKind.VISUAL` would be `False` for the string
-    `"visual"`, and the picture lane would quietly stop being the picture lane.
-
-    Compares against the members rather than calling `members(stored)`, which is
-    the obvious spelling and does not type-check here: through `type[MemberT]`
-    the call resolves to `StrEnum.__new__`, which is annotated as taking `str`,
-    while what arrives from a JSON document is `object`. Casting it to `str` to
-    get past that would be a claim about the one value most likely to be
-    something else -- `None`, a number, a nested object. Equality is honest
-    about accepting anything, and it is the same lookup by value that calling
-    the enumeration would have performed.
-    """
-    for member in members:
-        if member.value == stored:
-            return member
-    raise InvalidTimelineModel
-
-
 def _material_id(stored: object) -> MaterialId | None:
     """`None` is an ordinary value here: a caption clip carries text instead."""
     if stored is None:
@@ -169,7 +144,7 @@ def _track(document: dict[str, object]) -> object:
         return document
     return TimelineTrack(
         track_id=cast(str, document["track_id"]),
-        kind=_enumeration_member(TimelineTrackKind, document["kind"]),
+        kind=enumeration_member(TimelineTrackKind, document["kind"], InvalidTimelineModel),
         clips=cast(
             "tuple[TimelineClip, ...]",
             tuple(_clip(clip) for clip in cast("list[dict[str, object]]", document["clips"])),
@@ -213,7 +188,7 @@ def _transition(stored: object) -> object:
     if not isinstance(stored, dict) or stored.keys() != _TRANSITION_KEYS:
         return stored
     return TimelineTransition(
-        kind=_enumeration_member(TransitionKind, stored["kind"]),
+        kind=enumeration_member(TransitionKind, stored["kind"], InvalidTimelineModel),
         duration_ms=cast(int, stored["duration_ms"]),
     )
 
