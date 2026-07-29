@@ -7,6 +7,7 @@ import {
   openAutomationRuns,
   openTaskCreate,
   waitForStartup,
+  waitForTaskRow,
 } from "./navigation";
 
 interface AppCrashRecoveryPreparation {
@@ -110,12 +111,10 @@ describe("H8-04 hidden App crash recovery acceptance", () => {
       )) as { readonly state: string };
       assert.equal(executor.state, "running");
         await openAutomationRuns();
-        await waitForRenderedText(
-        taskId ?? "",
-        "本机执行器在线",
-        "运行中",
-      );
-      await browser.$(`button=${taskId ?? ""}`).click();
+      // 列表的行名改版后是创建时刻、不印 UUID；标识在 data-task-id 上。
+      await waitForTaskRow(taskId ?? "");
+      await waitForRenderedText("本机执行器在线", "运行中");
+      await browser.$(`button[data-task-id="${taskId ?? ""}"]`).click();
       await waitForRenderedText(
         "任务运行详情",
         taskId ?? "",
@@ -145,20 +144,24 @@ describe("H8-04 hidden App crash recovery acceptance", () => {
     }
     const taskId = requiredEnvironment("AUTOMATION_TOOL_H804_TASK_ID");
     assert.match(taskId, UUID_V4);
+    // 重启后的 App 落在 AI 助理页；快照恢复要在运行记录页上验。
+    await openAutomationRuns();
     const retry = await browser.$("button=重新加载工作台");
     await browser.waitUntil(
       async () => {
         const body = await browser.$("body").getText();
         return (
           (await retry.isExisting()) ||
-          (body.includes(taskId) && body.includes("本机执行器在线") && body.includes("运行中"))
+          ((await browser.$(`button[data-task-id="${taskId}"]`).isExisting())
+            && body.includes("本机执行器在线") && body.includes("运行中"))
         );
       },
       { timeout: 120_000, timeoutMsg: "H8-04 workbench did not restore its snapshot" },
     );
     if (await retry.isExisting()) await retry.click();
-    await waitForRenderedText(taskId, "本机执行器在线", "运行中");
-    await browser.$(`button=${taskId}`).click();
+    await waitForTaskRow(taskId);
+    await waitForRenderedText("本机执行器在线", "运行中");
+    await browser.$(`button[data-task-id="${taskId}"]`).click();
     await waitForRenderedText(
       "任务运行详情",
       taskId,
