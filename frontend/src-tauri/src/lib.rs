@@ -1644,32 +1644,42 @@ async fn logout_douyin_session(
         }
     }
 
-    let service = platform.inner().clone();
-    app_logging::record(app_logging::DesktopLogEvent::ExecutorEmergencyStopRequested);
-    tauri::async_runtime::spawn_blocking(move || service.emergency_stop())
-        .await
-        .map_err(|_| ExecutorPlatformCommandError {
-            code: "process_unavailable",
-            retryable: true,
-        })?
-        .map_err(map_executor_platform_error)?;
+    // 执行器在跑的路径不再紧停：浏览器已被上面那条命令优雅关闭（Playwright
+    // 等它真正退出），而执行器进程自己并不持有 Profile 目录——停它只会连带
+    // 杀掉刚入队、尚未送达的注销信封，让权威投影停在旧版本上（b5_13 的
+    // 「闸版本 2、健康版本 1」正是这个）。留着它跑，信封照常送达。
+    // 执行器本来停着的那条路径仍需紧停+重启：那种情况下可能有更早遗留的
+    // 孤儿浏览器，且需要一个活着的执行器来补记注销信封。
+    if !running {
+        let service = platform.inner().clone();
+        app_logging::record(app_logging::DesktopLogEvent::ExecutorEmergencyStopRequested);
+        tauri::async_runtime::spawn_blocking(move || service.emergency_stop())
+            .await
+            .map_err(|_| ExecutorPlatformCommandError {
+                code: "process_unavailable",
+                retryable: true,
+            })?
+            .map_err(map_executor_platform_error)?;
+    }
 
     profiles
         .remove_current_douyin_profile()
         .map_err(map_browser_profile_logout_error)?;
 
-    let connection = client
-        .issue_executor_connection(&vault)
-        .await
-        .map_err(map_executor_connection_error)?;
-    let service = platform.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || service.restart(connection))
-        .await
-        .map_err(|_| ExecutorPlatformCommandError {
-            code: "process_unavailable",
-            retryable: true,
-        })?
-        .map_err(map_executor_platform_error)?;
+    if !running {
+        let connection = client
+            .issue_executor_connection(&vault)
+            .await
+            .map_err(map_executor_connection_error)?;
+        let service = platform.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || service.restart(connection))
+            .await
+            .map_err(|_| ExecutorPlatformCommandError {
+                code: "process_unavailable",
+                retryable: true,
+            })?
+            .map_err(map_executor_platform_error)?;
+    }
 
     if !running {
         // 执行器本来停着：上面没有任何人发注销信封，投影永远到不了

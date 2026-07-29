@@ -189,7 +189,10 @@ async def verify_database_state(database_url: str) -> None:
     ):
         raise RuntimeError("B5-13 platform health projection is invalid")
     if gate_rows != [("douyin", "blocked", revision)] or task_count != 0:
-        raise RuntimeError("B5-14 logout gate or blocked Task projection is invalid")
+        raise RuntimeError(
+            "B5-14 logout gate or blocked Task projection is invalid: "
+            f"gate_rows={gate_rows!r} health_revision={revision!r} task_count={task_count!r}"
+        )
 
 
 def dump_douyin_tree(private_app_data: Path, moment: str) -> None:
