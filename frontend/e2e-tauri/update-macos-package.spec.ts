@@ -81,16 +81,35 @@ async function waitForInstalledBinary(): Promise<void> {
   throw new Error("official macOS updater did not replace the installed App binary");
 }
 
+/**
+ * Open the manual update controls in whichever home the App booted into.
+ *
+ * The acceptance bundle intentionally ships without the executor package and
+ * embedded browser, so since EB-07/08 the packaged App correctly boots to the
+ * startup repair screen. Updates must stay fully drivable from there — the
+ * updater replaces the whole installed app, so it is the standard way a
+ * damaged installation heals itself. On the repair screen the settings-mode
+ * update panel lives inside the repair tools; call this once per scenario
+ * (the toggle button flips to 收起 after opening).
+ */
+async function openUpdateControls(mode: "workbench" | "repair"): Promise<void> {
+  if (mode === "repair") {
+    await browser.$("button=打开本地修复工具").click();
+    return;
+  }
+  await openSettings();
+}
+
 describe("H8-22 ad-hoc macOS package update acceptance", () => {
   it("drives the requested package scenario through the original App", async () => {
-    await waitForStartup();
+    const mode = await waitForStartup({ allowRepair: true });
     const scenario = process.env.H822_MAC_SCENARIO;
 
     if (scenario === "optional-decisions") {
       await waitForText("发现新版本 0.2.0");
       await clickEnabledButton("稍后提醒");
       await waitForState("ready", "deferred");
-      await openSettings();
+      await openUpdateControls(mode);
       await browser.$("button=检查更新").click();
       await waitForText("发现新版本 0.2.0");
       await clickEnabledButton("跳过此版本");
@@ -131,7 +150,7 @@ describe("H8-22 ad-hoc macOS package update acceptance", () => {
       const failed = await waitForState("failed");
       assert.equal(failed.stage, "install");
       assert.equal(failed.code, "installation_failed");
-      await openSettings();
+      await openUpdateControls(mode);
       await waitForText("更新当前不可用");
       return;
     }
