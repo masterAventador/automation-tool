@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
 import {
+  openAutomationRuns,
   waitForStartup,
 } from "./navigation";
 
@@ -16,6 +17,20 @@ interface TaskDiscoveryPreparation {
 
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+/**
+ * 等某一条任务出现在运行记录里，按它的标识而不是按它的显示名。
+ *
+ * 列表的行名改版后是创建时刻（`07-29 12:01:54 的任务`），不再印 UUID——那是有意的
+ * 可读性改动，`Workbench.test.tsx` 有一条测试专门守着。标识仍在，作为惰性的
+ * `data-task-id`。
+ */
+async function waitForTaskRow(taskId: string): Promise<void> {
+  await browser.waitUntil(
+    async () => browser.$(`button[data-task-id="${taskId}"]`).isExisting(),
+    { timeout: 60_000, timeoutMsg: `运行记录里没有出现任务 ${taskId}` },
+  );
+}
 
 describe("Task discovery production-path acceptance", () => {
   it("converges candidates through the hidden real App and formal Executor", async () => {
@@ -34,17 +49,14 @@ describe("Task discovery production-path acceptance", () => {
     assert.equal(preparation.lastEventSequence, 0);
 
     await browser.refresh();
+    // 改版把默认落地页换成了 AI 助理，所以刷新之后停的不再是运行记录。
+    await waitForStartup();
+    await openAutomationRuns();
+    // 每次 refresh 之后重新取一次：刷新会让先前解析到的元素引用作废。
     let body = await browser.$("body");
-    await browser.waitUntil(
-      async () => {
-        const text = await body.getText();
-        return (
-          text.includes(preparation.taskId) && text.includes(preparation.competingTaskId)
-        );
-      },
-      { timeout: 60_000, timeoutMsg: "Workbench did not load both prepared discovery Tasks" },
-    );
-    await browser.$(`button=${preparation.taskId}`).click();
+    await waitForTaskRow(preparation.taskId);
+    await waitForTaskRow(preparation.competingTaskId);
+    await browser.$(`button[data-task-id="${preparation.taskId}"]`).click();
     await expect(await browser.$("h3=任务运行详情")).toExist();
     await browser.$("button=开始目标发现").click();
     await browser.waitUntil(
@@ -53,7 +65,10 @@ describe("Task discovery production-path acceptance", () => {
     );
 
     await browser.$("button=返回工作台").click();
-    await browser.$(`button=${preparation.competingTaskId}`).click();
+    await openAutomationRuns();
+    // 另两处都等了，这里漏了：列表要等它自己渲染出来，点击不会替你等。
+    await waitForTaskRow(preparation.competingTaskId);
+    await browser.$(`button[data-task-id="${preparation.competingTaskId}"]`).click();
     await expect(await browser.$("h3=任务运行详情")).toExist();
     await browser.$("button=开始目标发现").click();
     try {
@@ -71,12 +86,11 @@ describe("Task discovery production-path acceptance", () => {
     );
 
     await browser.refresh();
+    await waitForStartup();
+    await openAutomationRuns();
     body = await browser.$("body");
-    await browser.waitUntil(
-      async () => (await body.getText()).includes(preparation.taskId),
-      { timeout: 30_000, timeoutMsg: "Workbench did not reload the first Task" },
-    );
-    await browser.$(`button=${preparation.taskId}`).click();
+    await waitForTaskRow(preparation.taskId);
+    await browser.$(`button[data-task-id="${preparation.taskId}"]`).click();
     await browser.waitUntil(
       async () => (await body.getText()).includes(preparation.taskId),
       { timeout: 10_000, timeoutMsg: "Task details did not open the first Task" },
