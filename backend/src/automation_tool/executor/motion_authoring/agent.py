@@ -826,6 +826,31 @@ class DesignArtifact:
         )
 
 
+def require_repair_changed_only_copy(
+    before: StoryboardArtifact, after: StoryboardArtifact
+) -> None:
+    """The repair round may shorten copy and touch nothing else.
+
+    T92 dropped the repair loop because rewriting 13KB of HTML was too costly;
+    PC-14's cheap version rewrites tens of bytes of copy. A model told to
+    "shorten" can just as easily reshuffle beats — and that would be a new film
+    slipping past every gate the first one already passed. Structure, timing,
+    parts and layout must survive byte for byte.
+    """
+    if len(before.beats) != len(after.beats):
+        _reject("repair round altered more than copy")
+    for original, revised in zip(before.beats, after.beats):
+        if (
+            original.beat_id != revised.beat_id
+            or original.purpose != revised.purpose
+            or original.start_seconds != revised.start_seconds
+            or original.duration_seconds != revised.duration_seconds
+            or original.catalog_parts != revised.catalog_parts
+            or original.layout != revised.layout
+        ):
+            _reject("repair round altered more than copy")
+
+
 @dataclass(frozen=True)
 class ScriptArtifact:
     one_message: str
