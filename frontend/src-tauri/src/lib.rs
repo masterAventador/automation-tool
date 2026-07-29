@@ -1609,6 +1609,7 @@ async fn logout_douyin_session(
         .map_err(map_executor_connection_error)?;
 
     let service = platform.inner().clone();
+    app_logging::record(app_logging::DesktopLogEvent::ExecutorEmergencyStopRequested);
     tauri::async_runtime::spawn_blocking(move || service.emergency_stop())
         .await
         .map_err(|_| ExecutorPlatformCommandError {
