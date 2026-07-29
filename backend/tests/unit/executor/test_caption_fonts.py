@@ -579,25 +579,58 @@ def _clear_coverage_cache() -> Iterator[None]:
     fonts.glyph_coverage.cache_clear()
 
 
+def _exception_types_defined_by_the_module() -> tuple[type[BaseException], ...]:
+    """Every exception class `fonts` itself defines, found rather than listed.
+
+    Derived for the same reason `test_the_refused_set_covers_every_line_boundary`
+    derives its boundary set: a hand-written list is a second copy, and the way
+    it fails is silent -- a refusal added by T4, T5 or LE-10 simply would not be
+    checked, and the suite would stay green while the promise below stopped
+    holding for the new class.
+
+    The probe cannot be `CaptionFontRejected.__subclasses__()`, which would be
+    circular: a class that ought to be a subclass but is not would be absent
+    from that answer, and absence is exactly the fault being looked for. So the
+    module namespace is enumerated instead, filtered by `__module__` so the
+    exception types merely imported into it -- `TTLibError` -- stay out.
+    """
+    return tuple(
+        value
+        for value in vars(fonts).values()
+        if isinstance(value, type)
+        and issubclass(value, BaseException)
+        and value.__module__ == fonts.__name__
+    )
+
+
 class TestRefusalHierarchy:
+    def test_the_probe_finds_the_modules_exception_classes(self) -> None:
+        """Premise: an empty derivation would make the check below vacuous.
+
+        pytest reports a parametrisation with no arguments as passed, so a
+        probe that silently stopped finding anything would read as green
+        rather than as broken -- the same shape as an assertion that cannot
+        fail.
+        """
+        assert _exception_types_defined_by_the_module(), (
+            "no exception classes found in the fonts module; the probe is broken"
+        )
+
     @pytest.mark.parametrize(
         "refusal",
-        [
-            fonts.CaptionFontUnavailable,
-            fonts.CaptionGlyphUnavailable,
-            fonts.CaptionTextRejected,
-        ],
+        _exception_types_defined_by_the_module(),
+        ids=lambda refusal: refusal.__name__,
     )
-    def test_every_refusal_is_catchable_as_one_type(self, refusal: type[Exception]) -> None:
+    def test_every_refusal_is_catchable_as_one_type(self, refusal: type[BaseException]) -> None:
         """`CaptionTextRejected`'s docstring promises this; nothing enforced it.
 
         Every refusal this module raises has to be catchable as
         `CaptionFontRejected`, so a caller can put one `except` at its
         boundary and still tell the causes apart by subclass. Repointing any
-        of the three at a bare `RuntimeError` used to leave the whole suite
-        green, which is the same "stated but unenforced" shape that made the
-        control-character precondition worth putting in code rather than in a
-        docstring. LE-10 is the first caller that will depend on it.
+        of the subclasses at a bare `RuntimeError` used to leave the whole
+        suite green, which is the same "stated but unenforced" shape that made
+        the control-character precondition worth putting in code rather than
+        in a docstring. LE-10 is the first caller that will depend on it.
         """
         assert issubclass(refusal, fonts.CaptionFontRejected)
 
@@ -908,7 +941,9 @@ class TestFontChain:
             "\x00",  # bottom of the C0 range
             "\x1f",  # top of the C0 range, mirror of the space boundary below
             "\x7f",  # DEL
+            "\x80",  # bottom of the C1 range
             "\x85",  # NEL: a line boundary that sits outside C0
+            "\x9f",  # top of the C1 range, mirror of the NBSP boundary below
             "\u2028",  # LINE SEPARATOR, written escaped so it stays visible
             "\u2029",  # PARAGRAPH SEPARATOR
         ],
@@ -948,6 +983,28 @@ class TestFontChain:
         chain = fonts.FontChain((_LATIN, _CJK))
 
         assert chain.face_for(" ") == _LATIN
+
+    def test_a_non_breaking_space_is_drawable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """U+00A0 sits immediately above C1, mirroring what U+0020 is to C0.
+
+        Widening the range by one -- `range(0x80, 0xA1)` -- refuses a
+        character every packaged face does cover (measured: both Noto faces
+        and the latin face all map it), so it would reject captions the
+        renderer can draw. NBSP arrives constantly in text pasted out of a web
+        page or a CMS, which is the same provenance this module already cites
+        when discussing U+200B.
+
+        Each end of the C1 range has its own refusal case in the parametrised
+        test above; this is the one-past-the-top side of the same boundary.
+        """
+        _stage_synthetic_faces(
+            tmp_path, monkeypatch, {_LATIN: [], _CJK: []}, blank={_LATIN: [0x00A0]}
+        )
+        chain = fonts.FontChain((_LATIN, _CJK))
+
+        assert chain.face_for("\u00a0") == _LATIN  # written escaped so it stays visible
 
     def test_a_zero_width_space_is_not_treated_as_a_control_character(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
