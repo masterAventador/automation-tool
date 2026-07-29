@@ -277,6 +277,8 @@ async def report_platform_gate_state(
                             platform_session_health.c.platform,
                             platform_session_health.c.state,
                             platform_session_health.c.session_revision,
+                            platform_session_health.c.observed_at,
+                            platform_session_health.c.updated_at,
                         ).where(
                             platform_session_health.c.installation_id
                             == installation_id.uuid
@@ -307,8 +309,29 @@ async def report_platform_gate_state(
                         select(
                             execution_attempts.c.task_id,
                             execution_attempts.c.status,
+                            execution_attempts.c.attempt_number,
+                            execution_attempts.c.created_at,
+                            execution_attempts.c.updated_at,
                         ).where(
                             execution_attempts.c.installation_id == installation_id.uuid
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            commands = (
+                (
+                    await session.execute(
+                        select(
+                            task_commands.c.task_id,
+                            task_commands.c.command_type,
+                            task_commands.c.status,
+                            task_commands.c.delivery_attempts,
+                            task_commands.c.created_at,
+                            task_commands.c.updated_at,
+                        ).where(
+                            task_commands.c.installation_id == installation_id.uuid
                         )
                     )
                 )
@@ -319,9 +342,10 @@ async def report_platform_gate_state(
         await database.close()
     print(
         "[D6-10] platform health="
-        f"{[dict(row) for row in health]} gates={[dict(row) for row in gates]} "
-        f"attempts={[dict(row) for row in attempts]}"
+        f"{[dict(row) for row in health]} gates={[dict(row) for row in gates]}"
     )
+    print(f"[D6-10] attempts={[dict(row) for row in attempts]}")
+    print(f"[D6-10] commands={[dict(row) for row in commands]}")
 
 
 def wait_for_busy_signal(
