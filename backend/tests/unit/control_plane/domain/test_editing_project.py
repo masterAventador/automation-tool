@@ -260,3 +260,19 @@ def test_project_title_length_bound_is_inclusive() -> None:
     assert len(_project(title="国" * MAX_PROJECT_TITLE_CHARACTERS).title) == (
         MAX_PROJECT_TITLE_CHARACTERS
     )
+
+
+def test_the_guard_does_not_depend_on_the_calling_verb() -> None:
+    """`\\Z` is why, and this is the only shape that pins it.
+
+    Under `fullmatch` a trailing `$` behaves identically, so every
+    behavioural case in this file passes either way -- reverting the
+    anchor is invisible to them. Calling `match` instead states the
+    property the anchor actually buys: the guard holds even if the
+    verb is ever weakened.
+    """
+    from automation_tool.control_plane.domain.editing_project import (
+        _FONT_KEY_PATTERN,
+    )
+
+    assert _FONT_KEY_PATTERN.match("noto-sans-sc\n") is None

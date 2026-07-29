@@ -999,3 +999,19 @@ def test_a_timeline_refuses_two_lanes_with_the_same_id() -> None:
                 ),
             )
         )
+
+
+def test_the_guard_does_not_depend_on_the_calling_verb() -> None:
+    """`\\Z` is why, and this is the only shape that pins it.
+
+    Under `fullmatch` a trailing `$` behaves identically, so every
+    behavioural case in this file passes either way -- reverting the
+    anchor is invisible to them. Calling `match` instead states the
+    property the anchor actually buys: the guard holds even if the
+    verb is ever weakened.
+    """
+    from automation_tool.control_plane.domain.timeline import (
+        _LOCAL_ID_PATTERN,
+    )
+
+    assert _LOCAL_ID_PATTERN.match("clip-1\n") is None

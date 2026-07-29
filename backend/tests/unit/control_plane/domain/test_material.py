@@ -400,3 +400,20 @@ def test_user_description_must_not_carry_ai_tags() -> None:
             ai_tags=("室内",),
             description_source=DescriptionSource.USER,
         )
+
+
+def test_the_guard_does_not_depend_on_the_calling_verb() -> None:
+    """`\\Z` is why, and this is the only shape that pins it.
+
+    Under `fullmatch` a trailing `$` behaves identically, so every
+    behavioural case in this file passes either way -- reverting the
+    anchor is invisible to them. Calling `match` instead states the
+    property the anchor actually buys: the guard holds even if the
+    verb is ever weakened.
+    """
+    from automation_tool.control_plane.domain.material import (
+        _SHA256_PATTERN,
+    )
+
+    digest = "a" * 64
+    assert _SHA256_PATTERN.match(digest + "\n") is None

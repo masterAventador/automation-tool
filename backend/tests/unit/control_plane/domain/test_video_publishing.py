@@ -441,3 +441,20 @@ class TestPublishJob:
         job = _job(description=None, cover_artifact_id=ArtifactId.new())
         assert job.description is None
         assert job.cover_artifact_id is not None
+
+
+def test_the_guard_does_not_depend_on_the_calling_verb() -> None:
+    """`\\Z` is why, and this is the only shape that pins it.
+
+    Under `fullmatch` a trailing `$` behaves identically, so every
+    behavioural case in this file passes either way -- reverting the
+    anchor is invisible to them. Calling `match` instead states the
+    property the anchor actually buys: the guard holds even if the
+    verb is ever weakened.
+    """
+    from automation_tool.control_plane.domain.video_publishing import (
+        _SHA256_PATTERN,
+    )
+
+    digest = "b" * 64
+    assert _SHA256_PATTERN.match(digest + "\n") is None

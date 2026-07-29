@@ -431,3 +431,22 @@ def test_render_job_rejects_wrong_ids_overlap_and_time_regression() -> None:
     ):
         with pytest.raises(InvalidVideoDomainModel):
             RenderJob(**(values | changes))  # type: ignore[arg-type]
+
+
+def test_the_guard_does_not_depend_on_the_calling_verb() -> None:
+    """`\\Z` is why, and this is the only shape that pins it.
+
+    Under `fullmatch` a trailing `$` behaves identically, so every
+    behavioural case in this file passes either way -- reverting the
+    anchor is invisible to them. Calling `match` instead states the
+    property the anchor actually buys: the guard holds even if the
+    verb is ever weakened.
+    """
+    from automation_tool.control_plane.domain.video_creation import (
+        _LANGUAGE_PATTERN,
+        _SHA256_PATTERN,
+    )
+
+    assert _LANGUAGE_PATTERN.match("zh-CN\n") is None
+    digest = "c" * 64
+    assert _SHA256_PATTERN.match(digest + "\n") is None
