@@ -259,6 +259,13 @@ def test_a_caption_cannot_be_taller_than_the_frame_it_is_drawn_on() -> None:
     so the standard here is "check it where the information is". Nothing below
     the project can: the style does not know the frame, and the frame does not
     know the style.
+
+    The frame is deliberately not square. The guard's whole claim is about
+    *height*, and a square frame cannot tell height from width -- a mutant
+    reading `output.width` survives every square fixture. Here the wide frame
+    makes the mutant accept (200 > 1080 is false) where the real guard
+    refuses; `test_a_caption_may_fill_the_whole_frame_height` pins the same
+    axis from the other side with a tall one.
     """
     assert (
         _project(
@@ -269,17 +276,22 @@ def test_a_caption_cannot_be_taller_than_the_frame_it_is_drawn_on() -> None:
     )
     with pytest.raises(InvalidEditingProjectModel):
         _project(
-            output=_output(width=128, height=128),
+            output=_output(width=1080, height=MIN_OUTPUT_DIMENSION),
             caption_style=_caption(font_px=MAX_CAPTION_FONT_PX, stroke_px=0),
         )
 
 
 def test_a_caption_may_fill_the_whole_frame_height() -> None:
     """The bound is the frame, not some fraction of it: a one-line caption on a
-    short frame is a legitimate design, an overflowing one is not."""
+    short frame is a legitimate design, an overflowing one is not.
+
+    Portrait, so this case discriminates too: the caption exactly fills the
+    height and is accepted, while a mutant measuring against the narrower
+    width would refuse it.
+    """
     assert (
         _project(
-            output=_output(width=256, height=200),
+            output=_output(width=MIN_OUTPUT_DIMENSION, height=200),
             caption_style=_caption(font_px=200, stroke_px=0),
         ).caption_style.font_px
         == 200
