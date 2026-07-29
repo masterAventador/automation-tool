@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
 import {
+  openAutomationRuns,
   waitForStartup,
 } from "./navigation";
 
@@ -23,6 +24,9 @@ describe("Task target preview UI production-path acceptance", () => {
     assert.match(preparation.taskId, UUID_V4);
 
     await browser.refresh();
+    // 改版后刷新落在 AI 助理页，「等待确认」与「查看运行详情」都在运行记录页。
+    await waitForStartup();
+    await openAutomationRuns();
     const body = await browser.$("body");
     await browser.waitUntil(
       async () => (await body.getText()).includes("等待确认"),

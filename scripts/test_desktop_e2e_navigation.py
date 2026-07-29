@@ -86,6 +86,59 @@ class DesktopNavigationTests(unittest.TestCase):
             f"{offenders}",
         )
 
+    def test_no_spec_clicks_a_task_row_by_its_identifier(self) -> None:
+        """`button=${taskId}` can never match again; the row is named by time.
+
+        The redesign renames run-list rows to their creation time (`07-29
+        12:01:54 的任务`) — deliberately, with a Workbench test guarding that the
+        list never prints a UUID. The identifier survives as an inert
+        `data-task-id`, which is what `waitForTaskRow` and row clicks must use.
+        Five specs failed on this exact pattern on 2026-07-29, one of them
+        (task-run) three runs deep before the pattern was even visible.
+
+        Only the unambiguous shape is refused here. Text waits on a taskId are
+        NOT refused: the same audit that found these found five legitimate
+        UUID waits (detail pages still print the full identifier, and the
+        diagnostics fold exposes it once opened) — a gate that cries wolf on
+        those gets switched off.
+        """
+        import re
+
+        pattern = re.compile(r"button=\$\{[^}]*[Tt]askId")
+        offenders = [
+            f"{path.name}: {pattern.search(path.read_text(encoding='utf-8')).group(0)}"
+            for path in _specs()
+            if pattern.search(path.read_text(encoding="utf-8"))
+        ]
+        self.assertEqual(
+            offenders,
+            [],
+            "run-list rows are named by creation time, not by UUID; click them "
+            f"via button[data-task-id=...] instead: {offenders}",
+        )
+
+    def test_no_spec_clicks_the_emergency_stop_without_scoping(self) -> None:
+        """Two buttons are accessibly named 紧急停止; `$` always takes the header's.
+
+        The redesign added a global emergency stop to the shell header, which
+        precedes the content area in the document. An unscoped
+        `browser.$("button=紧急停止")` therefore always clicks the global one and
+        the task's own Popconfirm never appears — measured on 2026-07-29, where
+        the same pair existed twice in one spec and fixing only the branch under
+        test left the other to fail two runs later.
+        """
+        offenders = [
+            path.name
+            for path in _specs()
+            if 'browser.$("button=紧急停止")' in path.read_text(encoding="utf-8")
+        ]
+        self.assertEqual(
+            offenders,
+            [],
+            "scope the click to the surface that owns it, e.g. "
+            f'browser.$(".task-run-content").$("button=紧急停止"): {offenders}',
+        )
+
     def test_no_spec_hand_rolls_a_sidebar_click(self) -> None:
         offenders = [
             spec.name
