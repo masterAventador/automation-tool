@@ -197,7 +197,21 @@ def verify_logout_local_state(private_app_data: Path) -> None:
     current_marker = profile_root / CURRENT_DOUYIN_PROFILE_FILE
     platform_root = profile_root / "douyin"
     if current_marker.exists():
-        raise RuntimeError("B5-14 safe logout retained the current Profile marker")
+        # 标记是谁、什么时候复活的——current_douyin_profile() 在标记缺失时会新建
+        # Profile 并写回标记，所以登出后的任何一次读取都能让它回来。mtime 定位
+        # 复活时刻（在登出命令内部还是登出之后的哪一步），内容是新 Profile 的 id。
+        import datetime as _dt
+        marker_mtime = _dt.datetime.fromtimestamp(current_marker.stat().st_mtime)
+        marker_content = current_marker.read_bytes()[:64]
+        siblings = sorted(
+            f"{child.name}@{_dt.datetime.fromtimestamp(child.stat().st_mtime):%H:%M:%S}"
+            for child in platform_root.iterdir()
+        ) if platform_root.is_dir() else []
+        raise RuntimeError(
+            "B5-14 safe logout retained the current Profile marker: "
+            f"mtime={marker_mtime:%H:%M:%S} content={marker_content!r} "
+            f"douyin_dir={siblings}"
+        )
     if platform_root.is_dir() and any(platform_root.iterdir()):
         raise RuntimeError("B5-14 safe logout retained a Profile or removal tombstone")
     ledger = private_app_data / "local-executor" / "state" / "executor-ledger.sqlite3"
