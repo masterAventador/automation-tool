@@ -633,36 +633,55 @@ def main() -> None:
         )
         wait_for_control_plane()
         print("[D6-10] Running the real Tauri App with visible=false")
+        # The wdio child buffers its reporter output until the run ends, and
+        # every failure path below kills the child before that happens — which
+        # is how a timeout here used to leave zero trace of how far the spec
+        # got. The output lands in a file so the failure paths can print it.
+        app_output = private_app_data.parent / "d6-10-app-output.log"
+        app_output_sink = app_output.open("wb")
         app_process = subprocess.Popen(
             ["pnpm", "test:task-discovery-tauri"],
             cwd=FRONTEND_ROOT,
             env=environment,
             start_new_session=True,
-        )
-        installation_id, task_id, credential = asyncio.run(
-            wait_for_app_task(database_url, private_app_data, app_process)
-        )
-        asyncio.run(seed_healthy_platform(database_url, installation_id))
-        try:
-            wait_for_busy_signal(private_app_data / BUSY_SIGNAL_FILE, app_process)
-        except RuntimeError:
-            asyncio.run(report_platform_gate_state(database_url, installation_id))
-            raise
-        executor_stop, executor_thread, executor_failures = start_executor(
-            private_app_data=private_app_data,
-            installation_id=installation_id,
-            session_token=executor_session(credential),
+            stdout=app_output_sink,
+            stderr=app_output_sink,
         )
         try:
-            app_exit = app_process.wait(timeout=180)
-        except subprocess.TimeoutExpired as error:
-            raise RuntimeError("D6-10 hidden App acceptance did not finish") from error
-        if app_exit != 0:
-            asyncio.run(report_platform_gate_state(database_url, installation_id))
-            asyncio.run(verify_database_state(database_url, installation_id, task_id))
-            raise RuntimeError(
-                "D6-10 hidden App acceptance failed after the database converged"
+            installation_id, task_id, credential = asyncio.run(
+                wait_for_app_task(database_url, private_app_data, app_process)
             )
+            asyncio.run(seed_healthy_platform(database_url, installation_id))
+            try:
+                wait_for_busy_signal(private_app_data / BUSY_SIGNAL_FILE, app_process)
+            except RuntimeError:
+                asyncio.run(report_platform_gate_state(database_url, installation_id))
+                raise
+            executor_stop, executor_thread, executor_failures = start_executor(
+                private_app_data=private_app_data,
+                installation_id=installation_id,
+                session_token=executor_session(credential),
+            )
+            try:
+                app_exit = app_process.wait(timeout=180)
+            except subprocess.TimeoutExpired as error:
+                raise RuntimeError(
+                    "D6-10 hidden App acceptance did not finish"
+                ) from error
+            if app_exit != 0:
+                asyncio.run(report_platform_gate_state(database_url, installation_id))
+                asyncio.run(verify_database_state(database_url, installation_id, task_id))
+                raise RuntimeError(
+                    "D6-10 hidden App acceptance failed after the database converged"
+                )
+        except BaseException:
+            app_output_sink.flush()
+            print("[D6-10] App output tail (last 60 lines):")
+            for line in app_output.read_text(errors="replace").splitlines()[-60:]:
+                print(f"    {line}")
+            raise
+        finally:
+            app_output_sink.close()
         app_process = None
         verify_app_private_data(private_app_data)
         asyncio.run(verify_database_state(database_url, installation_id, task_id))
