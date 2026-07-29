@@ -190,12 +190,15 @@ async def test_the_longest_values_the_domain_accepts_still_fit_the_columns(
 ) -> None:
     """Ties the domain's two text limits to the real column widths.
 
-    `varchar(200)` and `varchar(64)` are written out in the migration, again in
-    `schema.py`, and a third time as `{0,63}` inside the domain's font-key
-    pattern -- three literals with no reference between them. Widening the
-    pattern without widening the column would turn a clean validation error into
-    a `StringDataRightTruncation` at insert time, on the one input a user
-    controls.
+    `caption_font_key`'s limit is written three times with no reference between
+    any of them: `varchar(64)` in the migration, `String(length=64)` in
+    `schema.py`, and `{0,63}` inside the domain's font-key pattern. `title` is
+    better off -- `schema.py` imports `MAX_PROJECT_TITLE_CHARACTERS`, so that
+    one is a reference -- but the migration still spells 200 out, because a
+    migration is frozen history and must not import a constant that can move
+    under it. Either way, widening the domain without widening the column turns
+    a clean validation error into a `StringDataRightTruncation` at insert time,
+    on the one input a user controls.
 
     The pair of assertions is what pins it: the longest accepted value must
     survive a real round trip, and one character more must be refused by the

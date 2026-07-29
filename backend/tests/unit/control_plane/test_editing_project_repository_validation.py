@@ -248,9 +248,13 @@ async def test_an_authentication_failure_is_refused_without_leaking_the_role() -
     -- note the intermediate class, and note that `TooManyConnectionsError`
     arrives via `InsufficientResourcesError` instead, so the four classes in
     this family do not share a single direct base. What they do share is the
-    `PostgresError` spine and the absence of `OSError` and `SQLAlchemyError`,
-    which is the part the repository's clause ordering depends on and the part
-    asserted below. The message names the role.
+    `PostgresError` spine and the absence of `OSError` and `SQLAlchemyError`.
+
+    The absence is what the repository's clause ordering rests on, and it is
+    asserted first below. The `PostgresError` assertion that follows carries no
+    weight for the catch-all -- it records a third-party fact, so that an
+    asyncpg release which restructures this hierarchy fails here and sends
+    someone back to re-read the reasoning. The message names the role.
     """
     database = unreachable_database()
     try:
@@ -364,6 +368,7 @@ def test_hydration_normalises_a_stored_timestamp_to_utc() -> None:
         # moving the instant by the host's offset and handing back a perfectly
         # valid-looking object. The guard has to run first.
         datetime(2026, 7, 29, 3, 21, 45, 123_456),
+        # DO NOT COPY THIS PARAMETER INTO T2. See the docstring below.
         None,
         "2026-07-29T03:21:45.123456+00:00",
         123,
@@ -371,11 +376,21 @@ def test_hydration_normalises_a_stored_timestamp_to_utc() -> None:
     ids=["naive", "null", "text", "number"],
 )
 def test_hydration_refuses_a_timestamp_it_cannot_trust(created_at: object) -> None:
-    """`None` and text arrive the moment a nullable timestamp column exists.
+    """Every one of these is refused because `created_at` is `NOT NULL`.
 
-    LE-05 T2's `described_at` is nullable and will reuse this hydration shape.
-    Normalising before validating turns those two into a bare `AttributeError`,
-    which is neither the domain's error nor the repository's.
+    Normalising before validating would turn the last three into a bare
+    `AttributeError` or a wrong instant, which is neither the domain's error nor
+    the repository's -- that is what this pins.
+
+    **The `null` parameter must not be copied to a nullable column.** LE-05 T2's
+    `described_at` is nullable, so `None` is a legal value there and must
+    hydrate to `described_at=None` rather than raise. Copied verbatim, this case
+    would demand that T2 reject a perfectly ordinary row -- and if T2's
+    implementation is copied from here too, both halves agree, the test passes,
+    and the bug ships green. `_timestamp()` itself needs no change: it already
+    returns `None` untouched and lets the constructor decide. What changes for a
+    nullable column is the constructor's expectation and this parameter's
+    direction.
     """
     with pytest.raises(InvalidEditingProjectModel):
         repository_module._hydrate(hydration_row(created_at=created_at))

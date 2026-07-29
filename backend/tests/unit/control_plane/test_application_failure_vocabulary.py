@@ -30,13 +30,31 @@ EXEMPT_BASES: frozenset[str] = frozenset()
 
 
 def _failure_bases() -> list[type]:
-    """Every private `_...Failure` base declared in the application package."""
+    """Every private `_...Failure` base declared in the application package.
+
+    The `BaseException` check is not redundant with the name check. Matching on
+    a name alone would sweep in a dataclass or an `Enum` that happened to end in
+    `Failure` -- something like a `_RenderFailure` result value -- and it would
+    fail loudly on `pytest.raises(TypeError)` for reasons having nothing to do
+    with this guard, sending whoever reads the output down the wrong path.
+
+    Two known limits of the sweep, neither of which bites today:
+
+    * `iter_modules` does not recurse, so a failure vocabulary placed in a
+      sub-package of `application/` would be skipped silently;
+    * `__subclasses__()` returns direct subclasses only, so a grandchild -- a
+      subclass of a concrete failure -- would not be checked.
+
+    T2 through T4 are flat modules with one level of subclassing, so both hold.
+    Whoever breaks either shape has to widen this function at the same time.
+    """
     bases: list[type] = []
     for module_info in pkgutil.iter_modules(application_package.__path__):
         module = importlib.import_module(f"{application_package.__name__}.{module_info.name}")
         for name, value in vars(module).items():
             if (
                 inspect.isclass(value)
+                and issubclass(value, BaseException)
                 and value.__module__ == module.__name__
                 and name.startswith("_")
                 and name.endswith("Failure")
@@ -47,7 +65,7 @@ def _failure_bases() -> list[type]:
 
 
 def _failure_types() -> list[type]:
-    """The bases plus every concrete failure that inherits from one."""
+    """The bases plus every concrete failure that directly inherits from one."""
     types: list[type] = []
     for base in _failure_bases():
         types.append(base)
