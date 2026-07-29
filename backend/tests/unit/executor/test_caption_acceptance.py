@@ -94,9 +94,11 @@ _EXTENSION_B_IDEOGRAPH: Final = "\U00020bb7"
 
 # LATIN SMALL LETTER DOTLESS I: covered by the latin face and by neither
 # Chinese one, which makes it the fallback chain's own case. Twelve codepoints
-# have that property on the packaged set and only nine of them put down ink;
-# this one puts down the most (198 pixels at 54 px), so a comparison against
-# the face's own rendering has something to compare.
+# have that property on the packaged set and ten of them put down ink. This
+# one is among the heaviest (198 pixels at 54 px; the heaviest is U+2044
+# FRACTION SLASH at 253), so a comparison against the face's own rendering has
+# something to compare. Chosen over U+2044 because it is a real letter rather
+# than punctuation, which is the shape a caption is actually made of.
 _LATIN_ONLY_CHARACTER: Final = "\u0131"  # LATIN SMALL LETTER DOTLESS I
 
 # Ink counts for "ABCDEFG" at 48 px from the one packaged variable face,
