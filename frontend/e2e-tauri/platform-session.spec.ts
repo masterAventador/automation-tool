@@ -56,6 +56,7 @@ describe("B5-13/B5-14 platform Session production-path acceptance", () => {
       timeoutMsg: "open handling did not settle",
     });
 
+    console.log(`[b514-clock] before-recheck ${new Date().toISOString()}`);
     const recheck = await browser.$("button=我已处理，重新检查");
     await recheck.click();
     await waitForOneFact();
@@ -63,9 +64,11 @@ describe("B5-13/B5-14 platform Session production-path acceptance", () => {
       timeout: 120_000,
       timeoutMsg: "platform recheck did not settle",
     });
+    console.log(`[b514-clock] before-logout-lookup ${new Date().toISOString()}`);
     const logout = await browser.$("button=安全注销");
     assert.equal(await logout.isEnabled(), true);
     await logout.click();
+    console.log(`[b514-clock] logout-confirm-click ${new Date().toISOString()}`);
     await browser.$("button=确认注销").click();
     try {
       await browser.waitUntil(
@@ -101,6 +104,19 @@ describe("B5-13/B5-14 platform Session production-path acceptance", () => {
       );
     }
 
+    console.log(`[b514-clock] logout-rendered-missing ${new Date().toISOString()}`);
+    // 这条等待可以空转通过：fixture 从未真正登录，登出**之前**页面就可能已写着
+    // 「需要登录」。命令失败时页面留一条警告、文字照样匹配，spec 照绿——
+    // 2026-07-29 实测正是这样漏掉了「登出命令 254ms 快速失败、Profile 原样留下」。
+    // 所以登出的成立必须同时断言：没有失败警告。
+    const postLogoutAlerts = await browser
+      .$$(".ant-alert-error, .ant-alert-warning")
+      .map((alert) => alert.getText());
+    assert.deepEqual(
+      postLogoutAlerts,
+      [],
+      `safe logout left a failure alert on screen: ${JSON.stringify(postLogoutAlerts)}`,
+    );
     const blocked = (await browser.tauri.execute(async ({ core }) => {
       try {
         await core.invoke("create_douyin_search_exposure_task", {
