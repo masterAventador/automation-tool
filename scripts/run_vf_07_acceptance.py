@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -29,8 +30,13 @@ def main() -> int:
     if len(rows) != 1 or not rows[0].endswith("| ✅ 已完成 |"):
         raise SystemExit("VF-07 roadmap row is missing, duplicated or incomplete")
 
+    # sys.executable 而不是裸 "python3"：被转调的 run_vf_06 要 import
+    # automation_tool（经 desktop_e2e_prerequisites → run_e4_14 的链），那只在
+    # backend/.venv 里有。裸字符串会拿到系统解释器，在第一条断言之前就
+    # ModuleNotFoundError——2026-07-29 实测。别处调门禁脚本的裸 python3 不受
+    # 影响（它们不 import 业务包），不顺手改。
     subprocess.run(
-        ["python3", "scripts/run_vf_06_acceptance.py"],
+        [sys.executable, "scripts/run_vf_06_acceptance.py"],
         cwd=ROOT,
         check=True,
     )
