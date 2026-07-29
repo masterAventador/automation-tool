@@ -25,6 +25,14 @@ _DONE = re.compile(r"^- ✅ 已完成：(\d+)$", re.MULTILINE)
 _PENDING_ACCEPT = re.compile(r"^- 🔍 待验收：(\d+)$", re.MULTILINE)
 _IN_FLIGHT = re.compile(r"^- 🧪 RED / 🚧 实现中：(\d+)$", re.MULTILINE)
 
+# 台账 §3 的规则是「**每条工作线**同一时间最多一个任务处于 RED 或实现中」，
+# 2026-07-29 起经用户授权开三条并行线（`wt/smart-edit`、`wt/le-07-probe`、
+# `wt/le-09-captions`），各自独占一棵 worktree。本上限守的是「每个在途任务都
+# 有工作线认领」，超出这个数就说明有任务没人真正在做，台账在虚报进度。
+# 这个常量原为写死的 1，是 LE-01（2026-07-28）在开并行线之前写的，比它所守护的
+# 文档旧了一天。
+MAX_CONCURRENT_WORK_LINES = 3
+
 # 表格「当前状态」列里出现的字面值。RED 与实现中在表格里是两个不同状态，但
 # 进度区把它们合并声明成同一个「🧪 RED / 🚧 实现中」桶。
 _STATUS_NOT_STARTED = "⬜ 未开始"
@@ -134,8 +142,11 @@ def check(text: str) -> list[str]:
             )
 
     in_flight_match = _IN_FLIGHT.search(text)
-    if in_flight_match is not None and int(in_flight_match.group(1)) > 1:
-        problems.append("同一时间最多一个任务处于 RED 或实现中")
+    if in_flight_match is not None and int(in_flight_match.group(1)) > MAX_CONCURRENT_WORK_LINES:
+        problems.append(
+            f"在途任务多于 {MAX_CONCURRENT_WORK_LINES} 条并行工作线，"
+            "每条工作线同一时间最多一个 RED 或实现中"
+        )
 
     return problems
 

@@ -12,6 +12,12 @@ _LEDGER = (
     Path(__file__).resolve().parents[1] / "docs/local-video-editing-roadmap.md"
 )
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from check_local_editing_roadmap_counts import (  # noqa: E402
+    MAX_CONCURRENT_WORK_LINES,
+)
+
 # These read the ledger's *current* counts instead of a hardcoded snapshot: a
 # literal like "- ✅ 已完成：1" goes stale the next time a task finishes, and a
 # stale literal that no longer matches silently turns `.replace()` into a
@@ -77,33 +83,53 @@ def test_status_sum_mismatch_fails(tmp_path: Path) -> None:
     assert "各状态相加" in result.stdout + result.stderr
 
 
-def test_two_in_flight_fails(tmp_path: Path) -> None:
-    """同一时间最多一个任务处于 RED 或实现中。"""
-    text = _LEDGER.read_text(encoding="utf-8")
+def _with_in_flight(text: str, wanted: int) -> str:
+    """Return the ledger with exactly `wanted` rows in flight, counts kept consistent.
 
-    not_started_rows = _NOT_STARTED_ROW.findall(text)
-    assert len(not_started_rows) >= 2, "需要至少两行「⬜ 未开始」才能构造本场景"
-    for row in not_started_rows[:2]:
-        text = text.replace(row, row[: -len("⬜ 未开始 |")] + "🚧 实现中 |", 1)
-
+    The progress counts are adjusted alongside the rows so that the "sums do not
+    add up" and "cross-check" rules stay satisfied and only the concurrency rule
+    can fire.
+    """
     in_flight_match = _IN_FLIGHT_COUNT.search(text)
     not_started_match = _NOT_STARTED_COUNT.search(text)
     assert in_flight_match is not None
     assert not_started_match is not None
-    # 同步声明的进度计数，让「相加对不上」与「跨表核对」两类检查都保持通过，
-    # 只让「同一时间最多一个任务处于 RED/实现中」这一条单独触发。
-    text = _IN_FLIGHT_COUNT.sub(
-        f"- 🧪 RED / 🚧 实现中：{int(in_flight_match.group(1)) + 2}", text
-    )
-    text = _NOT_STARTED_COUNT.sub(
-        f"- ⬜ 未开始：{int(not_started_match.group(1)) - 2}", text
+    added = wanted - int(in_flight_match.group(1))
+
+    not_started_rows = _NOT_STARTED_ROW.findall(text)
+    assert len(not_started_rows) >= added, "需要足够多的「⬜ 未开始」行才能构造本场景"
+    for row in not_started_rows[:added]:
+        text = text.replace(row, row[: -len("⬜ 未开始 |")] + "🚧 实现中 |", 1)
+
+    text = _IN_FLIGHT_COUNT.sub(f"- 🧪 RED / 🚧 实现中：{wanted}", text)
+    return _NOT_STARTED_COUNT.sub(
+        f"- ⬜ 未开始：{int(not_started_match.group(1)) - added}", text
     )
 
-    broken = tmp_path / "roadmap.md"
-    broken.write_text(text, encoding="utf-8")
-    result = _run(broken)
+
+def test_one_in_flight_per_work_line_passes(tmp_path: Path) -> None:
+    """每条工作线各带一个在途任务是台账明文授权的，不该被判红。"""
+    ledger = tmp_path / "roadmap.md"
+    ledger.write_text(
+        _with_in_flight(_LEDGER.read_text(encoding="utf-8"), MAX_CONCURRENT_WORK_LINES),
+        encoding="utf-8",
+    )
+    result = _run(ledger)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_more_in_flight_than_work_lines_fails(tmp_path: Path) -> None:
+    """超过授权的并行线数就没有工作线认领它，必须判红。"""
+    ledger = tmp_path / "roadmap.md"
+    ledger.write_text(
+        _with_in_flight(
+            _LEDGER.read_text(encoding="utf-8"), MAX_CONCURRENT_WORK_LINES + 1
+        ),
+        encoding="utf-8",
+    )
+    result = _run(ledger)
     assert result.returncode != 0
-    assert "同一时间最多一个任务" in result.stdout + result.stderr
+    assert "并行工作线" in result.stdout + result.stderr
 
 
 def test_status_cross_check_mismatch_fails(tmp_path: Path) -> None:
