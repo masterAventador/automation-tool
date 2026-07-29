@@ -28,9 +28,10 @@ from uuid import UUID
 import pytest
 from alembic_head import HEAD_REVISION
 from conftest import AlembicRunner
-from sqlalchemy import delete, insert, select, text
+from sqlalchemy import ForeignKeyConstraint, delete, insert, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.sql.schema import ColumnCollectionConstraint
 
 from automation_tool.control_plane.application.timelines import (
     TimelineDataRejected,
@@ -111,6 +112,21 @@ EXPECTED_TABLE_TYPES = {
     "duration_ms": "Integer",
     "tracks": "JSONB",
     "created_at": "DateTime",
+}
+
+# What `schema.py` declares, as opposed to what the migration built. The two are
+# written separately and drift silently: `migrations/env.py` points
+# `target_metadata` at this metadata, so anything the database has and this does
+# not is what the next `--autogenerate` offers to drop. Column *order* is part
+# of the value because the composite foreign key T4 declares has to name these
+# columns in this order.
+EXPECTED_TABLE_CONSTRAINTS = {
+    "pk_timelines": ("PrimaryKeyConstraint", ["timeline_id", "revision"]),
+    "fk_timelines_project": ("ForeignKeyConstraint", ["project_id"]),
+    "uq_timelines_revision_project": (
+        "UniqueConstraint",
+        ["timeline_id", "revision", "project_id"],
+    ),
 }
 
 # The superkey exists for exactly one reader: `editing_jobs` (T4) points a
@@ -1090,7 +1106,7 @@ async def test_wrong_credentials_are_refused_without_leaking_the_identity(
     postgresql_url: str,
     alembic_runner: AlembicRunner,
 ) -> None:
-    """A refused login is neither an `OSError` nor a `SQLAlchemyError`.
+    """A real server refusing a real login, against all three public methods.
 
     A refused *connection* is an `OSError`. A refused *login* is an
     `asyncpg.exceptions.InvalidPasswordError`, and its message names the role.
@@ -1099,9 +1115,13 @@ async def test_wrong_credentials_are_refused_without_leaking_the_identity(
         InvalidPasswordError -> InvalidAuthorizationSpecificationError
         -> PostgresError -> PostgresMessage -> Exception -> BaseException
 
-    `SQLAlchemyError` appears nowhere on it, and neither does `OSError`. All
-    three public methods are checked, because a catch-all tail missing from one
-    of them leaks from that one alone.
+    `SQLAlchemyError` appears nowhere on it, and neither does `OSError` -- a
+    third-party fact recorded rather than a distinction this module rests on,
+    since the `except Exception` tail would answer identically either way.
+
+    What is load-bearing here is that **all three methods** are exercised: the
+    tail is written once per `try`, and one missing it leaks from that method
+    alone while the other two stay clean.
     """
     alembic_runner(postgresql_url, "upgrade", "head")
     url = make_url(postgresql_url)
@@ -1185,10 +1205,10 @@ async def test_migration_creates_the_declared_shape_and_drops_it(
         assert revision == HEAD_REVISION
         assert columns == EXPECTED_COLUMNS
         assert constraints >= EXPECTED_CONSTRAINTS
-        # `schema.py` and the migration each declare these separately, and
-        # nothing else compares them: every other test here reads either the
-        # migrated database or this file's own constants, so narrowing the Table
-        # alone would leave the suite green.
+        # `schema.py` and the migration each declare all of this separately, and
+        # this assertion is the only thing comparing the two: every other test
+        # in this file reads either the migrated database or this file's own
+        # constants, so narrowing the `Table` alone would leave them all green.
         declared = {
             column.name: (column.type.__class__.__name__, column.nullable)
             for column in timelines.columns
@@ -1197,6 +1217,35 @@ async def test_migration_creates_the_declared_shape_and_drops_it(
             name: (EXPECTED_TABLE_TYPES[name], shape[1] == "YES")
             for name, shape in EXPECTED_COLUMNS.items()
         }
+        # The constraints, not just the columns -- and this is not decoration.
+        # `migrations/env.py` sets `target_metadata` to exactly this metadata,
+        # so a constraint present in the database but missing from `schema.py`
+        # is drift that the *next* `alembic revision --autogenerate` proposes
+        # dropping. Measured: with only the column comparison above, deleting
+        # the superkey, the foreign key, or half the primary key from
+        # `schema.py` left the whole suite green -- and T4 is the next task to
+        # run autogenerate, against the very constraint it depends on.
+        # `Table.constraints` is typed as holding the `Constraint` base, which
+        # declares no `.columns`; the narrowing is asserted rather than cast so
+        # that a constraint kind without one shows up as a failure here instead
+        # of being quietly skipped by an `isinstance` filter.
+        declared_constraints: dict[str, tuple[str, list[str]]] = {}
+        for constraint in timelines.constraints:
+            assert isinstance(constraint, ColumnCollectionConstraint), constraint
+            assert constraint.name is not None
+            declared_constraints[str(constraint.name)] = (
+                type(constraint).__name__,
+                list(constraint.columns.keys()),
+            )
+        assert declared_constraints == EXPECTED_TABLE_CONSTRAINTS
+        # The foreign key's target as well, since its columns alone say nothing
+        # about what it points at.
+        assert [
+            element.target_fullname
+            for constraint in timelines.constraints
+            if isinstance(constraint, ForeignKeyConstraint)
+            for element in constraint.elements
+        ] == ["editing_projects.project_id"]
 
         alembic_runner(postgresql_url, "downgrade", PREVIOUS_REVISION)
         async with database.session() as session:

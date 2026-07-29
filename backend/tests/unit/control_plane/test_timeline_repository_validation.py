@@ -493,12 +493,20 @@ async def test_repository_refuses_foreign_argument_types() -> None:
 
 @pytest.mark.asyncio
 async def test_an_unreachable_database_is_refused_without_leaking_the_connection() -> None:
-    """A refused connection is an `OSError`, not a `SQLAlchemyError`.
+    """A refused connection is refused without the connection string in it.
 
     Measured against a real PostgreSQL: `asyncpg` raises `ConnectionRefusedError`
     out of asyncio's connect call, and the SQLAlchemy dialect does not wrap it,
-    because it is not one of asyncpg's own exceptions. A repository catching only
-    `SQLAlchemyError` would let the raw socket error escape to the caller.
+    because it is not one of asyncpg's own exceptions -- so it is an `OSError`
+    and not a `SQLAlchemyError`.
+
+    That classification is recorded here as a third-party fact, **not** as this
+    module's load-bearing guard. Every `try` in the repository ends in an
+    `except Exception` tail, so an `OSError` would be answered identically with
+    the `_CONNECTION_FAILURES` clause deleted; the clause is kept as the shape
+    shared across seven repositories, several of which have no tail and do
+    depend on it. What this test pins is the outcome: `Unavailable`, and no host,
+    port, user or password anywhere in the rendered traceback.
     """
     database = unreachable_database()
     try:
@@ -570,11 +578,14 @@ async def test_an_authentication_failure_is_refused_without_leaking_the_role() -
     this family do not share a single direct base. What they do share is the
     `PostgresError` spine and the absence of `OSError` and `SQLAlchemyError`.
 
-    The absence is what the repository's clause ordering rests on, and it is
-    asserted first below. The `PostgresError` assertion that follows carries no
-    weight for the catch-all -- it records a third-party fact, so that an
-    asyncpg release restructuring this hierarchy fails here and sends someone
-    back to re-read the reasoning. The message names the role.
+    Both assertions below record third-party facts rather than this module's
+    behaviour: with the catch-all tail present, an exception's position relative
+    to `OSError` and `SQLAlchemyError` changes nothing about the answer it gets
+    here. They are worth keeping because an asyncpg release restructuring this
+    hierarchy should fail here and send someone back to re-read the reasoning --
+    and because the repositories that have no tail *do* rest on it. What this
+    test pins for this module is the outcome: `Unavailable`, with the role
+    absent from the rendered traceback even though the driver's message names it.
     """
     database = unreachable_database()
     try:
@@ -730,6 +741,47 @@ async def test_a_missing_revision_is_not_found_and_a_present_one_hydrates() -> N
         await database.close()
 
 
+@pytest.mark.asyncio
+async def test_a_serialisation_failure_is_not_reported_as_an_unavailable_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Building the row is not database work and must not borrow its failures.
+
+    `_row` keeps `_hydrate` outside its `try` for exactly this reason, and says
+    so: a catch-all that swallows the row-building step turns "this code is
+    broken" into "try again later", which is wrong and unfixable by retrying.
+    `save` had the same shape in reverse -- `_column_values` sat *inside* the
+    try, so a serialiser that raised would have been reported as an unavailable
+    database and retried forever.
+
+    Nothing can trigger it today: every value the serialiser produces is a JSON
+    native, and the timeline it reads from is already validated. That is an
+    argument for the guard being cheap, not for leaving the failure mode wired
+    the dangerous way -- and a field added to the domain is exactly how "nothing
+    can trigger it today" stops being true.
+
+    Letting it propagate is the point. A broken serialiser is not one of the
+    five outcomes a caller can act on; masking it as one of them is how it would
+    stay hidden.
+    """
+    database = unreachable_database()
+    try:
+        repository = repository_module.SqlAlchemyTimelineRepository(database)
+        object.__setattr__(database, "_sessions", StubSessions(None))
+
+        class SerialiserFailure(Exception):
+            pass
+
+        def explode(_timeline: Timeline) -> dict[str, object]:
+            raise SerialiserFailure("le05_leaked_serialiser_detail")
+
+        monkeypatch.setattr(repository_module, "_column_values", explode)
+        with pytest.raises(SerialiserFailure):
+            await repository.save(make_timeline())
+    finally:
+        await database.close()
+
+
 def test_hydration_rebuilds_the_whole_tree_as_the_domain_declares_it() -> None:
     """Tuples all the way down, and every leaf parsed back into its own type.
 
@@ -788,6 +840,57 @@ def test_the_wrappers_the_rejection_cases_use_are_themselves_accepted() -> None:
     incoming = overlapped.tracks[0].clips[1].transition_in
     assert type(incoming) is TimelineTransition
     assert incoming.duration_ms == 800
+
+    # The caption wrapper the malformed-identifier cases use. Without this, a
+    # change to the caption rules could make that wrapper illegal on its own and
+    # all four of those cases would keep passing while testing nothing.
+    captioned = repository_module._hydrate(caption_with_material_row(None))
+    assert captioned.tracks[1].clips[0].text == CAPTION_ONE
+    assert captioned.tracks[1].clips[0].source_material_id is None
+
+    # The narration wrapper, likewise, for the level cases below.
+    levelled = repository_module._hydrate(narration_row(-6.0))
+    assert type(levelled.tracks[1].clips[0].gain_db) is float
+
+
+@pytest.mark.parametrize(
+    "stored",
+    ["lower-third", "Visual", "", None, 7, True],
+    ids=["unknown", "wrong-case", "empty", "null", "number", "boolean"],
+)
+def test_an_unrecognised_enumeration_value_is_refused_by_the_parser_itself(
+    stored: object,
+) -> None:
+    """Pinned at the function, because no row can pin it.
+
+    The obvious test -- store `"lower-third"` as a track's kind and watch the
+    row be refused -- passes whatever this function does. Hand the raw string
+    back instead of refusing and `TimelineTrack.__post_init__` rejects it on
+    `not isinstance(self.kind, TimelineTrackKind)`; the row is still refused,
+    the reason is no longer this function. Measured: a mutation that changes
+    only the fall-through leaves both layers green.
+
+    That is the same shape as the material-identifier gap below, with one
+    difference: there, a caption clip exists where losing the value hydrates
+    successfully, so a row could carry the assertion. Here every consumer
+    isinstance-checks the member, so no stored row can tell the two apart and
+    the only honest place to assert it is the parser.
+    """
+    with pytest.raises(InvalidTimelineModel):
+        repository_module._enumeration_member(TimelineTrackKind, stored)
+    with pytest.raises(InvalidTimelineModel):
+        repository_module._enumeration_member(TransitionKind, stored)
+
+
+def test_the_enumeration_parser_returns_the_member_not_its_text() -> None:
+    """The other side, so the refusals above are not a parser that only fails.
+
+    Identity rather than equality: a `StrEnum` member compares equal to its own
+    text, so `== "visual"` would hold for the bare string this exists to reject.
+    """
+    parsed = repository_module._enumeration_member(TimelineTrackKind, "visual")
+    assert parsed is TimelineTrackKind.VISUAL
+    assert repository_module._enumeration_member(TransitionKind, "fade") is TransitionKind.FADE
 
 
 def test_the_serialiser_and_the_reader_agree_on_every_key() -> None:
@@ -982,6 +1085,77 @@ def caption_with_material_row(source_material_id: object) -> RowMapping:
             },
         ],
     )
+
+
+def narration_row(gain_db: object) -> RowMapping:
+    """A narration clip carrying a level, next to a legal picture lane.
+
+    The clip parametrisation above runs on a picture lane, where a level of
+    *any* type is illegal -- the picture lane carries no sound of its own. So an
+    integer level asserted there would be refused for a reason having nothing to
+    do with its type. A narration clip is where a level is required, and
+    therefore the only place its type can be the thing under test.
+    """
+    return hydration_row(
+        duration_ms=VALID_CLIP_DURATION_MS,
+        tracks=[
+            {"track_id": "visual", "kind": "visual", "clips": [valid_clip()]},
+            {
+                "track_id": "narration",
+                "kind": "narration",
+                "clips": [
+                    clip_document(
+                        "n-one",
+                        0,
+                        2_000,
+                        source_material_id=str(MATERIAL_FOUR),
+                        source_in_ms=0,
+                        source_out_ms=2_000,
+                        gain_db=gain_db,
+                    )
+                ],
+            },
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    "gain_db",
+    [-6, 0, 12, -60, "-6.0", True],
+    ids=["whole-number", "zero", "upper-bound", "lower-bound", "text", "boolean"],
+)
+def test_hydration_refuses_a_level_stored_as_anything_but_a_float(gain_db: object) -> None:
+    """JSON keeps `-6` and `-6.0` apart, and only one of them is a level.
+
+    Measured against PostgreSQL 18.4: a JSON integer comes back as an `int` and
+    a JSON real as a `float`, and `TimelineClip` requires a `float`. The write
+    side is covered -- the stored document is asserted to hold a `float`, and a
+    mutation that normalises whole numbers to integers is killed by it. This is
+    the *read* side, which had nothing: hydration's whole premise is that rows
+    also arrive from migrations, fixtures and hand-run statements, and a person
+    typing `"gain_db": -6` into one of those is the likeliest way this ever
+    happens.
+
+    Both ends of the allowed range are here as integers on purpose. `-60` and
+    `12` are the boundary values the domain accepts as floats, so a guard that
+    checked only the range would pass them and only the type check refuses them.
+    `True` is included because `isinstance(True, float)` is `False` but
+    `isinstance(True, int)` is `True` -- a boolean must not be read as a level
+    whichever way the check is spelled.
+    """
+    with pytest.raises(InvalidTimelineModel):
+        repository_module._hydrate(narration_row(gain_db))
+
+
+@pytest.mark.parametrize(
+    "gain_db", [-6.0, -3.5, -60.0, 12.0], ids=["whole", "fractional", "lowest", "highest"]
+)
+def test_a_level_stored_as_a_float_hydrates_including_at_both_bounds(gain_db: float) -> None:
+    """The accepting side, so the refusals above cannot be vacuous."""
+    hydrated = repository_module._hydrate(narration_row(gain_db))
+    level = hydrated.tracks[1].clips[0].gain_db
+    assert type(level) is float
+    assert level == gain_db
 
 
 @pytest.mark.parametrize(

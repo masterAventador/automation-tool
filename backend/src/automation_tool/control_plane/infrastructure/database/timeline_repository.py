@@ -40,6 +40,16 @@ from .session import Database
 # `SQLAlchemyError`: it comes out of asyncio's connect call, and the asyncpg
 # dialect only wraps asyncpg's own exceptions. `session.py` and six other
 # repositories catch the same pair for the same reason.
+#
+# **In this module that pairing changes no behaviour.** Every `try` here ends in
+# an `except Exception` tail answering with the same failure, so deleting this
+# clause would be invisible: the tail already covers `OSError` and
+# `SQLAlchemyError` alike. It is kept as the shape shared across seven
+# repositories -- several of which have no tail, and for those the distinction
+# is what stops a raw socket error reaching the caller. Treat the sentence above
+# as documenting why the pair exists at all, not as a claim that this file would
+# leak without it. Tests naming these classes are pinning the third-party fact,
+# not this module's behaviour.
 _CONNECTION_FAILURES = (OSError, SQLAlchemyError)
 
 # PostgreSQL's SQLSTATE for the two violations this table can produce. Both
@@ -309,12 +319,21 @@ class SqlAlchemyTimelineRepository:
         proceed, which is the same defect one level down. The primary key and
         the foreign key are what refuse the second one, and they refuse it
         whoever is racing.
+
+        The row is built *before* the `try`, for the same reason `_row` hydrates
+        after its own: building it is not database work, and a catch-all that
+        covered it would report a broken serialiser as an unavailable database
+        -- telling the caller to retry something no retry can fix. Nothing can
+        raise there today, since every value it produces is a JSON native taken
+        from an already-validated timeline; keeping the statement outside costs
+        one line and stops a field added later from quietly landing inside.
         """
         if not isinstance(timeline, Timeline):
             raise TimelineDataRejected
+        values = _column_values(timeline)
         try:
             async with self._database.session() as session:
-                await session.execute(insert(timelines).values(**_column_values(timeline)))
+                await session.execute(insert(timelines).values(**values))
         except IntegrityError as error:
             _refuse_integrity_violation(error)
         except _CONNECTION_FAILURES:
