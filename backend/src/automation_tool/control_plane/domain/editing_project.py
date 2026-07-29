@@ -6,7 +6,6 @@ import re
 from dataclasses import dataclass
 from typing import Final, Never
 
-MAX_PROJECT_TITLE_CHARACTERS: Final = 200
 MIN_OUTPUT_DIMENSION: Final = 128
 MAX_OUTPUT_DIMENSION: Final = 4096
 MIN_OUTPUT_FPS: Final = 12
@@ -96,7 +95,6 @@ __all__ = [
     "MAX_CAPTION_STROKE_PX",
     "MAX_OUTPUT_DIMENSION",
     "MAX_OUTPUT_FPS",
-    "MAX_PROJECT_TITLE_CHARACTERS",
     "MIN_CAPTION_FONT_PX",
     "MIN_CAPTION_LINE_SPACING",
     "MIN_OUTPUT_DIMENSION",

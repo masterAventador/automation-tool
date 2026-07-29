@@ -97,7 +97,7 @@
 
 **Interfaces:**
 - Consumes: `ResourceId`（`domain/resource_ids.py`）
-- Produces：`InvalidEditingProjectModel(ValueError)`、`OutputSpec(width, height, fps)`、`CaptionStyle(font_key, font_px, stroke_px, line_spacing)`、模块私有 `_reject()`/`_validate_text()`/`_validate_timestamp()`/`_FONT_KEY_PATTERN`，以及常量 `MAX_PROJECT_TITLE_CHARACTERS=200`、`MIN_OUTPUT_DIMENSION=128`、`MAX_OUTPUT_DIMENSION=4096`、`MIN_OUTPUT_FPS=12`、`MAX_OUTPUT_FPS=60`、`MIN_CAPTION_FONT_PX=12`、`MAX_CAPTION_FONT_PX=200`、`MAX_CAPTION_STROKE_PX=20`、`MIN_CAPTION_LINE_SPACING=1.0`、`MAX_CAPTION_LINE_SPACING=3.0`
+- Produces：`InvalidEditingProjectModel(ValueError)`、`OutputSpec(width, height, fps)`、`CaptionStyle(font_key, font_px, stroke_px, line_spacing)`、模块私有 `_reject()`/`_FONT_KEY_PATTERN`，以及常量 `MIN_OUTPUT_DIMENSION=128`、`MAX_OUTPUT_DIMENSION=4096`、`MIN_OUTPUT_FPS=12`、`MAX_OUTPUT_FPS=60`、`MIN_CAPTION_FONT_PX=12`、`MAX_CAPTION_FONT_PX=200`、`MAX_CAPTION_STROKE_PX=20`、`MIN_CAPTION_LINE_SPACING=1.0`、`MAX_CAPTION_LINE_SPACING=3.0`
 
 > **注意 `_validate_timestamp`**：本 task **不要**写它——T2 才有第一个调用者（`EditingProject.created_at`）。LE-03 的 T2 就因为提前写入无调用者的同名函数吃了一个 Critical（死代码 + 违反 TDD 铁律）。同理 `_validate_text` 也留到 T2。
 
@@ -297,7 +297,6 @@ import re
 from dataclasses import dataclass
 from typing import Final, Never
 
-MAX_PROJECT_TITLE_CHARACTERS: Final = 200
 MIN_OUTPUT_DIMENSION: Final = 128
 MAX_OUTPUT_DIMENSION: Final = 4096
 MIN_OUTPUT_FPS: Final = 12
@@ -387,7 +386,6 @@ __all__ = [
     "MAX_CAPTION_STROKE_PX",
     "MAX_OUTPUT_DIMENSION",
     "MAX_OUTPUT_FPS",
-    "MAX_PROJECT_TITLE_CHARACTERS",
     "MIN_CAPTION_FONT_PX",
     "MIN_CAPTION_LINE_SPACING",
     "MIN_OUTPUT_DIMENSION",
@@ -424,7 +422,8 @@ git commit -m "feat(le-04): 输出规格与字幕样式，宽高锁偶数、字�
 - Test: `backend/tests/unit/control_plane/domain/test_editing_project.py`
 
 **Interfaces:**
-- Consumes: T1 的 `OutputSpec`、`CaptionStyle`、`_reject`、`MAX_PROJECT_TITLE_CHARACTERS`；`ResourceId`
+- Consumes: T1 的 `OutputSpec`、`CaptionStyle`、`_reject`；`ResourceId`
+- **本 task 新增常量 `MAX_PROJECT_TITLE_CHARACTERS: Final = 200`**（原计划放在 T1，但那时它零使用者——公开 API 没有消费者也没有测试，与 LE-03 T2 吃 Critical 的死代码是同一个模式，故挪到第一个真实使用者这里）
 - Produces: `EditingProjectId(ResourceId)`（`_resource = "editing project"`）、`EditingProject(project_id, title, output, caption_style, created_at)`；本 task 加入模块私有 `_validate_text`、`_validate_timestamp`（它们的第一个调用者在此）
 
 - [ ] **Step 1: 写会失败的测试**
