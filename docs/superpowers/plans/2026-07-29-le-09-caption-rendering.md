@@ -150,7 +150,7 @@ CLAUDE.md §9.2：`__init__.py` 重新导出什么，等于允许什么被顺带
 冻结走 `sys._MEIPASS/fonts`，源码走构建缓存 `subtitle-fonts/`（因为仓库禁止字体二进制）。
 **同一个函数、同一条规则**，不是「用环境变量决定产品去哪找东西」。
 不 import `motion_authoring.agent`（该模块 import 时即读契约并可能抛错，耦合不划算）；
-两处各 6 行、注释互指。若要消除重复需改别的任务的文件，**不主动动**。
+两处各 6 行、形状相同；captions 侧的注释指向 `motion_authoring/agent.py` 的先例，**反向不加**——那要改别的工作线的文件，与本计划「不动别人的文件」冲突，选择了后者。
 
 ### 1.5 缺字且整条链都没有 → fail closed（已获批准）
 
@@ -165,7 +165,7 @@ CLAUDE.md §9.2：`__init__.py` 重新导出什么，等于允许什么被顺带
 
 台账已写明。装配策略本身（进包 vs 设计 §6.3 的「按需下载」）是 LE-20 的决策，
 LE-09 抢做会替它砍掉一半选项。本任务交付机制，不交付装配，并把缺口做成机器可见：
-一条结构性用例断言冻结形态下 `font_root()` 落在 `<_MEIPASS>/fonts`，作为 LE-20 的落点契约。
+一条结构性用例断言冻结形态下 `bundle_root(bundle)` 落在 `<_MEIPASS>/fonts/<bundle>/`，并由 `packaged_relative_path(font_key)` 对外给出包内相对路径，作为 LE-20 的落点契约。
 `docs/development/LE-09.md` 声明 `用户可操作：否 / 证据类型：分层实现`，补验收依赖挂 LE-20。
 
 ---
@@ -178,7 +178,7 @@ LE-09 抢做会替它砍掉一半选项。本任务交付机制，不交付装�
 - **T1 依赖与骨架**：`pillow`/`fonttools`/`brotli` 进 executor 组（`uv lock` + `uv sync`），
   captions 包可导入。RED 是 `ModuleNotFoundError`。
 - **T2 字体注册表与解析**：`FONT_KEY_PATTERN`、`REGISTERED_CAPTION_FONTS` 闭集、
-  `font_root()`、`resolve_font_file()`；12 条用例含六个平台分支与哨兵用例。
+  `bundle_root(bundle)`、`packaged_relative_path(font_key)`、`resolve_font_file(font_key)`；用例含六个平台分支与哨兵用例。
 - **T3 cmap 覆盖与 fallback 链**（核心）：`glyph_coverage()`（排除 `.notdef` 映射）、
   `FontChain.face_for()`、`segment_runs()`；12 条用例；对 `and`/`in`/`!=` 三处做算子变异自证。
 - **T4 PIL 渲染**：`CaptionRenderStyle`（含跨层钉子）、`_load_face`（可变字体字重修正）、

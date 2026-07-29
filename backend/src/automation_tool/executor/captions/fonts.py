@@ -250,11 +250,28 @@ def resolve_font_file(font_key: str) -> Path:
 # the register is closed, so nothing benefits from a larger table.
 COVERAGE_CACHE_SIZE: Final = len(REGISTERED_CAPTION_FONTS)
 
-# The C0 controls and DEL. No face maps them, so without naming them here a
-# line break would come back as a missing glyph and blame the fonts for a
-# caller that had not split its text into lines yet. Everything above this
-# range -- U+200B, U+00AD, U+3000 -- is ordinary text the faces do cover.
-UNDRAWABLE_CODEPOINTS: Final[frozenset[int]] = frozenset(range(0x00, 0x20)) | {0x7F}
+# Control characters and the separators that end a line. No face maps any of
+# them, so without naming them here a line break comes back as a missing glyph
+# and blames the fonts for a caller that had not split its text into lines.
+#
+# The set has to contain every codepoint `str.splitlines()` treats as a line
+# boundary, because that is what the layout step splits on: anything it breaks
+# at but this does not refuse could still reach a face. Three of those sit
+# outside the C0 range -- U+0085, U+2028, U+2029 -- and none of the packaged
+# faces covers them. `test_the_refused_set_covers_every_line_boundary` derives
+# the boundary set from `str.splitlines()` itself and checks the containment,
+# so the two cannot drift apart.
+#
+# Which printable codepoints the packaged faces do and do not cover is a
+# separate question, and one this module makes no claim about; the real-face
+# tests settle it.
+_C0_CONTROLS: Final = frozenset(range(0x00, 0x20))
+_DELETE: Final = frozenset({0x7F})
+_C1_CONTROLS: Final = frozenset(range(0x80, 0xA0))
+_UNICODE_LINE_SEPARATORS: Final = frozenset({0x2028, 0x2029})
+UNDRAWABLE_CODEPOINTS: Final[frozenset[int]] = (
+    _C0_CONTROLS | _DELETE | _C1_CONTROLS | _UNICODE_LINE_SEPARATORS
+)
 
 
 @lru_cache(maxsize=COVERAGE_CACHE_SIZE)

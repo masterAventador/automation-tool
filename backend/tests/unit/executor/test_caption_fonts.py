@@ -579,6 +579,29 @@ def _clear_coverage_cache() -> Iterator[None]:
     fonts.glyph_coverage.cache_clear()
 
 
+class TestRefusalHierarchy:
+    @pytest.mark.parametrize(
+        "refusal",
+        [
+            fonts.CaptionFontUnavailable,
+            fonts.CaptionGlyphUnavailable,
+            fonts.CaptionTextRejected,
+        ],
+    )
+    def test_every_refusal_is_catchable_as_one_type(self, refusal: type[Exception]) -> None:
+        """`CaptionTextRejected`'s docstring promises this; nothing enforced it.
+
+        Every refusal this module raises has to be catchable as
+        `CaptionFontRejected`, so a caller can put one `except` at its
+        boundary and still tell the causes apart by subclass. Repointing any
+        of the three at a bare `RuntimeError` used to leave the whole suite
+        green, which is the same "stated but unenforced" shape that made the
+        control-character precondition worth putting in code rather than in a
+        docstring. LE-10 is the first caller that will depend on it.
+        """
+        assert issubclass(refusal, fonts.CaptionFontRejected)
+
+
 class TestGlyphCoverage:
     def test_a_mapped_codepoint_is_covered(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -760,12 +783,12 @@ class TestFontToolsNotdefAssumption:
         no test could reach. If a future fontTools starts preserving such a
         mapping, this turns red and `glyph_coverage` needs revisiting.
 
-        Both formats are exercised, because they are dropped for different
-        reasons and could stop being dropped independently. Format 12 is the
-        one that matters most: it carries every astral codepoint the shipped
-        CJK face covers, so a regression confined to it would let astral
-        characters be judged covered and then drawn as tofu -- precisely what
-        the whole design is built to prevent.
+        Both formats are read back separately, and deliberately not through
+        `getBestCmap()`. That returns a single subtable -- the preference
+        order puts format 12 first whenever one exists -- so two assertions
+        against it would both be reading the same table while appearing to
+        cover two. The shipped latin face carries only format 4 subtables, so
+        that is the one production actually reads for it.
         """
         astral = 0x20BB7
         second_astral = 0x20BB8
@@ -787,12 +810,21 @@ class TestFontToolsNotdefAssumption:
         face.close()
 
         with TTFont(str(path), lazy=True) as reloaded:
-            character_map = reloaded.getBestCmap()
+            bmp_subtable = reloaded["cmap"].getcmap(3, 1)
+            full_subtable = reloaded["cmap"].getcmap(3, 10)
+            # Premise: these really are the two different tables, not one seen
+            # twice. Without this the assertions below could silently collapse
+            # onto whichever subtable happened to answer.
+            assert bmp_subtable.format == 4
+            assert full_subtable.format == 12
+            bmp_map = dict(bmp_subtable.cmap)
+            full_map = dict(full_subtable.cmap)
 
-        assert ord("A") in character_map
-        assert astral in character_map
-        assert ord("B") not in character_map, "format 4 preserved a .notdef mapping"
-        assert second_astral not in character_map, "format 12 preserved a .notdef mapping"
+        assert ord("A") in bmp_map
+        assert astral in full_map
+        assert ord("B") not in bmp_map, "format 4 preserved a .notdef mapping"
+        assert ord("B") not in full_map, "format 12 preserved a BMP .notdef mapping"
+        assert second_astral not in full_map, "format 12 preserved an astral .notdef mapping"
 
 
 class TestFontChain:
@@ -848,7 +880,39 @@ class TestFontChain:
         assert "U+1F600" in str(refusal.value)
         assert "😀" not in str(refusal.value)
 
-    @pytest.mark.parametrize("character", ["\n", "\t", "\r", "\x00", "\x7f"])
+    def test_the_refused_set_covers_every_line_boundary(self) -> None:
+        """Derived from `str.splitlines()`, the same rule layout will split on.
+
+        Anything the layout step breaks a line at, but this set does not
+        refuse, would reach a face and come back as a missing glyph. Deriving
+        the boundary set here rather than restating it is what stops the two
+        from drifting: U+0085, U+2028 and U+2029 are line boundaries that sit
+        outside the C0 range, and the first version of this guard missed all
+        three.
+        """
+        boundaries = {
+            codepoint
+            for codepoint in range(0x110000)
+            if len(f"a{chr(codepoint)}b".splitlines()) > 1
+        }
+
+        assert boundaries, "str.splitlines() split at nothing; the probe is broken"
+        assert boundaries <= fonts.UNDRAWABLE_CODEPOINTS
+
+    @pytest.mark.parametrize(
+        "character",
+        [
+            "\n",  # the one T4's wrapping has to split on
+            "\t",
+            "\r",
+            "\x00",  # bottom of the C0 range
+            "\x1f",  # top of the C0 range, mirror of the space boundary below
+            "\x7f",  # DEL
+            "\x85",  # NEL: a line boundary that sits outside C0
+            "\u2028",  # LINE SEPARATOR, written escaped so it stays visible
+            "\u2029",  # PARAGRAPH SEPARATOR
+        ],
+    )
     def test_a_control_character_is_refused_as_text_not_as_a_missing_glyph(
         self, character: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -888,10 +952,16 @@ class TestFontChain:
     def test_a_zero_width_space_is_not_treated_as_a_control_character(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Only the C0 range and DEL are layout; format effectors are text.
+        """A format effector is text, so the chain decides it, not this guard.
 
-        U+200B and U+00AD are covered by the real faces, so refusing them here
-        would reject captions the renderer can in fact draw.
+        The guard's job is to refuse what layout owns -- controls and line
+        separators -- and to leave everything else to coverage. U+200B is not
+        a control, so it reaches the chain and is answered by whichever face
+        covers it, exactly like any other character.
+
+        Whether a packaged face actually covers it is a separate question this
+        test deliberately does not assert: it stages a synthetic face, so it
+        could not tell you either way. The real faces are examined in T5.
         """
         _stage_synthetic_faces(tmp_path, monkeypatch, {_LATIN: [0x200B], _CJK: []})
         chain = fonts.FontChain((_LATIN, _CJK))
