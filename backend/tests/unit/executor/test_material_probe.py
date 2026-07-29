@@ -69,12 +69,14 @@ if [ -f "$d/.probe-sleep" ]; then sleep "$(cat "$d/.probe-sleep")"; fi
 if [ -f "$d/.probe-signal" ]; then kill -9 $$; fi
 if [ -f "$d/.probe-drain" ]; then cat > "$d/.probe-stdin"; fi
 if [ -f "$d/.probe-stderr" ]; then cat "$d/.probe-stderr" >&2; fi
+if [ -f "$d/.probe-stdout" ]; then cat "$d/.probe-stdout"; fi
+if [ -f "$d/.probe-pid" ]; then printf '%s' $$ > "$d/.probe-pid"; fi
+if [ -f "$d/.probe-wipe-early" ]; then rm -rf "$d"/automation-tool-measure-*; fi
 if [ -f "$d/.probe-linger" ]; then
   sleep "$(cat "$d/.probe-linger")"
   printf 1 > "$d/.probe-finished"
 fi
 if [ -f "$d/.probe-wipe" ]; then rm -rf "$d"/automation-tool-measure-*; fi
-if [ -f "$d/.probe-stdout" ]; then cat "$d/.probe-stdout"; fi
 if [ -f "$d/.probe-exit" ]; then exit "$(cat "$d/.probe-exit")"; fi
 exit 0
 """
@@ -209,47 +211,51 @@ def _rejection(excinfo: pytest.ExceptionInfo[MaterialProbeRejected]) -> Material
 def _measure_log(
     *,
     silences: list[tuple[float, float]] | None = None,
+    open_silence: float | None = None,
     integrated: str | None = "-21.8",
-    trailing_silence_start: float | None = None,
+    superseded: str | None = None,
 ) -> str:
-    """Reproduce the stderr shape ffmpeg emits for silencedetect + ebur128."""
+    """Reproduce the metadata channel `ametadata=mode=print` writes.
+
+    Copied from a measured report: one header line per frame that carries
+    metadata, then one line per key on it. A span silencedetect closes states an
+    end and a duration; the span it leaves open at EOF states only a start,
+    because the end of a track is not a frame and there is nothing left to
+    attach the closing metadata to.
+    """
     lines: list[str] = []
+    frame = 0
+
+    def _states(*entries: str) -> None:
+        nonlocal frame
+        lines.append(f"frame:{frame:<4} pts:{frame * 4410:<7} pts_time:{frame / 10}")
+        lines.extend(entries)
+        frame += 1
+
+    if superseded is not None:
+        _states(f"lavfi.r128.I={superseded}")
     for start, end in silences or []:
-        lines.append(f"[Parsed_silencedetect_0 @ 0x1] silence_start: {start}")
-        lines.append(
-            f"[Parsed_silencedetect_0 @ 0x1] silence_end: {end} | silence_duration: {end - start}"
-        )
-    if trailing_silence_start is not None:
-        lines.append(f"[Parsed_silencedetect_0 @ 0x1] silence_start: {trailing_silence_start}")
+        _states(f"lavfi.silence_start={start}")
+        _states(f"lavfi.silence_end={end}", f"lavfi.silence_duration={end - start}")
+    if open_silence is not None:
+        _states(f"lavfi.silence_start={open_silence}")
     if integrated is not None:
-        lines.append("[Parsed_ebur128_1 @ 0x2] Summary:")
-        lines.append("")
-        lines.append("  Integrated loudness:")
-        lines.append(f"    I:         {integrated} LUFS")
-        lines.append("    Threshold: -31.8 LUFS")
-    return "\n".join(lines) + "\n"
+        _states(f"lavfi.r128.I={integrated}")
+    return "".join(f"{line}\n" for line in lines)
 
 
-def _metadata_dump(*statements: str) -> str:
-    """The shape ffmpeg prints for the tags it read out of a file.
+def _diagnostic_noise(*statements: str) -> str:
+    """What ffmpeg prints about a file on the stream nothing here reads.
 
-    Reproduced from a measured report: the key is padded out to a fixed width,
-    so the colon never lands against a short key, and every value the file
-    carries is printed verbatim.
+    Reproduced from a measured report: a tag whose *name* carries a newline puts
+    everything after it in column 0, so the file can reproduce a filter's own
+    line exactly — which is why the findings are taken off a different stream
+    entirely rather than matched harder here.
     """
-    lines = ["  Metadata:"]
-    lines.extend(f"    comment         : {statement}" for statement in statements)
-    return "\n".join(lines) + "\n"
-
-
-def _continued_metadata(statement: str) -> str:
-    """How ffmpeg continues a tag value that carries a newline.
-
-    Copied from a measured report, byte for byte: the continuation is indented
-    and prefixed with `: `, which is the only thing standing between an
-    attacker-chosen line and the filter's own line format.
-    """
-    return f"  Metadata:\n    comment         : x\n                    : {statement}\n"
+    lines = ["Input #0, mov,mp4,m4a,3gp,3g2,mj2, from '/private/holiday.mp4':", "  Metadata:"]
+    lines.append("    x")
+    lines.extend(statements)
+    return "".join(f"{line}\n" for line in lines)
 
 
 def _stream_facts(
@@ -257,7 +263,6 @@ def _stream_facts(
     *,
     duration_ms: int | None = 3000,
     audio_codec: str | None = "aac",
-    audio_duration_ms: int | None = None,
 ) -> MediaStreamFacts:
     return MediaStreamFacts(
         kind=kind,
@@ -266,7 +271,6 @@ def _stream_facts(
         height=None if kind is ProbedMaterialKind.AUDIO else 360,
         video_codec=None if kind is ProbedMaterialKind.AUDIO else "h264",
         audio_codec=audio_codec,
-        audio_duration_ms=audio_duration_ms,
     )
 
 
@@ -274,7 +278,7 @@ def _audio_tools(directory: Path, log: str, **stub: Any) -> PackagedMediaTools:
     """Only the ffmpeg stub carries behaviour: the measuring step never runs ffprobe."""
     return PackagedMediaTools(
         ffprobe_path=_ffprobe_stub(directory),
-        ffmpeg_path=_ffmpeg_stub(directory, stderr=log, **stub),
+        ffmpeg_path=_ffmpeg_stub(directory, channel=log, **stub),
     )
 
 
@@ -300,6 +304,9 @@ def _ffmpeg_stub(directory: Path, **behavior: Any) -> Path:
     if path.exists():
         path.unlink()
     for key, filename in (
+        # `channel` is what the measuring step parses — `ametadata` writes it to
+        # stdout. `stderr` is the stream it discards.
+        ("channel", ".probe-stdout"),
         ("stderr", ".probe-stderr"),
         ("sleep", ".probe-sleep"),
         ("linger", ".probe-linger"),
@@ -317,6 +324,10 @@ def _ffmpeg_stub(directory: Path, **behavior: Any) -> Path:
         (directory / ".probe-argv").write_text("", encoding="utf-8")
     if behavior.get("wipe_workspace"):
         (directory / ".probe-wipe").write_text("1", encoding="ascii")
+    if behavior.get("wipe_workspace_early"):
+        (directory / ".probe-wipe-early").write_text("1", encoding="ascii")
+    if behavior.get("pid_log"):
+        (directory / ".probe-pid").write_text("", encoding="ascii")
     os.link(_stub_master(directory), path)
     return path
 
@@ -776,56 +787,34 @@ class TestReadStreamFactsDuration:
         assert _rejection(excinfo) is MaterialProbeRejection.TOO_LONG
 
 
-class TestReadStreamFactsSoundTrackDuration:
-    """The sound track's own duration, which is a different fact from the container's.
+class TestReadStreamFactsAsksForNoStreamDuration:
+    """The sound track's stated duration is not read at all any more.
 
-    One case per way ffprobe can decline to state one: absence is ordinary here
-    — measured, Matroska and FLV state a container duration and no stream
-    duration at all — so none of these may reject the file. A merged case would
-    let one of these paths never run while the whole thing still read as covered.
+    It used to bound the silence a file had to contain before it counted as
+    having none, and the file states it: measured, three rewritten bytes of an
+    `mdhd` shrank that bound to a millisecond and a second of leading silence
+    then covered nine seconds of audible tone. `read_audio_facts` now decides
+    from what the filters measured, so the field has no reader — and a field
+    with no reader is one more thing the file gets to say for nothing.
     """
 
-    def test_reads_the_sound_track_duration_when_it_is_stated(self, tmp_path: Path) -> None:
+    def test_does_not_ask_ffprobe_for_stream_durations(self, tmp_path: Path) -> None:
+        tools = _tools(tmp_path, stdout=_probe_json([_video_stream()]), argv_log=True)
+        read_stream_facts(tools, _source(tmp_path))
+        argv = (tmp_path / ".probe-argv").read_text(encoding="utf-8").splitlines()
+        entries = argv[argv.index("-show_entries") + 1]
+        stream_entries = entries.split("stream=")[1]
+        assert "duration" not in stream_entries
+        assert "format=duration" in entries
+
+    def test_ignores_a_stream_duration_ffprobe_states_anyway(self, tmp_path: Path) -> None:
+        """`-show_entries` selects, so a future ffprobe stating more must change nothing."""
         facts = _facts_from(
             tmp_path,
             _probe_json([_video_stream(), _audio_stream(duration="2.000000")], duration="10.0"),
         )
         assert facts.duration_ms == 10000
-        assert facts.audio_duration_ms == 2000
-
-    def test_states_no_sound_track_duration_when_the_stream_omits_it(self, tmp_path: Path) -> None:
-        """The Matroska and FLV shape: a container duration and nothing per stream."""
-        facts = _facts_from(tmp_path, _probe_json([_video_stream(), _audio_stream()]))
-        assert facts.duration_ms == 3000
-        assert facts.audio_duration_ms is None
-
-    def test_states_no_sound_track_duration_for_a_non_text_value(self, tmp_path: Path) -> None:
-        facts = _facts_from(tmp_path, _probe_json([_audio_stream(duration=2.0)]))
-        assert facts.audio_duration_ms is None
-
-    def test_states_no_sound_track_duration_for_an_unparseable_value(self, tmp_path: Path) -> None:
-        facts = _facts_from(tmp_path, _probe_json([_audio_stream(duration="N/A")]))
-        assert facts.audio_duration_ms is None
-
-    def test_states_no_sound_track_duration_for_a_non_finite_value(self, tmp_path: Path) -> None:
-        """`round()` raises on infinity and NaN alike, so this guard really is load-bearing.
-
-        Without it the escape is an `OverflowError`, which no caller of this
-        module is catching.
-        """
-        facts = _facts_from(tmp_path, _probe_json([_audio_stream(duration="inf")]))
-        assert facts.audio_duration_ms is None
-
-    def test_states_no_sound_track_duration_for_a_span_below_a_millisecond(
-        self, tmp_path: Path
-    ) -> None:
-        """Zero would be a window every file covers, which is the shape of the bug."""
-        facts = _facts_from(tmp_path, _probe_json([_audio_stream(duration="0.0004")]))
-        assert facts.audio_duration_ms is None
-
-    def test_states_no_sound_track_duration_without_a_sound_track(self, tmp_path: Path) -> None:
-        facts = _facts_from(tmp_path, _probe_json([_video_stream()]))
-        assert facts.audio_duration_ms is None
+        assert not hasattr(facts, "audio_duration_ms")
 
 
 class TestReadStreamFactsFrameSize:
@@ -1092,59 +1081,99 @@ class TestReadAudioFactsEffectiveSound:
         assert facts.has_audio is True
         assert facts.loudness_lufs == pytest.approx(-22.2)
 
-    def test_reports_no_effective_sound_when_silence_covers_the_file(self, tmp_path: Path) -> None:
+    def test_reports_no_effective_sound_when_one_span_covers_the_whole_track(
+        self, tmp_path: Path
+    ) -> None:
         """`has_audio` means audible sound, not the presence of a track.
 
-        Measured: a digitally silent 2-second AAC file reports
-        `silence_duration: 2.020136` — slightly longer than the stream itself,
-        because of encoder padding. The comparison therefore has to tolerate
-        silence running past the nominal duration.
+        A span that opens at the start and never closes is silence running to
+        EOF: silencedetect closes a span the moment sound resumes, and the close
+        it flushes at EOF has no frame to be attached to, so it never reaches
+        this channel.
         """
-        facts = _audio_from(
-            tmp_path,
-            _measure_log(silences=[(0.0, 2.020136)], integrated="-70.0"),
-            facts=_stream_facts(duration_ms=2000),
-        )
+        facts = _audio_from(tmp_path, _measure_log(open_silence=0.0, integrated="-70.0"))
         assert facts.has_audio is False
         assert facts.loudness_lufs is None
 
+    def test_reports_sound_when_a_span_opens_after_the_start(self, tmp_path: Path) -> None:
+        """A file that runs out of sound partway is not a file without sound.
 
-class TestReadAudioFactsIgnoresTextTheFilterDidNotWrite:
-    """Only the filter's own lines count. Everything else in the report is the file talking."""
+        Without the "opened at the start" test this reads exactly like the case
+        above: one span, never closed.
+        """
+        facts = _audio_from(tmp_path, _measure_log(open_silence=1.0, integrated="-22.2"))
+        assert facts.has_audio is True
 
-    def test_a_metadata_tag_stating_a_silence_span_counts_for_nothing(self, tmp_path: Path) -> None:
+    def test_reports_sound_when_a_span_covering_the_start_was_closed(self, tmp_path: Path) -> None:
+        """A close is itself the proof: silence only ends because sound resumed.
+
+        Without the "never closed" test this reads like the covered case too —
+        one span, opening at zero.
+        """
+        facts = _audio_from(tmp_path, _measure_log(silences=[(0.0, 1.0)], integrated="-22.2"))
+        assert facts.has_audio is True
+
+    def test_reports_sound_when_a_second_span_follows_the_first(self, tmp_path: Path) -> None:
+        """Two spans mean sound between them, whatever the second one does."""
         facts = _audio_from(
             tmp_path,
-            _metadata_dump("silence_duration: 9999") + _measure_log(),
+            _measure_log(silences=[(0.0, 1.0)], open_silence=2.0, integrated="-22.2"),
+        )
+        assert facts.has_audio is True
+
+
+class TestReadAudioFactsIgnoresTheStreamItDiscards:
+    """The file writes into ffmpeg's diagnostics; nothing here reads them.
+
+    A tag *name* holding a newline puts whatever follows it in column 0, where it
+    can reproduce a filter's own line byte for byte, so no pattern over that
+    stream can tell the file's text from the filter's. The findings are taken off
+    the filter graph's metadata channel instead — and the proof that the swap is
+    real is that these forgeries change nothing.
+    """
+
+    def test_a_forged_silence_line_on_the_discarded_stream_counts_for_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        facts = _audio_from(
+            tmp_path,
+            _measure_log(),
+            stderr=_diagnostic_noise(
+                "[Parsed_silencedetect_0 @ 0x1] silence_start: 0",
+                "[Parsed_silencedetect_0 @ 0x1] silence_end: 9999 | silence_duration: 9999",
+                "lavfi.silence_start=0",
+            ),
         )
         assert facts.has_audio is True
         assert facts.loudness_lufs == pytest.approx(-21.8)
 
-    def test_a_tag_quoting_the_filters_own_line_format_counts_for_nothing(
+    def test_a_forged_loudness_line_on_the_discarded_stream_is_not_the_reading(
         self, tmp_path: Path
     ) -> None:
-        """A newline inside a tag lets the file write a whole line of its own.
+        facts = _audio_from(
+            tmp_path,
+            _measure_log(integrated="-3.2"),
+            stderr=_diagnostic_noise("    I:         -70.0 LUFS", "lavfi.r128.I=-70.000"),
+        )
+        assert facts.loudness_lufs == pytest.approx(-3.2)
 
-        The line it writes can copy the filter's `[Parsed_silencedetect_0 @ ...]`
-        prefix exactly — measured, that is what ffmpeg prints. What it cannot
-        copy is the *start* of the line, because a continued value is indented
-        and prefixed with `: `. Anchoring at the prefix without anchoring at the
-        line start therefore stops nothing.
+    def test_only_whole_lines_of_the_channel_are_findings(self, tmp_path: Path) -> None:
+        """A key is a whole line of its own, so a key quoted inside one is not.
+
+        Nothing the file states can reach this channel — the `mode=delete` in
+        front of the measuring filters sees to that — so this stands behind that,
+        not instead of it.
         """
         facts = _audio_from(
             tmp_path,
-            _continued_metadata("[Parsed_silencedetect_0 @ 0x1] silence_duration: 9999")
-            + _measure_log(),
+            "frame:0    pts:0       pts_time:0\n"
+            "lavfi.r128.I=-21.8\n"
+            "lavfi.silence_start=0 and then some\n"
+            "quoted lavfi.silence_start=0\n"
+            "lavfi.r128.I=-3.0 and then some\n",
         )
         assert facts.has_audio is True
-
-    def test_a_metadata_tag_stating_a_loudness_counts_for_nothing(self, tmp_path: Path) -> None:
-        """The reading has to come from ebur128's summary, not from a tag quoting one."""
-        facts = _audio_from(
-            tmp_path,
-            _metadata_dump("I:         -70.0 LUFS") + _measure_log(integrated="-3.2"),
-        )
-        assert facts.loudness_lufs == pytest.approx(-3.2)
+        assert facts.loudness_lufs == pytest.approx(-21.8)
 
 
 class TestReadAudioFactsLoudnessRange:
@@ -1169,12 +1198,18 @@ class TestReadAudioFactsLoudnessRange:
         assert facts.has_audio is True
         assert facts.loudness_lufs is None
 
-    def test_states_no_loudness_when_the_measure_is_above_full_scale(self, tmp_path: Path) -> None:
+    def test_states_no_loudness_one_step_above_full_scale(self, tmp_path: Path) -> None:
         """Heavily limited material can integrate above 0 LUFS, which cannot be stored.
 
         Recording nothing is honest; clamping to 0.0 would invent a reading.
+
+        The reading is one step above the ceiling rather than plainly above it:
+        ebur128 states three decimals, so 0.001 is the smallest overshoot it can
+        express. A rejecting case further out leaves the ceiling free to drift
+        that far — measured, 1.5 kept every `<= CEILING + k` for k up to 1.5
+        alive.
         """
-        facts = _audio_from(tmp_path, _measure_log(integrated="1.5"))
+        facts = _audio_from(tmp_path, _measure_log(integrated="0.001"))
         assert facts.has_audio is True
         assert facts.loudness_lufs is None
 
@@ -1183,109 +1218,41 @@ class TestReadAudioFactsLoudnessRange:
         assert facts.loudness_lufs == pytest.approx(0.0)
 
     def test_accepts_a_measure_just_above_the_floor(self, tmp_path: Path) -> None:
-        facts = _audio_from(tmp_path, _measure_log(integrated="-69.9"))
-        assert facts.loudness_lufs == pytest.approx(-69.9)
+        facts = _audio_from(tmp_path, _measure_log(integrated="-69.999"))
+        assert facts.loudness_lufs == pytest.approx(-69.999)
 
+    def test_the_last_stated_loudness_is_the_reading(self, tmp_path: Path) -> None:
+        """ebur128 states the loudness integrated so far once per window.
 
-class TestReadAudioFactsSoundTrackWindow:
-    """Silence is measured on the sound track, so it is compared against the sound track."""
-
-    def test_silence_covering_a_short_sound_track_leaves_no_audible_sound(
-        self, tmp_path: Path
-    ) -> None:
-        """Ten seconds of picture, two seconds of silent sound: no sound at all.
-
-        Charging that silence against the container's ten seconds reported a
-        file with nothing audible in it as having sound.
+        Every window before the last states a partial answer, so taking the
+        first match reports the loudness of the opening 100 ms. Measured on a
+        440 Hz tone: the first window states -70.000 and the last -21.776, which
+        is what its own end-of-run summary rounds to -21.8.
         """
-        facts = _audio_from(
-            tmp_path,
-            _measure_log(silences=[(0.0, 2.020136)], integrated="-70.0"),
-            facts=_stream_facts(duration_ms=10000, audio_duration_ms=2000),
-        )
-        assert facts.has_audio is False
-        assert facts.loudness_lufs is None
+        facts = _audio_from(tmp_path, _measure_log(superseded="-70.0", integrated="-21.8"))
+        assert facts.loudness_lufs == pytest.approx(-21.8)
 
-    def test_a_sound_track_stating_more_than_the_container_does_not_widen_the_window(
-        self, tmp_path: Path
+
+class TestReadAudioFactsTakesNoDurationFromTheFacts:
+    """The verdict no longer consults a duration, so no duration can bend it.
+
+    `read_audio_facts` is exported and the facts can be built by the caller, so
+    while a duration decided the verdict the caller decided it too — and where
+    those facts come from `read_stream_facts`, the file decided it. Measured:
+    three rewritten bytes of an `mdhd` were enough.
+    """
+
+    @pytest.mark.parametrize("duration_ms", [None, 0, 1, 10_000_000])
+    def test_the_verdict_is_the_same_whatever_the_facts_state(
+        self, tmp_path: Path, duration_ms: int | None
     ) -> None:
-        """Stream durations come out of the file, so the wider of the two is not trusted.
-
-        The shorter bound is the honest one, and taking it means this change can
-        only ever move a verdict toward "no audible sound" — never the way the
-        bug went.
-        """
-        facts = _audio_from(
-            tmp_path,
-            _measure_log(silences=[(0.0, 3.018594)], integrated="-70.0"),
-            facts=_stream_facts(duration_ms=3000, audio_duration_ms=9_000_000),
-        )
-        assert facts.has_audio is False
-
-    def test_silence_exactly_as_long_as_the_sound_track_leaves_no_audible_sound(
-        self, tmp_path: Path
-    ) -> None:
-        """The endpoint the `>=` exists for. `>` passes every other case unchanged.
-
-        Measured silence usually overshoots the stated duration because of
-        encoder padding, so the two are rarely equal and no other case pins
-        which comparison is in use.
-        """
-        facts = _audio_from(
-            tmp_path,
-            _measure_log(silences=[(0.0, 2.0)], integrated="-70.0"),
-            facts=_stream_facts(duration_ms=2000),
-        )
-        assert facts.has_audio is False
-
-    def test_partial_silence_within_the_sound_track_still_counts_as_sound(
-        self, tmp_path: Path
-    ) -> None:
-        """The narrower window must not turn every gap into a silent file."""
         facts = _audio_from(
             tmp_path,
             _measure_log(silences=[(0.0, 1.0)], integrated="-22.2"),
-            facts=_stream_facts(duration_ms=10000, audio_duration_ms=2000),
+            facts=_stream_facts(duration_ms=duration_ms),
         )
         assert facts.has_audio is True
-
-
-class TestReadAudioFactsGuardsTheFactsItIsGiven:
-    """`read_audio_facts` is exported, so the facts can come from somewhere else.
-
-    Its sibling checks the tools and the source it is handed and then trusted
-    `streams` completely — and the value it took from there decides the whole
-    verdict.
-    """
-
-    def test_rejects_facts_stating_no_duration_at_all(self, tmp_path: Path) -> None:
-        """An absent duration became a window of zero, which every file covers."""
-        excinfo = _audio_reject(
-            tmp_path,
-            _measure_log(),
-            facts=_stream_facts(duration_ms=None),
-        )
-        assert _rejection(excinfo) is MaterialProbeRejection.UNUSABLE_DURATION
-
-    def test_rejects_facts_whose_only_stated_duration_rounds_to_nothing(
-        self, tmp_path: Path
-    ) -> None:
-        excinfo = _audio_reject(
-            tmp_path,
-            _measure_log(),
-            facts=_stream_facts(duration_ms=None, audio_duration_ms=0),
-        )
-        assert _rejection(excinfo) is MaterialProbeRejection.UNUSABLE_DURATION
-
-    def test_refuses_before_paying_for_a_decode(self, tmp_path: Path) -> None:
-        """The waste is the decode, so the facts are checked before it, not after."""
-        with pytest.raises(MaterialProbeRejected):
-            read_audio_facts(
-                _audio_tools(tmp_path, _measure_log(), argv_log=True),
-                _source(tmp_path),
-                _stream_facts(duration_ms=None),
-            )
-        assert (tmp_path / ".probe-argv").read_text(encoding="utf-8") == ""
+        assert facts.loudness_lufs == pytest.approx(-22.2)
 
 
 class TestReadAudioFactsSilentAudioMaterial:
@@ -1297,7 +1264,7 @@ class TestReadAudioFactsSilentAudioMaterial:
         """
         excinfo = _audio_reject(
             tmp_path,
-            _measure_log(silences=[(0.0, 2.02)], integrated="-70.0"),
+            _measure_log(open_silence=0.0, integrated="-70.0"),
             facts=_stream_facts(ProbedMaterialKind.AUDIO, duration_ms=2000),
         )
         assert _rejection(excinfo) is MaterialProbeRejection.SILENT_AUDIO
@@ -1312,9 +1279,24 @@ class TestReadAudioFactsSilentAudioMaterial:
 
 
 class TestReadAudioFactsMeasureFailure:
-    def test_rejects_a_measure_that_reports_no_loudness_line(self, tmp_path: Path) -> None:
-        excinfo = _audio_reject(tmp_path, _measure_log(integrated=None))
+    def test_rejects_a_measure_that_states_findings_but_no_loudness(self, tmp_path: Path) -> None:
+        """ebur128 states one reading per 100 ms window, so a report holding any
+        frame at all should already hold several. None means the pass did not run
+        the way it was asked to, whatever its exit code said.
+        """
+        excinfo = _audio_reject(tmp_path, _measure_log(silences=[(0.0, 1.0)], integrated=None))
         assert _rejection(excinfo) is MaterialProbeRejection.PROBE_FAILED
+
+    def test_accepts_a_measure_that_states_nothing_at_all(self, tmp_path: Path) -> None:
+        """A sound track shorter than one window states nothing, measured.
+
+        Rejecting an empty report would turn a 50 ms clip into a failure the user
+        can do nothing about, so the two absences are told apart rather than
+        merged.
+        """
+        facts = _audio_from(tmp_path, _measure_log(integrated=None))
+        assert facts.has_audio is True
+        assert facts.loudness_lufs is None
 
     def test_rejects_a_measure_that_exits_non_zero(self, tmp_path: Path) -> None:
         excinfo = _audio_reject(tmp_path, _measure_log(), measure_exit=1)
@@ -1380,12 +1362,49 @@ class TestReadAudioFactsMeasureFailure:
 
 
 class TestReadAudioFactsInvocation:
+    def test_takes_the_findings_off_the_filter_graphs_own_channel(self, tmp_path: Path) -> None:
+        """The whole shape of the fix, asserted on the command line that carries it.
+
+        `ametadata` prints frame metadata, and frame metadata is written by the
+        filters. The `mode=delete` in front of them drops anything the demuxer or
+        decoder attached, so nothing the file states can be in there; the
+        diagnostics, which is where the file does get to write, are asked for at
+        `error` and read by nobody.
+        """
+        _audio_from(tmp_path, _measure_log(), argv_log=True)
+        argv = (tmp_path / ".probe-argv").read_text(encoding="utf-8").splitlines()
+        filters = argv[argv.index("-af") + 1].split(",")
+        assert filters[0] == "ametadata=mode=delete"
+        assert filters[-1] == "ametadata=mode=print:file=-"
+        assert filters.index("ametadata=mode=delete") < filters.index(
+            f"silencedetect=noise={material_probe.SILENCE_NOISE_FLOOR_DB}dB"
+            f":d={material_probe.SILENCE_MINIMUM_SECONDS}"
+        )
+        assert argv[argv.index("-v") + 1] == "error"
+
+    def test_asks_ebur128_to_state_its_reading_on_that_channel(self, tmp_path: Path) -> None:
+        """Without `metadata=1` the loudness exists only in the summary it logs.
+
+        That summary lands on the stream the file can write into, and takes the
+        first match: measured, a tag naming itself `x\\n    I: -3.0 LUFS` made a
+        -21.8 LUFS tone report -3.0.
+        """
+        _audio_from(tmp_path, _measure_log(), argv_log=True)
+        argv = (tmp_path / ".probe-argv").read_text(encoding="utf-8").splitlines()
+        filters = argv[argv.index("-af") + 1].split(",")
+        assert "ebur128=peak=none:framelog=quiet:metadata=1" in filters
+        # The five ebur128 states that are not read, dropped before the sink.
+        assert sum(f.startswith("ametadata=mode=delete:key=lavfi.r128.") for f in filters) == 5
+
     def test_silences_the_per_frame_loudness_log(self, tmp_path: Path) -> None:
         """Without `framelog=quiet` ebur128 prints a line every 100 ms.
 
-        Measured on a 2-second file: 65 stderr lines against 45 with it. The gap
-        grows with duration, so a 4-hour import would emit roughly 144,000
-        lines — the "oversized file" row of the failure matrix.
+        Measured on a 2-second file: 65 stderr lines against 45 with it, a gap
+        that grows with duration until a 4-hour import emits roughly 144,000
+        lines. Those print at `info` and this pass asks for `error`, so on the
+        command line as it stands the diagnostics are empty either way —
+        measured, 0 bytes for a 60-second file. This keeps it from coming back
+        the moment anyone raises the level to look at something.
         """
         _audio_from(tmp_path, _measure_log(), argv_log=True)
         argv = (tmp_path / ".probe-argv").read_text(encoding="utf-8").splitlines()
@@ -1423,13 +1442,18 @@ class TestReadAudioFactsInvocation:
 
 class TestReadAudioFactsLeaksNothing:
     def test_no_traceback_frame_retains_the_measure_report(self, tmp_path: Path) -> None:
-        """The measuring step must read ffmpeg's stderr, which names the file.
+        """Whatever the report holds, no frame on the raising path holds it.
 
-        It is written to a file and parsed into numbers, so no frame on the
-        raising path holds the text.
+        The stream that names the file is discarded now, so the report is not
+        meant to carry a path at all — this pins the structure that would keep
+        one out anyway: the text is written to a file, handed straight to the
+        parser, and reduced to facts before anything can reject.
         """
         secret = "operator-private-wedding-2021"
-        log = f"/private/var/folders/ab/{secret}.mp4: something went wrong\n"
+        log = (
+            _measure_log(silences=[(0.0, 1.0)], integrated=None)
+            + f"/private/var/folders/ab/{secret}.mp4: something went wrong\n"
+        )
         excinfo = _audio_reject(tmp_path, log)
         module_file = material_probe.__file__
         traceback = excinfo.value.__traceback__
@@ -1579,28 +1603,66 @@ class TestReadAudioFactsGuardsItsOwnInputs:
         excinfo = _audio_reject(tmp_path, _measure_log(), wipe_workspace=True)
         assert _rejection(excinfo) is MaterialProbeRejection.PROBE_FAILED
 
+    def test_kills_a_measure_whose_report_vanishes_while_it_still_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The same disappearance, but during the flight rather than after it.
+
+        The size is read once per poll while the child is still running, so the
+        workspace going away underneath it raises there — inside the `with`, not
+        after it. Leaving a `Popen` block by exception waits without a timeout
+        and never kills, so the call sits out the child's natural life: measured
+        with a one-second timeout and a thirty-second child, 30.59 s. The timeout
+        is fifteen minutes in production, which is the failure matrix's "hangs"
+        row reached from an ordinary tmp sweeper.
+
+        The marker the stub would leave behind is what separates "killed" from
+        "waited out" — the same proof `test_stops_a_measure_still_writing_past_the_limit`
+        relies on.
+        """
+        monkeypatch.setattr(tempfile, "tempdir", os.fspath(tmp_path))
+        excinfo = _audio_reject(tmp_path, _measure_log(), wipe_workspace_early=True, linger="5")
+        assert _rejection(excinfo) is MaterialProbeRejection.PROBE_FAILED
+        assert not (tmp_path / ".probe-finished").exists()
+
+    def test_kills_a_measure_when_the_import_itself_is_interrupted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Ctrl-C during an import must not leave ffmpeg decoding a four-hour film.
+
+        `KeyboardInterrupt` and `SystemExit` are not `Exception`, so a handler
+        narrower than `BaseException` would let them out of the `Popen` block the
+        one way that waits for the child without a timeout and never kills it.
+        Neither is caught anywhere below either, so the interrupt still arrives
+        as itself rather than as a rejection.
+
+        The marker the other kill cases rely on proves nothing here: CPython
+        special-cases `KeyboardInterrupt` in `Popen.__exit__` and waits a quarter
+        of a second rather than indefinitely, so an unkilled child simply
+        outlives the assertion instead of delaying it. What separates the two is
+        whether the process is still there — measured, the marker alone let
+        `except Exception` survive.
+        """
+        stat = Path.stat
+
+        def interrupt(self: Path, *arguments: Any, **keywords: Any) -> os.stat_result:
+            if self.name == "report.log":
+                raise KeyboardInterrupt
+            return stat(self, *arguments, **keywords)
+
+        monkeypatch.setattr(Path, "stat", interrupt)
+        tools = _audio_tools(tmp_path, _measure_log(), linger="2", pid_log=True)
+        with pytest.raises(KeyboardInterrupt):
+            read_audio_facts(tools, _source(tmp_path), _stream_facts())
+        child = int((tmp_path / ".probe-pid").read_text(encoding="ascii"))
+        with pytest.raises(ProcessLookupError):
+            os.kill(child, 0)
+
     def test_accepts_a_report_exactly_at_the_size_limit(self, tmp_path: Path) -> None:
         body = _measure_log()
         padding = MAX_MEASURE_OUTPUT_BYTES - len(body.encode("utf-8"))
         assert padding >= 0
         facts = _audio_from(tmp_path, ("#" * padding) + body)
-        assert facts.has_audio is True
-
-    def test_charges_nothing_for_a_span_the_filter_left_open(self, tmp_path: Path) -> None:
-        """An unterminated `silence_start` states no duration, so it counts for nothing.
-
-        Measured against the packaged build, silencedetect never leaves one
-        open: a wholly silent file, a file fading to silence, one truncated
-        mid-silence and a sound track ending before its picture all flush a
-        closed `silence_end` at EOF. The earlier code charged such a span to the
-        rest of the file, which no report could reach — and once the patterns
-        are anchored to the filter's own line, nothing can plant one either.
-        """
-        facts = _audio_from(
-            tmp_path,
-            _measure_log(integrated="-70.0", trailing_silence_start=0.0),
-            facts=_stream_facts(duration_ms=2000),
-        )
         assert facts.has_audio is True
 
 
@@ -1650,6 +1712,44 @@ def _encode(ffmpeg: Path, *arguments: str) -> None:
 # calls a file, `PLANTED_TAG` is what they write inside one.
 PLANTED_STATEMENT = "silence_duration: 9999"
 PLANTED_NAME = f"{PLANTED_STATEMENT} holiday.m4a"
+# A tag *name* carrying a newline. ffmpeg continues a tag value across lines by
+# indenting it and prefixing `: `, but it prints the key verbatim, so whatever
+# follows the newline in a key lands in column 0 — where it can reproduce a
+# filter's line byte for byte. These two spell out the two forgeries that buys.
+FORGED_SILENCE_KEY = f"x\n[Parsed_silencedetect_0 @ 0x1] {PLANTED_STATEMENT}: v"
+FORGED_LOUDNESS_LUFS = -3.0
+FORGED_LOUDNESS_KEY = f"x\n    I:         {FORGED_LOUDNESS_LUFS} LUFS\n    y"
+# The sound track's stated duration, rewritten to 44/44100 s — one millisecond,
+# the shortest span `read_stream_facts` will hand on.
+FORGED_SOUND_TRACK_TICKS = 44
+SOUND_TRACK_SAMPLE_RATE = 44100
+
+
+def _shorten_the_stated_sound_track(source: Path, destination: Path) -> None:
+    """Rewrite one MP4's sound track duration in place, changing nothing else.
+
+    `mdhd` is a fixed-layout box, so the duration is at a known offset: type(4),
+    version+flags(4), creation(4), modification(4), timescale(4), duration(4).
+    Only the sound track's is touched — the picture's `mdhd` is what
+    `format.duration` is built from, and collapsing that too would make the file
+    fail on its container duration long before the sound track mattered.
+
+    The sound track is the one whose media timescale is the sample rate. The
+    assertion is what keeps this honest: if it ever matches none or both, the
+    test fails rather than silently producing an unmodified file.
+    """
+    data = bytearray(source.read_bytes())
+    patched = 0
+    index = data.find(b"mdhd")
+    while index != -1:
+        timescale = int.from_bytes(data[index + 16 : index + 20], "big")
+        if data[index + 4] == 0 and timescale == SOUND_TRACK_SAMPLE_RATE:
+            data[index + 20 : index + 24] = FORGED_SOUND_TRACK_TICKS.to_bytes(4, "big")
+            patched += 1
+        index = data.find(b"mdhd", index + 1)
+    assert patched == 1, f"expected exactly one sound track mdhd, patched {patched}"
+    assert len(data) == source.stat().st_size
+    destination.write_bytes(bytes(data))
 
 
 @pytest.fixture(scope="session")
@@ -1673,6 +1773,12 @@ def real_media(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         "planted_line": directory / "reunion.m4a",
         "planted_name": directory / PLANTED_NAME,
         "short_sound": directory / "short-sound.mp4",
+        "plain_copy": directory / "plain-copy.mp4",
+        "forged_silence_key": directory / "forged-silence-key.mp4",
+        "forged_loudness_key": directory / "forged-loudness-key.mp4",
+        "lead_silence": directory / "lead-silence.mp4",
+        "forged_sound_track": directory / "forged-sound-track.mp4",
+        "sub_bin": directory / "sub-bin.m4a",
     }
     # Audible throughout: silencedetect stays quiet, ebur128 states a reading.
     _encode(
@@ -1770,6 +1876,75 @@ def real_media(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         "aac",
         os.fspath(media["short_sound"]),
     )
+    # The same sound track in an ordinary MP4, and two copies of it whose only
+    # difference is one tag *name*. `-c copy` keeps the AAC payload identical, so
+    # any verdict that differs between these three came out of the tag.
+    for name, arguments in (
+        ("plain_copy", ()),
+        ("forged_silence_key", ("-metadata", f"{FORGED_SILENCE_KEY}=1")),
+        ("forged_loudness_key", ("-metadata", f"{FORGED_LOUDNESS_KEY}=1")),
+    ):
+        _encode(
+            ffmpeg,
+            "-i",
+            os.fspath(media["tone"]),
+            "-c",
+            "copy",
+            # MP4 carries only the tags it knows unless asked otherwise. A file
+            # written by anything but ffmpeg has no such restraint, so this only
+            # reproduces with the packaged tool what an authored file states
+            # outright.
+            "-movflags",
+            "+use_metadata_tags",
+            *arguments,
+            os.fspath(media[name]),
+        )
+    # A second of silence and then nine seconds of tone, under ten seconds of
+    # picture. Plainly audible, and the leading silence is long enough for
+    # `silencedetect` to report it.
+    _encode(
+        ffmpeg,
+        "-f",
+        "lavfi",
+        "-t",
+        "1",
+        "-i",
+        f"anullsrc=r={SOUND_TRACK_SAMPLE_RATE}:cl=mono",
+        "-f",
+        "lavfi",
+        "-i",
+        "sine=frequency=440:duration=9",
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=black:s=320x240:r=25:d=10",
+        "-filter_complex",
+        "[0:a][1:a]concat=n=2:v=0:a=1[sound]",
+        "-map",
+        "2:v",
+        "-map",
+        "[sound]",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        os.fspath(media["lead_silence"]),
+    )
+    _shorten_the_stated_sound_track(media["lead_silence"], media["forged_sound_track"])
+    # Shorter than one of ebur128's 100 ms windows: measured, it states no
+    # loudness at all, which must not be read as a broken measuring pass.
+    _encode(
+        ffmpeg,
+        "-f",
+        "lavfi",
+        "-i",
+        "sine=frequency=440:duration=0.05",
+        "-c:a",
+        "aac",
+        os.fspath(media["sub_bin"]),
+    )
     return media
 
 
@@ -1855,6 +2030,75 @@ class TestUntrustedTextCannotStateSilence:
         assert facts.loudness_lufs == pytest.approx(-21.8, abs=1.0)
 
 
+class TestATagNameCannotForgeAWholeLine:
+    """A tag *value* holding a newline is continued indented; a tag *name* is not.
+
+    ffmpeg prints a tag as `av_log(ctx, INFO, "%s  %-16s: ", indent, tag->key)`
+    followed by the value, and only the value gets the continuation treatment.
+    Whatever follows a newline inside the key therefore starts in column 0, where
+    it can reproduce a filter's own line byte for byte — prefix, address and all.
+    No pattern over that text can tell the two apart, so nothing here is a
+    question of anchoring: the parsed text has to come from somewhere the file
+    cannot write.
+    """
+
+    def test_a_tag_name_forging_a_filter_line_does_not_silence_the_file(
+        self, real_media: dict[str, Path]
+    ) -> None:
+        """Nine seconds of 440 Hz tone, rejected outright as having no sound.
+
+        The rejection carries no path by design, so the operator is told their
+        audio file is silent and given nothing to connect it to.
+        """
+        tools = _packaged_tools()
+        for name in ("plain_copy", "forged_silence_key"):
+            source = real_media[name]
+            streams = read_stream_facts(tools, source)
+            facts = read_audio_facts(tools, source, streams)
+            assert facts.has_audio is True, name
+            assert facts.loudness_lufs == pytest.approx(-21.8, abs=1.0), name
+
+    def test_a_tag_name_forging_the_loudness_summary_is_not_the_reading(
+        self, real_media: dict[str, Path]
+    ) -> None:
+        """The same channel states a loudness, and the file's number wins.
+
+        ebur128's summary is printed after the input is dumped, and the pattern
+        takes the first match, so a tag quoting the summary's shape is read in
+        preference to the measurement.
+        """
+        tools = _packaged_tools()
+        source = real_media["forged_loudness_key"]
+        streams = read_stream_facts(tools, source)
+        facts = read_audio_facts(tools, source, streams)
+        assert facts.loudness_lufs is not None
+        assert facts.loudness_lufs != pytest.approx(FORGED_LOUDNESS_LUFS)
+        assert facts.loudness_lufs == pytest.approx(-21.8, abs=1.0)
+
+
+class TestAStatedSoundTrackDurationCannotSilenceTheFile:
+    """Three bytes of a header decide whether nine seconds of tone are heard.
+
+    `mdhd` states the sound track's duration and the file states `mdhd`. Where
+    that number bounded the window silence had to cover, shrinking it to one
+    millisecond made a second of leading silence cover the whole track.
+    """
+
+    def test_a_forged_sound_track_duration_does_not_silence_the_file(
+        self, real_media: dict[str, Path]
+    ) -> None:
+        tools = _packaged_tools()
+        honest = real_media["lead_silence"]
+        forged = real_media["forged_sound_track"]
+        assert len(forged.read_bytes()) == len(honest.read_bytes())
+        for source in (honest, forged):
+            streams = read_stream_facts(tools, source)
+            assert streams.duration_ms == 10000
+            facts = read_audio_facts(tools, source, streams)
+            assert facts.has_audio is True, source.name
+            assert facts.loudness_lufs == pytest.approx(-21.8, abs=1.0), source.name
+
+
 class TestSoundTrackShorterThanThePicture:
     """The silence total is measured on the sound track; the container is not it.
 
@@ -1890,7 +2134,6 @@ class TestAgainstThePackagedBinaries:
         assert streams.kind is ProbedMaterialKind.AUDIO
         assert streams.audio_codec == "aac"
         assert streams.duration_ms == 2000
-        assert streams.audio_duration_ms == 2000
         facts = read_audio_facts(tools, real_clip, streams)
         assert facts.has_audio is True
         assert facts.loudness_lufs is not None
@@ -1920,6 +2163,25 @@ class TestAgainstThePackagedBinaries:
         with pytest.raises(MaterialProbeRejected) as excinfo:
             read_audio_facts(tools, source, streams)
         assert _rejection(excinfo) is MaterialProbeRejection.SILENT_AUDIO
+
+    def test_accepts_a_real_clip_shorter_than_one_loudness_window(
+        self, real_media: dict[str, Path]
+    ) -> None:
+        """Fifty milliseconds of tone: audible, and ebur128 states nothing at all.
+
+        Measured against the packaged build — 0.05 s and 0.09 s produce no
+        `lavfi.r128.I` at all, 0.10 s produces one — because the reading is
+        stated once per completed 100 ms window and a shorter track completes
+        none. An empty report therefore cannot mean "the pass went wrong".
+        """
+        tools = _packaged_tools()
+        source = real_media["sub_bin"]
+        streams = read_stream_facts(tools, source)
+        assert streams.kind is ProbedMaterialKind.AUDIO
+        assert streams.duration_ms == 50
+        facts = read_audio_facts(tools, source, streams)
+        assert facts.has_audio is True
+        assert facts.loudness_lufs is None
 
     def test_reads_sound_from_a_real_file_that_ends_in_silence(
         self, real_media: dict[str, Path]

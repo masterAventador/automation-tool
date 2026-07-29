@@ -55,7 +55,7 @@
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| LE-07 | 素材探测 | Local Executor 侧用随包 ffprobe 读时长/分辨率/编码，`silencedetect` 判有无有效音频与响度，内容摘要去重；路径映射只存本机不上报 Control Plane | LE-02 | 🚧 实现中 |
+| LE-07 | 素材探测 | Local Executor 侧用随包 ffprobe 读时长/分辨率/编码，`silencedetect` 判有无有效音频与响度，内容摘要去重；路径映射只存本机不上报 Control Plane。**T7 收口必须补一项**：`_run_probe` 的 stdout 是 `PIPE` + `subprocess.run`，`MAX_PROBE_OUTPUT_BYTES` 在读完之后才比，即 ffprobe 输出被无上限读进内存；与 T3 的测量 sink 同形，修法同款（边读边量、超限即杀） | LE-02 | 🚧 实现中 |
 | LE-08 | 自适应抽帧 | `select='eq(n,0)+gt(scene,TH)'` 场景检测抽帧、长镜头按时间补抽、按时长分档封顶、超限时保切点降采样；产出 768px JPEG 并断言帧数与文件存在 | LE-07 | ⬜ 未开始 |
 | LE-09 | 字幕渲染与 fallback 机制 | PIL 渲染字幕 PNG；`fontTools` 读 cmap 实现缺字 fallback **机制**；换行、描边、行距可控；产出 PNG 并断言像素尺寸与非空。**只用现有 Noto Sans SC 加一个拉丁字体验证 fallback 链路本身**，生僻字字体的引入与装配属于 LE-19，两者不得互相阻塞 | LE-01 | ⬜ 未开始 |
 | LE-10 | 视频渲染管线 | trim(in/out) → scale/crop → fps 归一 → concat → `xfade` 转场 → 字幕 overlay；补齐 `ffmpeg-toolchain.v1.json` 的 `required_capabilities.filters` 声明（xfade/select/scdet 等，**无需重建 ffmpeg**）；产出 mp4 并以 ffprobe 断言编码/分辨率/帧数/时长 | LE-03,LE-09 | ⬜ 未开始 |
