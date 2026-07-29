@@ -309,8 +309,10 @@ def test_the_output_reference_is_narrow_too() -> None:
     carry an artifact" refuses any output at all, so deleting the isinstance
     guard would still leave the job rejected and the mutant would survive.
     SUCCEEDED is the one status where the fact check accepts a non-empty
-    output, which makes the isinstance guard the sole rejecter and this
-    assertion the thing that kills the mutant.
+    output, which makes the isinstance guard the sole rejecter. Deleting that
+    disjunct is caught here and also by
+    `test_succeeding_demands_a_real_artifact_id`, which reaches the same guard
+    through the `succeed()` transition -- two ways in, one guard.
     """
     with pytest.raises(InvalidEditingJobModel):
         _job(status=EditingJobStatus.SUCCEEDED, output_artifact_id=TimelineId.new())
@@ -400,7 +402,9 @@ def test_the_domain_package_exports_the_editing_project_and_job() -> None:
     """`__all__` is the load-bearing half, not the module attribute.
 
     `mypy` runs `strict = true`, which implies `no_implicit_reexport`, and 62
-    call sites already consume this package as `from ...domain import <name>`.
+    files under `backend/src` already consume this package as
+    `from ...domain import <name>` (65 import statements there; 161 across the
+    whole repo once tests are counted).
     A name that is imported into `__init__.py` but missing from `__all__`
     resolves fine at runtime -- so attribute assertions stay green -- while
     every consumer gets `does not explicitly export attribute`. That break

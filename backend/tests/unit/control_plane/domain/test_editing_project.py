@@ -281,6 +281,22 @@ def test_a_caption_cannot_be_taller_than_the_frame_it_is_drawn_on() -> None:
         )
 
 
+def test_a_caption_one_pixel_taller_than_the_frame_is_refused() -> None:
+    """The loosening direction, which the other two cases leave wide open.
+
+    `test_a_caption_may_fill_the_whole_frame_height` sits exactly on the bound
+    and so kills `>` -> `>=`; the refusing case above sits 72 px past it, which
+    kills nothing between. Measured: `> height + k` survives for every k in
+    1..71 -- 81 passed, zero failures -- and only dies at k=72. One pixel over
+    is the case that closes it. Height must stay even, hence 198/199.
+    """
+    with pytest.raises(InvalidEditingProjectModel):
+        _project(
+            output=_output(width=1080, height=198),
+            caption_style=_caption(font_px=199, stroke_px=0),
+        )
+
+
 def test_a_caption_may_fill_the_whole_frame_height() -> None:
     """The bound is the frame, not some fraction of it: a one-line caption on a
     short frame is a legitimate design, an overflowing one is not.
