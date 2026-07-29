@@ -241,6 +241,9 @@ def run_item_render_sweep(
             entry_path.read_text(encoding="utf-8"),
             catalog_root=workspace,
             origin=entry_path.parent,
+            # 发布树里存在死引用（实测 video.mp4），渲染时沙箱拦截并计数——
+            # sweep 沿用这个语义；工作区写入器保持拒绝（封闭树是产品的保证）。
+            on_missing="skip",
         )
         allowed = sorted((set(files) | set(referenced)) - {entries[0]})
         if len(allowed) > 128:

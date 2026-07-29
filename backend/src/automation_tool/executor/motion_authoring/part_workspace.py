@@ -270,6 +270,7 @@ def referenced_assets(
     *,
     catalog_root: Path,
     origin: Path,
+    on_missing: str = "refuse",
 ) -> dict[str, Path]:
     """Everything the document reaches for, and what that reaches, by reference.
 
@@ -305,6 +306,12 @@ def referenced_assets(
                 continue
             seen.add(target)
             if target.is_symlink() or not target.is_file():
+                # The sweep opts into lenience: the release tree carries dead
+                # references (measured: `video.mp4`), which the sandbox blocks
+                # and counts at render time. The working copy keeps the refusal
+                # — a closed tree is the product's guarantee.
+                if on_missing == "skip":
+                    continue
                 raise SlotAnchorRejected(f"a reference resolves to nothing: {reference}")
             collected[relative.as_posix()] = target
             if target.suffix.lower() in _COPIED_TEXT_SUFFIXES:

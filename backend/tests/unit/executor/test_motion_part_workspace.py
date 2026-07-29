@@ -516,3 +516,31 @@ def test_referenced_assets_refuses_a_reference_leaving_the_catalog(tmp_path) -> 
             catalog_root=catalog,
             origin=part,
         )
+
+
+def test_referenced_assets_can_skip_a_dead_reference_when_told_to(tmp_path) -> None:
+    """The sweep's policy, stated as a parameter rather than a second traversal.
+
+    The release tree carries parts whose documents reference files that never
+    shipped (measured 2026-07-29: `video.mp4`). At render time the sandbox
+    blocks such a request and counts it — the render succeeds without the file.
+    The working copy must still refuse (a closed tree is the product's
+    guarantee), so lenience is opt-in and the default stays refusal.
+    """
+    from automation_tool.executor.motion_authoring.part_workspace import (
+        referenced_assets,
+    )
+
+    catalog = tmp_path / "catalog"
+    part = catalog / "items" / "demo"
+    part.mkdir(parents=True)
+    (part / "poster.png").write_bytes(b"\x00")
+    html = '<img src="poster.png"><video src="video.mp4"></video>'
+
+    with pytest.raises(SlotAnchorRejected):
+        referenced_assets(html, catalog_root=catalog, origin=part)
+
+    assets = referenced_assets(
+        html, catalog_root=catalog, origin=part, on_missing="skip"
+    )
+    assert set(assets) == {"items/demo/poster.png"}
