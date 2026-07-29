@@ -106,6 +106,13 @@ def test_a_caption_style_is_accepted() -> None:
         "x" * 65,
         None,
         b"noto",
+        # `_FONT_KEY_PATTERN.fullmatch` already rejects this because fullmatch
+        # requires the whole string to be consumed — the newline is left over
+        # regardless of `$` vs `\Z`. Pinned separately so the guard does not
+        # quietly start depending on that call-site choice of verb: `$` (unlike
+        # `\Z`) would let a future `match()` rewrite treat a trailing newline as
+        # end-of-string and accept it.
+        "noto-sans-sc\n",
     ],
 )
 def test_a_font_key_names_a_registry_entry_never_a_path(font_key: object) -> None:
@@ -114,12 +121,23 @@ def test_a_font_key_names_a_registry_entry_never_a_path(font_key: object) -> Non
         _caption(font_key=font_key)
 
 
+def test_a_font_key_at_the_maximum_length_is_accepted() -> None:
+    """Pattern is `^[a-z][a-z0-9-]{0,63}\\Z`: 1 + 63 = 64 characters is the cap."""
+    key = "x" * 64
+    assert _caption(font_key=key).font_key == key
+
+
 @pytest.mark.parametrize(
     "font_px", [MIN_CAPTION_FONT_PX - 1, MAX_CAPTION_FONT_PX + 1, 48.0, True, None]
 )
 def test_caption_size_fails_closed(font_px: object) -> None:
     with pytest.raises(InvalidEditingProjectModel):
         _caption(font_px=font_px)
+
+
+def test_caption_font_px_bounds_are_inclusive() -> None:
+    assert _caption(font_px=MIN_CAPTION_FONT_PX).font_px == MIN_CAPTION_FONT_PX
+    assert _caption(font_px=MAX_CAPTION_FONT_PX).font_px == MAX_CAPTION_FONT_PX
 
 
 @pytest.mark.parametrize("stroke_px", [-1, MAX_CAPTION_STROKE_PX + 1, 3.0, True, None])
@@ -137,6 +155,10 @@ def test_a_stroke_that_would_swallow_the_glyph_is_rejected() -> None:
     assert _caption(font_px=20, stroke_px=9).stroke_px == 9
     with pytest.raises(InvalidEditingProjectModel):
         _caption(font_px=20, stroke_px=10)
+
+
+def test_caption_stroke_upper_bound_is_inclusive() -> None:
+    assert _caption(stroke_px=MAX_CAPTION_STROKE_PX).stroke_px == MAX_CAPTION_STROKE_PX
 
 
 @pytest.mark.parametrize(
