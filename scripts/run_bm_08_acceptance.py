@@ -35,8 +35,15 @@ DEFAULT_EVIDENCE = ROOT / ".local/embedded-browser-video-studio/bm-08-evidence"
 _RENDER_CANVAS = json.loads(
     (ROOT / "contracts/video/motion-render-canvas.v1.json").read_text(encoding="utf-8")
 )
-EXPECTED_FRAME_WIDTH = _RENDER_CANVAS["outputWidth"]
-EXPECTED_FRAME_HEIGHT = _RENDER_CANVAS["outputHeight"]
+# What this run measures is a *delivered film*, not one captured frame, and
+# PC-18 split those into two declarations: a shot is captured on whatever stage
+# its part declares (640x360 at factor 2 for the built-in template, 1920x1080
+# for most of the catalog), while the finished file is always the film canvas.
+# Reading `outputWidth` here kept deriving — from the wrong section — and went
+# red on 2026-07-29 against a film that was correct at 1920x1080.
+_FILM_CANVAS = _RENDER_CANVAS["film"]["byAspectRatio"]["16:9"]
+EXPECTED_FRAME_WIDTH = _FILM_CANVAS["width"]
+EXPECTED_FRAME_HEIGHT = _FILM_CANVAS["height"]
 
 
 def _run(

@@ -13,11 +13,17 @@ describe("VF-06 production App video studio acceptance", () => {
     await browser.refresh();
     await waitForStartup();
 
-        const studio = await openMaterialVideoStudio();
-    await expect(await studio.$("button=打开完整制作界面")).not.toBeEnabled();
+    const studio = await openMaterialVideoStudio();
+    // 2026-07-29: this used to assert that `打开完整制作界面` renders greyed out
+    // until a method is chosen. That button no longer exists in the App at all —
+    // `OperationsWorkspace` is the only place that renders `VideoStudio`, and it
+    // passes `embedded` unconditionally, which replaces the whole opener with the
+    // notice below. Asserting the old shape was asserting a screen the product
+    // stopped having.
+    assert.equal(await studio.$("button=打开完整制作界面").isExisting(), false);
     await expect(studio).toHaveText(
       expect.stringContaining(
-        "“智能素材成片”在独立完整界面制作；“品牌动效成片”在当前 App 内编辑和预览。",
+        "完整制作流程将直接嵌入当前 App，不会打开额外窗口。当前真实内嵌服务尚未接入。",
       ),
     );
 
