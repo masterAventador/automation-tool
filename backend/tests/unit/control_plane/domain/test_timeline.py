@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta, timezone
 import pytest
 from test_video_creation import assert_field_names_carry_no_banned_fragment
 
+from automation_tool.control_plane.domain.editing_project import EditingProjectId
 from automation_tool.control_plane.domain.material import MaterialId
 from automation_tool.control_plane.domain.resource_ids import InvalidResourceId
 from automation_tool.control_plane.domain.timeline import (
@@ -64,7 +65,14 @@ def test_public_timeline_models_have_exact_provider_neutral_fields() -> None:
             "transition_in",
         ),
         TimelineTrack: ("track_id", "kind", "clips"),
-        Timeline: ("timeline_id", "revision", "duration_ms", "tracks", "created_at"),
+        Timeline: (
+            "timeline_id",
+            "project_id",
+            "revision",
+            "duration_ms",
+            "tracks",
+            "created_at",
+        ),
     }
     for model, field_names in expected.items():
         assert tuple(field.name for field in fields(model)) == field_names
@@ -708,6 +716,7 @@ def test_more_than_max_clips_per_track_is_rejected() -> None:
 def _timeline(**overrides: object) -> Timeline:
     defaults: dict[str, object] = {
         "timeline_id": TimelineId.new(),
+        "project_id": EditingProjectId.new(),
         "revision": 1,
         "duration_ms": 7_000,
         "tracks": (_visual_track(),),
@@ -715,6 +724,22 @@ def _timeline(**overrides: object) -> Timeline:
     }
     defaults.update(overrides)
     return Timeline(**defaults)  # type: ignore[arg-type]
+
+
+def test_a_timeline_belongs_to_one_project() -> None:
+    project_id = EditingProjectId.new()
+    assert _timeline(project_id=project_id).project_id is project_id
+
+
+@pytest.mark.parametrize(
+    "project_id",
+    [None, "not-an-id", TimelineId.new()],
+)
+def test_a_timeline_refuses_a_project_reference_of_the_wrong_type(
+    project_id: object,
+) -> None:
+    with pytest.raises(InvalidTimelineModel):
+        _timeline(project_id=project_id)
 
 
 def test_a_timeline_is_as_long_as_its_picture_lane() -> None:

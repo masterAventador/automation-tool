@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Final, Never, final
 
+from automation_tool.control_plane.domain.editing_project import EditingProjectId
 from automation_tool.control_plane.domain.material import (
     MAX_MATERIAL_DURATION_MS,
     MaterialId,
@@ -298,13 +299,14 @@ class TimelineTrack:
 
 @dataclass(frozen=True, slots=True)
 class Timeline:
-    """One editable cut of one film.
+    """One editable cut of one film, owned by one editing project.
 
-    It has no owning project yet — `EditingProject` arrives in LE-04, and a
-    field pointing at a type that does not exist would be worse than none.
+    Render settings — frame size, frame rate, caption style — live on the
+    project rather than here: they are the same for every cut of it.
     """
 
     timeline_id: TimelineId
+    project_id: EditingProjectId
     revision: int
     duration_ms: int
     tracks: tuple[TimelineTrack, ...]
@@ -313,6 +315,7 @@ class Timeline:
     def __post_init__(self) -> None:
         if (
             not isinstance(self.timeline_id, TimelineId)
+            or not isinstance(self.project_id, EditingProjectId)
             or type(self.revision) is not int
             or self.revision < 1
             or type(self.duration_ms) is not int
