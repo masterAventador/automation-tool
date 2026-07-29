@@ -428,6 +428,12 @@ def main() -> None:
                 print(f"[B5-13] profile-path survivors at spec failure: {survivors or '(none)'}")
                 # 幸存进程为空后，嫌疑在删除流程自身——目录内容点名肇事者。
                 dump_douyin_tree(private_app_data, "spec-failure")
+                # PC-25：删除流程五阶段已进固定事件日志，与执行器生命周期事件
+                # 同轴——日志尾部就是完整时间线。
+                for log_path in sorted(private_app_data.glob("logs/desktop-*.log"))[-1:]:
+                    lines = log_path.read_text(errors="replace").splitlines()
+                    for line in lines[-40:]:
+                        print(f"[B5-13] desktop-log {line}")
                 raise RuntimeError("B5-13 hidden App production-path acceptance failed")
             app_process = None
 

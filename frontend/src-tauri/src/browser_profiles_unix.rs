@@ -235,6 +235,16 @@ impl PlatformProfileStore {
     }
 
     pub(super) fn remove_profile(&self, profile_id: &str) -> Result<(), BrowserProfileError> {
+        crate::app_logging::record(crate::app_logging::DesktopLogEvent::ProfileRemovalStarted);
+        let result = self.remove_profile_steps(profile_id);
+        crate::app_logging::record(match result {
+            Ok(()) => crate::app_logging::DesktopLogEvent::ProfileRemovalCompleted,
+            Err(_) => crate::app_logging::DesktopLogEvent::ProfileRemovalRejected,
+        });
+        result
+    }
+
+    fn remove_profile_steps(&self, profile_id: &str) -> Result<(), BrowserProfileError> {
         self.revalidate_layout()?;
         let profile_name = safe_name(profile_id)?;
         let removal_id = format!(".removing-{profile_id}");
@@ -263,6 +273,7 @@ impl PlatformProfileStore {
                 return Err(BrowserProfileError::identity_changed());
             }
             sync_directory_handle(&self.platform.file)?;
+            crate::app_logging::record(crate::app_logging::DesktopLogEvent::ProfileRemovalStaged);
             lock.release()?;
             drop(reopened);
             drop(profile);
@@ -282,6 +293,7 @@ impl PlatformProfileStore {
             .join(&removal_id);
         fs::remove_dir_all(&removal_path)
             .map_err(|_| BrowserProfileError::storage_unavailable())?;
+        crate::app_logging::record(crate::app_logging::DesktopLogEvent::ProfileRemovalDeleted);
         sync_directory_handle(&self.platform.file)?;
         if open_optional_child(&self.platform, &profile_name)?.is_some()
             || open_optional_child(&self.platform, &removal_name)?.is_some()

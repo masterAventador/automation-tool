@@ -53,6 +53,14 @@ pub(crate) enum DesktopLogEvent {
     #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
     ExecutorAutoStartRequested,
     ExecutorEmergencyStopRequested,
+    // PC-25：安全注销的删除流程逐步打点。b5_13 的 profile_identity_changed
+    // 用四轮插桩都定位不到是哪一步，因为删除的五个阶段在日志里是一片空白；
+    // 这五个事件与上面的执行器生命周期事件同轴，一份日志给出完整时间线。
+    ProfileRemovalStarted,
+    ProfileRemovalStaged,
+    ProfileRemovalDeleted,
+    ProfileRemovalCompleted,
+    ProfileRemovalRejected,
     ExecutorProcessStartRequested,
     ExecutorProcessStartSucceeded,
     ExecutorProcessStartFailed,
@@ -105,6 +113,11 @@ impl DesktopLogEvent {
             #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
             Self::ExecutorAutoStartRequested => "executor.auto_start.requested",
             Self::ExecutorEmergencyStopRequested => "executor.emergency_stop.requested",
+            Self::ProfileRemovalStarted => "profile.removal.started",
+            Self::ProfileRemovalStaged => "profile.removal.staged",
+            Self::ProfileRemovalDeleted => "profile.removal.deleted",
+            Self::ProfileRemovalCompleted => "profile.removal.completed",
+            Self::ProfileRemovalRejected => "profile.removal.rejected",
             Self::ExecutorProcessStartRequested => "executor.process.start.requested",
             Self::ExecutorProcessStartSucceeded => "executor.process.start.succeeded",
             Self::ExecutorProcessStartFailed => "executor.process.start.failed",
