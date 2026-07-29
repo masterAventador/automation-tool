@@ -136,7 +136,10 @@ describe("Task run production-path acceptance", () => {
         requiredSignalPath("AUTOMATION_TOOL_H803_DOWN_SIGNAL"),
         "Control Plane shutdown",
       );
-      await browser.$("button=紧急停止").click();
+      // 改版给外壳的顶栏也加了一个「紧急停止」（全局那个），于是
+      // `button=紧急停止` 有两个匹配，而 `$` 取文档里第一个——顶栏在内容区之前，
+      // 点到的是全局那个，任务自己的 Popconfirm 因此从不出现。限定到任务区域。
+      await browser.$(".task-run-content").$("button=紧急停止").click();
       await browser.$("button=确认紧停").click();
       await waitForRenderedText("命令结果暂时无法确认，请查看权威状态后重试");
       await writeSignal(
