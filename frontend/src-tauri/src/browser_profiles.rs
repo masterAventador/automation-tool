@@ -90,6 +90,17 @@ impl BrowserProfileError {
             code: BrowserProfileErrorCode::StorageUnavailable,
         }
     }
+
+    /// Build one of every failure so a mapping can be checked exhaustively.
+    ///
+    /// The constructors above are crate-private on purpose — a failure is
+    /// something this module observes, never something a caller declares. This
+    /// one exists only for tests that must cover every variant, which is how
+    /// PC-25 keeps two failures from quietly sharing one operator-facing code.
+    #[cfg(test)]
+    pub fn for_tests(code: BrowserProfileErrorCode) -> Self {
+        Self { code }
+    }
 }
 
 impl Display for BrowserProfileError {

@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   PlatformSessionGatewayError,
   type PlatformSessionGateway,
+  type PlatformSessionGatewayErrorCode,
 } from "./platform-session-gateway";
 import { PlatformSessions } from "./PlatformSessions";
 
@@ -204,6 +205,39 @@ describe("platform status page", () => {
       expect(screen.getByText(/health_publication_timed_out/u)).toBeVisible();
     } finally {
       vi.useRealTimers();
+    }
+  });
+});
+
+/**
+ * PC-25：拆开的 Profile 失败码必须各自有话说。
+ *
+ * 五种 Profile 失败此前在 Rust 侧一起塌成 `storage_unavailable`，界面对每
+ * 一种都说「重新操作不会有效」。Rust 侧拆开之后，界面若不认这些新码就会
+ * 掉进 default 分支——用户看到的还是同一句万能话，拆开等于白拆。
+ */
+describe("PC-25 profile removal failure copy", () => {
+  it("names each profile failure with its own operator-facing sentence", async () => {
+    const cases: ReadonlyArray<readonly [PlatformSessionGatewayErrorCode, RegExp]> = [
+      ["profile_identity_changed", /运营浏览器档案被系统外的东西改动过/u],
+      ["profile_missing", /运营浏览器档案已经不在了/u],
+      ["profile_directory_unsafe", /运营浏览器档案所在目录不安全/u],
+      ["profile_marker_invalid", /运营浏览器档案记录读不出来/u],
+    ];
+    for (const [code, expected] of cases) {
+      const source = gateway();
+      vi.mocked(source.logoutDouyinSession).mockRejectedValue(
+        new PlatformSessionGatewayError(code, false),
+      );
+      const user = userEvent.setup();
+      const view = render(<PlatformSessions gateway={source} />);
+
+      await user.click(await screen.findByRole("button", { name: "安全注销" }));
+      await user.click(screen.getByRole("button", { name: "确认注销" }));
+
+      expect(await screen.findByText(expected)).toBeVisible();
+      expect(screen.getByText(new RegExp(code, "u"))).toBeVisible();
+      view.unmount();
     }
   });
 });

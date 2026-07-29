@@ -1258,11 +1258,20 @@ fn map_browser_profile_logout_error(
         browser_profiles::BrowserProfileErrorCode::RecoveryRequired => {
             ("profile_recovery_required", false)
         }
-        browser_profiles::BrowserProfileErrorCode::InvalidProfileId
-        | browser_profiles::BrowserProfileErrorCode::ProfileNotFound
-        | browser_profiles::BrowserProfileErrorCode::UnsafeDirectory
-        | browser_profiles::BrowserProfileErrorCode::IdentityChanged
-        | browser_profiles::BrowserProfileErrorCode::StorageUnavailable => {
+        // PC-25：这五种此前一起塌成 `storage_unavailable`，于是界面对每一种
+        // 都说「这是本产品自身的问题，重新操作不会有效」，而 b5_13 查了四轮
+        // 也没能从那个字符串里读出是哪一步失败的。各自成码。
+        browser_profiles::BrowserProfileErrorCode::IdentityChanged => {
+            ("profile_identity_changed", false)
+        }
+        browser_profiles::BrowserProfileErrorCode::ProfileNotFound => ("profile_missing", false),
+        browser_profiles::BrowserProfileErrorCode::UnsafeDirectory => {
+            ("profile_directory_unsafe", false)
+        }
+        browser_profiles::BrowserProfileErrorCode::InvalidProfileId => {
+            ("profile_marker_invalid", false)
+        }
+        browser_profiles::BrowserProfileErrorCode::StorageUnavailable => {
             ("storage_unavailable", false)
         }
     };
@@ -4779,6 +4788,61 @@ mod tests {
                 "retryable": false,
             }),
             "the structured fields must survive unchanged and `message` must name the code"
+        );
+    }
+
+    /// PC-25：安全注销失败时，界面能说出的话取决于这个映射区分了几种失败。
+    ///
+    /// 五个互不相同的 Profile 失败此前一起塌成 `storage_unavailable`——那句
+    /// 文案是「这是本产品自身的问题，重新操作不会有效」。b5_13 的四轮插桩
+    /// 之所以只查到「删 Profile 一步失败了」而定位不到是哪一步，就是因为
+    /// 到达用户和日志的那个字符串已经把五种原因抹平。每一种都要有自己的码。
+    #[test]
+    fn every_profile_removal_failure_reaches_the_operator_as_its_own_code() {
+        use browser_profiles::BrowserProfileErrorCode as Code;
+
+        let mapped = |code: Code| {
+            let error = map_browser_profile_logout_error(
+                browser_profiles::BrowserProfileError::for_tests(code),
+            );
+            (error.code, error.retryable)
+        };
+
+        assert_eq!(mapped(Code::ProfileInUse), ("profile_in_use", true));
+        assert_eq!(
+            mapped(Code::RecoveryRequired),
+            ("profile_recovery_required", false)
+        );
+        assert_eq!(
+            mapped(Code::IdentityChanged),
+            ("profile_identity_changed", false)
+        );
+        assert_eq!(mapped(Code::ProfileNotFound), ("profile_missing", false));
+        assert_eq!(
+            mapped(Code::UnsafeDirectory),
+            ("profile_directory_unsafe", false)
+        );
+        assert_eq!(
+            mapped(Code::InvalidProfileId),
+            ("profile_marker_invalid", false)
+        );
+        assert_eq!(mapped(Code::StorageUnavailable), ("storage_unavailable", false));
+
+        let codes = [
+            Code::ProfileInUse,
+            Code::RecoveryRequired,
+            Code::IdentityChanged,
+            Code::ProfileNotFound,
+            Code::UnsafeDirectory,
+            Code::InvalidProfileId,
+            Code::StorageUnavailable,
+        ]
+        .map(|code| mapped(code).0);
+        let distinct: std::collections::BTreeSet<&str> = codes.iter().copied().collect();
+        assert_eq!(
+            distinct.len(),
+            codes.len(),
+            "两种失败共用一个码，用户和日志就分不出该关浏览器还是该报障"
         );
     }
 

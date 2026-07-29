@@ -100,6 +100,30 @@ function failurePresentation(error: unknown): PlatformSessionFailure {
         text: "运营浏览器正在被占用。请先关掉已经打开的运营浏览器窗口，再重新操作。",
         code,
       };
+    case "profile_identity_changed":
+      return {
+        kind: "internal",
+        text: "运营浏览器档案被系统外的东西改动过，为安全起见没有继续。请把下面的代码发给我们。",
+        code,
+      };
+    case "profile_missing":
+      return {
+        kind: "needs_user",
+        text: "运营浏览器档案已经不在了，可能被手动清理过。重新登录一次抖音即可。",
+        code,
+      };
+    case "profile_directory_unsafe":
+      return {
+        kind: "internal",
+        text: "运营浏览器档案所在目录不安全，为安全起见没有继续。请把下面的代码发给我们。",
+        code,
+      };
+    case "profile_marker_invalid":
+      return {
+        kind: "internal",
+        text: "运营浏览器档案记录读不出来。请把下面的代码发给我们。",
+        code,
+      };
     case "profile_recovery_required":
       return {
         kind: "needs_user",

@@ -597,3 +597,39 @@ fn embedded_era_uses_a_fresh_root_and_never_reads_the_legacy_root() {
         assert_eq!(root_mode, 0o700, "fresh root must be private");
     }
 }
+
+/// PC-25：登录处理的浏览器还开着时按下「安全注销」。
+///
+/// 这是 b5_13 立案的第五个产品真缺陷的最小复现。用户能做的补救确实存在
+/// ——关掉那个运营浏览器窗口再来一次——但只有 `ProfileInUse` 这个码会把
+/// 这句话说出口（`PlatformSessions.tsx` 已经为它写好了「先关掉已经打开的
+/// 运营浏览器窗口」）。任何其它码都会让界面说成「这是本产品自身的问题，
+/// 重新操作不会有效」，于是既没删掉、又劝人别重试。
+#[test]
+fn safe_removal_while_the_login_browser_holds_the_profile_stays_actionable() {
+    let app_data = TemporaryAppData::new();
+    let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");
+    let current = store.current_douyin_profile().expect("current profile");
+    let current_directory = current.directory().to_path_buf();
+    // 登录处理开着 = 这个 Profile 的锁被持有。
+    let held = current.try_acquire_lock().expect("login browser lock");
+
+    let error = store
+        .remove_current_douyin_profile()
+        .expect_err("removal must refuse while the profile is held");
+
+    assert_eq!(error.code(), BrowserProfileErrorCode::ProfileInUse);
+    // 拒绝必须是干净的：登录态原样留在盘上，标记还在，重试才有意义。
+    assert!(current_directory.is_dir());
+    assert!(app_data
+        .path
+        .join("embedded-browser-profiles/current-douyin-profile-v1")
+        .exists());
+
+    held.release().expect("release the login browser lock");
+    drop(current);
+    store
+        .remove_current_douyin_profile()
+        .expect("removal succeeds once the browser is closed");
+    assert!(!current_directory.exists());
+}
