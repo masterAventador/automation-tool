@@ -9,6 +9,7 @@ stays on this side of the boundary.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -27,6 +28,25 @@ from automation_tool.protocol.safe_text import contains_control_or_bidi
 MAX_PATH_CHARACTERS: Final = 4096
 MAX_CODEC_NAME_CHARACTERS: Final = 64
 MAX_PROBE_OUTPUT_BYTES: Final = 1024 * 1024
+# The largest file the digest will read. Unlike the duration and frame-size
+# limits further down this mirrors nothing — `Material` has no size field — so
+# it is not a shape constraint but a bound on work, and it is chosen against the
+# two things that do constrain it.
+#
+# Against the duration limit: four hours is the longest material that can exist,
+# and four hours at roughly 9.5 Mbps is this figure, which covers ordinary
+# consumer 1080p at that length. Above it are professional intermediates —
+# ProRes 1080p would be some 265 GB over the same four hours — and nothing here
+# is meant to edit those.
+#
+# Against time: measured on the packaged interpreter, hashing runs at 2.08 GiB/s
+# and a file at this limit takes 8.7 s. The measuring pass above is already
+# allowed fifteen minutes for one file, so this is a small part of what probing
+# one material may cost.
+MAX_SOURCE_FILE_BYTES: Final = 16 * 1024 * 1024 * 1024
+# Matching `package_manifest._BUFFER_SIZE` and `macos_candidate._SCAN_CHUNK_SIZE`,
+# the two other places in the executor that stream a file past a hash or a scan.
+_DIGEST_CHUNK_BYTES: Final = 1024 * 1024
 PROBE_TIMEOUT_SECONDS: float = 30.0
 # Measuring decodes the whole sound track, so it is allowed far longer than
 # reading the header.
@@ -172,6 +192,7 @@ class MaterialProbeRejection(StrEnum):
     TOO_LONG = "too_long"
     UNUSABLE_FRAME_SIZE = "unusable_frame_size"
     FRAME_TOO_LARGE = "frame_too_large"
+    FILE_TOO_LARGE = "file_too_large"
     SILENT_AUDIO = "silent_audio"
     PROBE_CRASHED = "probe_crashed"
     PROBE_FAILED = "probe_failed"
@@ -762,6 +783,82 @@ def read_stream_facts(tools: PackagedMediaTools, source: Path) -> MediaStreamFac
     )
 
 
+def _digest_stable_file(path: Path) -> str | None:
+    """Hash a file, or report that it would not hold still long enough to be hashed.
+
+    `None` means "it moved", not "it failed": the caller turns both into the same
+    rejection, but it does so after leaving its `except`, and returning rather
+    than raising here is what keeps that possible.
+
+    Three things this refuses to hash, each measured rather than assumed:
+
+    - **Unlinked while being read.** POSIX keeps the inode alive behind the
+      descriptor, so the read neither fails nor comes up short — measured, every
+      remaining byte still arrives and the digest is correct. Nothing about the
+      read looks wrong; only asking the *path* again notices, and it raises
+      `FileNotFoundError` when it does.
+    - **Grown while being read.** `read()` does not stop at the size the
+      descriptor stated: measured, a file stating 1 MiB handed back 3 MiB after
+      2 MiB were appended mid-read. Stopping at the stated size bounds the work
+      to something already checked against the limit rather than to whatever the
+      writer decides to produce.
+    - **Replaced by another file.** The descriptor keeps the old inode, so the
+      read succeeds and yields the old content's digest for the new file's path
+      — measured, `st_ino` on the descriptor is unchanged while the path's is
+      not. Storing that is exactly the mis-dedup this value exists to prevent.
+
+    Truncation mid-read is the fourth, and it needs no check of its own: the
+    loop ends early and the byte count comes up short of what was stated.
+    """
+    with path.open("rb") as handle:
+        # Taken from the descriptor rather than from the path, so the size
+        # checked is the size of the file about to be read. A path stat leaves
+        # room for a different file to be there by the time it is opened.
+        opened = os.fstat(handle.fileno())
+        if opened.st_size > MAX_SOURCE_FILE_BYTES:
+            _reject(MaterialProbeRejection.FILE_TOO_LARGE)
+        digest = hashlib.sha256()
+        read_bytes = 0
+        while chunk := handle.read(_DIGEST_CHUNK_BYTES):
+            read_bytes += len(chunk)
+            if read_bytes > opened.st_size:
+                return None
+            digest.update(chunk)
+    if read_bytes < opened.st_size:
+        return None
+    current = path.stat()
+    # Size is deliberately left out of this comparison, unlike
+    # `package_manifest._same_file_identity`, which states the same rule for the
+    # build's own inventory: the byte count the loop actually hashed is a
+    # sharper test of the size than a second stat is, and it has already been
+    # made above.
+    if (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino):
+        return None
+    return digest.hexdigest()
+
+
+def read_content_digest(source: Path) -> str:
+    """The SHA-256 of one file's bytes, so two imports of one material can be told apart.
+
+    The only fact about a material that the packaged tools are not needed for,
+    so they are not taken: nothing here starts a subprocess.
+    """
+    path = _require_source_file(source)
+    # Rejected after the handler has been left, as in `_run_probe`. `_reject`
+    # suppresses the chain, but suppression only stops the renderers: the
+    # handled exception stays reachable through `__context__`, and
+    # `OSError.filename` is the operator's path. Leaving the handler first drops
+    # the reference outright.
+    content_digest: str | None
+    try:
+        content_digest = _digest_stable_file(path)
+    except OSError:
+        content_digest = None
+    if content_digest is None:
+        _reject(MaterialProbeRejection.UNREADABLE)
+    return content_digest
+
+
 __all__ = [
     "MAX_CODEC_NAME_CHARACTERS",
     "MAX_MATERIAL_DIMENSION",
@@ -769,6 +866,7 @@ __all__ = [
     "MAX_MEASURE_OUTPUT_BYTES",
     "MAX_PATH_CHARACTERS",
     "MAX_PROBE_OUTPUT_BYTES",
+    "MAX_SOURCE_FILE_BYTES",
     "AudioFacts",
     "MaterialProbeRejected",
     "MaterialProbeRejection",
@@ -776,5 +874,6 @@ __all__ = [
     "PackagedMediaTools",
     "ProbedMaterialKind",
     "read_audio_facts",
+    "read_content_digest",
     "read_stream_facts",
 ]

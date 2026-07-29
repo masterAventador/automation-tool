@@ -3,11 +3,15 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import random
 import signal
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +21,12 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, os.fspath(REPOSITORY_ROOT / "scripts"))
 from video_runtime_cache import cache_root  # type: ignore[import-not-found]  # noqa: E402
 
+from automation_tool.control_plane.domain.material import (  # noqa: E402
+    DescriptionSource,
+    Material,
+    MaterialId,
+    MaterialKind,
+)
 from automation_tool.executor import material_probe  # noqa: E402
 from automation_tool.executor.material_probe import (  # noqa: E402
     LOUDNESS_CEILING_LUFS,
@@ -27,6 +37,7 @@ from automation_tool.executor.material_probe import (  # noqa: E402
     MAX_MEASURE_OUTPUT_BYTES,
     MAX_PATH_CHARACTERS,
     MAX_PROBE_OUTPUT_BYTES,
+    MAX_SOURCE_FILE_BYTES,
     AudioFacts,
     MaterialProbeRejected,
     MaterialProbeRejection,
@@ -34,8 +45,10 @@ from automation_tool.executor.material_probe import (  # noqa: E402
     PackagedMediaTools,
     ProbedMaterialKind,
     read_audio_facts,
+    read_content_digest,
     read_stream_facts,
 )
+from automation_tool.protocol.safe_text import is_sha256_hex  # noqa: E402
 
 
 def _executable(directory: Path, name: str) -> Path:
@@ -173,9 +186,9 @@ def _padded_json(streams: list[dict[str, Any]], *, total_bytes: int) -> str:
     return payload + " " * padding
 
 
-def _source(directory: Path, name: str = "clip.mp4") -> Path:
+def _source(directory: Path, name: str = "clip.mp4", *, payload: bytes = b"\x00" * 32) -> Path:
     path = directory / name
-    path.write_bytes(b"\x00" * 32)
+    path.write_bytes(payload)
     return path
 
 
@@ -2402,3 +2415,419 @@ class TestAgainstThePackagedBinaries:
         assert rendered == "material probe rejected"
         assert os.fspath(source.parent) not in rendered
         assert "silence_duration" not in rendered
+
+
+# --- T4: the content digest ------------------------------------------------
+
+# Content whose every chunk-sized slice differs from every other one, so that
+# reading the chunks in the wrong order, or dropping one, changes the digest. A
+# repeating pattern would not: the chunk size is a power of two, so any pattern
+# whose period divides it survives reordering byte for byte, and a file of zeros
+# survives it trivially. The seed is fixed so a failure is reproducible, and
+# `test_the_fixture_would_notice_chunks_read_out_of_order` checks the property
+# rather than trusting this comment.
+_DIGEST_FIXTURE_SEED = 20260729
+
+
+def _positional_bytes(size: int) -> bytes:
+    return random.Random(_DIGEST_FIXTURE_SEED).randbytes(size)
+
+
+def _sparse_source(directory: Path, size: int, name: str = "sparse.mp4") -> Path:
+    """A file that states `size` bytes while occupying none of them.
+
+    Measured on this repository's APFS temporary directory: 16 GiB costs 0.2 ms
+    to create and reports `st_blocks == 0`. That is what makes the byte limit
+    testable at all — the same fixture written for real would need the disk.
+    """
+    path = directory / name
+    with path.open("wb") as handle:
+        handle.truncate(size)
+    return path
+
+
+# Long enough that a mutation fired 15 ms in lands well inside the read.
+# Measured over 160 trials on the packaged interpreter: the mutation lands by
+# 24 ms at the latest, against a call spanning at least 127 ms, and all 160 were
+# caught. The fixture is sparse, so this margin costs no disk and no write time.
+_STABILITY_FIXTURE_BYTES = 256 * 1024 * 1024
+_MUTATION_DELAY_SECONDS = 0.015
+
+
+def _rejection_while_mutating(
+    source: Path, mutate: Callable[[Path], None]
+) -> tuple[pytest.ExceptionInfo[MaterialProbeRejected], float]:
+    """Hash a file that really changes underneath the reader, and report why it failed.
+
+    Nothing here is stubbed: the file is really unlinked, grown, truncated or
+    replaced by another inode while the production code is reading it.
+
+    Also returns how far into the call the mutation was armed, as a fraction of
+    the call's whole span, so a caller whose guard runs *after* the read can show
+    the mutation landed mid-read rather than merely before the last check. The
+    stamp is taken before the mutation rather than after it: taken after, it
+    races the main thread for a truncation, which is a mutation that ends the
+    read it is timing — measured, that ordering failed about half the time.
+    """
+    stamps: dict[str, float] = {}
+
+    def run() -> None:
+        time.sleep(_MUTATION_DELAY_SECONDS)
+        stamps["armed"] = time.monotonic()
+        mutate(source)
+
+    worker = threading.Thread(target=run)
+    started = time.monotonic()
+    worker.start()
+    try:
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_content_digest(source)
+    finally:
+        finished = time.monotonic()
+        worker.join()
+    return excinfo, (stamps["armed"] - started) / (finished - started)
+
+
+class TestContentDigest:
+    def test_two_files_with_the_same_bytes_share_a_digest(self, tmp_path: Path) -> None:
+        """The whole point: dedup compares content, not names."""
+        payload = _positional_bytes(4096)
+        first = _source(tmp_path, "holiday.mp4", payload=payload)
+        second = _source(tmp_path, "holiday-copy.mp4", payload=payload)
+        assert read_content_digest(first) == read_content_digest(second)
+
+    def test_one_changed_byte_changes_the_digest(self, tmp_path: Path) -> None:
+        payload = bytearray(_positional_bytes(4096))
+        original = read_content_digest(_source(tmp_path, "a.mp4", payload=bytes(payload)))
+        payload[2048] ^= 0x01
+        assert read_content_digest(_source(tmp_path, "b.mp4", payload=bytes(payload))) != original
+
+    def test_the_digest_is_one_canonical_lowercase_sha256(self, tmp_path: Path) -> None:
+        """Checked with the shared validator every other digest in the product uses.
+
+        `Material.content_digest` is matched against the same shape, so writing a
+        second check here would let the two drift apart.
+        """
+        assert is_sha256_hex(read_content_digest(_source(tmp_path)))
+
+    def test_the_digest_equals_hashing_the_whole_file_at_once(self, tmp_path: Path) -> None:
+        source = _source(tmp_path, payload=_positional_bytes(3_000_017))
+        assert read_content_digest(source) == hashlib.sha256(source.read_bytes()).hexdigest()
+
+    @pytest.mark.parametrize(
+        "size",
+        [
+            0,
+            1,
+            material_probe._DIGEST_CHUNK_BYTES - 1,
+            material_probe._DIGEST_CHUNK_BYTES,
+            material_probe._DIGEST_CHUNK_BYTES + 1,
+            5 * material_probe._DIGEST_CHUNK_BYTES + 7,
+        ],
+    )
+    def test_the_digest_is_right_on_and_around_the_chunk_boundary(
+        self, tmp_path: Path, size: int
+    ) -> None:
+        """A file of exactly one chunk, one byte either side of it, and several chunks."""
+        source = _source(tmp_path, payload=_positional_bytes(size))
+        assert read_content_digest(source) == hashlib.sha256(source.read_bytes()).hexdigest()
+
+    def test_the_fixture_would_notice_chunks_read_out_of_order(self) -> None:
+        """The chunk-boundary cases above are only worth anything if this holds.
+
+        A file of zeros, or of any pattern repeating on a divisor of the chunk
+        size, hashes the same however its chunks are ordered — so it cannot tell
+        a correct streaming loop from one that reads the file backwards or skips
+        a chunk. This asserts the fixture is not one of those.
+        """
+        chunk = material_probe._DIGEST_CHUNK_BYTES
+        payload = _positional_bytes(3 * chunk)
+        chunks = [payload[start : start + chunk] for start in range(0, len(payload), chunk)]
+        reversed_payload = b"".join(reversed(chunks))
+        assert hashlib.sha256(reversed_payload).hexdigest() != hashlib.sha256(payload).hexdigest()
+
+    def test_the_digest_fills_a_real_material(self, tmp_path: Path) -> None:
+        """Cross-layer: the probe's product has to satisfy the domain's own check.
+
+        `material.py` matches `content_digest` against its own pattern, and the
+        executor may not import it, so the two shapes are only held together by
+        a test that runs both. Constructing the material is the assertion.
+        """
+        material = Material(
+            material_id=MaterialId.new(),
+            kind=MaterialKind.VIDEO,
+            duration_ms=3_000,
+            width=640,
+            height=360,
+            content_digest=read_content_digest(_source(tmp_path)),
+            has_audio=False,
+            audio_loudness_lufs=None,
+            has_speech=False,
+            speech_segments_ms=(),
+            speech_transcript=None,
+            shot_boundaries_ms=(),
+            ai_description=None,
+            ai_tags=(),
+            description_source=DescriptionSource.AI,
+            described_at=None,
+        )
+        assert is_sha256_hex(material.content_digest)
+
+
+class TestContentDigestRejectsAnUnusableSource:
+    """The entry point validates its own source, as the other two do.
+
+    Nothing guarantees a caller reached this one through them — `read_stream_facts`
+    and `read_audio_facts` each re-check for the same reason.
+    """
+
+    def test_rejects_a_missing_file(self, tmp_path: Path) -> None:
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_content_digest(tmp_path / "gone.mp4")
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+
+    def test_rejects_a_directory(self, tmp_path: Path) -> None:
+        """`open()` on a directory raises `IsADirectoryError`, measured — but the
+        regular-file check gets there first, and this pins that it does."""
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_content_digest(tmp_path)
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+
+    def test_rejects_a_source_without_read_permission(self, tmp_path: Path) -> None:
+        source = _source(tmp_path)
+        source.chmod(0o000)
+        try:
+            with pytest.raises(MaterialProbeRejected) as excinfo:
+                read_content_digest(source)
+            assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+        finally:
+            source.chmod(0o644)
+
+    def test_rejects_a_path_component_over_the_name_limit(self, tmp_path: Path) -> None:
+        """`ENAMETOOLONG` arrives as a bare `OSError`, not a named subclass.
+
+        Measured: `stat()` and `open()` both raise `OSError` with `errno 63` on a
+        component longer than `NAME_MAX`, and the path is well inside
+        `MAX_PATH_CHARACTERS`, so the text guard never sees it. An escaping
+        `OSError` would both miss every caller catching `MaterialProbeRejected`
+        and carry the operator's path in its message.
+        """
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_content_digest(tmp_path / ("x" * 300))
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+
+    def test_rejects_a_relative_path(self) -> None:
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_content_digest(Path("clip.mp4"))
+        assert _rejection(excinfo) is MaterialProbeRejection.UNSAFE_PATH
+
+    def test_rejects_text_instead_of_a_path(self, tmp_path: Path) -> None:
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_content_digest(os.fspath(_source(tmp_path)))  # type: ignore[arg-type]
+        assert _rejection(excinfo) is MaterialProbeRejection.UNSAFE_PATH
+
+    def test_rejects_a_path_carrying_a_control_character(self, tmp_path: Path) -> None:
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_content_digest(tmp_path / "clip‮.mp4")
+        assert _rejection(excinfo) is MaterialProbeRejection.UNSAFE_PATH
+
+    def test_rejects_a_fifo(self, tmp_path: Path) -> None:
+        """Reading one would block until somebody writes, with no bound on either."""
+        fifo = tmp_path / "pipe.mp4"
+        os.mkfifo(fifo)
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_content_digest(fifo)
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+
+
+# Hashing throughput of the packaged interpreter, measured on this repository's
+# temporary directory over a 512 MiB file: 0.24 s, or 2.08 GiB/s. Only the two
+# tests below read it, and only to keep the byte limit's cost stated rather than
+# assumed.
+_MEASURED_HASH_GIB_PER_SECOND = 2.08
+
+
+class TestContentDigestByteLimit:
+    def test_the_limit_clears_a_material_at_the_duration_limit(self) -> None:
+        """Nothing else pins the number, and the two limits must not contradict.
+
+        Four hours is the longest material `Material` can hold. At 8 Mbps —
+        ordinary consumer 1080p — that is 14.4 GB, so a byte limit below it would
+        refuse for its size a file the duration limit had just accepted, and the
+        user would be told to shorten a video that is already inside the length
+        they were promised.
+        """
+        seconds = MAX_MATERIAL_DURATION_MS / 1000
+        ordinary_1080p_bits_per_second = 8_000_000
+        assert seconds * ordinary_1080p_bits_per_second / 8 <= MAX_SOURCE_FILE_BYTES
+
+    def test_the_limit_stays_inside_its_stated_time_budget(self) -> None:
+        """The other direction: a limit is only a bound if it bounds something.
+
+        At the measured rate the shipped value is worth 8.7 s of hashing. Thirty
+        is the ceiling this holds it to — still a small part of what probing one
+        material may cost, since the measuring pass is allowed fifteen minutes,
+        and low enough that raising the limit fourfold has to be argued for here
+        rather than done quietly.
+        """
+        seconds = MAX_SOURCE_FILE_BYTES / (_MEASURED_HASH_GIB_PER_SECOND * 1024**3)
+        assert seconds <= 30.0
+
+    def test_rejects_a_file_over_the_shipped_limit(self, tmp_path: Path) -> None:
+        """The real constant, with the real fixture — and not one byte is read.
+
+        The size is taken from the descriptor the read will use, so the file is
+        turned away before the loop starts. That is what keeps this test free:
+        a 16 GiB sparse file costs nothing to make and nothing to reject.
+        """
+        source = _sparse_source(tmp_path, MAX_SOURCE_FILE_BYTES + 1)
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_content_digest(source)
+        assert _rejection(excinfo) is MaterialProbeRejection.FILE_TOO_LARGE
+
+    def test_accepts_a_file_of_exactly_the_limit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The accepting endpoint, which is the one that tells `>` from `>=`.
+
+        Read at the shipped value it would hash 16 GiB — measured 8.7 s, which is
+        as long as this entire file takes — so the limit is moved rather than the
+        fixture grown. The production path is unchanged; only the number it
+        compares against differs, and the test above pins that number.
+        """
+        monkeypatch.setattr(material_probe, "MAX_SOURCE_FILE_BYTES", 4096)
+        source = _source(tmp_path, payload=_positional_bytes(4096))
+        assert read_content_digest(source) == hashlib.sha256(source.read_bytes()).hexdigest()
+
+    def test_rejects_one_byte_over_the_limit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(material_probe, "MAX_SOURCE_FILE_BYTES", 4096)
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_content_digest(_source(tmp_path, payload=_positional_bytes(4097)))
+        assert _rejection(excinfo) is MaterialProbeRejection.FILE_TOO_LARGE
+
+
+class TestContentDigestNeedsTheFileToHoldStill:
+    """A digest of a file that moved while it was read describes nothing.
+
+    Dedup is the whole reason this value exists, so a digest that does not
+    correspond to what the path holds is worse than no digest: it makes two
+    different files compare equal, or the same file compare unequal to itself.
+    """
+
+    def test_a_deleted_file_still_reads_to_the_end_on_its_own(self, tmp_path: Path) -> None:
+        """Why the three guards below have to exist at all.
+
+        Measured, and the reason the plan's "the file vanishes mid-read" case
+        cannot be met by error handling: unlinking a file that is already open
+        does not fail the read and does not shorten it. Every remaining byte
+        arrives through the descriptor and the digest comes out correct, so
+        nothing raises and nothing looks wrong. Only asking the *path* afterwards
+        notices.
+        """
+        payload = _positional_bytes(4 * material_probe._DIGEST_CHUNK_BYTES)
+        source = _source(tmp_path, payload=payload)
+        digest = hashlib.sha256()
+        with source.open("rb") as handle:
+            digest.update(handle.read(material_probe._DIGEST_CHUNK_BYTES))
+            source.unlink()
+            assert os.fstat(handle.fileno()).st_nlink == 0
+            while chunk := handle.read(material_probe._DIGEST_CHUNK_BYTES):
+                digest.update(chunk)
+        assert digest.hexdigest() == hashlib.sha256(payload).hexdigest()
+
+    def test_rejects_a_file_deleted_while_it_is_being_read(self, tmp_path: Path) -> None:
+        """A real `unlink`, fired while the read is genuinely still running.
+
+        This guard is the one that runs after the loop, so the rejection alone
+        would not distinguish a file deleted mid-read from one deleted after the
+        last byte. The fraction is what says which happened.
+        """
+        source = _sparse_source(tmp_path, _STABILITY_FIXTURE_BYTES)
+        excinfo, armed_at = _rejection_while_mutating(source, os.unlink)
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+        assert armed_at < 0.5, f"the file was deleted {armed_at:.0%} into the call, not mid-read"
+
+    def test_rejects_a_file_that_grows_while_it_is_being_read(self, tmp_path: Path) -> None:
+        """An import started before the recorder or the download finished writing.
+
+        Measured: the reader does not stop at the size the descriptor stated —
+        it keeps returning the appended bytes — so without a bound the work is
+        whatever the writer decides to produce.
+
+        No fraction is asserted here, and none is needed: this guard sits inside
+        the loop, so a rejection is only reachable if the append landed while the
+        loop was still running.
+        """
+
+        def append(path: Path) -> None:
+            with path.open("ab") as handle:
+                handle.write(b"x" * material_probe._DIGEST_CHUNK_BYTES)
+
+        source = _sparse_source(tmp_path, _STABILITY_FIXTURE_BYTES)
+        excinfo, _ = _rejection_while_mutating(source, append)
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+
+    def test_rejects_a_file_truncated_while_it_is_being_read(self, tmp_path: Path) -> None:
+        """Same as growth: the rejection is itself the proof of the timing.
+
+        A truncation landing after the loop would leave the byte count matching
+        what was stated and the inode unchanged, so the digest would come back.
+        The fraction is meaningless here — this mutation *ends* the read it would
+        be measured against, so it is ~1 by construction.
+        """
+        source = _sparse_source(tmp_path, _STABILITY_FIXTURE_BYTES)
+        excinfo, _ = _rejection_while_mutating(source, lambda path: os.truncate(path, 4096))
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+
+    def test_rejects_a_file_replaced_by_another_while_it_is_being_read(
+        self, tmp_path: Path
+    ) -> None:
+        """The descriptor keeps the old inode, so the read succeeds and says nothing.
+
+        Measured: after `os.replace`, the descriptor's `st_ino` is unchanged
+        while the path's is not. Reporting the old file's digest against the new
+        file's path is exactly the mis-dedup this value exists to prevent.
+        """
+
+        def replace(path: Path) -> None:
+            other = path.parent / "other.mp4"
+            other.write_bytes(b"z" * 4096)
+            os.replace(other, path)
+
+        source = _sparse_source(tmp_path, _STABILITY_FIXTURE_BYTES)
+        excinfo, armed_at = _rejection_while_mutating(source, replace)
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+        assert armed_at < 0.5, f"the file was replaced {armed_at:.0%} into the call, not mid-read"
+
+
+class TestContentDigestLeaksNoPath:
+    def test_the_rejection_message_stays_fixed(self, tmp_path: Path) -> None:
+        secret = "operator-private-wedding-2021"
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_content_digest(tmp_path / f"{secret}.mp4")
+        assert str(excinfo.value) == "material probe rejected"
+        assert secret not in str(excinfo.value)
+
+    def test_no_rendered_traceback_carries_the_path(self, tmp_path: Path) -> None:
+        secret = "operator-private-checkup-2022"
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_content_digest(tmp_path / f"{secret}.mp4")
+        assert secret not in _rendered_traceback(excinfo.value)
+
+    def test_the_vanishing_file_rejection_chains_nothing(self, tmp_path: Path) -> None:
+        """`OSError.filename` is the path itself, and it survives `from None`.
+
+        Suppressing the context stops every renderer, but the handled exception
+        is still hanging off `__context__` for anything that walks the chain.
+        This step drops the reference outright by leaving the handler before it
+        rejects, the way the two subprocess calls do, so there is no chain left
+        to walk.
+        """
+        secret = "operator-private-reunion-2020"
+        source = _sparse_source(tmp_path, _STABILITY_FIXTURE_BYTES, f"{secret}.mp4")
+        excinfo, _ = _rejection_while_mutating(source, os.unlink)
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+        assert excinfo.value.__context__ is None
+        assert secret not in _rendered_traceback(excinfo.value)
