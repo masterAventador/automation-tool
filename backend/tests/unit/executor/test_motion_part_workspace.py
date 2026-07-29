@@ -462,3 +462,57 @@ def test_the_caption_sharing_the_text_is_never_marked() -> None:
     )
     assert "<figcaption>Maya Chen</figcaption>" in rendered
     assert rendered.count("data-motion-slot=") == 1
+
+
+# BM-16's sweep needs the same reference-driven asset list the working copy is
+# built from: PC-13 grew the shared dependency tree past what a wholesale
+# allowlist can carry (the sandbox caps at 128), which is the exact problem
+# reference-driven copying already solved for the product (PC-05). One traversal,
+# used by both — a second implementation in the sweep would be the错位替换 this
+# module refuses everywhere else.
+def test_referenced_assets_walks_the_same_graph_the_copy_does(tmp_path) -> None:
+    from automation_tool.executor.motion_authoring.part_workspace import (
+        referenced_assets,
+    )
+
+    catalog = tmp_path / "catalog"
+    part = catalog / "items" / "demo"
+    deps = catalog / "offline-deps"
+    part.mkdir(parents=True)
+    deps.mkdir(parents=True)
+    (deps / "runtime.js").write_text("// runtime", encoding="utf-8")
+    (deps / "theme.css").write_text(
+        '@font-face { src: url("fonts/face.woff2"); }', encoding="utf-8"
+    )
+    (deps / "fonts").mkdir()
+    (deps / "fonts" / "face.woff2").write_bytes(b"\x00")
+    (deps / "unused.js").write_text("// never referenced", encoding="utf-8")
+    html = (
+        '<link rel="stylesheet" href="../../offline-deps/theme.css">'
+        '<script src="../../offline-deps/runtime.js"></script>'
+    )
+
+    assets = referenced_assets(html, catalog_root=catalog, origin=part)
+
+    # Transitive through the stylesheet, and nothing that is not reached.
+    assert set(assets) == {
+        "offline-deps/theme.css",
+        "offline-deps/runtime.js",
+        "offline-deps/fonts/face.woff2",
+    }
+
+
+def test_referenced_assets_refuses_a_reference_leaving_the_catalog(tmp_path) -> None:
+    from automation_tool.executor.motion_authoring.part_workspace import (
+        referenced_assets,
+    )
+
+    catalog = tmp_path / "catalog"
+    part = catalog / "items" / "demo"
+    part.mkdir(parents=True)
+    with pytest.raises(SlotAnchorRejected):
+        referenced_assets(
+            '<script src="../../../outside.js"></script>',
+            catalog_root=catalog,
+            origin=part,
+        )

@@ -265,21 +265,21 @@ _REFERENCE: Final = re.compile(
 _COPIED_TEXT_SUFFIXES: Final = frozenset({".css", ".js"})
 
 
-def _copy_referenced(
-    workspace: object,
+def referenced_assets(
+    text: str,
     *,
     catalog_root: Path,
     origin: Path,
-    text: str,
-    directory: str,
-) -> None:
-    """Copy exactly what the finished document reaches for, and what that reaches.
+) -> dict[str, Path]:
+    """Everything the document reaches for, and what that reaches, by reference.
 
-    The sandbox accepts at most 128 allowed assets, and the shared dependency
-    tree alone holds 125 files — copying it wholesale spends the budget before
-    the part's own assets are counted, and five of the 134 parts already exceed
-    it. Reading the references out of the document that will actually be
-    rendered keeps the copy to what is used and needs no list to maintain.
+    Returns catalog-relative posix path → resolved file. One traversal for two
+    consumers: the working-copy writer copies exactly this set (PC-05 — the
+    sandbox caps at 128 allowed assets and the shared tree alone outgrew that
+    when PC-13 added the typefaces), and BM-16's per-part sweep builds its
+    allowlist from the same set for the same reason. A second implementation in
+    the sweep would be one drift away from "the sweep allows what the product
+    never ships".
 
     A reference that leaves the catalog is refused rather than skipped: the
     release tree is closed by construction, so one pointing outside means this
@@ -287,6 +287,7 @@ def _copy_referenced(
     """
     pending: list[tuple[Path, str]] = [(origin, text)]
     seen: set[Path] = set()
+    collected: dict[str, Path] = {}
     while pending:
         base, source = pending.pop()
         for match in _REFERENCE.finditer(source):
@@ -305,11 +306,27 @@ def _copy_referenced(
             seen.add(target)
             if target.is_symlink() or not target.is_file():
                 raise SlotAnchorRejected(f"a reference resolves to nothing: {reference}")
-            workspace.write_bytes(  # type: ignore[attr-defined]
-                f"{directory}/{relative.as_posix()}", target.read_bytes()
-            )
+            collected[relative.as_posix()] = target
             if target.suffix.lower() in _COPIED_TEXT_SUFFIXES:
                 pending.append((target.parent, target.read_text(encoding="utf-8", errors="ignore")))
+    return collected
+
+
+def _copy_referenced(
+    workspace: object,
+    *,
+    catalog_root: Path,
+    origin: Path,
+    text: str,
+    directory: str,
+) -> None:
+    """Copy exactly what `referenced_assets` collects, through the workspace."""
+    for relative, target in referenced_assets(
+        text, catalog_root=catalog_root, origin=origin
+    ).items():
+        workspace.write_bytes(  # type: ignore[attr-defined]
+            f"{directory}/{relative}", target.read_bytes()
+        )
 
 
 __all__ = [
@@ -318,6 +335,7 @@ __all__ = [
     "SHARED_DEPENDENCIES",
     "SlotAnchorRejected",
     "WORKING_COPY_DIRECTORY",
+    "referenced_assets",
     "render_part_working_copy",
     "write_part_working_copy",
 ]

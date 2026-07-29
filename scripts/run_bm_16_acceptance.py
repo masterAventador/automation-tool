@@ -206,14 +206,13 @@ def run_item_render_sweep(
 ) -> dict[str, object]:
     manifest = json.loads((release / "manifest.json").read_text(encoding="utf-8"))
     workspace = _writable_release_copy(release, run_root / "item-sweep")
-    shared = sorted(
-        # The sandbox contract is POSIX-relative and rejects backslashes, so a
-        # native `str()` here makes every Windows sweep fail closed with
-        # `render_sandbox_invalid` before a single item renders.
-        path.relative_to(workspace).as_posix()
-        for path in (workspace / "offline-deps").rglob("*")
-        if path.is_file()
+    # 白名单按引用收集，与产品的工作区写入器同一份遍历（PC-05 的决定）。
+    # PC-13 把共享依赖加了字体之后，「零件文件 + 全部共享依赖」的老算法在
+    # caption-texture 上超过了沙箱的 128 上限——产品早就不整树拷贝了，sweep 跟上。
+    from automation_tool.executor.motion_authoring.part_workspace import (
+        referenced_assets,
     )
+
     results: dict[str, object] = {}
     # PC-19 之后段必须自带时间窗，而本 sweep 一直用夹具默认的 [0, 3000ms] 渲每一个
     # 零件。零件的动作不必发生在前三秒——apple-money-count 声明 5 秒，数钱、闪绿、
@@ -237,7 +236,13 @@ def run_item_render_sweep(
         entries = [candidate for candidate in files if candidate.endswith(".html")]
         if not entries:
             raise RuntimeError(f"{name}: release item has no HTML entry")
-        allowed = sorted(set(files + shared) - {entries[0]})
+        entry_path = workspace / entries[0]
+        referenced = referenced_assets(
+            entry_path.read_text(encoding="utf-8"),
+            catalog_root=workspace,
+            origin=entry_path.parent,
+        )
+        allowed = sorted((set(files) | set(referenced)) - {entries[0]})
         if len(allowed) > 128:
             raise RuntimeError(f"{name}: allowlist exceeds the sandbox maximum")
         declared_seconds = catalog_durations.get(name)
