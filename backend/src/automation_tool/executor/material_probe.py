@@ -39,10 +39,12 @@ MAX_PROBE_OUTPUT_BYTES: Final = 1024 * 1024
 # ProRes 1080p would be some 265 GB over the same four hours — and nothing here
 # is meant to edit those.
 #
-# Against time: measured on the packaged interpreter, hashing runs at 2.08 GiB/s
-# and a file at this limit takes 8.7 s. The measuring pass above is already
-# allowed fifteen minutes for one file, so this is a small part of what probing
-# one material may cost.
+# Against time, from two separate measurements rather than one extrapolated:
+# hashing a real 512 MiB file ran at 2.08 GiB/s, which puts a file at this limit
+# at 7.7 s; streaming and hashing a 16 GiB file end to end actually took 8.7 s,
+# or 1.83 GiB/s, the difference being that the larger read no longer fits the
+# cache. Either way the measuring pass above is already allowed fifteen minutes
+# for one file, so this is a small part of what probing one material may cost.
 MAX_SOURCE_FILE_BYTES: Final = 16 * 1024 * 1024 * 1024
 # Matching `package_manifest._BUFFER_SIZE` and `macos_candidate._SCAN_CHUNK_SIZE`,
 # the two other places in the executor that stream a file past a hash or a scan.
@@ -297,8 +299,8 @@ def _require_tool(path: object) -> None:
         _reject(MaterialProbeRejection.UNREADABLE)
 
 
-def _require_source_file(path: object) -> Path:
-    """Check a file the user chose to import.
+def _require_source_file(path: object) -> tuple[Path, os.stat_result]:
+    """Check a file the user chose to import, and hand back what was checked.
 
     Unlike the tools, a symlink is fine here: user media legitimately lives
     behind one, and there is no integrity claim to protect — the supply-chain
@@ -307,6 +309,13 @@ def _require_source_file(path: object) -> Path:
     regular file at the end of the chain is what keeps a FIFO or character
     device out, either of which would leave ffprobe blocked instead of
     returning a fact.
+
+    The stat is returned rather than dropped because nothing here can hold the
+    path still afterwards: what this approved and what a caller later opens are
+    two different moments, and only a caller holding both can tell that they
+    were the same file. The two ffprobe callers have no use for it — they hand
+    the path to a subprocess, which is a third moment again — but the digest
+    does.
     """
     source = _require_path_shape(path)
     try:
@@ -315,7 +324,7 @@ def _require_source_file(path: object) -> Path:
         _reject(MaterialProbeRejection.UNREADABLE)
     if not stat.S_ISREG(metadata.st_mode) or not os.access(source, os.R_OK):
         _reject(MaterialProbeRejection.UNREADABLE)
-    return source
+    return source, metadata
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -719,7 +728,7 @@ def read_audio_facts(
         # it would cost a full pass for nothing.
         return AudioFacts(has_audio=False, loudness_lufs=None)
     tools.revalidate()
-    path = _require_source_file(source)
+    path, _ = _require_source_file(source)
     measurement = _measure(tools.ffmpeg_path, path)
     # A report that states findings but no loudness means the pass did not run
     # the way it was asked to — ebur128 states one per 100 ms window, so any
@@ -743,7 +752,7 @@ def read_audio_facts(
 def read_stream_facts(tools: PackagedMediaTools, source: Path) -> MediaStreamFacts:
     """Read duration, frame size and codecs for one file with the packaged ffprobe."""
     tools.revalidate()
-    path = _require_source_file(source)
+    path, _ = _require_source_file(source)
     payload = _run_probe(tools.ffprobe_path, path)
     streams = payload.get("streams")
     container = payload.get("format")
@@ -783,14 +792,30 @@ def read_stream_facts(tools: PackagedMediaTools, source: Path) -> MediaStreamFac
     )
 
 
-def _digest_stable_file(path: Path) -> str | None:
+def _names_the_same_file(left: os.stat_result, right: os.stat_result) -> bool:
+    """Whether two stats are of one file. Size and time are checked separately.
+
+    `package_manifest._same_file_identity` states the same rule for the build's
+    own inventory and folds `st_size` in; here the byte count the loop actually
+    hashed is a sharper test of the length than a second stat is, and the
+    modification time — which that one does not look at — is what catches a
+    writer who changes neither the inode nor the length.
+    """
+    return left.st_dev == right.st_dev and left.st_ino == right.st_ino
+
+
+def _digest_stable_file(path: Path, expected: os.stat_result) -> str | None:
     """Hash a file, or report that it would not hold still long enough to be hashed.
 
     `None` means "it moved", not "it failed": the caller turns both into the same
     rejection, but it does so after leaving its `except`, and returning rather
     than raising here is what keeps that possible.
 
-    Three things this refuses to hash, each measured rather than assumed:
+    `expected` is the stat `_require_source_file` took. Between that check and
+    this open the path is not held still by anything, so the two are different
+    moments and only comparing them says they were one file.
+
+    What this refuses to hash, each measured rather than assumed:
 
     - **Unlinked while being read.** POSIX keeps the inode alive behind the
       descriptor, so the read neither fails nor comes up short — measured, every
@@ -802,37 +827,60 @@ def _digest_stable_file(path: Path) -> str | None:
       2 MiB were appended mid-read. Stopping at the stated size bounds the work
       to something already checked against the limit rather than to whatever the
       writer decides to produce.
+    - **Rewritten in place while being read.** The one that neither the inode nor
+      the byte count can see: same `st_dev`, same `st_ino`, same `st_size`, and
+      measured over five trials the digest came back describing content that was
+      no longer on disk, five times out of five. A pre-allocating writer does
+      exactly this for its whole run — aria2's `prealloc`, BitTorrent clients and
+      recorders size the file up front and fill it in — so importing a download
+      too early is the ordinary way to reach it. Only `st_mtime_ns` moves, so
+      that is what is compared. This narrows the window rather than closing it:
+      the resolution is the filesystem's, nanoseconds on APFS but whole seconds
+      on some network filesystems, and a rewrite finishing inside one tick is
+      invisible.
     - **Replaced by another file.** The descriptor keeps the old inode, so the
       read succeeds and yields the old content's digest for the new file's path
       — measured, `st_ino` on the descriptor is unchanged while the path's is
       not. Storing that is exactly the mis-dedup this value exists to prevent.
 
-    Truncation mid-read is the fourth, and it needs no check of its own: the
-    loop ends early and the byte count comes up short of what was stated.
+    Truncation is the fifth, and it needs no check of its own: the loop ends
+    early and the byte count comes up short of what was stated.
     """
-    with path.open("rb") as handle:
-        # Taken from the descriptor rather than from the path, so the size
-        # checked is the size of the file about to be read. A path stat leaves
-        # room for a different file to be there by the time it is opened.
-        opened = os.fstat(handle.fileno())
+    # `O_NONBLOCK` because the mode cannot be checked until the open returns, and
+    # for a FIFO with no writer it never does: measured, a plain read-only open
+    # was still waiting after a full second, while this one came back in 0.165 ms
+    # and reported the FIFO. `_require_source_file` rejects a FIFO, but it cannot
+    # keep the path from becoming one afterwards, and this is the only one of the
+    # three entry points with no subprocess timeout behind it to end the wait.
+    # On a regular file the flag changes nothing — measured, the same bytes in
+    # the same chunks.
+    descriptor = os.open(os.fspath(path), os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        # Taken from the descriptor rather than from the path, so everything
+        # below is about the file actually being read. A path stat leaves room
+        # for a different file to be there by the time it is opened.
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            return None
+        if not _names_the_same_file(expected, opened):
+            return None
         if opened.st_size > MAX_SOURCE_FILE_BYTES:
             _reject(MaterialProbeRejection.FILE_TOO_LARGE)
         digest = hashlib.sha256()
         read_bytes = 0
-        while chunk := handle.read(_DIGEST_CHUNK_BYTES):
+        while chunk := os.read(descriptor, _DIGEST_CHUNK_BYTES):
             read_bytes += len(chunk)
             if read_bytes > opened.st_size:
                 return None
             digest.update(chunk)
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
     if read_bytes < opened.st_size:
         return None
-    current = path.stat()
-    # Size is deliberately left out of this comparison, unlike
-    # `package_manifest._same_file_identity`, which states the same rule for the
-    # build's own inventory: the byte count the loop actually hashed is a
-    # sharper test of the size than a second stat is, and it has already been
-    # made above.
-    if (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino):
+    if after.st_mtime_ns != opened.st_mtime_ns:
+        return None
+    if not _names_the_same_file(opened, path.stat()):
         return None
     return digest.hexdigest()
 
@@ -843,7 +891,7 @@ def read_content_digest(source: Path) -> str:
     The only fact about a material that the packaged tools are not needed for,
     so they are not taken: nothing here starts a subprocess.
     """
-    path = _require_source_file(source)
+    path, expected = _require_source_file(source)
     # Rejected after the handler has been left, as in `_run_probe`. `_reject`
     # suppresses the chain, but suppression only stops the renderers: the
     # handled exception stays reachable through `__context__`, and
@@ -851,7 +899,7 @@ def read_content_digest(source: Path) -> str:
     # the reference outright.
     content_digest: str | None
     try:
-        content_digest = _digest_stable_file(path)
+        content_digest = _digest_stable_file(path, expected)
     except OSError:
         content_digest = None
     if content_digest is None:

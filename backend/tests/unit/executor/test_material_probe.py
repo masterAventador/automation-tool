@@ -5,6 +5,7 @@ import json
 import os
 import random
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,7 @@ import time
 import traceback
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -2641,9 +2643,10 @@ class TestContentDigestRejectsAnUnusableSource:
 
 
 # Hashing throughput of the packaged interpreter, measured on this repository's
-# temporary directory over a 512 MiB file: 0.24 s, or 2.08 GiB/s. Only the two
-# tests below read it, and only to keep the byte limit's cost stated rather than
-# assumed.
+# temporary directory over a real 512 MiB file: 0.24 s, or 2.08 GiB/s. A 16 GiB
+# read measures slower — 8.7 s, or 1.83 GiB/s, once it stops fitting the cache —
+# so the figure below is the optimistic one, which is the right direction for a
+# budget that must not be quietly exceeded.
 _MEASURED_HASH_GIB_PER_SECOND = 2.08
 
 
@@ -2664,11 +2667,11 @@ class TestContentDigestByteLimit:
     def test_the_limit_stays_inside_its_stated_time_budget(self) -> None:
         """The other direction: a limit is only a bound if it bounds something.
 
-        At the measured rate the shipped value is worth 8.7 s of hashing. Thirty
-        is the ceiling this holds it to — still a small part of what probing one
-        material may cost, since the measuring pass is allowed fifteen minutes,
-        and low enough that raising the limit fourfold has to be argued for here
-        rather than done quietly.
+        At the rate above the shipped value is worth 7.7 s of hashing, and 8.7 s
+        when actually measured end to end. Thirty is the ceiling this holds it
+        to — still a small part of what probing one material may cost, since the
+        measuring pass is allowed fifteen minutes, and low enough that raising
+        the limit fourfold has to be argued for here rather than done quietly.
         """
         seconds = MAX_SOURCE_FILE_BYTES / (_MEASURED_HASH_GIB_PER_SECOND * 1024**3)
         assert seconds <= 30.0
@@ -2690,8 +2693,8 @@ class TestContentDigestByteLimit:
     ) -> None:
         """The accepting endpoint, which is the one that tells `>` from `>=`.
 
-        Read at the shipped value it would hash 16 GiB — measured 8.7 s, which is
-        as long as this entire file takes — so the limit is moved rather than the
+        Read at the shipped value it would hash 16 GiB — measured 8.7 s, about as
+        long as this entire file takes — so the limit is moved rather than the
         fixture grown. The production path is unchanged; only the number it
         compares against differs, and the test above pins that number.
         """
@@ -2831,3 +2834,183 @@ class TestContentDigestLeaksNoPath:
         assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
         assert excinfo.value.__context__ is None
         assert secret not in _rendered_traceback(excinfo.value)
+
+
+def _freeze_the_descriptor_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every `os.fstat` report one fixed modification time.
+
+    Stands in for a filesystem whose timestamps are too coarse to show a change
+    that happened inside one tick, which is the case the byte counts exist for.
+    Only the five fields the digest reads are carried over, so a field it starts
+    reading later cannot silently arrive frozen as well.
+    """
+    real_fstat = os.fstat
+
+    def frozen(fileno: int) -> Any:
+        actual = real_fstat(fileno)
+        return SimpleNamespace(
+            st_mode=actual.st_mode,
+            st_size=actual.st_size,
+            st_dev=actual.st_dev,
+            st_ino=actual.st_ino,
+            st_mtime_ns=0,
+        )
+
+    # Patched on `os` itself, which is the same object the module holds; reaching
+    # through `material_probe.os` would be asking the module for a name it does
+    # not export.
+    monkeypatch.setattr(os, "fstat", frozen)
+
+
+class TestContentDigestNeedsMoreThanTheInode:
+    """Same inode and same length is not the same content.
+
+    Both additions here answer the same gap: the checks written first ask who
+    the file is and how long it is, and a writer that changes neither walks
+    straight through them.
+    """
+
+    def test_an_in_place_rewrite_moves_nothing_the_inode_checks_look_at(
+        self, tmp_path: Path
+    ) -> None:
+        """Why the byte count and the inode are not enough between them.
+
+        Measured over five trials: rewriting a block in place leaves `st_dev`,
+        `st_ino` and `st_size` identical and changes only `st_mtime_ns`. This is
+        what a pre-allocating downloader does for its whole run — aria2's
+        `prealloc`, BitTorrent clients and recorders size the file up front and
+        fill it in — so it is the ordinary shape of importing a file too early,
+        not a contrived one.
+        """
+        source = _source(tmp_path, payload=_positional_bytes(4 * 1024))
+        before = source.stat()
+        descriptor = os.open(source, os.O_WRONLY)
+        try:
+            os.pwrite(descriptor, b"y" * 1024, 0)
+        finally:
+            os.close(descriptor)
+        after = source.stat()
+        assert (before.st_dev, before.st_ino, before.st_size) == (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+        )
+        assert before.st_mtime_ns != after.st_mtime_ns
+
+    def test_rejects_a_file_rewritten_in_place_while_it_is_being_read(self, tmp_path: Path) -> None:
+        """The digest would otherwise describe bytes that are no longer there.
+
+        Measured against the implementation before this guard: five trials out
+        of five returned a digest, and none of the five matched what was on
+        disk when the call returned. Importing a half-written download would
+        then store a digest nothing will ever hash to again, and the same
+        material re-imported once complete would be filed a second time —
+        which is the one thing this value exists to prevent.
+        """
+
+        def rewrite(path: Path) -> None:
+            descriptor = os.open(path, os.O_WRONLY)
+            try:
+                os.pwrite(descriptor, b"y" * material_probe._DIGEST_CHUNK_BYTES, 0)
+            finally:
+                os.close(descriptor)
+
+        source = _sparse_source(tmp_path, _STABILITY_FIXTURE_BYTES)
+        excinfo, armed_at = _rejection_while_mutating(source, rewrite)
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+        assert armed_at < 0.5, f"the file was rewritten {armed_at:.0%} into the call, not mid-read"
+
+    def test_a_read_only_open_of_a_fifo_never_returns_on_its_own(self, tmp_path: Path) -> None:
+        """Why the open needs `O_NONBLOCK`, and why checking the mode is not enough.
+
+        The mode can only be read once `open` has returned, and for a FIFO with
+        no writer it does not return at all — measured, a plain `O_RDONLY` open
+        was still waiting after a full second, while the same open with
+        `O_NONBLOCK` came back in 0.165 ms and reported `S_ISFIFO`. This entry
+        point is the only one of the three with no subprocess timeout behind it,
+        so a wait here has nothing to end it.
+        """
+        fifo = tmp_path / "pipe.mp4"
+        os.mkfifo(fifo)
+        returned: dict[str, bool] = {"blocking": False}
+
+        def blocking_open() -> None:
+            os.close(os.open(fifo, os.O_RDONLY))
+            returned["blocking"] = True
+
+        waiter = threading.Thread(target=blocking_open, daemon=True)
+        waiter.start()
+        time.sleep(0.3)
+        assert not returned["blocking"], "a plain read-only open of an empty FIFO returned"
+
+        descriptor = os.open(fifo, os.O_RDONLY | os.O_NONBLOCK)
+        try:
+            assert not stat.S_ISREG(os.fstat(descriptor).st_mode)
+        finally:
+            os.close(descriptor)
+
+        # Release the waiting thread rather than leaving it parked for the run.
+        writer = os.open(fifo, os.O_WRONLY)
+        try:
+            waiter.join(timeout=5.0)
+        finally:
+            os.close(writer)
+        assert returned["blocking"]
+
+    def test_rejects_a_path_that_is_no_longer_a_regular_file_when_opened(
+        self, tmp_path: Path
+    ) -> None:
+        """The window between the guard's check and the open, reached directly.
+
+        `_require_source_file` cannot keep the path a regular file after it has
+        looked, so what it approved and what gets opened are two different
+        moments. Production reaches this only by losing that race, which is not
+        something a test can arrange, so the guard is exercised where it lives.
+        """
+        fifo = tmp_path / "pipe.mp4"
+        os.mkfifo(fifo)
+        assert material_probe._digest_stable_file(fifo, os.stat(fifo)) is None
+
+    def test_rejects_a_file_swapped_between_the_guard_and_the_open(self, tmp_path: Path) -> None:
+        """Same window, the other outcome: still a regular file, but a different one.
+
+        The stat that authorized the import is carried in rather than thrown
+        away, so the file that gets hashed has to be the file that was checked.
+        """
+        approved = _source(tmp_path, "approved.mp4", payload=_positional_bytes(4096))
+        impostor = _source(tmp_path, "impostor.mp4", payload=_positional_bytes(4096))
+        assert material_probe._digest_stable_file(impostor, approved.stat()) is None
+
+    def test_rejects_a_file_that_grows_when_the_clock_cannot_show_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The byte count has to stand on its own, because the timestamp may not.
+
+        `st_mtime_ns` is only as fine as the filesystem storing it — APFS keeps
+        nanoseconds, but network filesystems commonly keep whole seconds — so a
+        change finishing inside one tick moves nothing the clock can show.
+
+        Restoring the timestamp with `os.utime` does not reproduce that: measured,
+        APFS writes the truncation's own timestamp back *after* the restore, so
+        the clock moves anyway and this would pass on the strength of the very
+        check it is meant to stand in for. Freezing what the descriptor reports
+        is what actually takes the clock out of the answer.
+        """
+        _freeze_the_descriptor_clock(monkeypatch)
+
+        def append(path: Path) -> None:
+            with path.open("ab") as handle:
+                handle.write(b"x" * material_probe._DIGEST_CHUNK_BYTES)
+
+        source = _sparse_source(tmp_path, _STABILITY_FIXTURE_BYTES)
+        excinfo, _ = _rejection_while_mutating(source, append)
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+
+    def test_rejects_a_file_truncated_when_the_clock_cannot_show_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Same fallback, the other direction: fewer bytes arrived than were stated."""
+        _freeze_the_descriptor_clock(monkeypatch)
+        source = _sparse_source(tmp_path, _STABILITY_FIXTURE_BYTES)
+        excinfo, _ = _rejection_while_mutating(source, lambda path: os.truncate(path, 4096))
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
