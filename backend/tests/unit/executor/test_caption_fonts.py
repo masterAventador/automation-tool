@@ -168,6 +168,23 @@ class TestFontKeyPattern:
 
         assert fonts.FONT_KEY_PATTERN.pattern == editing_project._FONT_KEY_PATTERN.pattern
 
+    def test_the_guard_holds_even_when_called_with_match(self) -> None:
+        r"""What the `\Z` anchor buys, stated as behaviour not as characters.
+
+        No `fullmatch` case can pin this anchor: under `fullmatch` a `$` is
+        equivalent, because the verb already requires the whole string to be
+        consumed and both refuse a trailing newline. The entire value of `\Z`
+        is that the guard survives the calling verb degrading to `match`,
+        where `$` would accept "noto\n" because `$` also matches just before
+        a final newline.
+
+        So this asserts the property rather than the pattern text. Reverting
+        the anchor to `$` turns it red; a test comparing the pattern string
+        to a literal would also turn red, but would only be reporting that
+        someone edited a string.
+        """
+        assert fonts.FONT_KEY_PATTERN.match("noto\n") is None
+
 
 class TestBundleLayout:
     def test_every_registered_bundle_has_a_source_location(self) -> None:
