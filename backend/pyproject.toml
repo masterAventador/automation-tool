@@ -48,6 +48,14 @@ dev = [
 ]
 executor = [
     "playwright==1.61.0",
+    # Captions are drawn by PIL and overlaid by ffmpeg: the shipped ffmpeg has
+    # no freetype/libass, so drawtext/subtitles/ass are all unavailable (see
+    # the local smart edit design 5.2). fontTools reads each face's cmap to
+    # decide which face draws a character, and brotli is what lets it read the
+    # WOFF2 faces -- FreeType decompresses those on its own, fontTools does not.
+    "pillow",
+    "fonttools",
+    "brotli",
 ]
 
 [tool.uv]
@@ -77,6 +85,14 @@ mypy_path = "src"
 python_version = "3.12"
 strict = true
 warn_unused_configs = true
+
+# fontTools ships no py.typed marker, so strict mode cannot follow it. Scoped
+# to that one package deliberately: it is the only untyped import in the tree,
+# and Pillow -- the other new face-handling dependency -- does ship py.typed,
+# so caption rendering stays fully checked.
+[[tool.mypy.overrides]]
+module = "fontTools.*"
+ignore_missing_imports = true
 
 [tool.coverage.run]
 branch = true

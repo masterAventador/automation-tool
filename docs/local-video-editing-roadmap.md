@@ -57,7 +57,7 @@
 | --- | --- | --- | --- | --- |
 | LE-07 | 素材探测 | Local Executor 侧用随包 ffprobe 读时长/分辨率/编码，`silencedetect` 判有无有效音频与响度，内容摘要去重；路径映射只存本机不上报 Control Plane | LE-02 | ⬜ 未开始 |
 | LE-08 | 自适应抽帧 | `select='eq(n,0)+gt(scene,TH)'` 场景检测抽帧、长镜头按时间补抽、按时长分档封顶、超限时保切点降采样；产出 768px JPEG 并断言帧数与文件存在 | LE-07 | ⬜ 未开始 |
-| LE-09 | 字幕渲染与 fallback 机制 | PIL 渲染字幕 PNG；`fontTools` 读 cmap 实现缺字 fallback **机制**；换行、描边、行距可控。**验收判据不是「PNG 非空」——LE-09 调研实测证明那条零捕捉力**：中文字体渲染不在 cmap 的 `😀` 会画出 1226 个非零像素的实心方框（与 `.notdef` 逐字节相同），而拉丁字体渲染 `中` 画的是空白；豆腐块有墨、缺字无墨，非空断言两头都抓不住。**正确判据是与 `.notdef` 位图差分**（`font.getmask(chr(0x10FFFF))`）。**只用生产在册的 Noto Sans CJK SC 加一个在册拉丁字体验证 fallback 链路本身**，字体扩充与装配属于 LE-20，两者不得互相阻塞。**缺字且整条链都没有时 fail closed**（抛异常、带码位不带原文、不留半成品文件），不画替代符号——画了会让所有下游断言照常通过，正是 T108 事故的形状。**字幕样式基线（字号/描边/行距/字体键）已由 `EditingProject.caption_style`（`CaptionStyle`）承载，LE-09 消费它而不是自己定义**；**换行宽度由本任务提出并回填 `CaptionStyle`**——LE-04 终审指出：台账既要求「换行可控」又明令「样式基线由 `EditingProject.caption_style` 承载、LE-09 消费它而不是自己定义」，而那四个字段里没有换行宽度，两句直接冲突；另 `line_spacing` 只在多行时有意义、多行又只在换行存在后才出现，四字段自身也不自洽。**字幕位置/边距同样缺失**，一并在此定 | LE-01 | ⬜ 未开始 |
+| LE-09 | 字幕渲染与 fallback 机制 | PIL 渲染字幕 PNG；`fontTools` 读 cmap 实现缺字 fallback **机制**；换行、描边、行距可控。**验收判据不是「PNG 非空」——LE-09 调研实测证明那条零捕捉力**：中文字体渲染不在 cmap 的 `😀` 会画出 1226 个非零像素的实心方框（与 `.notdef` 逐字节相同），而拉丁字体渲染 `中` 画的是空白；豆腐块有墨、缺字无墨，非空断言两头都抓不住。**正确判据是与 `.notdef` 位图差分**（`font.getmask(chr(0x10FFFF))`）。**只用生产在册的 Noto Sans CJK SC 加一个在册拉丁字体验证 fallback 链路本身**，字体扩充与装配属于 LE-20，两者不得互相阻塞。**缺字且整条链都没有时 fail closed**（抛异常、带码位不带原文、不留半成品文件），不画替代符号——画了会让所有下游断言照常通过，正是 T108 事故的形状。**T1～T5 全部完成**（机制、注册表、cmap fallback、样式与字体加载、排版出图、真实面验收），证据见 `docs/development/LE-09.md`；**顶格 `🔍 待验收`**——补验收依赖 LE-10（PNG 进 ffmpeg overlay 出成片）、LE-20（字体进执行器包并有出厂门禁）、LE-17（工作台接上形成用户可操作路径），三条都不满足之前不得标完成。**原登记的两项待定已在实现中定型**：换行宽度首期为固定边距断行（回填 `CaptionStyle` 登记在 `docs/development/LE-09.md` 遗留项 4，归 Control Plane 侧），字幕位置/边距归 LE-10 的 overlay | LE-01 | 🔍 待验收 |
 | LE-10 | 视频渲染管线 | trim(in/out) → scale/crop → fps 归一 → concat → `xfade` 转场 → 字幕 overlay；补齐 `ffmpeg-toolchain.v1.json` 的 `required_capabilities.filters` 声明（xfade/select/scdet 等，**无需重建 ffmpeg**）；产出 mp4 并以 ffprobe 断言编码/分辨率/帧数/时长。**输出画幅与帧率已由 `EditingProject.output`（`OutputSpec`）承载，ffprobe 断言的目标值取自它**；**并决定两项 LE-04 未覆盖的渲染必需信息**：① 16:9 素材放进 9:16 画幅时是 scale 加黑边还是 crop 裁切（两个完全不同的成片，加黑边还需填充色），`OutputSpec` 只有 width/height/fps、没有字段表达这个选择；② **毫秒时间轴与 fps 帧栅格的对账**——LE-04 终审实测 1ms 的视觉 clip 与 1ms 的 xfade 转场当前都被接受，而任何合法 fps（12–60）下一帧至少 16.7ms，这段渲不出任何一帧；且 `TimelineTrack` 要求 `start_ms == previous_end - overlap` 精确成立、`Timeline` 要求 `picture.end_ms == duration_ms` 精确相等，而渲染器必须把它们量化到帧栅格，量化误差累积后成片时长会偏离 `duration_ms`——**而本任务的完成定义恰恰是 ffprobe 断言帧数与时长**。谁对账、允许多大偏差，需在此定死 | LE-03,LE-09 | ⬜ 未开始 |
 | LE-11 | 音频管线 | 旁白/原声/BGM 三轨；`sidechaincompress` 以旁白为 sidechain 自动闪避；`has_audio` 为假时不排 ambient 轨；采样率归一；断言输出音轨时长与成片一致；**必须实现设计 §5.3 的「原声处理方式」三态开关**（自动闪避 / 固定音量 / 静音，默认自动闪避）。LE-03 终审指出模型只有 `gain_db`（对应三态里的基准音量那一维），三态本身表达不出来：静音可靠不排 ambient clip 表达，但「固定音量」需要一条**既不被旁白压、也不作为 sidechain 源**的音频通路，而五种轨道里没有这样一条——NARRATION 是 sidechain 源，AMBIENT 与 MUSIC 按 §5 都要过 `sidechaincompress`。本任务需决定：加第六种轨道、给 clip 加处理方式字段、还是收窄设计承诺 | LE-10 | ⬜ 未开始 |
 | LE-12 | Worker 生命周期与任务控制 | Tauri 调度渲染 Worker：随机 loopback、高熵会话令牌、健康检查、进度上报、取消与紧停、崩溃恢复、App 退出后任务恢复；`cargo test` 覆盖 | LE-11 | ⬜ 未开始 |
@@ -100,9 +100,9 @@
 
 - 任务总数：24
 - ✅ 已完成：4
-- 🔍 待验收：0
+- 🔍 待验收：1
 - 🧪 RED / 🚧 实现中：1
-- ⬜ 未开始：19
+- ⬜ 未开始：18
 
 ### 4.1 并行期间本文件有三份副本，计数只对本分支成立
 

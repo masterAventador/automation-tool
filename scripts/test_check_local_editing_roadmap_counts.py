@@ -29,6 +29,7 @@ from check_local_editing_roadmap_counts import (  # noqa: E402
 _DONE_COUNT = re.compile(r"^- ✅ 已完成：(\d+)$", re.MULTILINE)
 _NOT_STARTED_COUNT = re.compile(r"^- ⬜ 未开始：(\d+)$", re.MULTILINE)
 _IN_FLIGHT_COUNT = re.compile(r"^- 🧪 RED / 🚧 实现中：(\d+)$", re.MULTILINE)
+_PENDING_ACCEPT_COUNT = re.compile(r"^- 🔍 待验收：(\d+)$", re.MULTILINE)
 _NOT_STARTED_ROW = re.compile(r"^\| LE-\d+ \|.*\| ⬜ 未开始 \|$", re.MULTILINE)
 
 
@@ -71,12 +72,19 @@ def test_section_count_mismatch_fails(tmp_path: Path) -> None:
 
 
 def test_status_sum_mismatch_fails(tmp_path: Path) -> None:
-    """声明的四个状态计数加起来必须等于任务总数。"""
+    """声明的四个状态计数加起来必须等于任务总数。
+
+    待验收计数从活台账里读出来再 +5，不写死——这条曾硬编码替换「待验收：0」，
+    LE-09 收口把真值改成 1 之后替换成了 no-op，夹具与真台账相同、测试反而红。
+    正是本文件头注释警告的那种时效腐烂，只是当时漏改了这一条。
+    """
     broken = tmp_path / "roadmap.md"
+    text = _LEDGER.read_text(encoding="utf-8")
+    pending_match = _PENDING_ACCEPT_COUNT.search(text)
+    assert pending_match is not None
+    inflated = int(pending_match.group(1)) + 5
     broken.write_text(
-        _LEDGER.read_text(encoding="utf-8").replace(
-            "- 🔍 待验收：0", "- 🔍 待验收：5"
-        ),
+        _PENDING_ACCEPT_COUNT.sub(f"- 🔍 待验收：{inflated}", text),
         encoding="utf-8",
     )
     result = _run(broken)
