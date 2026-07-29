@@ -57,7 +57,7 @@
 | --- | --- | --- | --- | --- |
 | LE-07 | 素材探测 | Local Executor 侧用随包 ffprobe 读时长/分辨率/编码，`silencedetect` 判有无有效音频与响度，内容摘要去重；路径映射只存本机不上报 Control Plane | LE-02 | ⬜ 未开始 |
 | LE-08 | 自适应抽帧 | `select='eq(n,0)+gt(scene,TH)'` 场景检测抽帧、长镜头按时间补抽、按时长分档封顶、超限时保切点降采样；产出 768px JPEG 并断言帧数与文件存在 | LE-07 | ⬜ 未开始 |
-| LE-09 | 字幕渲染与 fallback 机制 | PIL 渲染字幕 PNG；`fontTools` 读 cmap 实现缺字 fallback **机制**；换行、描边、行距可控；产出 PNG 并断言像素尺寸与非空。**只用现有 Noto Sans SC 加一个拉丁字体验证 fallback 链路本身**，生僻字字体的引入与装配属于 LE-19，两者不得互相阻塞 | LE-01 | ⬜ 未开始 |
+| LE-09 | 字幕渲染与 fallback 机制 | PIL 渲染字幕 PNG；`fontTools` 读 cmap 实现缺字 fallback **机制**；换行、描边、行距可控。**验收判据不是「PNG 非空」——LE-09 调研实测证明那条零捕捉力**：中文字体渲染不在 cmap 的 `😀` 会画出 1226 个非零像素的实心方框（与 `.notdef` 逐字节相同），而拉丁字体渲染 `中` 画的是空白；豆腐块有墨、缺字无墨，非空断言两头都抓不住。**正确判据是与 `.notdef` 位图差分**（`font.getmask(chr(0x10FFFF))`）。**只用生产在册的 Noto Sans CJK SC 加一个在册拉丁字体验证 fallback 链路本身**，字体扩充与装配属于 LE-20，两者不得互相阻塞。**缺字且整条链都没有时 fail closed**（抛异常、带码位不带原文、不留半成品文件），不画替代符号——画了会让所有下游断言照常通过，正是 T108 事故的形状 | LE-01 | ⬜ 未开始 |
 | LE-10 | 视频渲染管线 | trim(in/out) → scale/crop → fps 归一 → concat → `xfade` 转场 → 字幕 overlay；补齐 `ffmpeg-toolchain.v1.json` 的 `required_capabilities.filters` 声明（xfade/select/scdet 等，**无需重建 ffmpeg**）；产出 mp4 并以 ffprobe 断言编码/分辨率/帧数/时长 | LE-03,LE-09 | ⬜ 未开始 |
 | LE-11 | 音频管线 | 旁白/原声/BGM 三轨；`sidechaincompress` 以旁白为 sidechain 自动闪避；`has_audio` 为假时不排 ambient 轨；采样率归一；断言输出音轨时长与成片一致；**必须实现设计 §5.3 的「原声处理方式」三态开关**（自动闪避 / 固定音量 / 静音，默认自动闪避）。LE-03 终审指出模型只有 `gain_db`（对应三态里的基准音量那一维），三态本身表达不出来：静音可靠不排 ambient clip 表达，但「固定音量」需要一条**既不被旁白压、也不作为 sidechain 源**的音频通路，而五种轨道里没有这样一条——NARRATION 是 sidechain 源，AMBIENT 与 MUSIC 按 §5 都要过 `sidechaincompress`。本任务需决定：加第六种轨道、给 clip 加处理方式字段、还是收窄设计承诺 | LE-10 | ⬜ 未开始 |
 | LE-12 | Worker 生命周期与任务控制 | Tauri 调度渲染 Worker：随机 loopback、高熵会话令牌、健康检查、进度上报、取消与紧停、崩溃恢复、App 退出后任务恢复；`cargo test` 覆盖 | LE-11 | ⬜ 未开始 |
@@ -84,7 +84,7 @@
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| LE-20 | 中文字体扩充与装配 | 核实 Plangothic/文津宋体/霞鹜文楷 GB 体积后决定进包或走离线按需下载；锁版本、锁 SHA256、登记许可证与 SBOM；**必须有生产装配路径与出厂门禁**，不允许只有测试路径；用户可选字体 | LE-09 | ⬜ 未开始 |
+| LE-20 | 中文字体扩充与装配 | **本任务的前提已被 LE-09 调研推翻，开工前必须先重估必要性**：设计文档 §6.1 称「Noto Sans SC 覆盖约 3 万字、扩展 B 以上是豆腐块」，但生产在册的中文字体其实是 `contracts/quality/asset-rights-policy.v1.json` 锁的 **Noto Sans CJK SC**（静态 OTF，`Sans2.004`，由 `scripts/subtitle_font_assets.py` 按 SHA-256 取到构建缓存），LE-09 实测 `𠮷`（U+20BB7，扩展 B）在其 cmap 中映射到真实字形 `cid59625`。**先量清楚它到底缺哪些字**，再决定是否引入 Plangothic/文津宋体/霞鹜文楷 GB；若确需引入：锁版本、锁 SHA256、登记许可证与 SBOM，**必须有生产装配路径与出厂门禁**，不允许只有测试路径；用户可选字体。**装配整体归本任务**（LE-09 只交付机制，完成后最多 `🔍 待验收`）；同时处理 `scripts/check_embedded_browser_package.py:106` 硬编码的 `local-executor: 177 MiB` 上限——LE-09 引入 pillow(约 14 MB) + fonttools(约 18 MB) + brotli 会冲击它 | LE-09 | ⬜ 未开始 |
 
 ### 3.8 验收（3 项）
 

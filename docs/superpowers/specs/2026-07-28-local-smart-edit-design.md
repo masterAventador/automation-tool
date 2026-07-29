@@ -321,6 +321,16 @@ amix → libx264 veryfast crf23 → mp4
 
 ## 6. 字体方案
 
+### 6.0 本节 §6.1 的说法已被 LE-09 调研推翻（2026-07-29 实测）
+
+**下面 §6.1 关于「生产中文字体是 Noto Sans SC、覆盖约 3 万字、扩展 B 以上是豆腐块」的判断是错的**，保留原文以存档，但不要据此决策：
+
+- `contracts/video/offline-motion-dependencies.v1.json` 里的 18 个字体家族**全部是拉丁字体**，`keptFontSubsets` 只有 latin/latin-ext，**一个中文字体都没有**；
+- 生产在册的中文字体是 `contracts/quality/asset-rights-policy.v1.json` 锁的 **Noto Sans CJK SC**（静态 OTF，版本 `Sans2.004`），仓库里不存二进制，构建期由 `scripts/subtitle_font_assets.py` 按 SHA-256 取到 `~/Library/Caches/automation-tool-build/subtitle-fonts/`，有回归用例守着；
+- **它覆盖到扩展 B**：`𠮷`（U+20BB7）在其 cmap 中映射到真实字形 `cid59625`，不是豆腐块。
+
+因此 §6.2 候选字体表里「Plangothic 正好是补集」的论证前提不成立，LE-20 必须先量清楚现有字体到底缺哪些字再决定是否引入。
+
 ### 6.1 现状更正
 
 `contracts/video/offline-motion-dependencies.v1.json` 锁定 23 个 Google 字体家族（全部 OFL-1.1，钉在 commit `00e726a`），本机落地 143 个 woff2 分片。其中**仅 Noto Sans SC 一个支持中文**，其余为拉丁字体。
