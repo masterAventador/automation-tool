@@ -8,7 +8,7 @@
 - 每个任务的提交、RED/GREEN、失败矩阵、验收证据与边界单独写入 `docs/development/<任务ID>.md`
 - **禁止**把完成记录、测试命令明细或历史证据追加回本文件
 - 本线任务不向 `docs/development-roadmap.md` 或 `docs/embedded-browser-video-studio-roadmap.md` 双写状态
-- **每条工作线**同一时间最多一个任务处于 `🧪 RED` 或 `🚧 实现中`。2026-07-29 起经用户授权开三条并行线，各自独占一棵 worktree（`wt/smart-edit` 走 Control Plane 线、`wt/le-07-probe` 走素材探测、`wt/le-09-captions` 走字幕渲染）；三条线依赖互不重叠、改动文件零交集
+- **每条工作线**同一时间最多一个任务处于 `🧪 RED` 或 `🚧 实现中`。2026-07-29 起经用户授权开三条并行线，各自独占一棵 worktree（`wt/smart-edit` 走 Control Plane 线、`wt/le-07-probe` 走素材探测、`wt/le-09-captions` 走字幕渲染）；三条线的**代码文件**零交集；**台账、门禁脚本与设计文档是共享面**，合并时按 §4.1 处理（原写「改动文件零交集」，已被实际推翻：`dcfeb8e` 改了门禁脚本、`cf5ae10` 改了台账与设计文档，而且这个交集已经造成过一次事故——门禁在一条分支上被放宽、而那条分支看不到台账改动，被终审判为 Critical）
 
 ## 1. 为什么装配单独立项
 
@@ -48,7 +48,7 @@
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| LE-05 | 数据库迁移与仓储 | 项目/素材/时间轴/任务表迁移、SQLAlchemy 仓储；**真实 PostgreSQL** 集成测试，断言落库行；**同任务内加结构性边界测试守住 Material 的描述保护**——`with_ai_description` 只挡住走它的调用方，`dataclasses.replace()` 与直接构造 `Material(...)` 都能到达它要阻止的状态（转换不变式无法由单快照构造校验表达，LE-02 T5 审查实跑证明）。仿 `backend/tests/unit/executor/test_shipped_package_boundary.py` 的 AST 做法，禁止 `material.py` 之外的模块调用 `replace(` 于 Material 或直接构造它 | LE-04 | ⬜ 未开始 |
+| LE-05 | 数据库迁移与仓储 | 项目/素材/时间轴/任务表迁移、SQLAlchemy 仓储；**真实 PostgreSQL** 集成测试，断言落库行；**同任务内加结构性边界测试守住 Material 的描述保护**——`with_ai_description` 只挡住走它的调用方，`dataclasses.replace()` 与直接构造 `Material(...)` 都能到达它要阻止的状态（转换不变式无法由单快照构造校验表达，LE-02 T5 审查实跑证明）。仿 `backend/tests/unit/executor/test_shipped_package_boundary.py` 的 AST 做法，禁止 `material.py` 之外的模块调用 `replace(` 于 Material 或直接构造它；**并承接 LE-04 新造的三条跨聚合根不变式**（领域对象不持有彼此引用，只能在仓储层成立，LE-04 终审实测三者当前全部 ACCEPTED）：① `EditingJob.project_id` 必须等于其 `timeline_id` 所属 `Timeline.project_id`——`project_id` 同时挂在两处是有意冗余，**普通外键管不住这个三角，需要复合外键或 CHECK**；② `EditingJob.timeline_revision` 必须真实存在；③ 同一 `(timeline_id, revision)` 不得同时有多个 QUEUED 作业 | ⬜ 未开始 |
 | LE-06 | 剪辑 REST API | `control_plane/api/` 下新增剪辑路由：项目 CRUD、素材登记与查询、时间轴保存与修订、任务提交与查询；FastAPI 真实起服务的契约测试 | LE-05 | ⬜ 未开始 |
 
 ### 3.4 本地渲染引擎（6 项）
@@ -57,8 +57,8 @@
 | --- | --- | --- | --- | --- |
 | LE-07 | 素材探测 | Local Executor 侧用随包 ffprobe 读时长/分辨率/编码，`silencedetect` 判有无有效音频与响度，内容摘要去重；路径映射只存本机不上报 Control Plane | LE-02 | ⬜ 未开始 |
 | LE-08 | 自适应抽帧 | `select='eq(n,0)+gt(scene,TH)'` 场景检测抽帧、长镜头按时间补抽、按时长分档封顶、超限时保切点降采样；产出 768px JPEG 并断言帧数与文件存在 | LE-07 | ⬜ 未开始 |
-| LE-09 | 字幕渲染与 fallback 机制 | PIL 渲染字幕 PNG；`fontTools` 读 cmap 实现缺字 fallback **机制**；换行、描边、行距可控。**验收判据不是「PNG 非空」——LE-09 调研实测证明那条零捕捉力**：中文字体渲染不在 cmap 的 `😀` 会画出 1226 个非零像素的实心方框（与 `.notdef` 逐字节相同），而拉丁字体渲染 `中` 画的是空白；豆腐块有墨、缺字无墨，非空断言两头都抓不住。**正确判据是与 `.notdef` 位图差分**（`font.getmask(chr(0x10FFFF))`）。**只用生产在册的 Noto Sans CJK SC 加一个在册拉丁字体验证 fallback 链路本身**，字体扩充与装配属于 LE-20，两者不得互相阻塞。**缺字且整条链都没有时 fail closed**（抛异常、带码位不带原文、不留半成品文件），不画替代符号——画了会让所有下游断言照常通过，正是 T108 事故的形状。**字幕样式基线（字号/描边/行距/字体键）已由 `EditingProject.caption_style`（`CaptionStyle`）承载，LE-09 消费它而不是自己定义** | LE-01 | ⬜ 未开始 |
-| LE-10 | 视频渲染管线 | trim(in/out) → scale/crop → fps 归一 → concat → `xfade` 转场 → 字幕 overlay；补齐 `ffmpeg-toolchain.v1.json` 的 `required_capabilities.filters` 声明（xfade/select/scdet 等，**无需重建 ffmpeg**）；产出 mp4 并以 ffprobe 断言编码/分辨率/帧数/时长。**输出画幅与帧率已由 `EditingProject.output`（`OutputSpec`）承载，ffprobe 断言的目标值取自它** | LE-03,LE-09 | ⬜ 未开始 |
+| LE-09 | 字幕渲染与 fallback 机制 | PIL 渲染字幕 PNG；`fontTools` 读 cmap 实现缺字 fallback **机制**；换行、描边、行距可控。**验收判据不是「PNG 非空」——LE-09 调研实测证明那条零捕捉力**：中文字体渲染不在 cmap 的 `😀` 会画出 1226 个非零像素的实心方框（与 `.notdef` 逐字节相同），而拉丁字体渲染 `中` 画的是空白；豆腐块有墨、缺字无墨，非空断言两头都抓不住。**正确判据是与 `.notdef` 位图差分**（`font.getmask(chr(0x10FFFF))`）。**只用生产在册的 Noto Sans CJK SC 加一个在册拉丁字体验证 fallback 链路本身**，字体扩充与装配属于 LE-20，两者不得互相阻塞。**缺字且整条链都没有时 fail closed**（抛异常、带码位不带原文、不留半成品文件），不画替代符号——画了会让所有下游断言照常通过，正是 T108 事故的形状。**字幕样式基线（字号/描边/行距/字体键）已由 `EditingProject.caption_style`（`CaptionStyle`）承载，LE-09 消费它而不是自己定义**；**换行宽度由本任务提出并回填 `CaptionStyle`**——LE-04 终审指出：台账既要求「换行可控」又明令「样式基线由 `EditingProject.caption_style` 承载、LE-09 消费它而不是自己定义」，而那四个字段里没有换行宽度，两句直接冲突；另 `line_spacing` 只在多行时有意义、多行又只在换行存在后才出现，四字段自身也不自洽。**字幕位置/边距同样缺失**，一并在此定 | ⬜ 未开始 |
+| LE-10 | 视频渲染管线 | trim(in/out) → scale/crop → fps 归一 → concat → `xfade` 转场 → 字幕 overlay；补齐 `ffmpeg-toolchain.v1.json` 的 `required_capabilities.filters` 声明（xfade/select/scdet 等，**无需重建 ffmpeg**）；产出 mp4 并以 ffprobe 断言编码/分辨率/帧数/时长。**输出画幅与帧率已由 `EditingProject.output`（`OutputSpec`）承载，ffprobe 断言的目标值取自它**；**并决定两项 LE-04 未覆盖的渲染必需信息**：① 16:9 素材放进 9:16 画幅时是 scale 加黑边还是 crop 裁切（两个完全不同的成片，加黑边还需填充色），`OutputSpec` 只有 width/height/fps、没有字段表达这个选择；② **毫秒时间轴与 fps 帧栅格的对账**——LE-04 终审实测 1ms 的视觉 clip 与 1ms 的 xfade 转场当前都被接受，而任何合法 fps（12–60）下一帧至少 16.7ms，这段渲不出任何一帧；且 `TimelineTrack` 要求 `start_ms == previous_end - overlap` 精确成立、`Timeline` 要求 `picture.end_ms == duration_ms` 精确相等，而渲染器必须把它们量化到帧栅格，量化误差累积后成片时长会偏离 `duration_ms`——**而本任务的完成定义恰恰是 ffprobe 断言帧数与时长**。谁对账、允许多大偏差，需在此定死 | ⬜ 未开始 |
 | LE-11 | 音频管线 | 旁白/原声/BGM 三轨；`sidechaincompress` 以旁白为 sidechain 自动闪避；`has_audio` 为假时不排 ambient 轨；采样率归一；断言输出音轨时长与成片一致；**必须实现设计 §5.3 的「原声处理方式」三态开关**（自动闪避 / 固定音量 / 静音，默认自动闪避）。LE-03 终审指出模型只有 `gain_db`（对应三态里的基准音量那一维），三态本身表达不出来：静音可靠不排 ambient clip 表达，但「固定音量」需要一条**既不被旁白压、也不作为 sidechain 源**的音频通路，而五种轨道里没有这样一条——NARRATION 是 sidechain 源，AMBIENT 与 MUSIC 按 §5 都要过 `sidechaincompress`。本任务需决定：加第六种轨道、给 clip 加处理方式字段、还是收窄设计承诺 | LE-10 | ⬜ 未开始 |
 | LE-12 | Worker 生命周期与任务控制 | Tauri 调度渲染 Worker：随机 loopback、高熵会话令牌、健康检查、进度上报、取消与紧停、崩溃恢复、App 退出后任务恢复；`cargo test` 覆盖 | LE-11 | ⬜ 未开始 |
 

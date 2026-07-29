@@ -150,6 +150,12 @@ class EditingProject:
             _reject()
         _validate_text(self.title, maximum=MAX_PROJECT_TITLE_CHARACTERS)
         _validate_timestamp(self.created_at)
+        # The only place that can see both halves. `CaptionStyle` does not know
+        # the frame it will be drawn on and `OutputSpec` does not know the
+        # style, so a caption taller than its own frame is only refusable here
+        # -- the same standard `CaptionStyle` already applies to its stroke.
+        if self.caption_style.font_px > self.output.height:
+            _reject()
 
 
 __all__ = [

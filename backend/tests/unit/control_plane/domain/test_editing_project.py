@@ -252,6 +252,40 @@ def test_project_structural_bounds_fail_closed(field: str, value: object) -> Non
         _project(**{field: value})
 
 
+def test_a_caption_cannot_be_taller_than_the_frame_it_is_drawn_on() -> None:
+    """The project holds both halves, so it is the only place that can see this.
+
+    `CaptionStyle` already refuses a stroke that would swallow its own glyph,
+    so the standard here is "check it where the information is". Nothing below
+    the project can: the style does not know the frame, and the frame does not
+    know the style.
+    """
+    assert (
+        _project(
+            output=_output(width=128, height=128),
+            caption_style=_caption(font_px=MIN_CAPTION_FONT_PX, stroke_px=3),
+        ).caption_style.font_px
+        == MIN_CAPTION_FONT_PX
+    )
+    with pytest.raises(InvalidEditingProjectModel):
+        _project(
+            output=_output(width=128, height=128),
+            caption_style=_caption(font_px=MAX_CAPTION_FONT_PX, stroke_px=0),
+        )
+
+
+def test_a_caption_may_fill_the_whole_frame_height() -> None:
+    """The bound is the frame, not some fraction of it: a one-line caption on a
+    short frame is a legitimate design, an overflowing one is not."""
+    assert (
+        _project(
+            output=_output(width=256, height=200),
+            caption_style=_caption(font_px=200, stroke_px=0),
+        ).caption_style.font_px
+        == 200
+    )
+
+
 def test_a_project_title_may_wrap_but_carries_no_control_characters() -> None:
     assert _project(title="国庆探店\n第二季").title == "国庆探店\n第二季"
 
