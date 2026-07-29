@@ -240,11 +240,17 @@ async def test_a_database_error_is_refused_without_leaking_its_message() -> None
 async def test_an_authentication_failure_is_refused_without_leaking_the_role() -> None:
     """The catch-all tail, on the exception class a live server really raises.
 
-    `asyncpg.exceptions.InvalidPasswordError` inherits from `PostgresError` and
-    `Exception` only -- asserted below rather than assumed -- so neither the
-    `OSError` nor the `SQLAlchemyError` clause sees it, and it carries the role
-    name in its message. `TooManyConnectionsError` reaches the same gap through
-    the same bases, and a saturated pool is ordinary production traffic.
+    Measured on asyncpg 0.31.0, `InvalidPasswordError`'s MRO is
+
+        InvalidPasswordError -> InvalidAuthorizationSpecificationError
+        -> PostgresError -> PostgresMessage -> Exception -> BaseException
+
+    -- note the intermediate class, and note that `TooManyConnectionsError`
+    arrives via `InsufficientResourcesError` instead, so the four classes in
+    this family do not share a single direct base. What they do share is the
+    `PostgresError` spine and the absence of `OSError` and `SQLAlchemyError`,
+    which is the part the repository's clause ordering depends on and the part
+    asserted below. The message names the role.
     """
     database = unreachable_database()
     try:
@@ -253,6 +259,7 @@ async def test_an_authentication_failure_is_refused_without_leaking_the_role() -
             'password authentication failed for user "le05_leaked_user"'
         )
         assert not isinstance(failure, OSError | SQLAlchemyError)
+        assert asyncpg.exceptions.PostgresError in type(failure).__mro__
         object.__setattr__(database, "_sessions", FailingSessions(failure))
         with pytest.raises(EditingProjectPersistenceUnavailable) as loaded:
             await repository.get(EditingProjectId.new())

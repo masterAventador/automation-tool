@@ -148,11 +148,20 @@ class SqlAlchemyEditingProjectRepository:
             raise EditingProjectPersistenceUnavailable from None
         except Exception:
             # Authentication and authorisation failures are neither of the
-            # above: `InvalidPasswordError`, `InsufficientPrivilegeError`,
-            # `InvalidCatalogNameError` and `TooManyConnectionsError` derive from
-            # `PostgresError` and `Exception` only, and their messages name the
-            # role and the database. Without this tail they reach the caller
-            # verbatim. The same tail guards `save`.
+            # above. Measured on asyncpg 0.31.0:
+            #
+            #   InvalidPasswordError -> InvalidAuthorizationSpecificationError
+            #     -> PostgresError -> PostgresMessage -> Exception
+            #   InsufficientPrivilegeError -> SyntaxOrAccessError -> PostgresError -> ...
+            #   InvalidCatalogNameError -> PostgresError -> ...
+            #   TooManyConnectionsError -> InsufficientResourcesError -> PostgresError -> ...
+            #
+            # Only the third sits directly under `PostgresError`; the others
+            # arrive through an intermediate class, which is why matching on any
+            # single named base would miss some of them. None of the four has
+            # `OSError` or `SQLAlchemyError` anywhere on its MRO, and their
+            # messages name the role and the database, so without this tail they
+            # reach the caller verbatim. The same tail guards `save`.
             raise EditingProjectPersistenceUnavailable from None
         if row is None:
             raise EditingProjectNotFound

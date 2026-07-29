@@ -25,6 +25,7 @@ from automation_tool.control_plane.application.editing_projects import (
     EditingProjectPersistenceUnavailable,
 )
 from automation_tool.control_plane.domain import (
+    MAX_PROJECT_TITLE_CHARACTERS,
     CaptionStyle,
     EditingProject,
     EditingProjectId,
@@ -177,6 +178,69 @@ async def test_saved_project_lands_as_typed_columns_and_hydrates_back_equal(
         assert loaded == project
         assert loaded.created_at.tzinfo is UTC
         assert type(loaded.caption_style.line_spacing) is float
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_the_longest_values_the_domain_accepts_still_fit_the_columns(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    """Ties the domain's two text limits to the real column widths.
+
+    `varchar(200)` and `varchar(64)` are written out in the migration, again in
+    `schema.py`, and a third time as `{0,63}` inside the domain's font-key
+    pattern -- three literals with no reference between them. Widening the
+    pattern without widening the column would turn a clean validation error into
+    a `StringDataRightTruncation` at insert time, on the one input a user
+    controls.
+
+    The pair of assertions is what pins it: the longest accepted value must
+    survive a real round trip, and one character more must be refused by the
+    domain. Together they say the two limits are the same number, without
+    needing a fourth copy of it.
+
+    The title is CJK, so it is 200 characters and 600 bytes. PostgreSQL counts
+    `varchar` in characters; a column that counted bytes would fail here.
+    """
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyEditingProjectRepository(database)
+    longest_title = "标" * MAX_PROJECT_TITLE_CHARACTERS
+    longest_font_key = "a" + "b" * 63
+    try:
+        await reset_data(database)
+        project_id = EditingProjectId.new()
+        project = EditingProject(
+            project_id=project_id,
+            title=longest_title,
+            output=OutputSpec(width=1280, height=720, fps=30),
+            caption_style=CaptionStyle(
+                font_key=longest_font_key,
+                font_px=48,
+                stroke_px=3,
+                line_spacing=1.25,
+            ),
+            created_at=CREATED_AT,
+        )
+
+        await repository.save(project)
+        assert await repository.get(project_id) == project
+        row = await stored_row(database, project_id)
+        assert row["title"] == longest_title
+        assert row["caption_font_key"] == longest_font_key
+
+        with pytest.raises(InvalidEditingProjectModel):
+            make_project(EditingProjectId.new(), title=longest_title + "标")
+        with pytest.raises(InvalidEditingProjectModel):
+            CaptionStyle(
+                font_key=longest_font_key + "b",
+                font_px=48,
+                stroke_px=3,
+                line_spacing=1.25,
+            )
     finally:
         await reset_data(database)
         await database.close()
@@ -338,11 +402,19 @@ async def test_wrong_credentials_are_refused_without_leaking_the_identity(
     """A refused login is neither an `OSError` nor a `SQLAlchemyError`.
 
     A refused *connection* is an `OSError`. A refused *login* is an
-    `asyncpg.exceptions.InvalidPasswordError`, whose bases are `PostgresError`
-    and `Exception` and nothing else, and whose message names the role. The same
-    gap passes `InsufficientPrivilegeError`, `InvalidCatalogNameError` and
-    `TooManyConnectionsError` -- and a saturated connection pool is ordinary
-    production traffic, not a misconfiguration.
+    `asyncpg.exceptions.InvalidPasswordError`, and its message names the role.
+    Measured MRO:
+
+        InvalidPasswordError -> InvalidAuthorizationSpecificationError
+        -> PostgresError -> PostgresMessage -> Exception -> BaseException
+
+    `SQLAlchemyError` appears nowhere on it, and neither does `OSError`. Three
+    more classes reach the same gap along the same spine, only one of which
+    derives from `PostgresError` directly: `InsufficientPrivilegeError`
+    (via `SyntaxOrAccessError`), `InvalidCatalogNameError` (direct) and
+    `TooManyConnectionsError` (via `InsufficientResourcesError`) -- and a
+    saturated connection pool is ordinary production traffic, not a
+    misconfiguration.
     """
     alembic_runner(postgresql_url, "upgrade", "head")
     url = make_url(postgresql_url)
@@ -406,6 +478,14 @@ async def test_migration_creates_the_declared_shape_and_drops_it(
         assert revision == HEAD_REVISION
         assert columns == EXPECTED_COLUMNS
         assert constraints >= EXPECTED_CONSTRAINTS
+        # `schema.py` and the migration each declare these widths separately, and
+        # until this assertion existed nothing compared them: narrowing the Table
+        # to `String(length=32)` left the whole suite green, because every other
+        # test reads either the migrated database or this file's own constants.
+        declared = {
+            column.name: getattr(column.type, "length", None) for column in editing_projects.columns
+        }
+        assert declared == {name: shape[2] for name, shape in EXPECTED_COLUMNS.items()}
 
         alembic_runner(postgresql_url, "downgrade", PREVIOUS_REVISION)
         async with database.session() as session:

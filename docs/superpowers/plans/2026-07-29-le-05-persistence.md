@@ -64,9 +64,12 @@
    > - **范例选错了。** `workbench_metrics_repository.py` 是只读投影，没有重复键路径，
    >   所以它一个 `Rejected` 就够用；带 `save` 的仓储照抄它，会把「已存在」「不存在」
    >   「库挂了」压成同一个异常，调用方无法判断能否重试，LE-06 也没法分 409/404/503。
-   >   带写入的仓储按 `customer_account_repository.py:162-165` 的两分法，异常命名对齐
-   >   `customer_accounts.py`（`AlreadyExists` / `NotFound` / `PersistenceUnavailable` /
-   >   `DataRejected`，共用一个私有 `_XxxFailure` 基类）。
+   >   带写入的仓储按 `customer_account_repository.py:162-165` 的两分法，结构对齐
+   >   `customer_accounts.py`：一个私有 `_XxxFailure` 基类，`message` 写成类属性，
+   >   `__init__` 不收参数（于是 `raise X("detail")` 是 TypeError 而不是泄漏），四个
+   >   具体类各覆盖自己的 `message`。**语义名对齐，字面名不必**——T1 用的是
+   >   `AlreadyRegistered` 而不是 `customer_accounts.py` 的 `AlreadyExists`，取
+   >   `InstallationAlreadyRegistered` 的先例；「登记过了」比「存在」更贴近仓储在说的事。
 9. **Material 描述保护的结构性边界测试**（台账明令）：AST 测试禁止 `material.py` 之外
    的模块对 `Material` 调 `dataclasses.replace(` 或直接构造 `Material(...)`。
    **样板 `test_shipped_package_boundary.py` 不在本分支**（台账 LE-05 行已登记），
