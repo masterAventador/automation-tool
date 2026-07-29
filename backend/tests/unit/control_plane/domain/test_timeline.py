@@ -9,7 +9,10 @@ import pytest
 from test_video_creation import assert_field_names_carry_no_banned_fragment
 
 from automation_tool.control_plane.domain.editing_project import EditingProjectId
-from automation_tool.control_plane.domain.material import MaterialId
+from automation_tool.control_plane.domain.material import (
+    MAX_MATERIAL_DURATION_MS,
+    MaterialId,
+)
 from automation_tool.control_plane.domain.resource_ids import InvalidResourceId
 from automation_tool.control_plane.domain.timeline import (
     MAX_CLIP_TEXT_CHARACTERS,
@@ -233,6 +236,31 @@ def test_a_clip_cannot_end_past_the_timeline_upper_bound() -> None:
         _media_clip(start_ms=10**18)
 
 
+def test_a_source_window_cannot_reach_past_the_longest_material() -> None:
+    """The other half of the window bounds. Deleting it left every test green."""
+    with pytest.raises(InvalidTimelineModel):
+        _media_clip(
+            duration_ms=3_000,
+            source_in_ms=MAX_MATERIAL_DURATION_MS - 2_000,
+            source_out_ms=MAX_MATERIAL_DURATION_MS + 1_000,
+        )
+
+
+def test_caption_text_length_bound_is_inclusive() -> None:
+    """Only MAX+1 was pinned, so tightening `>` to `>=` went unnoticed."""
+    text = "字" * MAX_CLIP_TEXT_CHARACTERS
+    assert _caption_clip(text=text).text == text
+
+
+def test_transition_duration_bounds_are_inclusive() -> None:
+    """Neither end was pinned, so either `<=` could be tightened silently."""
+    assert TimelineTransition(TransitionKind.FADE, 1).duration_ms == 1
+    assert (
+        TimelineTransition(TransitionKind.FADE, MAX_TRANSITION_DURATION_MS).duration_ms
+        == MAX_TRANSITION_DURATION_MS
+    )
+
+
 def test_a_clip_may_end_exactly_at_the_timeline_upper_bound() -> None:
     clip = _media_clip(start_ms=MAX_TIMELINE_DURATION_MS - 3_000)
     assert clip.end_ms == MAX_TIMELINE_DURATION_MS
@@ -243,6 +271,9 @@ def test_a_clip_may_end_exactly_at_the_timeline_upper_bound() -> None:
     [
         ("clip_id", "Bad_ID"),
         ("clip_id", ""),
+        # A truthy non-string: `fullmatch` would raise TypeError instead of the
+        # domain error if the isinstance guard were not doing the deciding.
+        ("clip_id", 123),
         ("start_ms", -1),
         ("start_ms", 1.0),
         ("duration_ms", 0),
@@ -650,9 +681,16 @@ def test_a_caption_lane_refuses_a_clip_that_wants_to_dissolve() -> None:
     ("field", "value"),
     [
         ("track_id", "Bad_ID"),
+        # Same shape as the clip_id case: without the isinstance guard this
+        # reaches `fullmatch` and leaks a TypeError.
+        ("track_id", 123),
         ("kind", "visual"),
         ("clips", ()),
         ("clips", [_media_clip()]),
+        # A non-clip *inside* the tuple. `Timeline` has the twin case for
+        # tracks; without this one the guard here is load-bearing yet untested,
+        # and dropping it leaks AttributeError instead of the domain error.
+        ("clips", ("not-a-clip",)),
     ],
 )
 def test_track_structural_bounds_fail_closed(field: str, value: object) -> None:
