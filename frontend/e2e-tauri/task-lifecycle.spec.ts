@@ -87,7 +87,9 @@ describe("T3-19 hidden App lifecycle acceptance", () => {
     await browser.$("button=返回工作台").click();
     // 「返回工作台」把页面切到自动化中心而不是运行记录列表。
     await openAutomationRuns();
-    await waitForTaskRow(controlledTaskId);
+    // 这一处保持按文本等：首轮实测它是通过的，说明这个阶段 UUID 确实在页面上。
+    // 只有刷新之后那一处才需要按标识找行（那时列表里只剩时间戳标签）。
+    await waitForRenderedText(controlledTaskId);
     await openCreatePage();
     const succeededTaskId = await createTask("T3-19 成功链路");
     await waitForRenderedText("已成功", "任务完成", "100%");
