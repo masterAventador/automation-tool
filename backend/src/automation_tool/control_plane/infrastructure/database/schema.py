@@ -2401,6 +2401,42 @@ materials = Table(
     UniqueConstraint("content_digest", name="uq_materials_content_digest"),
 )
 
+timelines = Table(
+    "timelines",
+    metadata,
+    Column("timeline_id", UUID(as_uuid=True), nullable=False),
+    Column("revision", Integer(), nullable=False),
+    Column("project_id", UUID(as_uuid=True), nullable=False),
+    Column("duration_ms", Integer(), nullable=False),
+    # The whole cut as one document: tracks, their clips, and a clip's incoming
+    # transition. Not split into a clips table because a revision is an
+    # immutable snapshot that the renderer reads whole, and nothing in this
+    # release queries across clips. PostgreSQL never looks inside it, so its
+    # shape is entirely hydration's problem -- see the migration's docstring.
+    Column("tracks", JSONB(), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    # Composite, because a revision is a snapshot rather than a version counter
+    # on one mutable row: every revision of a timeline is its own row and none
+    # of them is ever updated. This is also what refuses a second write of the
+    # same revision, whoever is racing.
+    PrimaryKeyConstraint("timeline_id", "revision", name="pk_timelines"),
+    ForeignKeyConstraint(
+        ["project_id"],
+        ["editing_projects.project_id"],
+        name="fk_timelines_project",
+    ),
+    # A superkey of the primary key, so it refuses nothing the primary key would
+    # not have refused already. **Its only reason to exist is to be the target
+    # of `editing_jobs`'s composite foreign key**, which is what makes "a job's
+    # project is the project its timeline belongs to" a structural fact rather
+    # than an application check two concurrent callers can both pass. PostgreSQL
+    # requires a foreign key's target columns to be covered by a unique
+    # constraint spelling exactly those columns, and the primary key spells only
+    # two of the three. Dropping this as redundant would silently remove that
+    # invariant's only enforcement.
+    UniqueConstraint("timeline_id", "revision", "project_id", name="uq_timelines_revision_project"),
+)
+
 __all__ = [
     "account_audit_events",
     "account_installation_binding_challenges",
@@ -2428,6 +2464,7 @@ __all__ = [
     "task_events",
     "task_targets",
     "tasks",
+    "timelines",
     "user_password_credentials",
     "users",
 ]

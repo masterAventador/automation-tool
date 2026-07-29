@@ -47,6 +47,7 @@ from .schema import (
     task_target_exclusions,
     task_targets,
     tasks,
+    timelines,
     user_password_credentials,
     users,
 )
@@ -57,6 +58,7 @@ from .task_event_convergence_repository import SqlAlchemyTaskEventConvergenceRep
 from .task_event_stream_repository import SqlAlchemyTaskEventStreamRepository
 from .task_target_repository import SqlAlchemyTaskTargetRepository
 from .task_target_result_repository import SqlAlchemyTaskTargetResultRepository
+from .timeline_repository import SqlAlchemyTimelineRepository
 
 __all__ = [
     "Database",
@@ -77,6 +79,7 @@ __all__ = [
     "SqlAlchemyTaskEventStreamRepository",
     "SqlAlchemyTaskTargetRepository",
     "SqlAlchemyTaskTargetResultRepository",
+    "SqlAlchemyTimelineRepository",
     "account_audit_events",
     "account_installation_binding_challenges",
     "account_login_rate_limits",
@@ -106,6 +109,7 @@ __all__ = [
     "task_target_exclusions",
     "task_targets",
     "tasks",
+    "timelines",
     "user_password_credentials",
     "users",
 ]
