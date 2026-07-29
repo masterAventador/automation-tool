@@ -246,6 +246,11 @@ def run_item_render_sweep(
             "sourceStartMillis": 0,
             "sourceEndMillis": int(declared_seconds * 1000) if declared_seconds else 3000,
         }
+        # component 是贴进宿主的片段，自己没有时间轴（PC-01：duration/dimensions 只在
+        # 109 个 block 上）。单独渲它，静止就是真实状态——「必须动」对它构造性地
+        # 不成立，所以渲一帧：一帧就是它的全部真相，worker 的静帧判定也只在
+        # 帧数达到比较下限时才生效。block 仍渲 SWEEP_FRAMES 帧并要求动起来。
+        frame_count = SWEEP_FRAMES if declared_seconds else 1
         if declared_dimensions:
             overrides["canvas"] = {
                 # Factor 1：零件的舞台就是输出分辨率（PC-05 的装配同一条规则）。
@@ -259,7 +264,7 @@ def run_item_render_sweep(
             workspace,
             entries[0],
             allowed,
-            SWEEP_FRAMES,
+            frame_count,
             spec_overrides=overrides,
         )
         results[name] = {
