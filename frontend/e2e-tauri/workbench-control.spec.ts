@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { browser } from "@wdio/globals";
 import {
+  openAutomationRuns,
   waitForStartup,
 } from "./navigation";
 
@@ -41,6 +42,11 @@ describe("Workbench production-path acceptance", () => {
     )) as WorkbenchPreparation;
     assert.match(preparation.installationId, UUID_V4);
     assert.match(preparation.taskId, UUID_V4);
+
+    // 改版之后开机落在 AI 助理页，`Workbench` 只在运行记录页渲染——所以这里
+    // 要先按用户会走的路导航过去。这条 spec 要证的是工作台加载真实投影并能
+    // 紧急停止，不是「开机就停在工作台」。
+    await openAutomationRuns();
 
     const retry = await browser.$("button=重新加载工作台");
     await browser.waitUntil(
