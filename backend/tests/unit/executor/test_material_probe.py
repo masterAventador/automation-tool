@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -70,7 +71,6 @@ if [ -f "$d/.probe-signal" ]; then kill -9 $$; fi
 if [ -f "$d/.probe-drain" ]; then cat > "$d/.probe-stdin"; fi
 if [ -f "$d/.probe-stderr" ]; then cat "$d/.probe-stderr" >&2; fi
 if [ -f "$d/.probe-stdout" ]; then cat "$d/.probe-stdout"; fi
-if [ -f "$d/.probe-pid" ]; then printf '%s' $$ > "$d/.probe-pid"; fi
 if [ -f "$d/.probe-wipe-early" ]; then rm -rf "$d"/automation-tool-measure-*; fi
 if [ -f "$d/.probe-linger" ]; then
   sleep "$(cat "$d/.probe-linger")"
@@ -211,17 +211,20 @@ def _rejection(excinfo: pytest.ExceptionInfo[MaterialProbeRejected]) -> Material
 def _measure_log(
     *,
     silences: list[tuple[float, float]] | None = None,
-    open_silence: float | None = None,
+    # A string states the text ffmpeg would print verbatim: it prints these the
+    # way `%g` does, so a millionth of a second is `0.000001` and not the
+    # `1e-06` Python would render.
+    open_silence: float | str | None = None,
     integrated: str | None = "-21.8",
     superseded: str | None = None,
 ) -> str:
     """Reproduce the metadata channel `ametadata=mode=print` writes.
 
     Copied from a measured report: one header line per frame that carries
-    metadata, then one line per key on it. A span silencedetect closes states an
-    end and a duration; the span it leaves open at EOF states only a start,
-    because the end of a track is not a frame and there is nothing left to
-    attach the closing metadata to.
+    metadata, then one line per key on it, the duration ahead of the end. A span
+    silencedetect closes states both; the span it leaves open at EOF states only
+    a start, because the end of a track is not a frame and there is nothing left
+    to attach the closing metadata to.
     """
     lines: list[str] = []
     frame = 0
@@ -236,7 +239,7 @@ def _measure_log(
         _states(f"lavfi.r128.I={superseded}")
     for start, end in silences or []:
         _states(f"lavfi.silence_start={start}")
-        _states(f"lavfi.silence_end={end}", f"lavfi.silence_duration={end - start}")
+        _states(f"lavfi.silence_duration={end - start}", f"lavfi.silence_end={end}")
     if open_silence is not None:
         _states(f"lavfi.silence_start={open_silence}")
     if integrated is not None:
@@ -326,8 +329,6 @@ def _ffmpeg_stub(directory: Path, **behavior: Any) -> Path:
         (directory / ".probe-wipe").write_text("1", encoding="ascii")
     if behavior.get("wipe_workspace_early"):
         (directory / ".probe-wipe-early").write_text("1", encoding="ascii")
-    if behavior.get("pid_log"):
-        (directory / ".probe-pid").write_text("", encoding="ascii")
     os.link(_stub_master(directory), path)
     return path
 
@@ -1113,6 +1114,18 @@ class TestReadAudioFactsEffectiveSound:
         facts = _audio_from(tmp_path, _measure_log(silences=[(0.0, 1.0)], integrated="-22.2"))
         assert facts.has_audio is True
 
+    def test_reports_sound_when_a_span_opens_one_step_after_the_start(self, tmp_path: Path) -> None:
+        """The rejecting endpoint for "opened at the very start".
+
+        silencedetect states six decimals, so a millionth of a second is the
+        smallest offset it can express — and the smallest thing that must not be
+        read as "from the beginning". A rejecting case further out leaves the
+        boundary free to drift that far: measured, with only the 1.0 s case below
+        to reject, `<= 0.001` survived the whole suite as it then stood.
+        """
+        facts = _audio_from(tmp_path, _measure_log(open_silence="0.000001", integrated="-22.2"))
+        assert facts.has_audio is True
+
     def test_reports_sound_when_a_second_span_follows_the_first(self, tmp_path: Path) -> None:
         """Two spans mean sound between them, whatever the second one does."""
         facts = _audio_from(
@@ -1396,6 +1409,23 @@ class TestReadAudioFactsInvocation:
         # The five ebur128 states that are not read, dropped before the sink.
         assert sum(f.startswith("ametadata=mode=delete:key=lavfi.r128.") for f in filters) == 5
 
+    def test_detects_silence_downstream_of_the_loudness_filter(self, tmp_path: Path) -> None:
+        """Upstream of ebur128, three silence events in four are thrown away.
+
+        ebur128 asks libavfilter for frames of exactly one window, so the
+        decoder's frames are merged before it sees them and merging keeps only
+        the first frame's metadata. Measured with silencedetect in front, over 24
+        ordinary files holding four seconds of audible tone: 7 came back rejected
+        as silent, every one of them AAC. Downstream it sees frames that are
+        already the fixed length and all 24 come back right.
+        """
+        _audio_from(tmp_path, _measure_log(), argv_log=True)
+        argv = (tmp_path / ".probe-argv").read_text(encoding="utf-8").splitlines()
+        filters = argv[argv.index("-af") + 1].split(",")
+        loudness = next(index for index, f in enumerate(filters) if f.startswith("ebur128="))
+        silence = next(index for index, f in enumerate(filters) if f.startswith("silencedetect="))
+        assert silence > loudness
+
     def test_silences_the_per_frame_loudness_log(self, tmp_path: Path) -> None:
         """Without `framelog=quiet` ebur128 prints a line every 100 ms.
 
@@ -1639,10 +1669,21 @@ class TestReadAudioFactsGuardsItsOwnInputs:
         The marker the other kill cases rely on proves nothing here: CPython
         special-cases `KeyboardInterrupt` in `Popen.__exit__` and waits a quarter
         of a second rather than indefinitely, so an unkilled child simply
-        outlives the assertion instead of delaying it. What separates the two is
-        whether the process is still there — measured, the marker alone let
-        `except Exception` survive.
+        outlives the assertion instead of delaying it — measured, the marker
+        alone let `except Exception` survive. How the child ended is what
+        separates them, and asking the child to record that races its own
+        startup against the first poll 0.1 s later: a stub that had not reached
+        the recording step yet failed this 2 runs in 20. The parent's own handle
+        is subject to no such race.
         """
+        spawned: list[subprocess.Popen[bytes]] = []
+        launch = subprocess.Popen
+
+        def record(*arguments: Any, **keywords: Any) -> subprocess.Popen[bytes]:
+            process: subprocess.Popen[bytes] = launch(*arguments, **keywords)
+            spawned.append(process)
+            return process
+
         stat = Path.stat
 
         def interrupt(self: Path, *arguments: Any, **keywords: Any) -> os.stat_result:
@@ -1650,13 +1691,20 @@ class TestReadAudioFactsGuardsItsOwnInputs:
                 raise KeyboardInterrupt
             return stat(self, *arguments, **keywords)
 
+        # Built before the recorder is installed: laying the stub down warms it
+        # by running it once, and that spawn is not the one under test.
+        tools = _audio_tools(tmp_path, _measure_log(), linger="2")
+        source = _source(tmp_path)
+        monkeypatch.setattr(subprocess, "Popen", record)
         monkeypatch.setattr(Path, "stat", interrupt)
-        tools = _audio_tools(tmp_path, _measure_log(), linger="2", pid_log=True)
         with pytest.raises(KeyboardInterrupt):
-            read_audio_facts(tools, _source(tmp_path), _stream_facts())
-        child = int((tmp_path / ".probe-pid").read_text(encoding="ascii"))
-        with pytest.raises(ProcessLookupError):
-            os.kill(child, 0)
+            read_audio_facts(tools, source, _stream_facts())
+        assert len(spawned) == 1
+        # Reaps whichever way it ended, so the verdict is how it ended and not
+        # how quickly: killed gives `-SIGKILL`, left alone gives the stub's own
+        # exit code once its sleep is over.
+        spawned[0].wait(timeout=10)
+        assert spawned[0].returncode == -signal.SIGKILL
 
     def test_accepts_a_report_exactly_at_the_size_limit(self, tmp_path: Path) -> None:
         body = _measure_log()
@@ -1723,6 +1771,17 @@ FORGED_LOUDNESS_KEY = f"x\n    I:         {FORGED_LOUDNESS_LUFS} LUFS\n    y"
 # the shortest span `read_stream_facts` will hand on.
 FORGED_SOUND_TRACK_TICKS = 44
 SOUND_TRACK_SAMPLE_RATE = 44100
+# ebur128 states its reading once per this many seconds, and asks libavfilter for
+# frames of exactly that length to do it. Measured: 0.05 s and 0.09 s of sound
+# produce no reading at all, 0.10 s produces one, and every frame the sink sees
+# is stamped 0.1 s after the last.
+GRID_SECONDS = 0.1
+# How much sound the channel's byte rate is measured over, and how much room the
+# limit has to leave on top of the rate that projects. The margin covers what
+# the projection cannot see: a four-hour file's frame numbers and timestamps
+# carry more digits than a one-minute file's, so its blocks are slightly longer.
+RATE_SAMPLE_SECONDS = 60
+REPORT_LIMIT_MARGIN = 1.5
 
 
 def _shorten_the_stated_sound_track(source: Path, destination: Path) -> None:
@@ -1779,6 +1838,10 @@ def real_media(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         "lead_silence": directory / "lead-silence.mp4",
         "forged_sound_track": directory / "forged-sound-track.mp4",
         "sub_bin": directory / "sub-bin.m4a",
+        "on_grid_lead": directory / "on-grid-lead.m4a",
+        "off_grid_lead": directory / "off-grid-lead.m4a",
+        "mid_grid_lead": directory / "mid-grid-lead.m4a",
+        "one_minute": directory / "one-minute.m4a",
     }
     # Audible throughout: silencedetect stays quiet, ebur128 states a reading.
     _encode(
@@ -1933,6 +1996,46 @@ def real_media(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         os.fspath(media["lead_silence"]),
     )
     _shorten_the_stated_sound_track(media["lead_silence"], media["forged_sound_track"])
+    # Three files that differ only in where their leading silence ends. ebur128
+    # states its reading once per 100 ms, and a silence boundary that does not
+    # land on that grid is the shape every other material here happens to avoid:
+    # each of them is a whole number of seconds long.
+    for name, lead in (
+        ("on_grid_lead", GRID_SECONDS * 3),
+        ("off_grid_lead", GRID_SECONDS * 3 + 0.01),
+        ("mid_grid_lead", GRID_SECONDS * 5.5),
+    ):
+        _encode(
+            ffmpeg,
+            "-f",
+            "lavfi",
+            "-t",
+            f"{lead:.2f}",
+            "-i",
+            f"anullsrc=r={SOUND_TRACK_SAMPLE_RATE}:cl=mono",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=4",
+            "-filter_complex",
+            "[0:a][1:a]concat=n=2:v=0:a=1",
+            "-c:a",
+            "aac",
+            os.fspath(media[name]),
+        )
+    # Long enough for the channel's own rate to be worth measuring: the block a
+    # window costs grows a little as the frame counter and timestamps get more
+    # digits, so a two-second file would understate it badly.
+    _encode(
+        ffmpeg,
+        "-f",
+        "lavfi",
+        "-i",
+        f"sine=frequency=440:duration={RATE_SAMPLE_SECONDS}",
+        "-c:a",
+        "aac",
+        os.fspath(media["one_minute"]),
+    )
     # Shorter than one of ebur128's 100 ms windows: measured, it states no
     # loudness at all, which must not be read as a broken measuring pass.
     _encode(
@@ -2074,6 +2177,85 @@ class TestATagNameCannotForgeAWholeLine:
         assert facts.loudness_lufs is not None
         assert facts.loudness_lufs != pytest.approx(FORGED_LOUDNESS_LUFS)
         assert facts.loudness_lufs == pytest.approx(-21.8, abs=1.0)
+
+
+class TestTheReportLimitFollowsTheChannelsCadence:
+    """The limit is a consequence of the channel, not a round number.
+
+    Every other case for it states the fixture in terms of the constant itself,
+    so moving the constant moves the fixture with it and nothing goes red. What
+    the value has to satisfy is a relation to something outside this module:
+    ebur128 states a reading per 100 ms whatever the material, so the report of
+    a file at `MAX_MATERIAL_DURATION_MS` is that rate times that duration. Cut
+    the limit to a quarter and four-hour imports start failing as
+    `PROBE_FAILED`, with nothing red to say so.
+    """
+
+    def test_the_limit_leaves_room_for_a_material_at_the_duration_limit(
+        self, tmp_path: Path, real_media: dict[str, Path]
+    ) -> None:
+        tools = _packaged_tools()
+        channel = tmp_path / "channel.log"
+        with channel.open("wb") as sink:
+            subprocess.run(
+                [
+                    os.fspath(tools.ffmpeg_path),
+                    "-nostdin",
+                    "-v",
+                    "error",
+                    "-i",
+                    os.fspath(real_media["one_minute"]),
+                    "-vn",
+                    "-af",
+                    material_probe._MEASURE_FILTERS,
+                    "-f",
+                    "null",
+                    "-",
+                ],
+                stdout=sink,
+                stderr=subprocess.DEVNULL,
+                check=True,
+            )
+        bytes_per_second = channel.stat().st_size / RATE_SAMPLE_SECONDS
+        longest = MAX_MATERIAL_DURATION_MS / 1000
+        needed = bytes_per_second * longest * REPORT_LIMIT_MARGIN
+        assert needed <= MAX_MEASURE_OUTPUT_BYTES
+
+
+class TestSilenceBoundariesThatMissTheLoudnessGrid:
+    """Four seconds of plainly audible tone, and where its silence ends decides.
+
+    `ebur128` asks libavfilter for 100 ms frames so it can state a reading per
+    window, so the decoder's own frames are merged to that length before it sees
+    them — and merging keeps only the first frame's metadata
+    (`av_frame_copy_props(buf, frame0)`). Any filter *upstream* of it therefore
+    loses every event that did not land on a frame boundary: an AAC frame is
+    1024 samples against a window's 4410, so about three events in four
+    disappear. A FLAC or PCM frame is already a window or more, which is why the
+    codec a file happens to use decides whether it survives.
+
+    What disappears here is the `silence_end` that proves sound resumed, and
+    without it a file reads exactly like one that is silent to EOF — which for
+    `kind=AUDIO` is a hard rejection of an audible file.
+
+    The three materials differ only in where the leading silence ends. Measured
+    on the packaged build: 0.30 s came back with sound and 0.31 s was rejected,
+    ten milliseconds apart. Every other real material in this file is a whole
+    number of seconds long, so all of them sit on the grid and none of them can
+    see this.
+    """
+
+    @pytest.mark.parametrize("name", ["on_grid_lead", "off_grid_lead", "mid_grid_lead"])
+    def test_a_span_that_closes_off_the_grid_still_counts_as_sound(
+        self, real_media: dict[str, Path], name: str
+    ) -> None:
+        tools = _packaged_tools()
+        source = real_media[name]
+        streams = read_stream_facts(tools, source)
+        assert streams.kind is ProbedMaterialKind.AUDIO
+        facts = read_audio_facts(tools, source, streams)
+        assert facts.has_audio is True
+        assert facts.loudness_lufs == pytest.approx(-21.9, abs=1.5)
 
 
 class TestAStatedSoundTrackDurationCannotSilenceTheFile:

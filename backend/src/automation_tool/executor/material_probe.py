@@ -101,8 +101,11 @@ _MEASURE_FILTERS: Final = ",".join(
     (
         # Whatever the demuxer or the decoder attached to a frame goes first, so
         # the only keys the sink can see are the ones the two filters below add.
+        # Nothing measured has ever put a file's own text on a frame, so this is
+        # depth rather than a demonstrated necessity — it makes "the file cannot
+        # write here" structural instead of resting on that search having been
+        # exhaustive.
         "ametadata=mode=delete",
-        f"silencedetect=noise={SILENCE_NOISE_FLOOR_DB}dB:d={SILENCE_MINIMUM_SECONDS}",
         # `metadata=1` is what puts the running loudness on the frames; the
         # summary it prints at the end goes to the diagnostics, which are
         # discarded. `framelog=quiet` is belt-and-braces now rather than the
@@ -111,6 +114,19 @@ _MEASURE_FILTERS: Final = ",".join(
         # build the diagnostics of a 60-second file are 0 bytes either way. It
         # earns its place again the moment anyone raises the level to look.
         "ebur128=peak=none:framelog=quiet:metadata=1",
+        # Downstream of ebur128, and that order is load-bearing. ebur128 asks
+        # libavfilter for frames of exactly one window, so the decoder's frames
+        # are merged to that length on the way in — and merging keeps only the
+        # first frame's metadata (`av_frame_copy_props(buf, frame0)`). An AAC
+        # frame is 1024 samples against a window's 4410, so roughly three events
+        # in four written upstream of ebur128 never reach the sink. Measured with
+        # silencedetect in front, over 24 ordinary files carrying four seconds of
+        # audible tone: 7 were rejected outright as silent, all of them AAC — a
+        # FLAC or PCM frame is already a window or more, so nothing of theirs is
+        # ever the frame that gets dropped. The closest pair is a 0.30 s lead
+        # that passed against a 0.31 s lead that did not. Behind ebur128 the
+        # frames are already the fixed length and all 24 come back right.
+        f"silencedetect=noise={SILENCE_NOISE_FLOOR_DB}dB:d={SILENCE_MINIMUM_SECONDS}",
         # ebur128 states six numbers per window and one of them is used.
         # Dropping the other five is what keeps the channel's size proportional
         # to duration: measured 1763 bytes per second of sound against 576.
