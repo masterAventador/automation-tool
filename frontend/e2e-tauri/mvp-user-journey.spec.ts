@@ -70,6 +70,7 @@ describe("H8-16F hidden App original-caller MVP journey", () => {
       );
       const openLoginButton = await browser.$("button=打开登录处理");
       const openLoginButtonExists = await openLoginButton.isExisting();
+      const startButton = await browser.$("button=开始目标发现");
       throw new Error(
         `waiting-platform-login handoff facts: ${JSON.stringify({
           discoverySubmitted: text.includes("目标发现命令已提交"),
@@ -80,6 +81,14 @@ describe("H8-16F hidden App original-caller MVP journey", () => {
           platformFailure: text.includes("暂时无法读取抖音登录状态"),
           loginOpenPending: openLoginButtonExists && !(await openLoginButton.isEnabled()),
           loginActionRendered: text.includes("请在打开的运营浏览器中扫码登录"),
+          // 2026-07-29 之前这里没采三种失败 notice 与按钮态，凡 start 调用
+          // 失败（transport / busy / rejected）都表现为「什么都没发生」。
+          noticeRejected: text.includes("尚未满足目标发现条件"),
+          noticeBusy: text.includes("当前设备已有任务正在运行"),
+          noticeUnconfirmed: text.includes("目标发现结果暂时无法确认"),
+          startButtonExists: await startButton.isExisting(),
+          startButtonEnabled:
+            (await startButton.isExisting()) && (await startButton.isEnabled()),
           executorStatus,
           executorDiagnostics,
         })}`,
