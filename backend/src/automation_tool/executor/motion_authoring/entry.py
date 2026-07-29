@@ -215,6 +215,7 @@ _AGENT_FIXED_REJECTION_BODIES: Final = frozenset(
         "beat timing must be numeric",
         "beat_id is malformed",
         "beats count is out of range",
+        "repair round altered more than copy",
         "body is out of range",
         "brief must be a MotionBrief",
         "brief text is out of range",

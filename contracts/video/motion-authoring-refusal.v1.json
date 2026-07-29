@@ -72,6 +72,7 @@
     "agent_refusing_to_write_through_a_symlink",
     "agent_render_canvas_contract_drifted",
     "agent_render_canvas_contract_is_unreadable",
+    "agent_repair_round_altered_more_than_copy",
     "agent_script_has_an_unexpected_key_set",
     "agent_script_must_be_an_object",
     "agent_secondary_color_must_be_a_rrggbb_color",
