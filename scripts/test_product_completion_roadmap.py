@@ -73,6 +73,29 @@ def set_status(text: str, task_id: str, status: str) -> str:
     raise AssertionError(f"no row for {task_id}")
 
 
+def an_unfinished_task(text: str) -> str:
+    """A task whose evidence file does not claim completion.
+
+    Used to build the "ledger says done, evidence says otherwise" tamper. The
+    gate compares the two, so the tamper only bites on a task that has not
+    finished yet — and which task that is changes as the work proceeds.
+    """
+    for line in text.splitlines():
+        if not line.startswith("| PC-"):
+            continue
+        fields = [field.strip() for field in line.strip().split("|")[1:-1]]
+        task_id, status = fields[0], fields[4]
+        if status == "✅ 已完成":
+            continue
+        evidence = EVIDENCE_ROOT / f"{task_id}.md"
+        if evidence.is_file() and "> 状态：**已完成**" not in evidence.read_text(encoding="utf-8"):
+            return task_id
+    raise AssertionError(
+        "every task is finished, so this tamper can no longer be built; "
+        "replace it with one that does not depend on unfinished work"
+    )
+
+
 def main() -> int:
     assert CHECK.is_file(), "scripts/check_product_completion_roadmap.py is missing"
     assert LEDGER.is_file(), "docs/product-completion-roadmap.md is missing"
@@ -101,10 +124,18 @@ def main() -> int:
 
     expect_failure("completion record appended to the ledger", f"{text}\n## RED\n")
 
-    # An id that is finished but has no evidence file: the shape of the defect
-    # this whole gate exists for — the table says done and nothing can be read.
-    missing_evidence = set_status(text, "PC-06", "✅ 已完成")
-    expect_failure("finished task without evidence", missing_evidence)
+    # The table says done while the evidence file says otherwise: the shape of
+    # the defect this whole gate exists for.
+    #
+    # The target is *derived*, not named. Naming one (it used to be PC-06) makes
+    # this case rot on the day that task legitimately finishes: the tamper then
+    # agrees with its own evidence file, the gate correctly stays green, and the
+    # self-test fails for a reason that has nothing to do with the gate. Which
+    # is exactly what happened on 2026-07-29.
+    expect_failure(
+        "finished task whose evidence does not say so",
+        set_status(text, an_unfinished_task(text), "✅ 已完成"),
+    )
 
     print("product completion ledger tests passed")
     print("executed checks: 6")
