@@ -225,3 +225,41 @@ export async function openCreationMethodCards(
   }
   return opened;
 }
+
+/**
+ * 等某一条任务出现在运行记录里，按它的标识而不是按它的显示名。
+ *
+ * 列表的行名改版后是创建时刻（`07-29 12:01:54 的任务`），不再印 UUID——那是有意的
+ * 可读性改动，`Workbench.test.tsx` 有一条测试专门守着。标识仍在，作为惰性的
+ * `data-task-id`（`Workbench.tsx`）。任务详情页仍印完整 UUID。
+ *
+ * 失败时把页面上**实际存在的**行都报出来。2026-07-29 有两条 spec（task-run、
+ * task-discovery）在「处理完任务 A 之后任务 B 的行不见了」这个形状上各红了三轮，
+ * 而每一轮的错误只说「没等到 X」——那句话对「它在别处」「它被挤出前五条」
+ * 「页面根本不是运行记录」三种情况长得一模一样，所以三轮都在猜。
+ */
+export async function waitForTaskRow(taskId: string, timeout = 90_000): Promise<void> {
+  try {
+    await browser.waitUntil(
+      async () => browser.$(`button[data-task-id="${taskId}"]`).isExisting(),
+      { timeout },
+    );
+  } catch {
+    const present = await browser.execute(() =>
+      Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]")).map(
+        (node) => `${node.dataset["taskId"]}｜${node.textContent ?? ""}`,
+      ),
+    );
+    const heading = await browser.$("h2").getText().catch(() => "(无 h2)");
+    // 正文摘要：h2 与行数都说不出「这是哪一页」时，只有它能。
+    const body = (await browser.$("body").getText().catch(() => "(读不到 body)"))
+      .replace(/\s+/g, " ")
+      .slice(0, 400);
+    throw new Error(
+      `运行记录里没有出现任务 ${taskId}；`
+      + `当前页面 h2=「${heading}」；`
+      + `页面上实际有 ${present.length} 行：${JSON.stringify(present)}；`
+      + `正文前 400 字：${body}`,
+    );
+  }
+}

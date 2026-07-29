@@ -6,6 +6,7 @@ import { browser } from "@wdio/globals";
 import {
   openAutomationRuns,
   waitForStartup,
+  waitForTaskRow,
 } from "./navigation";
 
 interface TaskRunPreparation {
@@ -55,20 +56,6 @@ async function waitForRenderedText(...expected: string[]): Promise<void> {
   } catch {
     throw new Error(`Latest Task run text: ${latestText}`);
   }
-}
-
-/**
- * 等某一条任务出现在运行记录里，按它的标识而不是按它的显示名。
- *
- * 列表的行名改版后是创建时刻，不再印 UUID——那是有意的可读性改动；标识仍在，
- * 作为惰性的 `data-task-id`。任务详情页仍然印完整 UUID，所以下面那句按文本等
- * 的断言不动。
- */
-async function waitForTaskRow(taskId: string): Promise<void> {
-  await browser.waitUntil(
-    async () => browser.$(`button[data-task-id="${taskId}"]`).isExisting(),
-    { timeout: 90_000, timeoutMsg: `运行记录里没有出现任务 ${taskId}` },
-  );
 }
 
 async function openTask(taskId: string): Promise<void> {

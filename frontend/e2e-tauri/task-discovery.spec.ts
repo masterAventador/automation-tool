@@ -4,6 +4,7 @@ import { browser, expect } from "@wdio/globals";
 import {
   openAutomationRuns,
   waitForStartup,
+  waitForTaskRow,
 } from "./navigation";
 
 interface TaskDiscoveryPreparation {
@@ -17,20 +18,6 @@ interface TaskDiscoveryPreparation {
 
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-
-/**
- * 等某一条任务出现在运行记录里，按它的标识而不是按它的显示名。
- *
- * 列表的行名改版后是创建时刻（`07-29 12:01:54 的任务`），不再印 UUID——那是有意的
- * 可读性改动，`Workbench.test.tsx` 有一条测试专门守着。标识仍在，作为惰性的
- * `data-task-id`。
- */
-async function waitForTaskRow(taskId: string): Promise<void> {
-  await browser.waitUntil(
-    async () => browser.$(`button[data-task-id="${taskId}"]`).isExisting(),
-    { timeout: 60_000, timeoutMsg: `运行记录里没有出现任务 ${taskId}` },
-  );
-}
 
 describe("Task discovery production-path acceptance", () => {
   it("converges candidates through the hidden real App and formal Executor", async () => {
