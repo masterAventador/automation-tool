@@ -48,9 +48,14 @@ from automation_tool.control_plane.infrastructure.database import (
     task_commands,
     tasks,
 )
-from automation_tool.executor import (
+# Imported by module path, not from the package root: the shipped package's
+# `__init__.py` re-exports no test doubles, because `excludes=[]` in the spec means
+# the import graph alone decides what a customer's installer carries (CLAUDE.md §9.2).
+from automation_tool.executor.fake_client import (
     FakeExecutorClient,
     FakeExecutorClientConfiguration,
+)
+from automation_tool.executor.fake import (
     FakeExecutorEngine,
     FakeExecutorScenario,
 )

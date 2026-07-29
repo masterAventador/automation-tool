@@ -78,9 +78,17 @@ from automation_tool.control_plane.infrastructure.database import (
 from automation_tool.control_plane.infrastructure.database.task_target_repository import (
     SqlAlchemyTaskTargetRepository,
 )
-from automation_tool.executor import (
+# Imported by module path, not from the package root. The shipped package's
+# `__init__.py` deliberately re-exports no test doubles: `automation-tool-executor.spec`
+# declares `excludes=[]`, so what reaches a customer's installer is decided by the
+# import graph alone, and one `import automation_tool.executor` would be enough to
+# drag a Fake into the frozen bundle (CLAUDE.md §9.2). This script was left behind
+# when that boundary was drawn and had been failing at import ever since.
+from automation_tool.executor.fake_client import (
     FakeExecutorClient,
     FakeExecutorClientConfiguration,
+)
+from automation_tool.executor.fake import (
     FakeExecutorEngine,
     FakeExecutorScenario,
 )

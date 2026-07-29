@@ -72,3 +72,40 @@ def test_the_module_paths_still_work_for_the_tests_that_need_them() -> None:
 
     assert FakeExecutorEngine is not None
     assert FakeExecutorClient is not None
+
+
+def test_nothing_asks_the_package_root_for_a_test_double() -> None:
+    """The other half of the boundary: consumers must not ask for what is gone.
+
+    Removing the re-exports made every `from automation_tool.executor import
+    FakeExecutorClient` an `ImportError`. That is the right failure, but it is a
+    *runtime* one — and the seven acceptance runners carrying it are only ever
+    exercised when somebody runs them by hand, so they sat broken until
+    2026-07-29, when PC-21's catch-up run reached `run_t3_16_acceptance.py` and
+    it died before its first assertion.
+
+    A static check catches the whole class at once and costs nothing, which the
+    runtime one cannot: importing all 123 runners to find out would execute
+    whatever they do at import time.
+    """
+    root = Path(__file__).resolve().parents[3].parent
+    offenders: list[str] = []
+    for path in sorted(root.glob("scripts/*.py")) + sorted(root.glob("backend/tests/**/*.py")):
+        if path.resolve() == Path(__file__).resolve():
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (SyntaxError, UnicodeDecodeError):  # pragma: no cover - not this gate's job
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom) or node.module != "automation_tool.executor":
+                continue
+            for alias in node.names:
+                if any(marker in alias.name for marker in _TEST_DOUBLE_MARKERS):
+                    offenders.append(f"{path.relative_to(root)}:{node.lineno} {alias.name}")
+    assert offenders == [], (
+        "these ask the package root for a test double, which it deliberately no "
+        "longer re-exports; import them by module path "
+        "(`automation_tool.executor.fake` / `.fake_client`) instead: "
+        f"{offenders}"
+    )
