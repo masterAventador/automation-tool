@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { browser, expect } from "@wdio/globals";
 import {
   openMaterialVideoStudio,
+  openWorkbenchSection,
   waitForStartup,
 } from "./navigation";
 
@@ -139,7 +140,8 @@ describe("BM-06/BM-07 production App motion style catalog acceptance", () => {
       /biennale|blockframe|blue-professional|bold-poster|broadside|capsule|cartesian|cobalt-grid|coral|creative-mode|daisy-days|editorial-forest|code-editorial/i,
     );
 
-    // 回到工作台首页，避免把页面状态遗留给后续验收用例。
-    await waitForStartup();
+    // 回到助理页，避免把页面状态遗留给后续验收用例——常驻 App 在多个 spec
+    // 之间是共享的。`waitForStartup` 只等不导航，用它做这件事等于没做。
+    await openWorkbenchSection("AI 助理");
   });
 });

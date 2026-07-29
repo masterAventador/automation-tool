@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 
-import { browser, expect } from "@wdio/globals";
+import { expect } from "@wdio/globals";
 import {
+  openVideoStudio,
   waitForStartup,
 } from "./navigation";
 
 async function openMotionStudio() {
   await waitForStartup();
-  const studio = await browser.$("section[aria-label='视频制作工作区']");
-  await expect(studio).toBeDisplayed();
+  // `waitForStartup` 只等不导航；改版后进工作区要走 创作 → 分段 → 打开完整制作面板。
+  const studio = await openVideoStudio();
   await studio.$("button[aria-label='选择品牌动效成片']").click();
   return studio;
 }

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
 import {
-  waitForStartup,
   openTaskCreate,
+  waitForStartup,
 } from "./navigation";
 
 interface TaskCreateFormPreparation {

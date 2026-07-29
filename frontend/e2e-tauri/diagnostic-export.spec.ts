@@ -10,7 +10,7 @@ describe("H8-13 hidden App diagnostic export acceptance", () => {
   it("exports only after the user confirms in 设置与诊断", async () => {
     await waitForStartup();
     await openWorkbenchSection("设置");
-    await expect(await browser.$("h2")).toHaveText("设置与诊断");
+    await expect(await browser.$("h2")).toHaveText("设置");
 
     const body = await browser.$("body");
     assert.ok((await body.getText()).includes("导出诊断包"));

@@ -48,8 +48,14 @@ RETIRED_WORKBENCH_HEADING = "RPA 运营工作台"
 _SIDEBAR_CALL = re.compile(r"openSidebarDestination\(page,\s*\"([^\"]+)\"\)")
 _DESKTOP_SECTION = re.compile(r"openWorkbenchSection\(\"([^\"]+)\"\)")
 _SEGMENT_PLAYWRIGHT = re.compile(r"hasText:\s*\"([^\"]+)\"")
-_SEGMENT_DESKTOP = re.compile(r"openSegment\(\"([^\"]+)\"\)")
-_MENU_XPATH = re.compile(r"ant-menu-item")
+# 段名可能直接传给 `openSegment`，也可能经由 `openStudioPanel` 这样的包装转发。
+# 抓两种，否则收敛一次实现就会让门禁误报「桌面模块少了这个段」——判据没变，
+# 变的只是它去哪里找那个字面量。
+_SEGMENT_DESKTOP = re.compile(r"open(?:Segment|StudioPanel)\(\"([^\"]+)\"\)")
+# 侧边栏点击的每一种写法，不只是旧 XPath 那一种。第一版只认 `ant-menu-item`，
+# 于是 11 处 `browser.$("li=平台状态")` 从门禁底下原样穿过去了——而门禁**报告**
+# 这条规则成立。一道报告了它并不提供的保障的闸，正是这次事故本身的形状。
+_SIDEBAR_SELECTOR = re.compile(r"ant-menu-item|\$\(\s*[\"'`]li=|role='menuitem'|role=\\\"menuitem")
 
 
 def _specs() -> list[Path]:
@@ -84,7 +90,7 @@ class DesktopNavigationTests(unittest.TestCase):
         offenders = [
             spec.name
             for spec in _specs()
-            if spec.name != "navigation.ts" and _MENU_XPATH.search(spec.read_text(encoding="utf-8"))
+            if _SIDEBAR_SELECTOR.search(spec.read_text(encoding="utf-8"))
         ]
         self.assertEqual(
             offenders,
@@ -121,6 +127,32 @@ class DesktopNavigationTests(unittest.TestCase):
             set(),
             "the desktop module is missing segments the Playwright suite uses: "
             f"{sorted(expected_segments - actual_segments)}",
+        )
+
+
+class SpecDestinationTests(unittest.TestCase):
+    """spec 传的目的地名字必须是产品里真有的那批。
+
+    第 4 条只比对两个 navigation 模块，看不到 spec 传了什么。于是
+    `plain-language-comprehension.spec.ts` 把五个**已被删除**的侧边栏名字原样
+    传给了新 helper——选择器换了、目的地一个没改，五次点击全部找不到元素，
+    而门禁全绿。这一条把判据挪到实参上。
+    """
+
+    def test_every_destination_a_spec_asks_for_exists(self) -> None:
+        shell = (ROOT / "frontend/src/app/WorkbenchShell.tsx").read_text(encoding="utf-8")
+        declared = set(re.findall(r'label: "([^"]+)"', shell))
+        self.assertTrue(declared, "the shell must declare its sidebar labels")
+        asked: dict[str, list[str]] = {}
+        for spec in [*_specs(), DESKTOP_NAVIGATION]:
+            for name in _DESKTOP_SECTION.findall(spec.read_text(encoding="utf-8")):
+                asked.setdefault(name, []).append(spec.name)
+        unknown = {name: files for name, files in asked.items() if name not in declared}
+        self.assertEqual(
+            unknown,
+            {},
+            "these destinations do not exist in the shell's own navigation, so the "
+            f"click cannot land: {unknown}",
         )
 
 

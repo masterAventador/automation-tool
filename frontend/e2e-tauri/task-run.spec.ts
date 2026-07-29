@@ -4,7 +4,7 @@ import { writeFile } from "node:fs/promises";
 
 import { browser } from "@wdio/globals";
 import {
-  WORKBENCH_MARKERS,
+  openAutomationRuns,
   waitForStartup,
 } from "./navigation";
 
@@ -165,7 +165,8 @@ describe("Task run production-path acceptance", () => {
     await waitForRenderedText("取消命令已提交", "已取消", "任务已取消");
 
     await browser.$("button=返回工作台").click();
-    await waitForRenderedText(WORKBENCH_MARKERS[0]!, preparation.emergencyTaskId);
+    await openAutomationRuns();
+    await waitForRenderedText(preparation.emergencyTaskId);
     await openTask(preparation.emergencyTaskId);
     await browser.$("button=紧急停止").click();
     await browser.$("button=确认紧停").click();

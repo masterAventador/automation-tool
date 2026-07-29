@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
 import {
-  WORKBENCH_MARKERS,
+  openAutomationRuns,
   openTaskCreate,
   waitForStartup,
 } from "./navigation";
@@ -77,14 +77,15 @@ describe("T3-19 hidden App lifecycle acceptance", () => {
     await waitForRenderedText("取消命令已提交", "已取消", "任务已取消");
 
     await browser.$("button=返回工作台").click();
-    await waitForRenderedText(WORKBENCH_MARKERS[0]!, controlledTaskId);
+    // 「返回工作台」把页面切到自动化中心而不是运行记录列表。
+    await openAutomationRuns();
+    await waitForRenderedText(controlledTaskId);
     await openCreatePage();
     const succeededTaskId = await createTask("T3-19 成功链路");
     await waitForRenderedText("已成功", "任务完成", "100%");
 
     await browser.refresh();
     await waitForRenderedText(
-      WORKBENCH_MARKERS[0]!,
       controlledTaskId,
       succeededTaskId,
       "已取消",

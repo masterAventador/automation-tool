@@ -4,6 +4,7 @@ import { isAbsolute } from "node:path";
 
 import { browser, expect } from "@wdio/globals";
 import {
+  openWorkbenchSection,
   waitForStartup,
 } from "./navigation";
 
@@ -38,8 +39,8 @@ describe("B5-16 default browser Profile isolation", () => {
     )) as Preparation;
     assert.match(preparation.installationId, UUID_V4);
 
-    await browser.$("li=平台状态").click();
-    await expect(await browser.$("h2")).toHaveText("平台状态");
+    await openWorkbenchSection("账号与平台");
+    await expect(await browser.$("h2")).toHaveText("账号与平台");
     await browser.$("button=打开登录处理").click();
     await browser.waitUntil(
       async () => (await browser.$("body").getText()).includes(SCAN_FACT),

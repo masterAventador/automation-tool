@@ -4,6 +4,7 @@ import { writeFile } from "node:fs/promises";
 
 import { browser, expect } from "@wdio/globals";
 import {
+  openWorkbenchSection,
   waitForStartup,
 } from "./navigation";
 
@@ -43,8 +44,8 @@ async function signal(path: string, value: unknown): Promise<void> {
 }
 
 async function openPlatformPage(): Promise<void> {
-  await browser.$("li=平台状态").click();
-  await expect(await browser.$("h2")).toHaveText("平台状态");
+  await openWorkbenchSection("账号与平台");
+  await expect(await browser.$("h2")).toHaveText("账号与平台");
 }
 
 /**

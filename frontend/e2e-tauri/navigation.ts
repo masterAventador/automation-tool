@@ -38,43 +38,68 @@ export const WORKBENCH_SHELL = "nav[aria-label='桌面主导航']";
  * workbench in full. A gate that cannot fail is worse than a missing one: it
  * reports safety it is not providing.
  *
- * These are read off the redesign's own acceptance
- * (`WorkbenchShell.redesign.test.tsx`), so they are the strings the shell is
- * required to render rather than ones observed once.
+ * Deliberately just the landmark. A first version also matched body text
+ * against 「AI 运营助理」/「给 AI 助理发消息」, and both were wrong: the first
+ * only renders on the assistant section, and the second is an `aria-label` —
+ * `getText()` returns rendered text and never sees an attribute, so that half
+ * was dead code pretending to be a second line of defence. The landmark on its
+ * own is exact: `StartupGate` either returns the shell or returns the repair
+ * screen, never both, so the nav element exists if and only if the workbench is
+ * mounted.
  */
-export const WORKBENCH_MARKERS: readonly string[] = [
-  "AI 运营助理",
-  "给 AI 助理发消息",
-];
-
-/** Whether any part of the workbench shell is on screen right now. */
 export async function workbenchIsMounted(): Promise<boolean> {
-  if (await browser.$(WORKBENCH_SHELL).isExisting()) return true;
-  const body = await browser.$("body").getText();
-  return WORKBENCH_MARKERS.some((marker) => body.includes(marker));
+  return browser.$(WORKBENCH_SHELL).isExisting();
 }
 
 /**
- * Wait until the App has either mounted the shell or stopped at the startup
- * gate, and say which.
+ * Wait for the App to mount the workbench, and refuse anything else.
  *
- * Returns rather than throws on the repair path: several specs exist precisely
- * to exercise it, and a helper that treated it as a failure would make them
- * unable to use this module — which is how 46 copies started.
+ * This replaced `await expect(h2).toHaveText("RPA 运营工作台")`, which asserted
+ * two things — the App finished starting, *and* it is on the workbench. A first
+ * version returned `"workbench" | "repair"` and every one of the 42 call sites
+ * discarded the value, which quietly turned the second assertion into "either
+ * outcome is fine". Worse, it then had exactly the shape of a navigation call —
+ * awaited, typed, returning — so the migration script could substitute it for
+ * one and nothing anywhere would object. Seven specs lost their navigation that
+ * way.
+ *
+ * So the default is strict. The handful of specs that exist to exercise the
+ * startup gate ask for it explicitly, and that ask is visible at the call site
+ * rather than implied by a discarded return value.
  */
-export async function waitForStartup(timeout = 120_000): Promise<"workbench" | "repair"> {
+export async function waitForStartup(
+  { allowRepair = false, timeout = 120_000 }: {
+    readonly allowRepair?: boolean;
+    readonly timeout?: number;
+  } = {},
+): Promise<"workbench" | "repair"> {
   await browser.waitUntil(
     async () =>
       (await workbenchIsMounted()) ||
       (await browser.$("button=打开本地修复工具").isExisting()),
     { timeout, interval: 1_000, timeoutMsg: "App never left the startup check" },
   );
-  return (await workbenchIsMounted()) ? "workbench" : "repair";
+  if (await workbenchIsMounted()) return "workbench";
+  if (allowRepair) return "repair";
+  throw new Error(
+    "App stopped at the startup repair gate; pass { allowRepair: true } if that " +
+      "is what this spec is testing",
+  );
 }
 
-/** Click a sidebar destination by its accessible name. */
+/**
+ * Click a sidebar destination by name.
+ *
+ * Matches a *descendant*'s text rather than the whole item's, because the shell
+ * hangs an antd `Badge` on 创作 whose count is a word — 失败 / 未知 / 完成 — so
+ * the item's own `normalize-space()` becomes 「创作完成」 and an exact match on
+ * the item stops finding it. `WorkbenchShell.tsx` states this requirement in so
+ * many words next to the badge.
+ */
 export async function openWorkbenchSection(name: string): Promise<void> {
-  await browser.$(`//*[@role='menuitem'][normalize-space()='${name}']`).click();
+  await browser
+    .$(`//*[@role='menuitem'][.//*[normalize-space()='${name}'] or normalize-space()='${name}']`)
+    .click();
 }
 
 /**
@@ -90,25 +115,41 @@ async function openSegment(label: string): Promise<void> {
     .click();
 }
 
+const STUDIO = "section[aria-label='视频制作工作区']";
+
+/**
+ * Open the full studio panel, unless it is already open.
+ *
+ * Idempotent on purpose. The embedded Tauri service keeps one App alive across
+ * every spec in a run, and the studio panel does not close itself — so the
+ * second caller lands on a page that has no 创作 segment and no
+ * 打开完整制作面板 button, and a helper that assumed the landing page would
+ * fail on «element wasn't found» with no hint that the real cause was the
+ * previous test. Measured 2026-07-29 in CQ-01: test 1 opened it, tests 2 and 3
+ * both died this way.
+ */
+async function openStudioPanel(segment: string): Promise<ReturnType<typeof browser.$>> {
+  const open = await browser.$(STUDIO);
+  if (!(await open.isDisplayed().catch(() => false))) {
+    await openWorkbenchSection("创作");
+    await openSegment(segment);
+    await browser.$("button=打开完整制作面板").click();
+  }
+  const studio = await browser.$(STUDIO);
+  await expect(studio).toBeDisplayed();
+  return studio;
+}
+
 /** The brand-motion studio, with its method already chosen. */
 export async function openVideoStudio(): Promise<ReturnType<typeof browser.$>> {
-  await openWorkbenchSection("创作");
-  await openSegment("品牌动效成片");
-  await browser.$("button=打开完整制作面板").click();
-  const studio = await browser.$("section[aria-label='视频制作工作区']");
-  await expect(studio).toBeDisplayed();
+  const studio = await openStudioPanel("品牌动效成片");
   await studio.$("button[aria-label='选择品牌动效成片']").click();
   return studio;
 }
 
 /** The same studio by way of the material-montage method. */
 export async function openMaterialVideoStudio(): Promise<ReturnType<typeof browser.$>> {
-  await openWorkbenchSection("创作");
-  await openSegment("智能素材成片");
-  await browser.$("button=打开完整制作面板").click();
-  const studio = await browser.$("section[aria-label='视频制作工作区']");
-  await expect(studio).toBeDisplayed();
-  return studio;
+  return openStudioPanel("智能素材成片");
 }
 
 /** The lightweight editing workspace. */
@@ -135,7 +176,15 @@ export async function openTaskCreate(): Promise<void> {
   await browser.$("//button[contains(normalize-space(),'新建运营任务')]").click();
 }
 
-/** Settings and diagnostics. */
+/**
+ * Settings and diagnostics, with the page confirmed on screen.
+ *
+ * The two specs this replaced each returned only after asserting their own
+ * settings card was displayed. Collapsing them to a bare click would have made
+ * this helper return while the page was still whatever it was — so the landing
+ * assertion stays here, once, instead of twice.
+ */
 export async function openSettings(): Promise<void> {
   await openWorkbenchSection("设置");
+  await expect(await browser.$("h2")).toHaveText("设置");
 }

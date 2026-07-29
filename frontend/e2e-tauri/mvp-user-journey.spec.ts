@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
 import {
+  openAutomationRuns,
   openTaskCreate,
   waitForStartup,
 } from "./navigation";
@@ -84,9 +85,9 @@ describe("H8-16F hidden App original-caller MVP journey", () => {
         })}`,
       );
     }
-    await expect(await browser.$("h2")).toHaveText("平台状态");
+    await expect(await browser.$("h2")).toHaveText("账号与平台");
 
-    await browser.$("li=任务记录").click();
+    await openAutomationRuns();
     await expect(await browser.$("h3=任务运行详情")).toExist();
     await browser.waitUntil(
       async () => (await body.getText()).includes("草稿"),

@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
 import {
-  waitForStartup,
   openVideoEditing,
+  openWorkbenchSection,
+  waitForStartup,
 } from "./navigation";
 
 const SOURCE_ARTIFACT = "9f48954d-2df1-4168-8f33-b62c5772845b";
@@ -76,7 +77,8 @@ describe("VE-03 production App standalone video editing acceptance", () => {
     assert.doesNotMatch(body, /aliyun|阿里云|tencent|腾讯云|provider|ims|ice/i);
     assert.doesNotMatch(body, /完成 100%|示例成片|假任务/);
 
-    // 回到工作台首页，避免把页面状态遗留给后续验收用例。
-    await waitForStartup();
+    // 回到助理页，避免把页面状态遗留给后续验收用例——常驻 App 在多个 spec
+    // 之间是共享的。`waitForStartup` 只等不导航，用它做这件事等于没做。
+    await openWorkbenchSection("AI 助理");
   });
 });

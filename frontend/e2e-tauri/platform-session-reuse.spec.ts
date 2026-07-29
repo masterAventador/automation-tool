@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
 import {
+  openWorkbenchSection,
   waitForStartup,
 } from "./navigation";
 
@@ -33,8 +34,8 @@ function acceptancePhase(): AcceptancePhase {
 }
 
 async function openPlatformPage(expectedSnapshot: string): Promise<void> {
-  await browser.$("li=平台状态").click();
-  await expect(await browser.$("h2")).toHaveText("平台状态");
+  await openWorkbenchSection("账号与平台");
+  await expect(await browser.$("h2")).toHaveText("账号与平台");
   await browser.waitUntil(
     async () => (await browser.$("body").getText()).includes(expectedSnapshot),
     { timeout: 60_000, timeoutMsg: "authoritative platform snapshot did not converge" },

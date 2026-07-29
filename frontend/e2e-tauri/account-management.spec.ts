@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 
 import { browser } from "@wdio/globals";
 
-import { workbenchIsMounted } from "./navigation";
+import {
+  workbenchIsMounted,
+} from "./navigation";
 
 const phase = process.env.AUTOMATION_TOOL_U906_PHASE;
 const loginName = process.env.AUTOMATION_TOOL_U906_LOGIN_NAME;

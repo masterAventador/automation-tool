@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { browser, expect } from "@wdio/globals";
 import {
   openSettings,
+  waitForStartup,
   workbenchIsMounted,
 } from "./navigation";
 
@@ -10,12 +11,12 @@ const TEST_KEY = "sk-vf05-invalid-desktop-key-1234567890";
 
 describe("VF-05 hidden App model service acceptance", () => {
   it("persists, reloads, reuses and tests a credential without reflecting it", async () => {
-    await browser.waitUntil(
-      async () =>
-        (await workbenchIsMounted()) ||
-        (await browser.$("button=打开本地修复工具").isExisting()),
-      { timeoutMsg: "production App did not reach workbench or startup repair path" },
-    );
+    // 这个 spec 接受两种开机结局：直接进工作台，或停在启动修复关口。
+    // 停在修复关口时要先点进去，否则侧边栏根本不存在——这一段原本在本文件
+    // 自己的 openSettings 里，抽到共享模块时不能连带丢掉。
+    if (await waitForStartup({ allowRepair: true }) === "repair") {
+      await browser.$("button=打开本地修复工具").click();
+    }
     await openSettings();
 
     const script = await browser.$(".model-service-purpose--script");

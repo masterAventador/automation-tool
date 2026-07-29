@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { browser } from "@wdio/globals";
 import {
+  openSettings,
   waitForStartup,
 } from "./navigation";
 
@@ -53,7 +54,7 @@ describe("H8-21/H8-22 hidden original-App update decision and UI acceptance", ()
       await browser.$("button=稍后提醒").click();
       await waitForState("ready", "deferred");
 
-      await browser.$("li=设置与诊断").click();
+      await openSettings();
       await waitForText("已暂缓，将在下次检查时重新提示");
       await browser.$("button=检查更新").click();
       await waitForText("发现新版本 0.2.0");

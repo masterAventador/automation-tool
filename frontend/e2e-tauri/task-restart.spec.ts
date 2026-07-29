@@ -3,7 +3,7 @@ import { access, writeFile } from "node:fs/promises";
 
 import { browser } from "@wdio/globals";
 import {
-  WORKBENCH_MARKERS,
+  openAutomationRuns,
   openTaskCreate,
   waitForStartup,
 } from "./navigation";
@@ -96,7 +96,8 @@ describe("T3-20 hidden App restart recovery acceptance", () => {
 
     await waitForSignal(upPath);
     await browser.$("button=重新检查").click();
-    await waitForRenderedText(WORKBENCH_MARKERS[0]!, taskId ?? "", "已取消");
+    await openAutomationRuns();
+    await waitForRenderedText(taskId ?? "", "已取消");
     await browser.$(`button=${taskId}`).click();
     await waitForRenderedText("任务运行详情", taskId ?? "", "已取消", "任务已取消");
     assert.equal(/产品登录|注册账号|账号登录/.test(await browser.$("body").getText()), false);

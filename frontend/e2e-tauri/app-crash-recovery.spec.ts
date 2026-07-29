@@ -4,7 +4,7 @@ import { writeFile } from "node:fs/promises";
 
 import { browser } from "@wdio/globals";
 import {
-  WORKBENCH_MARKERS,
+  openAutomationRuns,
   openTaskCreate,
   waitForStartup,
 } from "./navigation";
@@ -109,8 +109,8 @@ describe("H8-04 hidden App crash recovery acceptance", () => {
         core.invoke("restart_executor"),
       )) as { readonly state: string };
       assert.equal(executor.state, "running");
+        await openAutomationRuns();
         await waitForRenderedText(
-        WORKBENCH_MARKERS[0]!,
         taskId ?? "",
         "本机执行器在线",
         "运行中",
@@ -157,7 +157,7 @@ describe("H8-04 hidden App crash recovery acceptance", () => {
       { timeout: 120_000, timeoutMsg: "H8-04 workbench did not restore its snapshot" },
     );
     if (await retry.isExisting()) await retry.click();
-    await waitForRenderedText(WORKBENCH_MARKERS[0]!, taskId, "本机执行器在线", "运行中");
+    await waitForRenderedText(taskId, "本机执行器在线", "运行中");
     await browser.$(`button=${taskId}`).click();
     await waitForRenderedText(
       "任务运行详情",

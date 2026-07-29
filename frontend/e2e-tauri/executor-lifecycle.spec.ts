@@ -37,7 +37,7 @@ async function waitForText(...expected: string[]): Promise<string> {
 
 async function openDiagnostics(): Promise<void> {
   await openWorkbenchSection("设置");
-  await expect(await browser.$("h2")).toHaveText("设置与诊断");
+  await expect(await browser.$("h2")).toHaveText("设置");
 }
 
 async function refreshUntil(...expected: string[]): Promise<void> {

@@ -4,6 +4,7 @@ import { writeFile } from "node:fs/promises";
 
 import { browser } from "@wdio/globals";
 import {
+  openAutomationRuns,
   openTaskCreate,
   openWorkbenchSection,
   waitForStartup,
@@ -107,6 +108,8 @@ describe("H8-05 hidden App Executor crash recovery acceptance", () => {
       { timeout: 120_000, interval: 1_000, timeoutMsg: "H8-05 supervisor did not recover once" },
     );
 
+    // 改版后任务列表在「自动化 → 查看运行记录」，不再是侧边栏「工作台」。
+    await openAutomationRuns();
     await waitForText(taskId ?? "", "结果待确认", "本机执行器在线");
     await browser.$(`button=${taskId ?? ""}`).click();
     await waitForText("任务运行详情", taskId ?? "", "结果待确认", "结果待确认");

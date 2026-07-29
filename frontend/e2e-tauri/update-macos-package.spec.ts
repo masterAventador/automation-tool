@@ -5,6 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { browser } from "@wdio/globals";
 import {
+  openSettings,
   waitForStartup,
 } from "./navigation";
 
@@ -89,7 +90,7 @@ describe("H8-22 ad-hoc macOS package update acceptance", () => {
       await waitForText("发现新版本 0.2.0");
       await clickEnabledButton("稍后提醒");
       await waitForState("ready", "deferred");
-      await browser.$("li=设置与诊断").click();
+      await openSettings();
       await browser.$("button=检查更新").click();
       await waitForText("发现新版本 0.2.0");
       await clickEnabledButton("跳过此版本");
@@ -130,7 +131,7 @@ describe("H8-22 ad-hoc macOS package update acceptance", () => {
       const failed = await waitForState("failed");
       assert.equal(failed.stage, "install");
       assert.equal(failed.code, "installation_failed");
-      await browser.$("li=设置与诊断").click();
+      await openSettings();
       await waitForText("更新当前不可用");
       return;
     }

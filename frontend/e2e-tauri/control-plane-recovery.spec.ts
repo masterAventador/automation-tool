@@ -4,7 +4,7 @@ import { writeFile } from "node:fs/promises";
 
 import { browser } from "@wdio/globals";
 import {
-  WORKBENCH_MARKERS,
+  openAutomationRuns,
   openTaskCreate,
   waitForStartup,
 } from "./navigation";
@@ -109,6 +109,8 @@ describe("H8-06 hidden App Control Plane restart recovery acceptance", () => {
     assert.equal(started.state, "running");
     assert.equal(started.restartCount, 0);
 
+    await openAutomationRuns();
+
     await waitForText(taskId ?? "", "运行中", "本机执行器在线");
     await browser.$(`button=${taskId ?? ""}`).click();
     await waitForText("任务运行详情", taskId ?? "", "运行中", "任务开始", "步骤开始");
@@ -141,7 +143,7 @@ describe("H8-06 hidden App Control Plane restart recovery acceptance", () => {
       "the restarted Control Plane",
     );
     await browser.$("button=重新检查").click();
-    await waitForText(WORKBENCH_MARKERS[0]!, taskId ?? "", "已取消", "本机执行器在线");
+    await waitForText(taskId ?? "", "已取消", "本机执行器在线");
     await browser.$(`button=${taskId ?? ""}`).click();
     await waitForText("任务运行详情", taskId ?? "", "已取消", "任务已取消");
     const recovered = (await browser.tauri.execute(({ core }) =>
