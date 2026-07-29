@@ -62,12 +62,20 @@ ffprobe -v error -print_format json \
 | `audio.m4a` | `"2.000000"` | 仅 aac | AUDIO |
 | `image.png` 800×600 | **键不存在** | png（`codec_type=video`） | IMAGE |
 
-**图片的判别信号是「`format` 里根本没有 `duration` 键」**，不是 duration=0。据此定 kind：
+~~**图片的判别信号是「`format` 里根本没有 `duration` 键」**，不是 duration=0。据此定 kind：~~
 
-- 有 video 流 + 有 `format.duration` → `VIDEO`
-- 有 video 流 + 无 `format.duration` → `IMAGE`
+- ~~有 video 流 + 有 `format.duration` → `VIDEO`~~
+- ~~有 video 流 + 无 `format.duration` → `IMAGE`~~
 - 无 video 流 + 有 audio 流 → `AUDIO`
 - 都没有 → 拒绝
+
+> **⚠️ 上面划掉的判据在 T2 被实测推翻，勿照此实现。** 只用这 5 个素材调研，样本恰好让「有没有
+> 时长」和「是不是图片」重合了。扩大样本后两个方向都出错：管道输出的 Matroska（`MediaRecorder`
+> 的 WebM 就是这形状）**真实 2 秒视频不带 duration 键**，会被判成图片；而 JPEG 容器是 `image2`
+> 且**自报 `duration: 0.040000`**，会被判成 40 毫秒视频。
+>
+> **时长是容器写不写的偶然事实，容器类型才是本质。** 正确判据见 T2 实现：仅当**无音轨**且
+> `format_name` 是图片容器（`*_pipe` 或 `image2`）才判 IMAGE，否则一律 VIDEO 并要求可用时长。
 
 **失败行为（关键，直接决定会不会写出静默失败）：**
 
@@ -339,8 +347,17 @@ def probe_material(tools: PackagedMediaTools, path: Path) -> MaterialFacts: ...
    注意跨层常量一致性测试**拦不住形状组合问题**：两份限值一模一样，也挡不住「视频被判成图片」
    这类 kind / 时长 / 画幅的组合错误（T2 的 Critical 正是此类）。故本 Task 必须逐条素材实际构造
    `Material`，而不只是比对上限数值。
+3. **每一条 ffmpeg / ffprobe 命令行，都必须至少有一个用例用随包真实二进制跑通。**
+   存根用例负责覆盖分支与失败矩阵，真实二进制用例负责证明**这条命令行本身合法**，两者不可
+   互相替代。收口前逐条清点模块里拼出的每一条命令行，确认都有真实二进制用例覆盖。
 
-**RED / 验收**：`test_material_probe_media.py`，session 级 fixture 用**随包 ffmpeg** 现场生成 6 个素材（实测总耗时约 1 秒）：
+   依据是 T3 的实测：`read_audio_facts` 写完时 **110 条单元测试全绿、覆盖率 100%，而六个真实
+   文件全部失败**——拼出的 ffmpeg 命令行根本不合法（输入必须在输出选项之前；且 **ffmpeg 不支持
+   `--`**，实测它把 `--` 当文件名打开，而同族的 ffprobe 支持）。**同族工具之间的差异只有真跑
+   才知道**，而存根对任何参数都照样回答，**这一类问题它本质上测不出**——「100% 覆盖 + 全绿」
+   在这里提供的信息量是零。这是可复现的失败模式，不是偶发。
+
+**RED / 验收**：`test_material_probe_media.py`，session 级 fixture 用**随包 ffmpeg** 现场生成 8 个素材（前 6 个实测总耗时约 1 秒）：
 
 | 素材 | 规格 |
 | --- | --- |
