@@ -204,6 +204,13 @@ class TestBundleLayout:
         code's idea of "where" tied to the register's.
         """
         monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+        # Pointing the build cache inside the checkout is a supported setup --
+        # CLAUDE.md 3 names the in-repo `.local/` as the place for local run
+        # and test data -- and it would otherwise put the fetched faces under
+        # the repository root and fail the assertion below. The failure would
+        # name this font code rather than the developer's environment, so it
+        # would cost someone a wasted investigation.
+        monkeypatch.delenv(fonts.BUILD_CACHE_OVERRIDE_VARIABLE, raising=False)
         cleared = _cleared_faces(_rights_document())
 
         for registered in fonts.REGISTERED_CAPTION_FONTS.values():
@@ -261,6 +268,25 @@ class TestBundleLayout:
     def test_an_unknown_bundle_is_refused(self) -> None:
         with pytest.raises(fonts.CaptionFontUnavailable):
             fonts.bundle_root("no-such-bundle")
+
+    @pytest.mark.parametrize(
+        "font_key", ["../../etc/passwd", "helvetica", "Noto", "noto\n", "", b"noto"]
+    )
+    def test_an_unresolvable_key_has_no_packaged_path(self, font_key: object) -> None:
+        """The guard here needs its own tests, not its sibling's.
+
+        `packaged_relative_path` is written as a guarded function but every
+        caller today feeds it a registered key, so nothing held the guard in
+        place: replacing its `_registered_font(...)` call with a bare
+        `REGISTERED_CAPTION_FONTS[...]` lookup left the whole suite green.
+
+        The blast radius is nil today -- it touches no filesystem and has no
+        production caller yet -- but LE-20 will import it, and a guard no test
+        pins is one a later refactor can quietly delete. Pin it while it is
+        still cheap.
+        """
+        with pytest.raises(fonts.CaptionFontRejected):
+            fonts.packaged_relative_path(font_key)  # type: ignore[arg-type]
 
 
 class TestResolveFontFile:
