@@ -49,17 +49,20 @@ describe("Workbench production-path acceptance", () => {
     await openAutomationRuns();
 
     const retry = await browser.$("button=重新加载工作台");
+    const diagnostics = await browser.$("div[role='button']=诊断信息");
     await browser.waitUntil(
-      async () => {
-        const bodyText = await browser.$("body").getText();
-        return (await retry.isExisting()) || bodyText.includes(preparation.taskId);
-      },
+      async () =>
+        (await retry.isExisting()) || (await diagnostics.isExisting()),
       { timeout: 60_000, timeoutMsg: "workbench did not expose a reload or Task state" },
     );
     if (await retry.isExisting()) {
       await retry.click();
     }
 
+    // 完整的 Task ID 收在「诊断信息」折叠面板里（`Workbench.tsx` 就在那段注释里
+    // 写明了理由：它是把任务与日志行对应起来的东西，但这是首屏最大的一张卡）。
+    // 收起的内容不进 `getText()`，所以要读它就得先展开——标识没丢，是读法要跟上。
+    await diagnostics.click();
     await waitForRenderedText(
       preparation.taskId,
       "控制服务已连接",
