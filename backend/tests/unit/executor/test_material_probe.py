@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -41,11 +42,13 @@ from automation_tool.executor.material_probe import (  # noqa: E402
     MAX_PROBE_OUTPUT_BYTES,
     MAX_SOURCE_FILE_BYTES,
     AudioFacts,
+    MaterialFacts,
     MaterialProbeRejected,
     MaterialProbeRejection,
     MediaStreamFacts,
     PackagedMediaTools,
     ProbedMaterialKind,
+    probe_material,
     read_audio_facts,
     read_content_digest,
     read_stream_facts,
@@ -2772,7 +2775,7 @@ class TestContentDigestNeedsTheFileToHoldStill:
 
         source = _sparse_source(tmp_path, _STABILITY_FIXTURE_BYTES)
         excinfo, _ = _rejection_while_mutating(source, append)
-        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+        assert _rejection(excinfo) is MaterialProbeRejection.SOURCE_NOT_AT_REST
 
     def test_rejects_a_file_truncated_while_it_is_being_read(self, tmp_path: Path) -> None:
         """Same as growth: the rejection is itself the proof of the timing.
@@ -2784,7 +2787,7 @@ class TestContentDigestNeedsTheFileToHoldStill:
         """
         source = _sparse_source(tmp_path, _STABILITY_FIXTURE_BYTES)
         excinfo, _ = _rejection_while_mutating(source, lambda path: os.truncate(path, 4096))
-        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+        assert _rejection(excinfo) is MaterialProbeRejection.SOURCE_NOT_AT_REST
 
     def test_rejects_a_file_replaced_by_another_while_it_is_being_read(
         self, tmp_path: Path
@@ -2803,7 +2806,7 @@ class TestContentDigestNeedsTheFileToHoldStill:
 
         source = _sparse_source(tmp_path, _STABILITY_FIXTURE_BYTES)
         excinfo, armed_at = _rejection_while_mutating(source, replace)
-        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+        assert _rejection(excinfo) is MaterialProbeRejection.SOURCE_NOT_AT_REST
         assert armed_at < 0.5, f"the file was replaced {armed_at:.0%} into the call, not mid-read"
 
 
@@ -2919,7 +2922,7 @@ class TestContentDigestNeedsMoreThanTheInode:
 
         source = _sparse_source(tmp_path, _STABILITY_FIXTURE_BYTES)
         excinfo, armed_at = _rejection_while_mutating(source, rewrite)
-        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+        assert _rejection(excinfo) is MaterialProbeRejection.SOURCE_NOT_AT_REST
         assert armed_at < 0.5, f"the file was rewritten {armed_at:.0%} into the call, not mid-read"
 
     def test_a_read_only_open_of_a_fifo_never_returns_on_its_own(self, tmp_path: Path) -> None:
@@ -2975,7 +2978,7 @@ class TestContentDigestNeedsMoreThanTheInode:
         """
         fifo = tmp_path / "pipe.mp4"
         os.mkfifo(fifo)
-        outcome: dict[str, str | None] = {}
+        outcome: dict[str, str | MaterialProbeRejection] = {}
 
         def call_it() -> None:
             outcome["result"] = material_probe._digest_stable_file(fifo, os.stat(fifo))
@@ -2995,7 +2998,9 @@ class TestContentDigestNeedsMoreThanTheInode:
             finally:
                 os.close(writer)
             pytest.fail("the digest blocked opening a FIFO — the open has lost O_NONBLOCK")
-        assert outcome["result"] is None
+        # Not "at rest": a FIFO is not a file part-way through being written, it
+        # is not a file at all, and waiting for it to settle would wait forever.
+        assert outcome["result"] is MaterialProbeRejection.UNREADABLE
 
     def test_rejects_a_file_swapped_between_the_guard_and_the_open(self, tmp_path: Path) -> None:
         """Same window, the other outcome: still a regular file, but a different one.
@@ -3005,7 +3010,10 @@ class TestContentDigestNeedsMoreThanTheInode:
         """
         approved = _source(tmp_path, "approved.mp4", payload=_positional_bytes(4096))
         impostor = _source(tmp_path, "impostor.mp4", payload=_positional_bytes(4096))
-        assert material_probe._digest_stable_file(impostor, approved.stat()) is None
+        assert (
+            material_probe._digest_stable_file(impostor, approved.stat())
+            is MaterialProbeRejection.SOURCE_NOT_AT_REST
+        )
 
     def test_rejects_a_file_that_grows_when_the_clock_cannot_show_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -3036,7 +3044,7 @@ class TestContentDigestNeedsMoreThanTheInode:
 
         source = _sparse_source(tmp_path, _STABILITY_FIXTURE_BYTES)
         excinfo, _ = _rejection_while_mutating(source, append)
-        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+        assert _rejection(excinfo) is MaterialProbeRejection.SOURCE_NOT_AT_REST
 
     def test_rejects_a_file_truncated_when_the_clock_cannot_show_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -3045,4 +3053,544 @@ class TestContentDigestNeedsMoreThanTheInode:
         _freeze_the_descriptor_clock(monkeypatch)
         source = _sparse_source(tmp_path, _STABILITY_FIXTURE_BYTES)
         excinfo, _ = _rejection_while_mutating(source, lambda path: os.truncate(path, 4096))
+        assert _rejection(excinfo) is MaterialProbeRejection.SOURCE_NOT_AT_REST
+
+
+# --- T5: probe_material, the orchestration ---------------------------------
+
+# The three steps, in the order the orchestration has to run them. Spelled out
+# once so a test cannot quietly agree with an implementation that reordered them.
+PROBE_STEPS = ("read_stream_facts", "read_audio_facts", "read_content_digest")
+
+# Every character the plan calls out, in one directory name: a space, `&`, `$`,
+# an apostrophe and Chinese. None of them is escaped anywhere below, and none of
+# them needs to be — which is the thing being shown, since nothing here goes
+# through a shell.
+SPECIAL_DIRECTORY_NAME = "it's $HOME & 素材 库"
+
+
+def _argv_log(directory: Path) -> list[str]:
+    return (directory / ".probe-argv").read_text(encoding="utf-8").splitlines()
+
+
+def _orchestration_tools(directory: Path, payload: str) -> PackagedMediaTools:
+    """A stub pair that both append their argv to one shared log.
+
+    Both stubs are hard links to the same master script and both read their
+    control files out of the source file's directory, so the log holds the two
+    tools' arguments in the order the processes really ran. That ordering comes
+    from `execve` rather than from a call site, which is the one thing an
+    in-process recorder cannot say.
+
+    They share `.probe-stdout` as well, so the measuring step reads the probe's
+    own JSON as its report. That report states no frame at all — the ordinary
+    shape of a sound track too short to measure — so it is not a rejection and
+    the orchestration runs to the end.
+    """
+    return PackagedMediaTools(
+        ffprobe_path=_ffprobe_stub(directory, stdout=payload, argv_log=True),
+        ffmpeg_path=_ffmpeg_stub(directory),
+    )
+
+
+def _measure_watching_tools(directory: Path) -> PackagedMediaTools:
+    """The packaged ffprobe, with a stub standing in for ffmpeg.
+
+    The kind has to be decided by the real tool, because that judgement is what
+    the dispatch turns on; whether a measuring pass ran at all is only visible
+    from a stub. Neither half can be dropped: a stub ffprobe would answer
+    whatever it was told, and a real ffmpeg leaves no record of having run.
+    """
+    (directory / ".probe-argv").write_text("", encoding="utf-8")
+    ffmpeg = directory / "ffmpeg"
+    os.link(_stub_master(directory), ffmpeg)
+    return PackagedMediaTools(ffprobe_path=_packaged_tools().ffprobe_path, ffmpeg_path=ffmpeg)
+
+
+def _record_the_steps(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    rejecting: str | None = None,
+    disturbs: Callable[[], None] | None = None,
+) -> tuple[list[str], list[MaterialProbeRejected]]:
+    """Replace the three steps with recorders, one of which may reject or meddle.
+
+    All the orchestration does is call these three and assemble what they give
+    back, so the order it calls them in and what it does when one says no are
+    invisible from outside unless the steps themselves report being called.
+
+    `disturbs` fires from the middle step, which is where "between the steps"
+    lives: the source file is changed while the probe is part-way through it.
+    """
+    called: list[str] = []
+    thrown: list[MaterialProbeRejected] = []
+    answers: dict[str, Any] = {
+        "read_stream_facts": _stream_facts(),
+        "read_audio_facts": AudioFacts(has_audio=True, loudness_lufs=-21.8),
+        "read_content_digest": "c" * 64,
+    }
+
+    def recorder(name: str) -> Callable[..., Any]:
+        def step(*_arguments: Any) -> Any:
+            called.append(name)
+            if disturbs is not None and name == "read_audio_facts":
+                disturbs()
+            if name == rejecting:
+                thrown.append(MaterialProbeRejected(MaterialProbeRejection.PROBE_CRASHED))
+                raise thrown[-1]
+            return answers[name]
+
+        return step
+
+    for name in PROBE_STEPS:
+        monkeypatch.setattr(material_probe, name, recorder(name))
+    return called, thrown
+
+
+@pytest.fixture(scope="session")
+def orchestration_media(
+    tmp_path_factory: pytest.TempPathFactory, real_media: dict[str, Path]
+) -> dict[str, Path]:
+    """One real material of each kind, plus the mute clip that pins the dispatch.
+
+    Two of the four already exist for the measuring step's own tests, so they
+    are taken rather than encoded again; the other two are the shapes nothing
+    needed until there was an orchestration to route them.
+    """
+    ffmpeg = _packaged_tools().ffmpeg_path
+    directory = tmp_path_factory.mktemp("orchestration-media")
+    media = {
+        # Ten seconds of picture over a sound track that is audible for nine of
+        # them: a video that has to be measured.
+        "sound": real_media["lead_silence"],
+        "audio": real_media["tone"],
+        "mute": directory / "mute.mp4",
+        "picture": directory / "still.png",
+    }
+    # A video with no sound track at all — the shape that must not pay for a
+    # measuring pass even though it is a video.
+    _encode(
+        ffmpeg,
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=black:s=480x854:r=24:d=1",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        os.fspath(media["mute"]),
+    )
+    _encode(
+        ffmpeg,
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=blue:s=800x600",
+        "-frames:v",
+        "1",
+        os.fspath(media["picture"]),
+    )
+    return media
+
+
+class TestProbeMaterialRunsItsStepsInOrder:
+    """Reading, then measuring, then the digest — and the tools checked first.
+
+    The order is the whole of what this function adds. Two of the three are
+    fixed by their signatures, since the measuring step is handed what the
+    reading step returns, but nothing about the digest forces it to be last: it
+    starts no subprocess and needs no tools, so it could as easily run first.
+    It goes last for two reasons — an earlier rejection then costs nothing, the
+    file being read end to end, and it is the step that closes the window the
+    orchestration opened.
+    """
+
+    def test_reads_then_measures_then_digests(
+        self, tmp_path: Path, tools: PackagedMediaTools, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        called, _ = _record_the_steps(monkeypatch)
+        facts = probe_material(tools, _source(tmp_path))
+        assert called == list(PROBE_STEPS)
+        assert facts.content_digest == "c" * 64
+
+    def test_the_measuring_pass_really_starts_after_the_reading_pass(self, tmp_path: Path) -> None:
+        """Taken off `execve` rather than off a call site."""
+        payload = _probe_json([_video_stream(), _audio_stream()])
+        facts = probe_material(_orchestration_tools(tmp_path, payload), _source(tmp_path))
+        argv = _argv_log(tmp_path)
+        assert argv.index("-show_entries") < argv.index("-af")
+        assert facts.has_audio
+
+    def test_rejects_before_starting_either_tool_when_one_is_gone(self, tmp_path: Path) -> None:
+        """The tools are re-checked ahead of the reading pass, not by it failing.
+
+        A removed ffprobe would make `subprocess.run` raise and come back as a
+        probe failure, which tells the user their file is fine and the run went
+        wrong. The reason being `UNREADABLE` — and the empty argv log — is what
+        says the check ran first.
+        """
+        source = _source(tmp_path)
+        probe_tools = _orchestration_tools(tmp_path, _probe_json([_video_stream()]))
+        probe_tools.ffprobe_path.unlink()
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            probe_material(probe_tools, source)
         assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+        assert _argv_log(tmp_path) == []
+
+
+class TestProbeMaterialDispatchesOnTheSoundTrack:
+    """Which materials pay for a measuring pass, decided by the real ffprobe.
+
+    The dispatch is deliberately not written here: `read_audio_facts` returns
+    without starting ffmpeg when the stream list carries no sound track, and a
+    picture container that does carry one is never filed as a picture in the
+    first place. Restating either rule in the orchestration would give the two
+    copies somewhere to drift apart, so these pin that the lower layer really
+    does it.
+    """
+
+    @pytest.mark.parametrize(
+        ("material", "kind", "measured"),
+        [
+            ("sound", ProbedMaterialKind.VIDEO, True),
+            ("mute", ProbedMaterialKind.VIDEO, False),
+            ("picture", ProbedMaterialKind.IMAGE, False),
+            ("audio", ProbedMaterialKind.AUDIO, True),
+        ],
+    )
+    def test_only_a_material_carrying_sound_is_measured(
+        self,
+        tmp_path: Path,
+        orchestration_media: dict[str, Path],
+        material: str,
+        kind: ProbedMaterialKind,
+        measured: bool,
+    ) -> None:
+        source = tmp_path / orchestration_media[material].name
+        source.write_bytes(orchestration_media[material].read_bytes())
+        facts = probe_material(_measure_watching_tools(tmp_path), source)
+        assert facts.kind is kind
+        # `-af` is the measuring pass's filter chain and appears in no other
+        # command line, so its presence in the shared log is ffmpeg having run.
+        assert ("-af" in _argv_log(tmp_path)) is measured
+        assert facts.has_audio is measured
+
+
+class TestProbeMaterialRejectsAsAWhole:
+    """One step saying no ends the probe, and nothing half-built comes back."""
+
+    @pytest.mark.parametrize("failing", PROBE_STEPS)
+    def test_a_step_that_rejects_stops_the_probe_there(
+        self,
+        tmp_path: Path,
+        tools: PackagedMediaTools,
+        monkeypatch: pytest.MonkeyPatch,
+        failing: str,
+    ) -> None:
+        """The rejection travels up untouched, and no later step runs.
+
+        Asserting the identity of the exception rather than its reason is what
+        makes this say something: a handler that caught the rejection and raised
+        a new one carrying the same reason would satisfy every other check here,
+        while burying the frame the failure actually came from.
+        """
+        called, thrown = _record_the_steps(monkeypatch, rejecting=failing)
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            probe_material(tools, _source(tmp_path))
+        assert excinfo.value is thrown[0]
+        assert called == list(PROBE_STEPS[: PROBE_STEPS.index(failing) + 1])
+
+
+class TestMaterialFactsCannotCarryAPath:
+    """The boundary holds by structure, not by anybody remembering it.
+
+    `Material` has no path field, so nothing the Control Plane stores can carry
+    one. That says nothing about what the executor hands its own callers, and
+    this is where that gap is closed.
+    """
+
+    @pytest.mark.parametrize("word", ["path", "dir", "file", "location"])
+    def test_no_field_is_named_for_a_place_on_disk(self, word: str) -> None:
+        named = [field.name for field in dataclasses.fields(MaterialFacts) if word in field.name]
+        assert named == []
+
+    def test_every_field_is_required(self) -> None:
+        """Half-built facts are not representable, because there is nothing to omit.
+
+        A default on any field would let a caller assemble the object out of
+        whatever it had so far, which is exactly the half product the
+        orchestration must never return. Together with `frozen=True` — no field
+        can be filled in afterwards either — the two make it structural rather
+        than a rule somebody has to keep.
+        """
+        for field in dataclasses.fields(MaterialFacts):
+            assert field.default is dataclasses.MISSING, field.name
+            assert field.default_factory is dataclasses.MISSING, field.name
+
+    def test_the_facts_cannot_be_changed_once_built(
+        self, tmp_path: Path, tools: PackagedMediaTools, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _record_the_steps(monkeypatch)
+        facts = probe_material(tools, _source(tmp_path))
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            facts.kind = ProbedMaterialKind.IMAGE  # type: ignore[misc]
+
+
+class TestProbeMaterialNeedsOneFileAllTheWayThrough:
+    """Three steps are three moments, and nothing holds the file still between them.
+
+    Each step hands the path to something that opens it itself — two of them to
+    a subprocess — so what each describes is whatever was there when it looked.
+    The digest already refuses a file that moved *while it was hashing*, but
+    nothing watched the far larger window in front of it: the measuring pass
+    alone is allowed fifteen minutes. Facts describing one file, stored beside
+    another file's digest, is a mis-dedup that surfaces as no error at all.
+
+    Closing the window is not the same as holding the file still, and it cannot
+    be: ffprobe and ffmpeg are given a name and open it themselves, so there is
+    no descriptor to share with them. What the stat taken at the start and the
+    stat taken at the end can do is notice afterwards, and refuse.
+
+    Each test below moves exactly one of the three things compared, so no two of
+    them can be satisfied by the same term.
+    """
+
+    def _probe_while_disturbed(
+        self,
+        tmp_path: Path,
+        tools: PackagedMediaTools,
+        monkeypatch: pytest.MonkeyPatch,
+        source: Path,
+        disturb: Callable[[], None],
+    ) -> pytest.ExceptionInfo[MaterialProbeRejected]:
+        _record_the_steps(monkeypatch, disturbs=disturb)
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            probe_material(tools, source)
+        return excinfo
+
+    def test_rejects_a_source_rewritten_between_the_steps(
+        self, tmp_path: Path, tools: PackagedMediaTools, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only the timestamp moves: same inode, same length, different content.
+
+        The ordinary shape of importing a download too early, and the one the
+        inode and the byte count cannot see between them.
+
+        The step is a millisecond, not a second, and that matters: measured, a
+        one-second step leaves a comparison written at whole-second resolution
+        passing this test unchanged, so the mutation that coarsens the check
+        survived until the step was made smaller than a tick of it.
+        """
+        source = _source(tmp_path, payload=b"a" * 32)
+
+        def bump_the_clock() -> None:
+            stamp = source.stat().st_mtime_ns + 1_000_000
+            os.utime(source, ns=(stamp, stamp))
+
+        excinfo = self._probe_while_disturbed(tmp_path, tools, monkeypatch, source, bump_the_clock)
+        assert _rejection(excinfo) is MaterialProbeRejection.SOURCE_NOT_AT_REST
+
+    def test_rejects_a_source_that_grows_between_the_steps(
+        self, tmp_path: Path, tools: PackagedMediaTools, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only the length moves, because the timestamp is put back afterwards.
+
+        Standing in for a filesystem whose timestamps are too coarse to show a
+        change that finished inside one tick — whole seconds on some network
+        filesystems — which is the case the byte count exists for.
+        """
+        source = _source(tmp_path, payload=b"a" * 32)
+
+        def grow_without_the_clock() -> None:
+            before = source.stat()
+            with source.open("ab") as handle:
+                handle.write(b"x" * 16)
+            os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+        excinfo = self._probe_while_disturbed(
+            tmp_path, tools, monkeypatch, source, grow_without_the_clock
+        )
+        assert _rejection(excinfo) is MaterialProbeRejection.SOURCE_NOT_AT_REST
+
+    def test_rejects_a_source_replaced_by_a_twin_between_the_steps(
+        self, tmp_path: Path, tools: PackagedMediaTools, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only the inode moves: same length, same timestamp, different file.
+
+        A writer that renames its finished output over the path leaves exactly
+        this, and the facts read before the rename describe the file that is no
+        longer there.
+        """
+        source = _source(tmp_path, payload=b"a" * 32)
+
+        def replace_with_a_twin() -> None:
+            before = source.stat()
+            twin = tmp_path / "twin.mp4"
+            twin.write_bytes(source.read_bytes())
+            os.replace(twin, source)
+            os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+        excinfo = self._probe_while_disturbed(
+            tmp_path, tools, monkeypatch, source, replace_with_a_twin
+        )
+        assert _rejection(excinfo) is MaterialProbeRejection.SOURCE_NOT_AT_REST
+
+    def test_a_source_nobody_touches_is_probed_to_the_end(
+        self, tmp_path: Path, tools: PackagedMediaTools, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The guard has to let the ordinary case through, and reading is not a change.
+
+        macOS updates `st_atime` when a file is read, so a check that compared
+        whole stat results rather than the three fields would reject every
+        material it was handed.
+        """
+        _record_the_steps(monkeypatch)
+        assert probe_material(tools, _source(tmp_path)).content_digest == "c" * 64
+
+
+class TestProbeMaterialAgainstThePackagedBinaries:
+    """The whole chain, end to end, with the tools that ship.
+
+    Everything above either stubs a tool or stubs a step. A stub answers
+    whatever it is asked, so none of it can show that the two command lines are
+    legal, that the two tools agree about one file, or that a path a shell would
+    mangle survives being handed to them.
+    """
+
+    def test_probes_a_real_clip_end_to_end(
+        self, tmp_path: Path, orchestration_media: dict[str, Path]
+    ) -> None:
+        source = tmp_path / "holiday.mp4"
+        source.write_bytes(orchestration_media["sound"].read_bytes())
+        facts = probe_material(_packaged_tools(), source)
+        assert facts.kind is ProbedMaterialKind.VIDEO
+        assert facts.duration_ms == 10_000
+        assert (facts.width, facts.height) == (320, 240)
+        assert (facts.video_codec, facts.audio_codec) == ("h264", "aac")
+        assert facts.has_audio
+        assert facts.audio_loudness_lufs is not None
+        assert LOUDNESS_FLOOR_LUFS < facts.audio_loudness_lufs <= LOUDNESS_CEILING_LUFS
+        # Hashed independently, so the digest is not just being compared to
+        # itself.
+        assert facts.content_digest == hashlib.sha256(source.read_bytes()).hexdigest()
+
+    def test_probes_a_source_under_a_directory_of_special_characters(
+        self, tmp_path: Path, orchestration_media: dict[str, Path]
+    ) -> None:
+        """Both tools get the awkward name, and ffmpeg is the one without a `--`.
+
+        A material with a sound track is used on purpose: a picture would never
+        reach the measuring pass, leaving the tool that has no separator at all
+        untested against this.
+        """
+        directory = tmp_path / SPECIAL_DIRECTORY_NAME
+        directory.mkdir()
+        source = directory / "holiday.mp4"
+        source.write_bytes(orchestration_media["sound"].read_bytes())
+        facts = probe_material(_packaged_tools(), source)
+        assert facts.kind is ProbedMaterialKind.VIDEO
+        assert facts.has_audio
+
+    def test_probes_a_source_whose_name_begins_with_a_dash(
+        self, tmp_path: Path, orchestration_media: dict[str, Path]
+    ) -> None:
+        """A name that reads like an option reaches both tools as a name.
+
+        What protects ffprobe is the `--` separator; what protects ffmpeg — which
+        has none, and opens a literal `--` as a file — is that the path handed
+        over is always absolute, so the argument never begins with a dash at all.
+        """
+        source = tmp_path / "-af holiday.mp4"
+        source.write_bytes(orchestration_media["sound"].read_bytes())
+        facts = probe_material(_packaged_tools(), source)
+        assert facts.kind is ProbedMaterialKind.VIDEO
+        assert facts.has_audio
+
+    def test_no_rendering_of_the_facts_carries_the_path(
+        self, tmp_path: Path, orchestration_media: dict[str, Path]
+    ) -> None:
+        """Every component of a real, private path, checked against both renderings.
+
+        `str` and `repr` are the same function on a dataclass today; both are
+        asserted so that giving it a `__str__` later cannot open a channel
+        without failing here.
+        """
+        directory = tmp_path / SPECIAL_DIRECTORY_NAME
+        directory.mkdir()
+        source = directory / "operator-private-wedding-2021.mp4"
+        source.write_bytes(orchestration_media["sound"].read_bytes())
+        facts = probe_material(_packaged_tools(), source)
+        rendered = f"{facts!r}\n{facts}"
+        fragments = [
+            os.fspath(source),
+            os.fspath(directory),
+            source.name,
+            source.stem,
+            SPECIAL_DIRECTORY_NAME,
+            # Every component long enough to identify anything. macOS puts a
+            # component named `T` in every temporary path, and a one-character
+            # needle matches ordinary text — measured, it is found inside
+            # `has_audio=True`, which is a hit that says nothing about a leak.
+            *(part for part in source.parts[1:] if len(part) >= 4),
+        ]
+        for fragment in fragments:
+            assert fragment not in rendered, fragment
+
+    def test_a_real_clip_whose_sound_track_is_silent_reports_no_sound(
+        self, tmp_path: Path, real_media: dict[str, Path]
+    ) -> None:
+        """Having a sound track and having sound are different facts.
+
+        Ten seconds of picture over two seconds of digital silence: the stream
+        list states `aac`, and the answer the facts carry has to be the one the
+        measuring pass produced, not the one the header stated. Measured against
+        a build that read `has_audio` off the stream list instead: it came back
+        true, and every other test in this file still passed — including the
+        four that pin which materials are measured at all, because for those
+        four the two rules happen to agree.
+        """
+        source = tmp_path / "short-sound.mp4"
+        source.write_bytes(real_media["short_sound"].read_bytes())
+        facts = probe_material(_packaged_tools(), source)
+        assert facts.audio_codec == "aac"
+        assert facts.has_audio is False
+        assert facts.audio_loudness_lufs is None
+
+    def test_a_real_undecodable_file_is_rejected_through_the_whole_chain(
+        self, tmp_path: Path, orchestration_media: dict[str, Path]
+    ) -> None:
+        """The reading pass's own refusal, raised by the real tool, arriving intact.
+
+        Everything else about rejection is stubbed, so this is the one that shows
+        the orchestration adds no handler of its own: the reason comes from
+        ffprobe exiting non-zero on a truncated container, several frames down.
+        """
+        source = tmp_path / "corrupt.mp4"
+        source.write_bytes(orchestration_media["sound"].read_bytes()[:5000])
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            probe_material(_packaged_tools(), source)
+        assert _rejection(excinfo) is MaterialProbeRejection.UNDECODABLE
+
+    def test_a_real_silent_sound_file_is_rejected_through_the_whole_chain(
+        self, tmp_path: Path, real_media: dict[str, Path]
+    ) -> None:
+        """The measuring pass's refusal, which only a real ffmpeg can produce.
+
+        A sound-only file with nothing audible in it is a state `Material`
+        forbids outright, and the rule lives in `read_audio_facts`. This is what
+        says the orchestration neither repeats it nor loses it.
+        """
+        source = tmp_path / "silent.m4a"
+        source.write_bytes(real_media["silent"].read_bytes())
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            probe_material(_packaged_tools(), source)
+        assert _rejection(excinfo) is MaterialProbeRejection.SILENT_AUDIO
+
+    def test_no_rendered_traceback_of_a_rejection_carries_the_path(self, tmp_path: Path) -> None:
+        secret = "operator-private-reunion-2020"
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            probe_material(_packaged_tools(), tmp_path / f"{secret}.mp4")
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+        assert str(excinfo.value) == "material probe rejected"
+        assert secret not in _rendered_traceback(excinfo.value)

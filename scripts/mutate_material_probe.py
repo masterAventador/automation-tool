@@ -95,7 +95,8 @@ MUTATIONS: list[tuple[str, str, str]] = [
     ),
     (
         "growth bound deleted",
-        "            if read_bytes > opened.st_size:\n                return None\n",
+        "            if read_bytes > opened.st_size:\n"
+        "                return MaterialProbeRejection.SOURCE_NOT_AT_REST\n",
         "",
     ),
     # --- the short-read check ---
@@ -106,13 +107,14 @@ MUTATIONS: list[tuple[str, str, str]] = [
     ),
     (
         "short-read check deleted",
-        "    if read_bytes < opened.st_size:\n        return None\n",
+        "    if read_bytes < opened.st_size:\n        return MaterialProbeRejection.SOURCE_NOT_AT_REST\n",
         "",
     ),
     # --- the closing identity check ---
     (
         "identity check deleted",
-        "    if not _names_the_same_file(opened, path.stat()):\n        return None\n",
+        "    if not _names_the_same_file(opened, path.stat()):\n"
+        "        return MaterialProbeRejection.SOURCE_NOT_AT_REST\n",
         "",
     ),
     (
@@ -162,8 +164,8 @@ MUTATIONS: list[tuple[str, str, str]] = [
     ),
     (
         "reason UNREADABLE -> UNSAFE_PATH",
-        "        _reject(MaterialProbeRejection.UNREADABLE)\n    return content_digest",
-        "        _reject(MaterialProbeRejection.UNSAFE_PATH)\n    return content_digest",
+        "        outcome = MaterialProbeRejection.UNREADABLE\n    if isinstance(",
+        "        outcome = MaterialProbeRejection.UNSAFE_PATH\n    if isinstance(",
     ),
     (
         "reason FILE_TOO_LARGE -> PROBE_FAILED",
@@ -171,25 +173,25 @@ MUTATIONS: list[tuple[str, str, str]] = [
         "_reject(MaterialProbeRejection.PROBE_FAILED)",
     ),
     (
-        "`is None` -> `is not None`",
-        "    if content_digest is None:\n        _reject(",
-        "    if content_digest is not None:\n        _reject(",
+        "outcome discriminated on the wrong type",
+        "    if isinstance(outcome, MaterialProbeRejection):",
+        "    if not isinstance(outcome, MaterialProbeRejection):",
     ),
     (
         "except OSError -> except Exception",
-        "    except OSError:\n        content_digest = None",
-        "    except Exception:\n        content_digest = None",
+        "    except OSError:\n        # Whatever",
+        "    except BaseException:\n        # Whatever",
     ),
     (
         "reject inside the handler",
-        "    except OSError:\n        content_digest = None\n    if content_digest is None:",
-        "    except OSError:\n        _reject(MaterialProbeRejection.UNREADABLE)\n"
-        "    if content_digest is None:",
+        "        outcome = MaterialProbeRejection.UNREADABLE\n    if isinstance(",
+        "        _reject(MaterialProbeRejection.UNREADABLE)\n    if isinstance(",
     ),
     # --- the file has to hold still ---
     (
         "mtime check deleted",
-        "    if after.st_mtime_ns != opened.st_mtime_ns:\n        return None\n",
+        "    if after.st_mtime_ns != opened.st_mtime_ns:\n"
+        "        return MaterialProbeRejection.SOURCE_NOT_AT_REST\n",
         "",
     ),
     (
@@ -210,12 +212,14 @@ MUTATIONS: list[tuple[str, str, str]] = [
     ),
     (
         "S_ISREG check deleted",
-        "        if not stat.S_ISREG(opened.st_mode):\n            return None\n",
+        "        if not stat.S_ISREG(opened.st_mode):\n"
+        "            return MaterialProbeRejection.UNREADABLE\n",
         "",
     ),
     (
         "pre-open stat check deleted",
-        "        if not _names_the_same_file(expected, opened):\n            return None\n",
+        "        if not _names_the_same_file(expected, opened):\n"
+        "            return MaterialProbeRejection.SOURCE_NOT_AT_REST\n",
         "",
     ),
     # --- canary: must die ---
@@ -224,6 +228,171 @@ MUTATIONS: list[tuple[str, str, str]] = [
         'super().__init__("material probe rejected")',
         'super().__init__("material probe rejected!")',
     ),
+]
+
+# The orchestration (T5) runs against the whole file rather than a slice of it.
+# Its own tests are one half of what should catch these; the other half is the
+# three steps' existing tests still passing, since the orchestration is allowed
+# to change none of their behaviour.
+T5_SELECTION = ""
+
+T5_MUTATIONS: list[tuple[str, str, str]] = [
+    # --- the order of the three steps ---
+    (
+        "digest taken before the reading pass",
+        "    streams = read_stream_facts(tools, path)\n"
+        "    audio = read_audio_facts(tools, path, streams)\n"
+        "    content_digest = read_content_digest(path)\n",
+        "    content_digest = read_content_digest(path)\n"
+        "    streams = read_stream_facts(tools, path)\n"
+        "    audio = read_audio_facts(tools, path, streams)\n",
+    ),
+    (
+        "digest taken before the measuring pass",
+        "    audio = read_audio_facts(tools, path, streams)\n"
+        "    content_digest = read_content_digest(path)\n",
+        "    content_digest = read_content_digest(path)\n"
+        "    audio = read_audio_facts(tools, path, streams)\n",
+    ),
+    (
+        "measuring pass skipped altogether",
+        "    audio = read_audio_facts(tools, path, streams)",
+        "    audio = AudioFacts(has_audio=False, loudness_lufs=None)",
+    ),
+    # --- the rejection travels up untouched ---
+    (
+        "steps wrapped in a handler that rebuilds the rejection",
+        "    streams = read_stream_facts(tools, path)",
+        "    try:\n"
+        "        streams = read_stream_facts(tools, path)\n"
+        "    except MaterialProbeRejected as error:\n"
+        "        raise MaterialProbeRejected(error.rejection) from None",
+    ),
+    # --- the source is checked at both ends ---
+    (
+        "opening source guard deleted",
+        "    path, before = _require_source_file(source)",
+        "    path, before = source, os.stat(source)",
+    ),
+    (
+        "closing check deleted",
+        "    _, after = _require_source_file(path)\n"
+        "    if not _held_still(before, after):\n"
+        "        _reject(MaterialProbeRejection.SOURCE_NOT_AT_REST)\n",
+        "",
+    ),
+    (
+        "closing check inverted",
+        "    if not _held_still(before, after):",
+        "    if _held_still(before, after):",
+    ),
+    (
+        "closing check compares the file with itself",
+        "    if not _held_still(before, after):",
+        "    if not _held_still(after, after):",
+    ),
+    (
+        "closing reason SOURCE_NOT_AT_REST -> UNREADABLE",
+        "    if not _held_still(before, after):\n"
+        "        _reject(MaterialProbeRejection.SOURCE_NOT_AT_REST)",
+        "    if not _held_still(before, after):\n        _reject(MaterialProbeRejection.UNREADABLE)",
+    ),
+    # --- the three terms of "it held still", one at a time ---
+    (
+        "held-still identity term deleted",
+        "        _names_the_same_file(before, after)\n        and before.st_mtime_ns",
+        "        before.st_mtime_ns",
+    ),
+    (
+        "held-still timestamp term deleted",
+        "        and before.st_mtime_ns == after.st_mtime_ns\n",
+        "",
+    ),
+    (
+        "held-still length term deleted",
+        "        and before.st_size == after.st_size\n",
+        "",
+    ),
+    (
+        "held-still `and` -> `or` (timestamp)",
+        "and before.st_mtime_ns ==",
+        "or before.st_mtime_ns ==",
+    ),
+    (
+        "held-still `and` -> `or` (length)",
+        "and before.st_size ==",
+        "or before.st_size ==",
+    ),
+    (
+        "held-still timestamp at second resolution",
+        "before.st_mtime_ns == after.st_mtime_ns",
+        "int(before.st_mtime) == int(after.st_mtime)",
+    ),
+    # Symmetric in both remaining terms and in `_names_the_same_file`, so this
+    # one is expected to survive. It is kept because an implementation that
+    # stopped being symmetric — comparing sizes with `<=`, say — would make it
+    # start dying, and a survivor list that never changes says nothing.
+    (
+        "held-still arguments swapped",
+        "_held_still(before, after)",
+        "_held_still(after, before)",
+    ),
+    # --- what the facts are assembled from ---
+    ("facts kind hard-wired", "kind=streams.kind,", "kind=ProbedMaterialKind.VIDEO,"),
+    ("facts duration dropped", "duration_ms=streams.duration_ms,", "duration_ms=None,"),
+    ("facts width and height swapped", "width=streams.width,", "width=streams.height,"),
+    (
+        "facts sound taken from the stream list",
+        "has_audio=audio.has_audio,",
+        "has_audio=streams.audio_codec is not None,",
+    ),
+    (
+        "facts loudness dropped",
+        "audio_loudness_lufs=audio.loudness_lufs,",
+        "audio_loudness_lufs=None,",
+    ),
+    # --- the facts cannot be half-built or edited afterwards ---
+    (
+        "facts no longer frozen",
+        "@dataclass(frozen=True, slots=True)\nclass MaterialFacts:",
+        "@dataclass(slots=True)\nclass MaterialFacts:",
+    ),
+    (
+        "facts digest given a default",
+        "    audio_loudness_lufs: float | None\n    content_digest: str\n",
+        '    audio_loudness_lufs: float | None\n    content_digest: str = ""\n',
+    ),
+    # --- the reason split the orchestration's own check belongs to ---
+    (
+        "swapped-at-open reason -> UNREADABLE",
+        "        if not _names_the_same_file(expected, opened):\n"
+        "            return MaterialProbeRejection.SOURCE_NOT_AT_REST",
+        "        if not _names_the_same_file(expected, opened):\n"
+        "            return MaterialProbeRejection.UNREADABLE",
+    ),
+    (
+        "not-a-regular-file reason -> SOURCE_NOT_AT_REST",
+        "        if not stat.S_ISREG(opened.st_mode):\n"
+        "            return MaterialProbeRejection.UNREADABLE",
+        "        if not stat.S_ISREG(opened.st_mode):\n"
+        "            return MaterialProbeRejection.SOURCE_NOT_AT_REST",
+    ),
+    (
+        "IO failure reason -> SOURCE_NOT_AT_REST",
+        "        outcome = MaterialProbeRejection.UNREADABLE\n    if isinstance(",
+        "        outcome = MaterialProbeRejection.SOURCE_NOT_AT_REST\n    if isinstance(",
+    ),
+    # --- canary: must die ---
+    (
+        "CANARY facts renamed",
+        "    return MaterialFacts(\n        kind=streams.kind,",
+        "    return MaterialFacts(\n        kind=ProbedMaterialKind.AUDIO,",
+    ),
+]
+
+GROUPS: list[tuple[str, str, list[tuple[str, str, str]]]] = [
+    ("T4 the content digest", SELECTION, MUTATIONS),
+    ("T5 the orchestration", T5_SELECTION, T5_MUTATIONS),
 ]
 
 
@@ -236,12 +405,21 @@ def _environment(clone_source: Path) -> dict[str, str]:
     }
 
 
-def run_tests(clone_source: Path) -> bool:
+def run_tests(clone_source: Path, selection: str) -> bool:
     """True when the suite passed. A hang counts as a detection, not a survival."""
     for cache in clone_source.rglob("__pycache__"):
         shutil.rmtree(cache, ignore_errors=True)
     completed = subprocess.run(
-        [str(PYTHON), "-B", "-m", "pytest", str(TESTS), "-x", "-q", "-k", SELECTION],
+        [
+            str(PYTHON),
+            "-B",
+            "-m",
+            "pytest",
+            str(TESTS),
+            "-x",
+            "-q",
+            *(["-k", selection] if selection else []),
+        ],
         cwd=BACKEND,
         capture_output=True,
         env=_environment(clone_source),
@@ -250,9 +428,9 @@ def run_tests(clone_source: Path) -> bool:
     return completed.returncode == 0
 
 
-def run_tests_guarded(clone_source: Path) -> bool:
+def run_tests_guarded(clone_source: Path, selection: str) -> bool:
     try:
-        return run_tests(clone_source)
+        return run_tests(clone_source, selection)
     except subprocess.TimeoutExpired:
         print("    (suite hung — counted as killed)", flush=True)
         return False
@@ -292,27 +470,32 @@ def main() -> int:
             return 1
         print("mutating a copy at", clone_module, flush=True)
 
-        if not run_tests_guarded(clone_source):
-            print("BASELINE IS RED — stopping")
-            return 1
-        print("baseline green\n", flush=True)
+        total = 0
+        for group, selection, mutations in GROUPS:
+            print(f"--- {group} ---", flush=True)
+            if not run_tests_guarded(clone_source, selection):
+                print("BASELINE IS RED — stopping")
+                return 1
+            print("baseline green\n", flush=True)
 
-        for label, old, new in MUTATIONS:
-            if pristine.count(old) != 1:
-                print(
-                    f"{label}: SKIPPED (anchor appears {pristine.count(old)} times)",
-                    flush=True,
-                )
-                survivors.append(f"{label} (anchor)")
-                continue
-            clone_module.write_text(pristine.replace(old, new), encoding="utf-8")
-            alive = run_tests_guarded(clone_source)
-            print(f"{label}: {'SURVIVED' if alive else 'killed'}", flush=True)
-            if alive:
-                survivors.append(label)
-            clone_module.write_text(pristine, encoding="utf-8")
+            for label, old, new in mutations:
+                total += 1
+                if pristine.count(old) != 1:
+                    print(
+                        f"{label}: SKIPPED (anchor appears {pristine.count(old)} times)",
+                        flush=True,
+                    )
+                    survivors.append(f"{label} (anchor)")
+                    continue
+                clone_module.write_text(pristine.replace(old, new), encoding="utf-8")
+                alive = run_tests_guarded(clone_source, selection)
+                print(f"{label}: {'SURVIVED' if alive else 'killed'}", flush=True)
+                if alive:
+                    survivors.append(label)
+                clone_module.write_text(pristine, encoding="utf-8")
+            print("", flush=True)
 
-    print(f"\n{len(MUTATIONS) - len(survivors)}/{len(MUTATIONS)} killed")
+    print(f"\n{total - len(survivors)}/{total} killed")
     if survivors:
         print("survivors:", *survivors, sep="\n  ")
 

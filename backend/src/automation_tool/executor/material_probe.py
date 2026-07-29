@@ -184,9 +184,31 @@ class MaterialProbeRejection(StrEnum):
     A single opaque failure would leave the material library able to say only
     "probe failed", so the one action left to the user is to retry every file in
     turn. Each member names a different next step.
+
+    Whether importing the same file again, untouched, could succeed is what
+    separates the two members below, and that separation is the whole of how
+    retryability is stated here. A second, parallel encoding of it — a flag on
+    every member, with no caller yet to read one — would only be somewhere for
+    the two to disagree.
     """
 
     UNREADABLE = "unreadable"
+    # Split out of `UNREADABLE`, which had become the confluence of eight
+    # separate findings. Six of them say the same thing — something else is
+    # writing this file right now — and are gathered here: the file was already
+    # a different one when it was opened, it grew, it was truncated, it was
+    # rewritten in place, the path came to name another file, or the probe's
+    # own end-to-end check saw it move between its first step and its last. The
+    # ordinary way to reach any of them is importing a download or a recording
+    # before it finished, and "this file cannot be read, go and find it again"
+    # is the wrong instruction for that: the right one is to wait.
+    #
+    # The two that stay behind under `UNREADABLE` will not settle on their own:
+    # anything the filesystem refused outright (no permission, nothing at that
+    # path, a real IO error), and a path that names something other than a
+    # regular file. A FIFO is the sharpest case of the difference — waiting for
+    # one to come to rest waits forever.
+    SOURCE_NOT_AT_REST = "source_not_at_rest"
     UNSAFE_PATH = "unsafe_path"
     UNDECODABLE = "undecodable"
     NO_USABLE_STREAM = "no_usable_stream"
@@ -804,12 +826,14 @@ def _names_the_same_file(left: os.stat_result, right: os.stat_result) -> bool:
     return left.st_dev == right.st_dev and left.st_ino == right.st_ino
 
 
-def _digest_stable_file(path: Path, expected: os.stat_result) -> str | None:
-    """Hash a file, or report that it would not hold still long enough to be hashed.
+def _digest_stable_file(path: Path, expected: os.stat_result) -> str | MaterialProbeRejection:
+    """Hash a file, or report why it would not hold still long enough to be hashed.
 
-    `None` means "it moved", not "it failed": the caller turns both into the same
-    rejection, but it does so after leaving its `except`, and returning rather
-    than raising here is what keeps that possible.
+    A reason rather than a raised rejection: the caller turns it into one after
+    leaving its `except`, and returning rather than raising here is what keeps
+    that possible. Almost every finding below is the file still being written,
+    which is `SOURCE_NOT_AT_REST`; the one that is not — a path that has stopped
+    naming a regular file — will not settle on its own and stays `UNREADABLE`.
 
     `expected` is the stat `_require_source_file` took. Between that check and
     this open the path is not held still by anything, so the two are different
@@ -861,9 +885,9 @@ def _digest_stable_file(path: Path, expected: os.stat_result) -> str | None:
         # for a different file to be there by the time it is opened.
         opened = os.fstat(descriptor)
         if not stat.S_ISREG(opened.st_mode):
-            return None
+            return MaterialProbeRejection.UNREADABLE
         if not _names_the_same_file(expected, opened):
-            return None
+            return MaterialProbeRejection.SOURCE_NOT_AT_REST
         if opened.st_size > MAX_SOURCE_FILE_BYTES:
             _reject(MaterialProbeRejection.FILE_TOO_LARGE)
         digest = hashlib.sha256()
@@ -871,17 +895,17 @@ def _digest_stable_file(path: Path, expected: os.stat_result) -> str | None:
         while chunk := os.read(descriptor, _DIGEST_CHUNK_BYTES):
             read_bytes += len(chunk)
             if read_bytes > opened.st_size:
-                return None
+                return MaterialProbeRejection.SOURCE_NOT_AT_REST
             digest.update(chunk)
         after = os.fstat(descriptor)
     finally:
         os.close(descriptor)
     if read_bytes < opened.st_size:
-        return None
+        return MaterialProbeRejection.SOURCE_NOT_AT_REST
     if after.st_mtime_ns != opened.st_mtime_ns:
-        return None
+        return MaterialProbeRejection.SOURCE_NOT_AT_REST
     if not _names_the_same_file(opened, path.stat()):
-        return None
+        return MaterialProbeRejection.SOURCE_NOT_AT_REST
     return digest.hexdigest()
 
 
@@ -897,14 +921,127 @@ def read_content_digest(source: Path) -> str:
     # handled exception stays reachable through `__context__`, and
     # `OSError.filename` is the operator's path. Leaving the handler first drops
     # the reference outright.
-    content_digest: str | None
+    outcome: str | MaterialProbeRejection
     try:
-        content_digest = _digest_stable_file(path, expected)
+        outcome = _digest_stable_file(path, expected)
     except OSError:
-        content_digest = None
-    if content_digest is None:
-        _reject(MaterialProbeRejection.UNREADABLE)
-    return content_digest
+        # Whatever the filesystem refused — no permission, a vanished path, a
+        # real IO error — will not come right by importing the same file again.
+        outcome = MaterialProbeRejection.UNREADABLE
+    if isinstance(outcome, MaterialProbeRejection):
+        _reject(outcome)
+    return outcome
+
+
+@dataclass(frozen=True, slots=True)
+class MaterialFacts:
+    """Everything one probe learned about one file. Structurally unable to hold a path.
+
+    `Material` has no path field, so nothing the Control Plane stores can carry
+    one; that says nothing about what the executor hands its own callers, and
+    this is where the same guarantee is made on this side of the boundary. It is
+    made by there being nowhere to put a path rather than by a rule about what
+    to leave out, which is also what makes `repr` safe without overriding it.
+
+    Every field is required and the whole thing is frozen, so a half-filled set
+    of facts cannot be built at all — not before the last step has returned, and
+    not by filling one in afterwards. The orchestration therefore has no state
+    to unwind when a step rejects: there is nothing part-built to discard.
+    """
+
+    kind: ProbedMaterialKind
+    duration_ms: int | None
+    width: int | None
+    height: int | None
+    video_codec: str | None
+    audio_codec: str | None
+    has_audio: bool
+    audio_loudness_lufs: float | None
+    content_digest: str
+
+
+def _held_still(before: os.stat_result, after: os.stat_result) -> bool:
+    """Whether one path named the same unchanged file at two moments.
+
+    `_names_the_same_file` answers who the file is; the other two answer whether
+    it changed while staying itself. The timestamp is what a rewrite in place
+    moves, and the byte count is what still shows a change on a filesystem whose
+    timestamps are too coarse to show one — whole seconds, on some network
+    filesystems, against nanoseconds on APFS.
+
+    Nothing else from the stat is compared. Reading a file is not a change, and
+    `st_atime` moves when it is read, so comparing the two results outright
+    would reject every material the probe was handed.
+    """
+    return (
+        _names_the_same_file(before, after)
+        and before.st_mtime_ns == after.st_mtime_ns
+        and before.st_size == after.st_size
+    )
+
+
+def probe_material(tools: PackagedMediaTools, source: Path) -> MaterialFacts:
+    """Read one file's facts with the packaged tools, or reject it.
+
+    The three steps run in this order for reasons that outlast the code: the
+    stream list is what says whether a measuring pass is needed at all, and the
+    digest goes last because it is the only step that reads the file end to end
+    — up to some nine seconds at the size limit — so an earlier rejection should
+    not have paid for it.
+
+    Nothing here decides which materials get measured. `read_audio_facts`
+    returns without starting ffmpeg when the stream list carries no sound track,
+    and it is also what refuses a sound-only file with nothing audible in it,
+    which `Material` cannot represent. Repeating either rule here would give the
+    two copies somewhere to drift apart.
+
+    Nor is anything caught: a step's rejection travels up as the object it was
+    raised as, carrying the frame it came from. Rebuilding it around the same
+    reason would lose that and add nothing.
+
+    **The file is not held still across the three steps, and cannot be.** Each
+    step hands the path to something that opens it itself, two of them to a
+    subprocess that is given a name rather than a descriptor, so each describes
+    whatever was there when it looked — three moments, and the measuring pass
+    alone may take fifteen minutes of the span between the first and the last.
+    The digest refuses a file that moved while *it* was hashing, but until now
+    nothing watched the window in front of it, where a swap would leave facts
+    describing one file stored beside another file's digest. That is a mis-dedup
+    that surfaces as no error at all.
+
+    So the stat that approved the import is compared against a fresh one at the
+    end. That notices rather than prevents, which is all a name-taking
+    subprocess leaves available, and rejecting on notice beats reporting facts
+    that were never all true at once. It narrows the window rather than closing
+    it: a change that begins and ends between the two stats, leaving the inode,
+    the length and the timestamp where they were, is invisible — the same
+    residual the digest's own checks have, for the same reason.
+
+    Nothing here takes a lock, so a probe spending its whole budget — the
+    reading pass, then up to fifteen minutes measuring, then the digest — blocks
+    no other work.
+    """
+    path, before = _require_source_file(source)
+    streams = read_stream_facts(tools, path)
+    audio = read_audio_facts(tools, path, streams)
+    content_digest = read_content_digest(path)
+    # Through `_require_source_file` rather than a bare `stat` so that a file
+    # that vanished, or stopped being readable, in the meantime comes back as
+    # the reason it already has instead of an `OSError` carrying the path.
+    _, after = _require_source_file(path)
+    if not _held_still(before, after):
+        _reject(MaterialProbeRejection.SOURCE_NOT_AT_REST)
+    return MaterialFacts(
+        kind=streams.kind,
+        duration_ms=streams.duration_ms,
+        width=streams.width,
+        height=streams.height,
+        video_codec=streams.video_codec,
+        audio_codec=streams.audio_codec,
+        has_audio=audio.has_audio,
+        audio_loudness_lufs=audio.loudness_lufs,
+        content_digest=content_digest,
+    )
 
 
 __all__ = [
@@ -916,11 +1053,13 @@ __all__ = [
     "MAX_PROBE_OUTPUT_BYTES",
     "MAX_SOURCE_FILE_BYTES",
     "AudioFacts",
+    "MaterialFacts",
     "MaterialProbeRejected",
     "MaterialProbeRejection",
     "MediaStreamFacts",
     "PackagedMediaTools",
     "ProbedMaterialKind",
+    "probe_material",
     "read_audio_facts",
     "read_content_digest",
     "read_stream_facts",
