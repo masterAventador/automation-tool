@@ -633,3 +633,66 @@ fn safe_removal_while_the_login_browser_holds_the_profile_stays_actionable() {
         .expect("removal succeeds once the browser is closed");
     assert!(!current_directory.exists());
 }
+
+/// PC-25 诊断：被真 Chromium 摸过的 Profile 还能不能干净删除。
+///
+/// b5_13 的登出在真实场景里报 `profile_identity_changed`，幸存进程为零、
+/// 残留物是年轻 Chromium profile 的骨架（含未清收尾的 sqlite journal）。
+/// 本测试把最小要素搬进实验室：内置 Chromium 以该 Profile 起一次、SIGKILL
+/// 整组（模拟紧急停止）、随后删除。红 = 实验室内复现，可单步定位是四处
+/// 身份检查里的哪一处；绿 = 触发条件在执行器并发，而不在 Chromium 文件。
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires the staged embedded Chromium under target/debug"]
+fn chromium_touched_profile_still_removes_cleanly() {
+    use std::io::Read;
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    let browser = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+        "target/debug/embedded-browser/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+    );
+    assert!(browser.is_file(), "staged embedded Chromium is required");
+
+    let app_data = TemporaryAppData::new();
+    let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");
+    let current = store.current_douyin_profile().expect("current profile");
+    let profile_directory = current.directory().to_path_buf();
+    drop(current);
+
+    let mut child = Command::new(&browser)
+        .arg("--headless")
+        .arg("--no-first-run")
+        .arg("--no-default-browser-check")
+        .arg(format!("--user-data-dir={}", profile_directory.display()))
+        .arg("about:blank")
+        .process_group(0)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch embedded chromium on the profile");
+    // 给它时间落盘 profile 骨架（Local State / Default / first_party_sets…）。
+    std::thread::sleep(std::time::Duration::from_millis(2500));
+    let group = child.id() as i32;
+    let killed = unsafe { libc::kill(-group, libc::SIGKILL) };
+    let kill_errno = std::io::Error::last_os_error().raw_os_error();
+    assert!(
+        killed == 0 || kill_errno == Some(libc::ESRCH),
+        "SIGKILL the browser group: {kill_errno:?}",
+    );
+    let _ = child.wait();
+    let mut stderr = Vec::new();
+    if let Some(mut pipe) = child.stderr.take() {
+        let _ = pipe.read_to_end(&mut stderr);
+    }
+
+    let removal = store.remove_current_douyin_profile();
+    assert!(
+        removal.is_ok(),
+        "removal after a killed Chromium must succeed, got {:?}; chromium stderr: {}",
+        removal.map(|_| ()).unwrap_err().code(),
+        String::from_utf8_lossy(&stderr),
+    );
+    assert!(!profile_directory.exists());
+}

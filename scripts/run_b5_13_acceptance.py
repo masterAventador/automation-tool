@@ -192,6 +192,30 @@ async def verify_database_state(database_url: str) -> None:
         raise RuntimeError("B5-14 logout gate or blocked Task projection is invalid")
 
 
+def dump_douyin_tree(private_app_data: Path, moment: str) -> None:
+    """点名删除后还留在盘上的东西——名字加类型，socket/符号链接会现形。"""
+    douyin_root = private_app_data / OPERATIONS_PROFILE_ROOT / "douyin"
+    if not douyin_root.is_dir():
+        print(f"[B5-13] ({moment}) douyin root absent")
+        return
+    for child in sorted(douyin_root.iterdir()):
+        kind = (
+            "symlink" if child.is_symlink()
+            else "dir" if child.is_dir()
+            else "file"
+        )
+        print(f"[B5-13] ({moment}) douyin/{child.name} [{kind}]")
+        if child.is_dir() and not child.is_symlink():
+            for entry in sorted(child.iterdir())[:40]:
+                entry_kind = (
+                    "symlink" if entry.is_symlink()
+                    else "dir" if entry.is_dir()
+                    else "socket" if entry.is_socket()
+                    else "file"
+                )
+                print(f"[B5-13] ({moment})   {entry.name} [{entry_kind}]")
+
+
 def verify_logout_local_state(private_app_data: Path) -> None:
     profile_root = private_app_data / OPERATIONS_PROFILE_ROOT
     current_marker = profile_root / CURRENT_DOUYIN_PROFILE_FILE
@@ -207,12 +231,24 @@ def verify_logout_local_state(private_app_data: Path) -> None:
             f"{child.name}@{_dt.datetime.fromtimestamp(child.stat().st_mtime):%H:%M:%S}"
             for child in platform_root.iterdir()
         ) if platform_root.is_dir() else []
+        # PC-25 第二轮插桩：分码后登出报 profile_identity_changed——最强嫌疑是
+        # 「有个拿着 Profile 路径的进程活过了紧急停止，把目录写了回来」。把还
+        # 活着的、命令行含本次 Profile 根路径的进程连同其进程组一起打出来，
+        # 一轮判「浏览器幸存说」真伪；全组已灭则嫌疑转回删除流程自身。
+        import subprocess as _sp
+        survivors = _sp.run(
+            ["pgrep", "-fl", str(profile_root)],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip()
         raise RuntimeError(
             "B5-14 safe logout retained the current Profile marker: "
             f"mtime={marker_mtime:%H:%M:%S} content={marker_content!r} "
-            f"douyin_dir={siblings}"
+            f"douyin_dir={siblings} survivors={survivors or '(none)'}"
         )
     if platform_root.is_dir() and any(platform_root.iterdir()):
+        dump_douyin_tree(private_app_data, "post-check")
         raise RuntimeError("B5-14 safe logout retained a Profile or removal tombstone")
     ledger = private_app_data / "local-executor" / "state" / "executor-ledger.sqlite3"
     if not ledger.is_file():
@@ -381,6 +417,17 @@ def main() -> None:
             app_output = app_output_bytes.decode("utf-8", errors="replace")
             print(app_output, end="")
             if app_process.returncode != 0:
+                # PC-25：spec 在登出警告处严格失败，走不到本地后置检查——幸存
+                # 进程要在这一刻抓，晚了 wdio 收尾会把 App 连同子进程带走。
+                survivors = subprocess.run(
+                    ["pgrep", "-fl", str(private_app_data / OPERATIONS_PROFILE_ROOT)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                ).stdout.strip()
+                print(f"[B5-13] profile-path survivors at spec failure: {survivors or '(none)'}")
+                # 幸存进程为空后，嫌疑在删除流程自身——目录内容点名肇事者。
+                dump_douyin_tree(private_app_data, "spec-failure")
                 raise RuntimeError("B5-13 hidden App production-path acceptance failed")
             app_process = None
 
