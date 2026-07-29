@@ -121,9 +121,16 @@ class CaptionOutputUnavailable(fonts.CaptionFontRejected):
     caller can do something about without changing the request: a full disk, a
     directory that is not there, a destination something else is holding.
 
-    The message names none of it. A destination is a local path
-    (CLAUDE.md 7), and the original error is kept as `__cause__` where a
-    developer can read it and a log formatter will not.
+    The message names none of it: a destination is a local path, and
+    CLAUDE.md 7 keeps those out of logs and error responses.
+
+    The original error is kept as `__cause__`, and that is a deliberate trade
+    rather than a free one. Measured: `logging.exception()` formats the whole
+    chain, and the chain carries the directory, the user's name in it and the
+    working file's name. Dropping the cause would take the only description of
+    what actually went wrong with it, so it stays -- and the obligation moves
+    to the caller, which must log `str(error)` rather than `exc_info`. That is
+    written down for LE-10 in `docs/development/LE-09.md`.
     """
 
 
@@ -507,7 +514,14 @@ def _draw(
     text_width = max(line.width for line in lines)
     # Baseline to baseline: the face's own line box, scaled by the setting.
     steps = [round((line.ascent + line.descent) * style.line_spacing) for line in lines]
-    height = 2 * stroke + sum(steps[:-1]) + lines[-1].ascent + lines[-1].descent
+    # Measured from the first baseline down, because that is where the drawing
+    # below starts: the first line's ascent sets the top, the steps carry each
+    # baseline to the next, and the last line's descent sets the bottom. The
+    # last line's *ascent* is not part of that sum, and reading it here instead
+    # of the first line's is short by the difference between the two -- which
+    # is zero whenever both lines use the same face, and is the bottom of the
+    # caption silently cut off whenever they do not.
+    height = 2 * stroke + lines[0].ascent + sum(steps[:-1]) + lines[-1].descent
     if height > frame_height:
         _refuse(f"the caption needs {height} px, taller than the {frame_height} px frame")
 

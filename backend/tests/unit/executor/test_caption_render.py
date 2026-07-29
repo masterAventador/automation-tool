@@ -1203,6 +1203,24 @@ class TestCaptionLayout:
         with Image.open(_render(tmp_path, "中" * 8, frame_width=frame_width)) as image:
             assert len(_ink_rows(image.convert("RGBA"))) == 1
 
+    def test_a_line_one_pixel_over_the_wrap_width_is_wrapped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The other side of the same endpoint, and the one that was missing.
+
+        The case above pins that the limit itself still fits. Without this one
+        the comparison could be `> wrap_width + 1` and stay green, because no
+        other frame here puts a line exactly one pixel over -- the glyphs are
+        35 px wide and every wrap width was a whole glyph away from the edge.
+        Measured: that mutant survived all 118 cases.
+        """
+        _stage_chain(tmp_path, monkeypatch)
+        advance = render._load_face(_CJK_KEY, _RENDER_STYLE["font_px"]).getlength("中")
+        frame_width = int(2 * render.CAPTION_SIDE_MARGIN_PX + 9 * advance - 1)
+
+        with Image.open(_render(tmp_path, "中" * 9, frame_width=frame_width)) as image:
+            assert len(_ink_rows(image.convert("RGBA"))) == 2
+
     def test_line_spacing_scales_the_gap_between_baselines(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1239,6 +1257,86 @@ class TestCaptionLayout:
 
         step = round((ascent + descent) * _RENDER_STYLE["line_spacing"])
         assert spaced_height - tight_height == step
+
+    def test_a_short_face_on_the_last_line_is_not_clipped_by_a_taller_first_line(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The canvas is measured from the first line down, so it ends there too.
+
+        The first baseline is `stroke + lines[0].ascent` below the top edge and
+        every later one is a fixed step below that, so what the canvas has to
+        hold is the *first* line's ascent plus the steps plus the *last* line's
+        descent. Taking the last line's ascent instead is short by the
+        difference between the two, and the bottom of the caption is quietly
+        cut off -- no exception, no wrong dimension, just a line missing its
+        descenders.
+
+        Every other multi-line case here puts the same face on both lines,
+        where the two expressions are the same number. This one does not.
+
+        The second face is given an ascent that still covers its own
+        letterform -- a face whose glyphs poke above its ascender line is not
+        a face, and a reference line that is itself clipped would prove
+        nothing -- while leaving `ascent + descent` of the last line smaller
+        than the ascent of the first, which is the condition under which the
+        wrong expression loses pixels.
+        """
+        _stage_chain(tmp_path, monkeypatch, metrics={_CJK_KEY: (900, -300), _LATIN_KEY: (720, -40)})
+
+        with Image.open(_render(tmp_path, "A")) as opened:
+            alone = opened.convert("RGBA")
+            top, bottom = _ink_rows(alone)[0]
+            alone_ink = bottom - top
+            alone_below = alone.height - bottom
+        with Image.open(_render(tmp_path, "\u4e2d\nA")) as opened:
+            stacked = opened.convert("RGBA")
+            first_bottom = _ink_rows(stacked)[0][1]
+            last_top, last_bottom = _ink_rows(stacked)[-1]
+
+        # The top of the stack, for the same reason `sits_on_its_baseline`
+        # pins it for one line: the first baseline is the first line's ascent
+        # down, and reading any other line's ascent there moves the whole
+        # stack without changing a single dimension asserted anywhere else.
+        tall_ascent, _ = render._load_face(_CJK_KEY, _RENDER_STYLE["font_px"]).getmetrics()
+        assert first_bottom == 2 * _RENDER_STYLE["stroke_px"] + tall_ascent
+        assert last_bottom - last_top == alone_ink
+        assert last_bottom < stacked.height
+        # And the bottom edge sits where the *last* line's descent puts it, not
+        # where the first line's would: reading the wrong one here does not
+        # clip anything, it pads the canvas, and a caption positioned against
+        # the bottom of its own PNG then rides that padding up the frame.
+        assert stacked.height - last_bottom == alone_below
+
+    def test_the_lines_are_drawn_in_the_order_they_were_written(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Nothing else here can tell a caption from the same caption upside down.
+
+        Centring is symmetric about the widest line, a blank line in the
+        middle is symmetric by construction, and the `.notdef` comparison is
+        over a set of blobs rather than a sequence. Reversing the stack was
+        measured to pass all 116 of them, and it is a layout fault the viewer
+        reads immediately.
+        """
+        _stage_chain(tmp_path, monkeypatch)
+
+        with Image.open(_render(tmp_path, "\u4e2d\u6587\n\u7b2c")) as opened:
+            image = opened.convert("RGBA")
+        alpha = image.getchannel("A").tobytes()
+        per_line = []
+        for top, bottom in _ink_rows(image):
+            per_line.append(
+                len(
+                    _spans(
+                        [
+                            any(alpha[row * image.width + column] for row in range(top, bottom))
+                            for column in range(image.width)
+                        ]
+                    )
+                )
+            )
+
+        assert per_line == [2, 1]
 
     def test_the_letterform_sits_on_its_baseline(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
