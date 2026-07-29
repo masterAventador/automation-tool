@@ -1137,11 +1137,21 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         returnByValue: true,
       }, sessionId);
       const timelineMetadata = timelineProbe?.result?.result?.value;
+      // Two independent facts, kept separate on purpose. Whether the document
+      // can be seeked depends only on it registering timelines; whether a
+      // requested window can be *validated* depends on the document declaring
+      // its own length. Conflating them skipped seeking entirely for the 31
+      // catalog documents that register a timeline but carry no
+      // `data-duration`, so their typing animations were captured as
+      // identical stills and the static gate below refused them (BM-16,
+      // first seen on `code-snippet-apple-terminal-basic`).
+      const seekableTimelineCount = Number.isInteger(timelineMetadata?.timelineCount)
+        ? timelineMetadata.timelineCount
+        : 0;
       const seekableDuration = (
         Number.isFinite(timelineMetadata?.duration)
         && timelineMetadata.duration > 0
-        && Number.isInteger(timelineMetadata?.timelineCount)
-        && timelineMetadata.timelineCount > 0
+        && seekableTimelineCount > 0
       ) ? timelineMetadata.duration : 0;
       // Warm up before the first kept frame. A composition's first paint
       // triggers lazy work — image decode, canvas and SVG initialisation —
@@ -1216,7 +1226,7 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         } catch {
           // The cancellation marker the caller named is absent; continue.
         }
-        if (seekableDuration > 0) {
+        if (seekableTimelineCount > 0) {
           const time = windowStart + (windowEnd - windowStart) * (index - 1) / spec.frameCount;
           const seek = await pipe.send("Runtime.evaluate", {
             expression: `(() => {
