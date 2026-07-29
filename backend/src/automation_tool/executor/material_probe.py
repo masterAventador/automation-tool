@@ -12,8 +12,10 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import stat
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -25,6 +27,27 @@ MAX_PATH_CHARACTERS: Final = 4096
 MAX_CODEC_NAME_CHARACTERS: Final = 64
 MAX_PROBE_OUTPUT_BYTES: Final = 1024 * 1024
 PROBE_TIMEOUT_SECONDS: float = 30.0
+# Measuring decodes the whole sound track, so it is allowed far longer than
+# reading the header.
+MEASURE_TIMEOUT_SECONDS: float = 15 * 60.0
+MAX_MEASURE_OUTPUT_BYTES: Final = 1024 * 1024
+
+# Anything quieter than this for at least this long counts as silence. Measured
+# against the packaged build: a tone attenuated by 80 dB is reported silent
+# throughout, which is the intent — inaudible material must not keep an
+# `ambient` track alive downstream.
+SILENCE_NOISE_FLOOR_DB: Final = -50
+SILENCE_MINIMUM_SECONDS: Final = 0.3
+# `Material` stores loudness only inside this range and only as a float.
+LOUDNESS_FLOOR_LUFS: Final = -70.0
+LOUDNESS_CEILING_LUFS: Final = 0.0
+
+_SILENCE_DURATION_PATTERN = re.compile(r"silence_duration: ([0-9]+(?:\.[0-9]+)?)")
+_SILENCE_START_PATTERN = re.compile(r"silence_start: (-?[0-9]+(?:\.[0-9]+)?)")
+_SILENCE_END_PATTERN = re.compile(r"silence_end: (-?[0-9]+(?:\.[0-9]+)?)")
+_INTEGRATED_LOUDNESS_PATTERN = re.compile(
+    r"^\s*I:\s*(-?(?:[0-9]+(?:\.[0-9]+)?|inf|nan))\s+LUFS", re.MULTILINE
+)
 
 # Mirrored from `control_plane.domain.material` rather than imported: the
 # executor does not depend on the product layer (`CLAUDE.md` §4.3). Probing that
@@ -39,6 +62,11 @@ _PROBE_ENTRIES: Final = "format=duration,format_name:stream=codec_type,codec_nam
 # packaged build: PNG and BMP demux as `*_pipe`, a JPEG as `image2`.
 _PICTURE_CONTAINER_SUFFIX: Final = "_pipe"
 _PICTURE_CONTAINER_NAMES: Final = frozenset({"image2"})
+
+_MEASURE_FILTERS: Final = (
+    f"silencedetect=noise={SILENCE_NOISE_FLOOR_DB}dB:d={SILENCE_MINIMUM_SECONDS},"
+    "ebur128=peak=none:framelog=quiet"
+)
 
 
 class MaterialProbeRejection(StrEnum):
@@ -57,6 +85,7 @@ class MaterialProbeRejection(StrEnum):
     TOO_LONG = "too_long"
     UNUSABLE_FRAME_SIZE = "unusable_frame_size"
     FRAME_TOO_LARGE = "frame_too_large"
+    SILENT_AUDIO = "silent_audio"
     PROBE_CRASHED = "probe_crashed"
     PROBE_FAILED = "probe_failed"
 
@@ -328,6 +357,161 @@ def _codec_name(stream: dict[str, object]) -> str:
     return value
 
 
+@dataclass(frozen=True, slots=True)
+class _Measurement:
+    """The only three numbers taken out of ffmpeg's report.
+
+    Parsing down to this before returning is what keeps the report text off
+    every raising path: the frames that hold it have all returned by the time
+    any rejection is raised, so no traceback can carry the file name ffmpeg
+    printed alongside its findings.
+    """
+
+    stated_loudness: bool
+    loudness_lufs: float | None
+    silent_seconds: float
+
+
+@dataclass(frozen=True, slots=True)
+class AudioFacts:
+    """Whether a file actually sounds like anything, and how loud."""
+
+    has_audio: bool
+    loudness_lufs: float | None
+
+
+def _measure(ffmpeg: Path, source: Path, duration_seconds: float) -> _Measurement:
+    """Run the silence and loudness pass, returning ffmpeg's report as text.
+
+    The report arrives on stderr mixed in with diagnostics that name the file,
+    so it is written to a file rather than captured: nothing that could carry
+    the path ends up on `CompletedProcess` or on a `TimeoutExpired`, and the
+    size can be checked before any of it is read.
+
+    Every rejection here happens before a single byte is read, and the text is
+    handed straight to the parser without being bound to a local, so nothing on
+    a raising path can hold it.
+    """
+    with tempfile.TemporaryDirectory(prefix="automation-tool-measure-") as workspace:
+        report = Path(workspace) / "report.log"
+        try:
+            with report.open("wb") as sink:
+                completed = subprocess.run(
+                    [
+                        os.fspath(ffmpeg),
+                        "-nostdin",
+                        "-v",
+                        "info",
+                        # ffmpeg reads its input before its output options, and
+                        # it has no `--` separator — it opens a literal "--" as
+                        # a file. What keeps a name starting with "-" from being
+                        # read as an option is `_require_source_file`, which
+                        # only ever yields an absolute path.
+                        "-i",
+                        os.fspath(source),
+                        # `framelog=quiet` keeps ebur128 from printing a line
+                        # every 100 ms: measured 65 stderr lines against 45 on a
+                        # 2-second file, a gap that grows with duration until a
+                        # 4-hour import emits roughly 144,000 lines.
+                        "-af",
+                        _MEASURE_FILTERS,
+                        "-f",
+                        "null",
+                        "-",
+                    ],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=sink,
+                    timeout=MEASURE_TIMEOUT_SECONDS,
+                    check=False,
+                )
+        except (OSError, subprocess.SubprocessError):
+            _reject(MaterialProbeRejection.PROBE_FAILED)
+        if completed.returncode < 0:
+            _reject(MaterialProbeRejection.PROBE_CRASHED)
+        if completed.returncode != 0:
+            _reject(MaterialProbeRejection.PROBE_FAILED)
+        if report.stat().st_size > MAX_MEASURE_OUTPUT_BYTES:
+            _reject(MaterialProbeRejection.PROBE_FAILED)
+        return _parse_measurement(
+            report.read_text(encoding="utf-8", errors="replace"), duration_seconds
+        )
+
+
+def _parse_measurement(report: str, duration_seconds: float) -> _Measurement:
+    """Reduce the report to numbers. Never raises, so it is never on a raising path."""
+    match = _INTEGRATED_LOUDNESS_PATTERN.search(report)
+    return _Measurement(
+        stated_loudness=match is not None,
+        loudness_lufs=None if match is None else _storable_loudness(match.group(1)),
+        silent_seconds=_silent_seconds(report, duration_seconds),
+    )
+
+
+def _silent_seconds(report: str, duration_seconds: float) -> float:
+    """Total silence the report accounts for.
+
+    A silence that never ends — the file stops while still quiet — is charged
+    to the remaining duration rather than dropped.
+    """
+    total = sum(float(value) for value in _SILENCE_DURATION_PATTERN.findall(report))
+    starts = _SILENCE_START_PATTERN.findall(report)
+    if len(starts) > len(_SILENCE_END_PATTERN.findall(report)):
+        total += max(0.0, duration_seconds - float(starts[-1]))
+    return total
+
+
+def _storable_loudness(text: str) -> float | None:
+    """The reading, or `None` when it is not one `Material` can hold."""
+    value = float(text)
+    # The floor is what ebur128 prints when it has nothing to measure — a clip
+    # shorter than its integration window reports it while being plainly
+    # audible, so it states absence, not quietness. Above full scale cannot be
+    # stored either. Reporting nothing beats inventing a reading.
+    #
+    # This range test also covers `inf`, `-inf` and `nan`, every one of which
+    # compares false against both bounds. An `isfinite` guard in front of it
+    # would be a term that can never decide anything — and `or` sub-conditions
+    # are not measured individually, so it would have ridden along at full
+    # coverage looking like a check.
+    if not LOUDNESS_FLOOR_LUFS < value <= LOUDNESS_CEILING_LUFS:
+        return None
+    return value
+
+
+def read_audio_facts(
+    tools: PackagedMediaTools, source: Path, streams: MediaStreamFacts
+) -> AudioFacts:
+    """Decide whether a file carries audible sound, and how loud it is.
+
+    This is the first stage of the three-stage speech funnel: it separates
+    "there is sound" from "there is a track". Telling speech from ambience, and
+    transcribing it, belong to later work.
+    """
+    if streams.audio_codec is None:
+        # The stream list already answered this; decoding the file to confirm
+        # it would cost a full pass for nothing.
+        return AudioFacts(has_audio=False, loudness_lufs=None)
+    tools.revalidate()
+    path = _require_source_file(source)
+    duration_seconds = 0.0 if streams.duration_ms is None else streams.duration_ms / 1000
+    measurement = _measure(tools.ffmpeg_path, path, duration_seconds)
+    if not measurement.stated_loudness:
+        _reject(MaterialProbeRejection.PROBE_FAILED)
+    # Measured: a digitally silent 2-second AAC file reports 2.020136 seconds of
+    # silence — longer than the stream, because of encoder padding. Comparing
+    # with `>=` is what tolerates that.
+    if measurement.silent_seconds >= duration_seconds:
+        if streams.kind is ProbedMaterialKind.AUDIO:
+            # `Material` forbids `kind=AUDIO` with `has_audio=False`, so this
+            # can never be stored. Rejecting here keeps the failure inside the
+            # closed set of reasons instead of surfacing as
+            # `InvalidMaterialModel` from a caller that cannot catch it.
+            _reject(MaterialProbeRejection.SILENT_AUDIO)
+        return AudioFacts(has_audio=False, loudness_lufs=None)
+    return AudioFacts(has_audio=True, loudness_lufs=measurement.loudness_lufs)
+
+
 def read_stream_facts(tools: PackagedMediaTools, source: Path) -> MediaStreamFacts:
     """Read duration, frame size and codecs for one file with the packaged ffprobe."""
     tools.revalidate()
@@ -375,12 +559,15 @@ __all__ = [
     "MAX_CODEC_NAME_CHARACTERS",
     "MAX_MATERIAL_DIMENSION",
     "MAX_MATERIAL_DURATION_MS",
+    "MAX_MEASURE_OUTPUT_BYTES",
     "MAX_PATH_CHARACTERS",
     "MAX_PROBE_OUTPUT_BYTES",
+    "AudioFacts",
     "MaterialProbeRejected",
     "MaterialProbeRejection",
     "MediaStreamFacts",
     "PackagedMediaTools",
     "ProbedMaterialKind",
+    "read_audio_facts",
     "read_stream_facts",
 ]

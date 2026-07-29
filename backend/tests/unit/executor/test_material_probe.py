@@ -11,15 +11,21 @@ import pytest
 
 from automation_tool.executor import material_probe
 from automation_tool.executor.material_probe import (
+    LOUDNESS_CEILING_LUFS,
+    LOUDNESS_FLOOR_LUFS,
     MAX_CODEC_NAME_CHARACTERS,
     MAX_MATERIAL_DIMENSION,
     MAX_MATERIAL_DURATION_MS,
+    MAX_MEASURE_OUTPUT_BYTES,
     MAX_PATH_CHARACTERS,
     MAX_PROBE_OUTPUT_BYTES,
+    AudioFacts,
     MaterialProbeRejected,
     MaterialProbeRejection,
+    MediaStreamFacts,
     PackagedMediaTools,
     ProbedMaterialKind,
+    read_audio_facts,
     read_stream_facts,
 )
 
@@ -39,9 +45,16 @@ def _executable(directory: Path, name: str) -> Path:
 # control files sitting beside the source file it is asked about.
 _STUB_SOURCE = """#!/bin/sh
 last=""
-for a in "$@"; do last="$a"; done
-[ -n "$last" ] || exit 0
-d=$(dirname "$last")
+want=0
+src=""
+for a in "$@"; do
+  last="$a"
+  if [ "$want" = 1 ]; then src="$a"; want=0; fi
+  if [ "$a" = "-i" ]; then want=1; fi
+done
+[ -n "$src" ] || src="$last"
+[ -n "$src" ] || exit 0
+d=$(dirname "$src")
 if [ -f "$d/.probe-argv" ]; then
   for a in "$@"; do printf '%s\\n' "$a" >> "$d/.probe-argv"; done
 fi
@@ -179,6 +192,91 @@ def tools(tmp_path: Path) -> PackagedMediaTools:
 
 def _rejection(excinfo: pytest.ExceptionInfo[MaterialProbeRejected]) -> MaterialProbeRejection:
     return excinfo.value.rejection
+
+
+def _measure_log(
+    *,
+    silences: list[tuple[float, float]] | None = None,
+    integrated: str | None = "-21.8",
+    trailing_silence_start: float | None = None,
+) -> str:
+    """Reproduce the stderr shape ffmpeg emits for silencedetect + ebur128."""
+    lines: list[str] = []
+    for start, end in silences or []:
+        lines.append(f"[Parsed_silencedetect_0 @ 0x1] silence_start: {start}")
+        lines.append(
+            f"[Parsed_silencedetect_0 @ 0x1] silence_end: {end} | silence_duration: {end - start}"
+        )
+    if trailing_silence_start is not None:
+        lines.append(f"[Parsed_silencedetect_0 @ 0x1] silence_start: {trailing_silence_start}")
+    if integrated is not None:
+        lines.append("[Parsed_ebur128_1 @ 0x2] Summary:")
+        lines.append("")
+        lines.append("  Integrated loudness:")
+        lines.append(f"    I:         {integrated} LUFS")
+        lines.append("    Threshold: -31.8 LUFS")
+    return "\n".join(lines) + "\n"
+
+
+def _stream_facts(
+    kind: ProbedMaterialKind = ProbedMaterialKind.VIDEO,
+    *,
+    duration_ms: int | None = 3000,
+    audio_codec: str | None = "aac",
+) -> MediaStreamFacts:
+    return MediaStreamFacts(
+        kind=kind,
+        duration_ms=duration_ms,
+        width=None if kind is ProbedMaterialKind.AUDIO else 640,
+        height=None if kind is ProbedMaterialKind.AUDIO else 360,
+        video_codec=None if kind is ProbedMaterialKind.AUDIO else "h264",
+        audio_codec=audio_codec,
+    )
+
+
+def _audio_tools(directory: Path, log: str, **stub: Any) -> PackagedMediaTools:
+    """Only the ffmpeg stub carries behaviour: the measuring step never runs ffprobe."""
+    return PackagedMediaTools(
+        ffprobe_path=_ffprobe_stub(directory),
+        ffmpeg_path=_ffmpeg_stub(directory, stderr=log, **stub),
+    )
+
+
+def _audio_from(
+    directory: Path, log: str, *, facts: MediaStreamFacts | None = None, **stub: Any
+) -> AudioFacts:
+    tools = _audio_tools(directory, log, **stub)
+    return read_audio_facts(tools, _source(directory), facts or _stream_facts())
+
+
+def _audio_reject(
+    directory: Path, log: str, *, facts: MediaStreamFacts | None = None, **stub: Any
+) -> pytest.ExceptionInfo[MaterialProbeRejected]:
+    tools = _audio_tools(directory, log, **stub)
+    with pytest.raises(MaterialProbeRejected) as excinfo:
+        read_audio_facts(tools, _source(directory), facts or _stream_facts())
+    return excinfo
+
+
+def _ffmpeg_stub(directory: Path, **behavior: Any) -> Path:
+    """Same master script, linked under the name the measuring step uses."""
+    path = directory / "ffmpeg"
+    if path.exists():
+        path.unlink()
+    for key, filename in (("stderr", ".probe-stderr"), ("sleep", ".probe-sleep")):
+        value = behavior.get(key)
+        if value:
+            (directory / filename).write_text(str(value), encoding="utf-8")
+    if behavior.get("measure_exit"):
+        (directory / ".probe-exit").write_text(str(behavior["measure_exit"]), encoding="ascii")
+    if behavior.get("measure_signal"):
+        (directory / ".probe-signal").write_text("1", encoding="ascii")
+    if behavior.get("drain_stdin"):
+        (directory / ".probe-drain").write_text("1", encoding="ascii")
+    if behavior.get("argv_log"):
+        (directory / ".probe-argv").write_text("", encoding="utf-8")
+    os.link(_stub_master(directory), path)
+    return path
 
 
 class TestPackagedMediaToolsAcceptance:
@@ -871,3 +969,321 @@ class TestReadStreamFactsLeaksNothing:
         assert secret not in rendered
         assert "Invalid data found" not in rendered
         assert str(tmp_path) not in rendered
+
+
+class TestReadAudioFactsWithoutASoundTrack:
+    def test_reports_no_audio_without_running_ffmpeg(self, tmp_path: Path) -> None:
+        """Decoding a whole file to learn what the stream list already said is waste."""
+        facts = _audio_from(
+            tmp_path, _measure_log(), facts=_stream_facts(audio_codec=None), argv_log=True
+        )
+        assert facts.has_audio is False
+        assert facts.loudness_lufs is None
+        assert (
+            not (tmp_path / ".probe-argv").exists()
+            or (tmp_path / ".probe-argv").read_text(encoding="utf-8") == ""
+        )
+
+
+class TestReadAudioFactsEffectiveSound:
+    def test_reports_sound_when_nothing_is_silent(self, tmp_path: Path) -> None:
+        facts = _audio_from(tmp_path, _measure_log())
+        assert facts.has_audio is True
+        assert facts.loudness_lufs == pytest.approx(-21.8)
+        assert type(facts.loudness_lufs) is float
+
+    def test_reports_sound_when_only_part_is_silent(self, tmp_path: Path) -> None:
+        """Measured shape: a half-silent clip reports one bounded silence span."""
+        facts = _audio_from(tmp_path, _measure_log(silences=[(0.0, 1.5)], integrated="-22.2"))
+        assert facts.has_audio is True
+        assert facts.loudness_lufs == pytest.approx(-22.2)
+
+    def test_reports_no_effective_sound_when_silence_covers_the_file(self, tmp_path: Path) -> None:
+        """`has_audio` means audible sound, not the presence of a track.
+
+        Measured: a digitally silent 2-second AAC file reports
+        `silence_duration: 2.020136` — slightly longer than the stream itself,
+        because of encoder padding. The comparison therefore has to tolerate
+        silence running past the nominal duration.
+        """
+        facts = _audio_from(
+            tmp_path,
+            _measure_log(silences=[(0.0, 2.020136)], integrated="-70.0"),
+            facts=_stream_facts(duration_ms=2000),
+        )
+        assert facts.has_audio is False
+        assert facts.loudness_lufs is None
+
+    def test_treats_an_unterminated_silence_as_running_to_the_end(self, tmp_path: Path) -> None:
+        facts = _audio_from(
+            tmp_path,
+            _measure_log(integrated="-70.0", trailing_silence_start=0.0),
+            facts=_stream_facts(duration_ms=2000),
+        )
+        assert facts.has_audio is False
+
+
+class TestReadAudioFactsLoudnessRange:
+    """`Material` stores loudness only within [-70.0, 0.0] and only as a float."""
+
+    def test_states_no_loudness_when_the_measure_sits_on_the_floor(self, tmp_path: Path) -> None:
+        """A 0.1-second tone is audible but shorter than ebur128's window.
+
+        Measured: it reports the -70.0 floor while silencedetect finds nothing
+        silent. Reporting the floor as a real reading would claim a precision
+        the measurement does not have.
+        """
+        facts = _audio_from(tmp_path, _measure_log(integrated="-70.0"))
+        assert facts.has_audio is True
+        assert facts.loudness_lufs is None
+
+    @pytest.mark.parametrize("reading", ["-inf", "inf", "nan"])
+    def test_states_no_loudness_when_the_measure_is_not_finite(
+        self, tmp_path: Path, reading: str
+    ) -> None:
+        facts = _audio_from(tmp_path, _measure_log(integrated=reading))
+        assert facts.has_audio is True
+        assert facts.loudness_lufs is None
+
+    def test_states_no_loudness_when_the_measure_is_above_full_scale(self, tmp_path: Path) -> None:
+        """Heavily limited material can integrate above 0 LUFS, which cannot be stored.
+
+        Recording nothing is honest; clamping to 0.0 would invent a reading.
+        """
+        facts = _audio_from(tmp_path, _measure_log(integrated="1.5"))
+        assert facts.has_audio is True
+        assert facts.loudness_lufs is None
+
+    def test_accepts_the_loudest_storable_measure(self, tmp_path: Path) -> None:
+        facts = _audio_from(tmp_path, _measure_log(integrated="0.0"))
+        assert facts.loudness_lufs == pytest.approx(0.0)
+
+    def test_accepts_a_measure_just_above_the_floor(self, tmp_path: Path) -> None:
+        facts = _audio_from(tmp_path, _measure_log(integrated="-69.9"))
+        assert facts.loudness_lufs == pytest.approx(-69.9)
+
+
+class TestReadAudioFactsSilentAudioMaterial:
+    def test_rejects_an_audio_file_with_no_audible_sound(self, tmp_path: Path) -> None:
+        """`Material` forbids `kind=AUDIO` with `has_audio=False`, so it cannot be built.
+
+        Handing back a fact that cannot be stored would only move the failure to
+        a place that raises `InvalidMaterialModel` instead of a probe rejection.
+        """
+        excinfo = _audio_reject(
+            tmp_path,
+            _measure_log(silences=[(0.0, 2.02)], integrated="-70.0"),
+            facts=_stream_facts(ProbedMaterialKind.AUDIO, duration_ms=2000),
+        )
+        assert _rejection(excinfo) is MaterialProbeRejection.SILENT_AUDIO
+
+    def test_accepts_an_audio_file_that_has_sound(self, tmp_path: Path) -> None:
+        facts = _audio_from(
+            tmp_path,
+            _measure_log(),
+            facts=_stream_facts(ProbedMaterialKind.AUDIO, duration_ms=2000),
+        )
+        assert facts.has_audio is True
+
+
+class TestReadAudioFactsMeasureFailure:
+    def test_rejects_a_measure_that_reports_no_loudness_line(self, tmp_path: Path) -> None:
+        excinfo = _audio_reject(tmp_path, _measure_log(integrated=None))
+        assert _rejection(excinfo) is MaterialProbeRejection.PROBE_FAILED
+
+    def test_rejects_a_measure_that_exits_non_zero(self, tmp_path: Path) -> None:
+        excinfo = _audio_reject(tmp_path, _measure_log(), measure_exit=1)
+        assert _rejection(excinfo) is MaterialProbeRejection.PROBE_FAILED
+
+    def test_rejects_a_measure_killed_by_a_signal(self, tmp_path: Path) -> None:
+        excinfo = _audio_reject(tmp_path, _measure_log(), measure_signal=True)
+        assert _rejection(excinfo) is MaterialProbeRejection.PROBE_CRASHED
+
+    def test_rejects_a_measure_that_outruns_its_timeout(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(material_probe, "MEASURE_TIMEOUT_SECONDS", 0.2)
+        excinfo = _audio_reject(tmp_path, _measure_log(), sleep="5")
+        assert _rejection(excinfo) is MaterialProbeRejection.PROBE_FAILED
+
+    def test_rejects_an_oversized_measure_report(self, tmp_path: Path) -> None:
+        excinfo = _audio_reject(
+            tmp_path, "x" * (MAX_MEASURE_OUTPUT_BYTES + 1) + "\n" + _measure_log()
+        )
+        assert _rejection(excinfo) is MaterialProbeRejection.PROBE_FAILED
+
+
+class TestReadAudioFactsInvocation:
+    def test_silences_the_per_frame_loudness_log(self, tmp_path: Path) -> None:
+        """Without `framelog=quiet` ebur128 prints a line every 100 ms.
+
+        Measured on a 2-second file: 65 stderr lines against 45 with it. The gap
+        grows with duration, so a 4-hour import would emit roughly 144,000
+        lines — the "oversized file" row of the failure matrix.
+        """
+        _audio_from(tmp_path, _measure_log(), argv_log=True)
+        argv = (tmp_path / ".probe-argv").read_text(encoding="utf-8").splitlines()
+        filters = next(a for a in argv if "ebur128" in a)
+        assert "framelog=quiet" in filters
+        assert "silencedetect" in filters
+        assert "-nostdin" in argv
+
+    def test_names_the_input_before_the_output_options(self, tmp_path: Path) -> None:
+        """ffmpeg reads its input first and has no `--`; an absolute path is the guard."""
+        _audio_from(tmp_path, _measure_log(), argv_log=True)
+        argv = (tmp_path / ".probe-argv").read_text(encoding="utf-8").splitlines()
+        source_index = argv.index("-i") + 1
+        assert argv[source_index].startswith("/")
+        assert argv.index("-af") > source_index
+        assert "--" not in argv
+
+
+class TestReadAudioFactsLeaksNothing:
+    def test_no_traceback_frame_retains_the_measure_report(self, tmp_path: Path) -> None:
+        """The measuring step must read ffmpeg's stderr, which names the file.
+
+        It is written to a file and parsed into numbers, so no frame on the
+        raising path holds the text.
+        """
+        secret = "operator-private-wedding-2021"
+        log = f"/private/var/folders/ab/{secret}.mp4: something went wrong\n"
+        excinfo = _audio_reject(tmp_path, log)
+        module_file = material_probe.__file__
+        traceback = excinfo.value.__traceback__
+        inspected = 0
+        while traceback is not None:
+            frame = traceback.tb_frame
+            if frame.f_code.co_filename == module_file:
+                inspected += 1
+                for value in frame.f_locals.values():
+                    assert secret not in repr(value)
+            traceback = traceback.tb_next
+        assert inspected, "no material_probe frame was inspected"
+
+
+class TestReadAudioFactsGuardsItsOwnInputs:
+    """The measuring step re-checks everything the reading step checks.
+
+    It is a separate entry point, so a caller can reach it with a source the
+    reading step never saw.
+    """
+
+    def test_rejects_a_missing_source(self, tmp_path: Path) -> None:
+        tools = _audio_tools(tmp_path, _measure_log())
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_audio_facts(tools, tmp_path / "absent.mp4", _stream_facts())
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+
+    def test_rejects_a_relative_source_path(self, tmp_path: Path) -> None:
+        tools = _audio_tools(tmp_path, _measure_log())
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_audio_facts(tools, Path("clip.mp4"), _stream_facts())
+        assert _rejection(excinfo) is MaterialProbeRejection.UNSAFE_PATH
+
+    def test_rejects_a_fifo_as_source(self, tmp_path: Path) -> None:
+        tools = _audio_tools(tmp_path, _measure_log())
+        fifo = tmp_path / "pipe.mp4"
+        os.mkfifo(fifo)
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_audio_facts(tools, fifo, _stream_facts())
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+
+    def test_revalidates_the_tools_before_measuring(self, tmp_path: Path) -> None:
+        tools = _audio_tools(tmp_path, _measure_log())
+        source = _source(tmp_path)
+        os.unlink(tools.ffmpeg_path)
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_audio_facts(tools, source, _stream_facts())
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+
+    def test_leaves_the_parent_stdin_untouched(self, tmp_path: Path) -> None:
+        """Same protocol channel as the reading step, same guard needed."""
+        sentinel = b"BOOTSTRAP-SENTINEL\n"
+        seeded = tmp_path / "stdin.bin"
+        seeded.write_bytes(sentinel)
+        tools = _audio_tools(tmp_path, _measure_log(), drain_stdin=True)
+        source = _source(tmp_path)
+        saved = os.dup(0)
+        try:
+            with seeded.open("rb") as handle:
+                os.dup2(handle.fileno(), 0)
+                read_audio_facts(tools, source, _stream_facts())
+                assert os.read(0, len(sentinel)) == sentinel
+        finally:
+            os.dup2(saved, 0)
+            os.close(saved)
+        assert (tmp_path / ".probe-stdin").read_bytes() == b""
+
+    def test_accepts_a_report_exactly_at_the_size_limit(self, tmp_path: Path) -> None:
+        body = _measure_log()
+        padding = MAX_MEASURE_OUTPUT_BYTES - len(body.encode("utf-8"))
+        assert padding >= 0
+        facts = _audio_from(tmp_path, ("#" * padding) + body)
+        assert facts.has_audio is True
+
+    def test_charges_no_negative_silence_for_a_span_past_the_end(self, tmp_path: Path) -> None:
+        """Silence can start after the stated end: measured padding runs past it.
+
+        Without clamping at zero that overshoot would subtract from the total
+        and turn a silent file into an audible one.
+        """
+        facts = _audio_from(
+            tmp_path,
+            _measure_log(silences=[(0.0, 2.02)], integrated="-70.0", trailing_silence_start=2.05),
+            facts=_stream_facts(duration_ms=2000),
+        )
+        assert facts.has_audio is False
+
+
+def _packaged_tools() -> PackagedMediaTools:
+    """The packaged pair, resolved the way the build cache lays it out.
+
+    A stub answers whatever it is asked, so it cannot tell a valid ffmpeg
+    command line from one ffmpeg rejects outright — every stub test passed while
+    the real binary failed on every file. Missing tooling fails loudly rather
+    than skipping: a skipped acceptance test looks green.
+    """
+    root = Path.home() / "Library/Caches/automation-tool-build/media-toolchain/bin"
+    ffprobe, ffmpeg = root / "ffprobe", root / "ffmpeg"
+    if not (ffprobe.exists() and ffmpeg.exists()):
+        raise AssertionError(
+            "packaged media toolchain missing; run scripts/prepare_video_runtime.py"
+        )
+    return PackagedMediaTools(ffprobe_path=ffprobe, ffmpeg_path=ffmpeg)
+
+
+@pytest.fixture(scope="session")
+def real_clip(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Two seconds of real tone, encoded by the packaged ffmpeg."""
+    tools = _packaged_tools()
+    clip = tmp_path_factory.mktemp("real-media") / "tone.m4a"
+    subprocess.run(
+        [
+            os.fspath(tools.ffmpeg_path),
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=2",
+            "-c:a",
+            "aac",
+            os.fspath(clip),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return clip
+
+
+class TestAgainstThePackagedBinaries:
+    def test_measures_a_real_clip(self, real_clip: Path) -> None:
+        tools = _packaged_tools()
+        streams = read_stream_facts(tools, real_clip)
+        assert streams.kind is ProbedMaterialKind.AUDIO
+        assert streams.audio_codec == "aac"
+        facts = read_audio_facts(tools, real_clip, streams)
+        assert facts.has_audio is True
+        assert facts.loudness_lufs is not None
+        assert LOUDNESS_FLOOR_LUFS < facts.loudness_lufs <= LOUDNESS_CEILING_LUFS
