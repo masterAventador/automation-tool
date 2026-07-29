@@ -13,6 +13,7 @@ from .action_risk_authorization_repository import (
 )
 from .bilibili_publish_repository import SqlAlchemyBilibiliArchivePublishStore
 from .customer_account_repository import SqlAlchemyCustomerAccountRepository
+from .editing_project_repository import SqlAlchemyEditingProjectRepository
 from .installation_revocation_repository import SqlAlchemyInstallationRevocationRepository
 from .platform_session_health_repository import SqlAlchemyPlatformSessionHealthRepository
 from .schema import (
@@ -30,6 +31,7 @@ from .schema import (
     device_credentials,
     device_sessions,
     douyin_search_exposure_definitions,
+    editing_projects,
     execution_attempts,
     installation_registration_challenges,
     installations,
@@ -63,6 +65,7 @@ __all__ = [
     "SqlAlchemyActionRiskAuthorizationRepository",
     "SqlAlchemyBilibiliArchivePublishStore",
     "SqlAlchemyCustomerAccountRepository",
+    "SqlAlchemyEditingProjectRepository",
     "SqlAlchemyInstallationRevocationRepository",
     "SqlAlchemyPlatformSessionHealthRepository",
     "SqlAlchemyTaskCommandRepository",
@@ -85,6 +88,7 @@ __all__ = [
     "device_credentials",
     "device_sessions",
     "douyin_search_exposure_definitions",
+    "editing_projects",
     "execution_attempts",
     "installation_registration_challenges",
     "installations",

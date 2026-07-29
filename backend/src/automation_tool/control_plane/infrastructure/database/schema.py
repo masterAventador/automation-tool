@@ -7,8 +7,10 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
+    Double,
     ForeignKeyConstraint,
     Index,
+    Integer,
     LargeBinary,
     MetaData,
     PrimaryKeyConstraint,
@@ -28,6 +30,7 @@ from automation_tool.control_plane.domain import (
     DOUYIN_SEARCH_EXPOSURE_TEMPLATE,
     MAX_ACTION_RISK_LIMIT,
     MAX_MESSAGE_TEMPLATE_CHARACTERS,
+    MAX_PROJECT_TITLE_CHARACTERS,
     MAX_SAFE_TASK_EVENT_MESSAGE_CHARACTERS,
     MAX_SEARCH_KEYWORD_CHARACTERS,
     MAX_TASK_EVENT_SEQUENCE,
@@ -2336,6 +2339,23 @@ bilibili_upload_parts = Table(
     ),
 )
 
+editing_projects = Table(
+    "editing_projects",
+    metadata,
+    Column("project_id", UUID(as_uuid=True), nullable=False),
+    Column("title", String(length=MAX_PROJECT_TITLE_CHARACTERS), nullable=False),
+    Column("output_width", Integer(), nullable=False),
+    Column("output_height", Integer(), nullable=False),
+    Column("output_fps", Integer(), nullable=False),
+    # `EditingProject`'s font-key pattern admits at most 64 characters.
+    Column("caption_font_key", String(length=64), nullable=False),
+    Column("caption_font_px", Integer(), nullable=False),
+    Column("caption_stroke_px", Integer(), nullable=False),
+    Column("caption_line_spacing", Double(), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    PrimaryKeyConstraint("project_id", name="pk_editing_projects"),
+)
+
 __all__ = [
     "account_audit_events",
     "account_installation_binding_challenges",
@@ -2350,6 +2370,7 @@ __all__ = [
     "device_credentials",
     "device_sessions",
     "douyin_search_exposure_definitions",
+    "editing_projects",
     "execution_attempts",
     "installation_registration_challenges",
     "installations",
