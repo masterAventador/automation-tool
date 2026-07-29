@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  WORKBENCH_MARKERS,
+  openTaskCreate,
+  waitForStartup,
+} from "./navigation";
 
 interface TaskLifecyclePreparation {
   readonly installationId: string;
@@ -30,9 +35,7 @@ async function waitForRenderedText(...expected: string[]): Promise<string> {
 }
 
 async function openCreatePage(): Promise<void> {
-  await browser
-    .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='新建任务']]")
-    .click();
+  await openTaskCreate();
   await expect(await browser.$("h2")).toHaveText("新建运营任务");
 }
 
@@ -56,7 +59,7 @@ async function clickTwoCharacterButton(first: string, second: string): Promise<v
 
 describe("T3-19 hidden App lifecycle acceptance", () => {
   it("creates, controls, succeeds, refreshes, and restores persisted Tasks", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_task_lifecycle_for_acceptance"),
     )) as TaskLifecyclePreparation;
@@ -74,14 +77,14 @@ describe("T3-19 hidden App lifecycle acceptance", () => {
     await waitForRenderedText("取消命令已提交", "已取消", "任务已取消");
 
     await browser.$("button=返回工作台").click();
-    await waitForRenderedText("RPA 运营工作台", controlledTaskId);
+    await waitForRenderedText(WORKBENCH_MARKERS[0]!, controlledTaskId);
     await openCreatePage();
     const succeededTaskId = await createTask("T3-19 成功链路");
     await waitForRenderedText("已成功", "任务完成", "100%");
 
     await browser.refresh();
     await waitForRenderedText(
-      "RPA 运营工作台",
+      WORKBENCH_MARKERS[0]!,
       controlledTaskId,
       succeededTaskId,
       "已取消",

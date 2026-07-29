@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-import { browser, expect } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import {
+  waitForStartup,
+} from "./navigation";
 
 interface UpdateRelease {
   readonly version: string;
@@ -51,7 +54,7 @@ async function waitForText(text: string): Promise<void> {
 
 describe("H8-20 hidden App update download acceptance", () => {
   it("recovers the interrupted startup download from the visible 设置与诊断 controls", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
     await browser.$("li=设置与诊断").click();
 
     // The startup check is what fails here: the feed cuts the artifact stream

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  waitForStartup,
+} from "./navigation";
 
 interface Preparation {
   readonly installationId: string;
@@ -31,7 +34,7 @@ async function waitForOneFact(): Promise<void> {
 
 describe("B5-13/B5-14 platform Session production-path acceptance", () => {
   it("queries status, drives the headless Executor, and safely logs out from the hidden App UI", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_platform_session_for_acceptance"),
     )) as Preparation;

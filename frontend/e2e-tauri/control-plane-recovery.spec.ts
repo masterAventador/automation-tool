@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 
-import { browser, expect } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import {
+  WORKBENCH_MARKERS,
+  openTaskCreate,
+  waitForStartup,
+} from "./navigation";
 
 interface Preparation {
   readonly installationId: string;
@@ -61,15 +66,13 @@ async function waitForText(...expected: string[]): Promise<string> {
 
 describe("H8-06 hidden App Control Plane restart recovery acceptance", () => {
   it("keeps one Executor process and converges the App-submitted command exactly once", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_control_plane_recovery_for_acceptance"),
     )) as Preparation;
     assert.match(preparation.installationId, UUID_V4);
 
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='新建任务']]")
-      .click();
+    await openTaskCreate();
     await browser.$("#searchKeyword").setValue("H8-06 Control Plane 重启恢复");
     const actionInput = await browser.$("#action");
     await browser.execute(() => {
@@ -106,9 +109,6 @@ describe("H8-06 hidden App Control Plane restart recovery acceptance", () => {
     assert.equal(started.state, "running");
     assert.equal(started.restartCount, 0);
 
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='工作台']]")
-      .click();
     await waitForText(taskId ?? "", "运行中", "本机执行器在线");
     await browser.$(`button=${taskId ?? ""}`).click();
     await waitForText("任务运行详情", taskId ?? "", "运行中", "任务开始", "步骤开始");
@@ -141,7 +141,7 @@ describe("H8-06 hidden App Control Plane restart recovery acceptance", () => {
       "the restarted Control Plane",
     );
     await browser.$("button=重新检查").click();
-    await waitForText("RPA 运营工作台", taskId ?? "", "已取消", "本机执行器在线");
+    await waitForText(WORKBENCH_MARKERS[0]!, taskId ?? "", "已取消", "本机执行器在线");
     await browser.$(`button=${taskId ?? ""}`).click();
     await waitForText("任务运行详情", taskId ?? "", "已取消", "任务已取消");
     const recovered = (await browser.tauri.execute(({ core }) =>

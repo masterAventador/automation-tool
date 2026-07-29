@@ -3,7 +3,10 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { browser, expect } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import {
+  waitForStartup,
+} from "./navigation";
 
 interface UpdateState {
   readonly state: string;
@@ -79,7 +82,7 @@ async function waitForInstalledBinary(): Promise<void> {
 
 describe("H8-22 ad-hoc macOS package update acceptance", () => {
   it("drives the requested package scenario through the original App", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
     const scenario = process.env.H822_MAC_SCENARIO;
 
     if (scenario === "optional-decisions") {

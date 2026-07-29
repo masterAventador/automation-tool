@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  WORKBENCH_SHELL,
+  openVideoStudio,
+  openWorkbenchSection,
+} from "./navigation";
 
 /**
  * T36: the one-sentence path, driven the way a customer will drive it.
@@ -84,45 +89,15 @@ const SUBMIT_FAILURES: readonly (readonly [string, string])[] = [
   ],
 ];
 
-async function openWorkbenchSection(name: string): Promise<void> {
-  await browser
-    .$(`//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='${name}']]`)
-    .click();
-}
-
 /**
  * The workbench shell, as opposed to the startup check or the startup gate.
  *
- * `h2=RPA 运营工作台` used to be this signal and no longer exists: the redesign
+ * The workbench heading used to be this signal and no longer exists: the redesign
  * (`c4d0d14`) replaced the single workbench heading with a per-section one, and
  * the section the App lands on — the assistant — has no heading at all. The
  * navigation landmark is what survives that, because it is the shell rather
  * than anything inside it.
  */
-const WORKBENCH_SHELL = "nav[aria-label='桌面主导航']";
-
-/**
- * The route to the brand-motion studio, as the redesign left it.
- *
- * Was: sidebar 工作台 → sidebar 视频制作. Is: sidebar 创作 → the 品牌动效成片
- * segment → 打开完整制作面板. Mirrors `frontend/e2e/navigation.ts`, which the
- * same commit added and keeps green; the studio itself did not move, only the
- * way in.
- */
-async function openVideoStudio() {
-  await openWorkbenchSection("创作");
-  // `*` rather than `div`: antd renders a Segmented item as a `label`, which
-  // the Playwright side never had to know because `.ant-segmented-item` does
-  // not constrain the tag.
-  await browser
-    .$("//*[contains(@class,'ant-segmented-item')][.//*[normalize-space()='品牌动效成片']]")
-    .click();
-  await browser.$("button=打开完整制作面板").click();
-  const studio = await browser.$("section[aria-label='视频制作工作区']");
-  await expect(studio).toBeDisplayed();
-  await studio.$("button[aria-label='选择品牌动效成片']").click();
-  return studio;
-}
 
 describe("T36 一句话自动制作的真实 App 用户路径", () => {
   it("configures the model, refuses an empty brief, then authors, renders and plays", async function () {

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  waitForStartup,
+  openTaskCreate,
+} from "./navigation";
 
 interface TaskCreateFormPreparation {
   readonly installationId: string;
@@ -11,16 +15,13 @@ const UUID_V4 =
 
 describe("Task form production-path acceptance", () => {
   it("validates and creates one personalized comment Task from the hidden real App UI", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_task_create_form_for_acceptance"),
     )) as TaskCreateFormPreparation;
     assert.match(preparation.installationId, UUID_V4);
 
-    const newTaskMenu = await browser.$(
-      "//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='新建任务']]",
-    );
-    await newTaskMenu.click();
+    await openTaskCreate();
     await expect(await browser.$("h2")).toHaveText("新建运营任务");
 
     const keyword = await browser.$("#searchKeyword");

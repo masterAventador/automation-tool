@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-import { browser, expect } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import {
+  waitForStartup,
+} from "./navigation";
 
 interface WorkbenchPreparation {
   readonly installationId: string;
@@ -31,8 +34,7 @@ async function waitForRenderedText(...expected: string[]): Promise<void> {
 
 describe("Workbench production-path acceptance", () => {
   it("loads real projections and emergency-stops from the hidden App UI", async () => {
-    const heading = await browser.$("h2");
-    await expect(heading).toHaveText("RPA 运营工作台");
+    await waitForStartup();
 
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_workbench_for_acceptance"),

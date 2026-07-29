@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  waitForStartup,
+} from "./navigation";
 
 interface TaskDiscoveryPreparation {
   readonly installationId: string;
@@ -16,8 +19,7 @@ const UUID_V4 =
 
 describe("Task discovery production-path acceptance", () => {
   it("converges candidates through the hidden real App and formal Executor", async () => {
-    const heading = await browser.$("h2");
-    await expect(heading).toHaveText("RPA 运营工作台");
+    await waitForStartup();
 
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_task_discovery_for_acceptance"),

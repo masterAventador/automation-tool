@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  waitForStartup,
+} from "./navigation";
 
 interface RegistrationSummary {
   readonly installationId: string;
@@ -9,8 +12,7 @@ interface RegistrationSummary {
 
 describe("Installation revocation production-path acceptance", () => {
   it("moves the hidden real App from the workbench to the revoked diagnostic", async () => {
-    const initialHeading = await browser.$("h2");
-    await expect(initialHeading).toHaveText("RPA 运营工作台");
+    await waitForStartup();
 
     const registration = (await browser.tauri.execute(({ core }) =>
       core.invoke("register_installation_for_revocation_acceptance"),

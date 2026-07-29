@@ -1,28 +1,18 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  openSettings,
+  workbenchIsMounted,
+} from "./navigation";
 
 const TEST_KEY = "sk-vf05-invalid-desktop-key-1234567890";
-
-async function openSettings(): Promise<void> {
-  const workbenchHeading = await browser.$("h2=RPA 运营工作台");
-  if (await workbenchHeading.isExisting()) {
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='设置与诊断']]")
-      .click();
-    await expect(await browser.$("h2")).toHaveText("设置与诊断");
-  } else {
-    await expect(await browser.$("button=打开本地修复工具")).toBeDisplayed();
-    await browser.$("button=打开本地修复工具").click();
-  }
-  await expect(await browser.$(".model-service-settings-card")).toBeDisplayed();
-}
 
 describe("VF-05 hidden App model service acceptance", () => {
   it("persists, reloads, reuses and tests a credential without reflecting it", async () => {
     await browser.waitUntil(
       async () =>
-        (await browser.$("h2=RPA 运营工作台").isExisting()) ||
+        (await workbenchIsMounted()) ||
         (await browser.$("button=打开本地修复工具").isExisting()),
       { timeoutMsg: "production App did not reach workbench or startup repair path" },
     );
@@ -42,7 +32,7 @@ describe("VF-05 hidden App model service acceptance", () => {
     await browser.refresh();
     await browser.waitUntil(
       async () =>
-        (await browser.$("h2=RPA 运营工作台").isExisting()) ||
+        (await workbenchIsMounted()) ||
         (await browser.$("button=打开本地修复工具").isExisting()),
       { timeoutMsg: "production App did not recover after refresh" },
     );

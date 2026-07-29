@@ -1,25 +1,20 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  waitForStartup,
+  openVideoEditing,
+} from "./navigation";
 
 const SOURCE_ARTIFACT = "9f48954d-2df1-4168-8f33-b62c5772845b";
 
 describe("VE-03 production App standalone video editing acceptance", () => {
   it("creates a project, edits the timeline, saves revisions and shows honest submission state", async () => {
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='工作台']]")
-      .click();
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
 
-    // 「视频剪辑」是独立左侧入口，与「视频制作」并列。
-    const productionEntry = await browser.$(
-      "//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='视频制作']]",
-    );
-    assert.equal(await productionEntry.isExisting(), true);
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='视频剪辑']]")
-      .click();
-    await expect(await browser.$("h2")).toHaveText("视频剪辑");
+    // 改版后「轻量剪辑」和两种成片方式并列在「创作」下的分段控件里，
+    // 不再是独立的左侧入口。
+    await openVideoEditing();
 
     const workbench = await browser.$("section[aria-label='视频剪辑工作区']");
     await expect(workbench).toBeDisplayed();
@@ -82,9 +77,6 @@ describe("VE-03 production App standalone video editing acceptance", () => {
     assert.doesNotMatch(body, /完成 100%|示例成片|假任务/);
 
     // 回到工作台首页，避免把页面状态遗留给后续验收用例。
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='工作台']]")
-      .click();
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
   });
 });

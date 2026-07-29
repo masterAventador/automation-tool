@@ -3,6 +3,9 @@ import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  waitForStartup,
+} from "./navigation";
 
 interface Preparation {
   readonly installationId: string;
@@ -109,7 +112,7 @@ function assertRecoveryGuidance(label: string, text: string): void {
 
 describe("T114 abandoned operations-profile lease recovery", () => {
   it("blocks both buttons after a killed App and recovers through safe logout", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
 
     if (phase === "abandon") {
       const preparation = (await browser.tauri.execute(({ core }) =>

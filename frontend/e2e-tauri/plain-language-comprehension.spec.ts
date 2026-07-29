@@ -3,6 +3,11 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  openTaskCreate,
+  waitForStartup,
+  openWorkbenchSection,
+} from "./navigation";
 
 interface TerminologyContract {
   readonly videoCreationMethods: ReadonlyArray<{ readonly displayName: string }>;
@@ -21,12 +26,6 @@ const CONTRACT = JSON.parse(
  */
 const CAPTURE_FILE = process.env["CQ01_PAGE_TEXT_FILE"];
 const captured: Array<{ page: string; text: string; accessibleNames: string[] }> = [];
-
-async function openMenu(label: string) {
-  await browser
-    .$(`//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='${label}']]`)
-    .click();
-}
 
 /**
  * Records the visible text of the current page together with the accessible
@@ -60,7 +59,7 @@ async function capture(page: string): Promise<string> {
 }
 
 async function openStudio() {
-  await openMenu("视频制作");
+  await openWorkbenchSection("视频制作");
   const studio = await browser.$("section[aria-label='视频制作工作区']");
   await expect(studio).toBeDisplayed();
   // VideoStudio intentionally remembers the last active tab across navigation.
@@ -84,8 +83,8 @@ describe("CQ-01 production App plain-language comprehension acceptance", () => {
   });
 
   it("lets a non-technical user pick the right creation method", async () => {
-    await openMenu("工作台");
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await openWorkbenchSection("工作台");
+    await waitForStartup();
     await capture("工作台");
 
     const studio = await openStudio();
@@ -199,7 +198,7 @@ describe("CQ-01 production App plain-language comprehension acceptance", () => {
   });
 
   it("presents 视频剪辑 as its own module rather than part of 视频制作", async () => {
-    await openMenu("视频剪辑");
+    await openWorkbenchSection("视频剪辑");
     await expect(await browser.$("h2")).toHaveText("视频剪辑");
     const editing = await browser.$("section[aria-label='视频剪辑工作区']");
     await expect(editing).toBeDisplayed();
@@ -221,7 +220,7 @@ describe("CQ-01 production App plain-language comprehension acceptance", () => {
   });
 
   it("keeps the settings and platform pages free of raw technical words", async () => {
-    await openMenu("设置与诊断");
+    await openWorkbenchSection("设置与诊断");
     const diagnostics = await capture("设置与诊断");
     assert.doesNotMatch(
       diagnostics,
@@ -229,10 +228,10 @@ describe("CQ-01 production App plain-language comprehension acceptance", () => {
       "设置与诊断不应把执行器原始状态码显示给用户",
     );
 
-    await openMenu("平台状态");
+    await openWorkbenchSection("平台状态");
     await capture("平台状态");
 
-    await openMenu("新建任务");
+    await openTaskCreate();
     await capture("新建任务");
   });
 });

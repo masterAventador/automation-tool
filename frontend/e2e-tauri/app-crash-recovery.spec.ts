@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 
-import { browser, expect } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import {
+  WORKBENCH_MARKERS,
+  openTaskCreate,
+  waitForStartup,
+} from "./navigation";
 
 interface AppCrashRecoveryPreparation {
   readonly installationId: string;
@@ -57,7 +62,7 @@ async function waitForRenderedText(...expected: string[]): Promise<string> {
 
 describe("H8-04 hidden App crash recovery acceptance", () => {
   it("restores the authoritative running Task without replaying work", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
 
     if (phase === "before-crash") {
       const preparation = (await browser.tauri.execute(({ core }) =>
@@ -65,9 +70,7 @@ describe("H8-04 hidden App crash recovery acceptance", () => {
       )) as AppCrashRecoveryPreparation;
       assert.match(preparation.installationId, UUID_V4);
 
-      await browser
-        .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='新建任务']]")
-        .click();
+      await openTaskCreate();
       await browser.$("#searchKeyword").setValue("H8-04 App 崩溃恢复");
       const actionInput = await browser.$("#action");
       await browser.execute(() => {
@@ -106,11 +109,8 @@ describe("H8-04 hidden App crash recovery acceptance", () => {
         core.invoke("restart_executor"),
       )) as { readonly state: string };
       assert.equal(executor.state, "running");
-      await browser
-        .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='工作台']]")
-        .click();
-      await waitForRenderedText(
-        "RPA 运营工作台",
+        await waitForRenderedText(
+        WORKBENCH_MARKERS[0]!,
         taskId ?? "",
         "本机执行器在线",
         "运行中",
@@ -157,7 +157,7 @@ describe("H8-04 hidden App crash recovery acceptance", () => {
       { timeout: 120_000, timeoutMsg: "H8-04 workbench did not restore its snapshot" },
     );
     if (await retry.isExisting()) await retry.click();
-    await waitForRenderedText("RPA 运营工作台", taskId, "本机执行器在线", "运行中");
+    await waitForRenderedText(WORKBENCH_MARKERS[0]!, taskId, "本机执行器在线", "运行中");
     await browser.$(`button=${taskId}`).click();
     await waitForRenderedText(
       "任务运行详情",

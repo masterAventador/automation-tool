@@ -1,22 +1,19 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  openMaterialVideoStudio,
+  waitForStartup,
+} from "./navigation";
 
 describe("VF-07 production App creation method acceptance", () => {
   it("compares and selects exactly two understandable creation methods", async () => {
     // A WDIO session change does not restart the embedded Tauri App. Reload so
     // method and tab state from the preceding spec cannot satisfy this one.
     await browser.refresh();
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='工作台']]")
-      .click();
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='视频制作']]")
-      .click();
+    await waitForStartup();
 
-    const studio = await browser.$("section[aria-label='视频制作工作区']");
-    await expect(studio).toBeDisplayed();
+    const studio = await openMaterialVideoStudio();
     // Declare this scenario's target page explicitly so a future default-tab
     // change cannot make the acceptance silently inspect a different panel.
     await studio.$("div[role='tab']=新建视频").click();

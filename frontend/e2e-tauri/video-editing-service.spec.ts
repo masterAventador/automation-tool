@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  openSettings,
+  waitForStartup,
+  workbenchIsMounted,
+} from "./navigation";
 
 interface RealAliyunCredentials {
   readonly accessKeyId: string;
@@ -34,24 +39,10 @@ function loadRealCredentials(): RealAliyunCredentials {
 async function waitForApp(): Promise<void> {
   await browser.waitUntil(
     async () =>
-      (await browser.$("h2=RPA 运营工作台").isExisting()) ||
+      (await workbenchIsMounted()) ||
       (await browser.$("button=打开本地修复工具").isExisting()),
     { timeoutMsg: "production App did not reach workbench or startup repair path" },
   );
-}
-
-async function openSettings(): Promise<void> {
-  const workbenchHeading = await browser.$("h2=RPA 运营工作台");
-  if (await workbenchHeading.isExisting()) {
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='设置与诊断']]")
-      .click();
-    await expect(await browser.$("h2")).toHaveText("设置与诊断");
-  } else {
-    await expect(await browser.$("button=打开本地修复工具")).toBeDisplayed();
-    await browser.$("button=打开本地修复工具").click();
-  }
-  await expect(await browser.$(".video-editing-service-settings-card")).toBeDisplayed();
 }
 
 describe("VE-04 hidden App real Aliyun editing-service acceptance", () => {
@@ -125,9 +116,6 @@ describe("VE-04 hidden App real Aliyun editing-service acceptance", () => {
     await expect(reloadedCard).toHaveText(expect.stringContaining("未配置"));
 
     // 回到工作台首页，避免把页面状态遗留给后续验收用例。
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='工作台']]")
-      .click();
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
   });
 });

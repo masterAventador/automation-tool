@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  openTaskCreate,
+  waitForStartup,
+} from "./navigation";
 
 interface InstallationPreparation {
   readonly installationId: string;
@@ -19,13 +23,13 @@ describe("H8-16F hidden App original-caller MVP journey", () => {
     // browser, so the only browser it can run is the verified embedded
     // Chromium that has to be present before startup. There is nothing left to
     // repair, and the journey now begins where a real operator begins.
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_task_create_form_for_acceptance"),
     )) as InstallationPreparation;
     assert.match(preparation.installationId, UUID_V4);
 
-    await browser.$("li=新建任务").click();
+    await openTaskCreate();
     await expect(await browser.$("h2")).toHaveText("新建运营任务");
     await browser.$("#searchKeyword").setValue("新能源汽车");
     await browser.$("#targetLimit").setValue("2");

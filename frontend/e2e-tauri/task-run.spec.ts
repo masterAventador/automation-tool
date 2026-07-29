@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 
-import { browser, expect } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import {
+  WORKBENCH_MARKERS,
+  waitForStartup,
+} from "./navigation";
 
 interface TaskRunPreparation {
   readonly installationId: string;
@@ -69,8 +73,7 @@ async function clickTwoCharacterButton(
 
 describe("Task run production-path acceptance", () => {
   it("renders persisted history and controls two Tasks from the hidden App UI", async () => {
-    const heading = await browser.$("h2");
-    await expect(heading).toHaveText("RPA 运营工作台");
+    await waitForStartup();
 
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_task_run_for_acceptance"),
@@ -162,7 +165,7 @@ describe("Task run production-path acceptance", () => {
     await waitForRenderedText("取消命令已提交", "已取消", "任务已取消");
 
     await browser.$("button=返回工作台").click();
-    await waitForRenderedText("RPA 运营工作台", preparation.emergencyTaskId);
+    await waitForRenderedText(WORKBENCH_MARKERS[0]!, preparation.emergencyTaskId);
     await openTask(preparation.emergencyTaskId);
     await browser.$("button=紧急停止").click();
     await browser.$("button=确认紧停").click();

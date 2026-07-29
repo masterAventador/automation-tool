@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  waitForStartup,
+} from "./navigation";
 
 type AcceptancePhase = "first" | "restart" | "expired" | "risk";
 
@@ -67,7 +70,7 @@ async function waitForAuthoritativeState(expectedState: string): Promise<void> {
 describe("B5-15 platform Session restart acceptance", () => {
   it("reuses one Profile across App/Executor/browser restarts and enters handoff", async () => {
     const phase = acceptancePhase();
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
 
     if (phase === "first") {
       const preparation = (await browser.tauri.execute(({ core }) =>

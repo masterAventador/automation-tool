@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 
-import { browser, expect } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import {
+  waitForStartup,
+} from "./navigation";
 
 interface Preparation {
   readonly installationId: string;
@@ -44,7 +47,7 @@ async function waitForSignal(path: string, label: string): Promise<void> {
 
 describe("H8-08 hidden App system-resume acceptance", () => {
   it("keeps one Executor and exposes fixed recovery diagnostics through App IPC", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_system_resume_for_acceptance"),
     )) as Preparation;

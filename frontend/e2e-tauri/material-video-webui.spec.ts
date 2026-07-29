@@ -1,23 +1,22 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  openWorkbenchSection,
+  waitForStartup,
+} from "./navigation";
 
 const TEST_KEY = "sk-im05-invalid-desktop-key-1234567890";
 
 describe("IM-05/IM-06 production App material video WebUI acceptance", () => {
   it("opens the real protected and product-themed WebUI through the normal product entry", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='设置与诊断']]")
-      .click();
+    await waitForStartup();
+    await openWorkbenchSection("设置");
     const scriptSettings = await browser.$(".model-service-purpose--script");
     await scriptSettings.$("input[aria-label='文案模型服务 API Key']").setValue(TEST_KEY);
     await scriptSettings.$("button=保存配置").click();
     await expect(scriptSettings).toHaveText(expect.stringContaining("已配置"));
 
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='视频制作']]")
-      .click();
     const studio = await browser.$("section[aria-label='视频制作工作区']");
     const mainHandle = await browser.getWindowHandle();
     await studio.$("button[aria-label='选择智能素材成片']").click();
@@ -115,8 +114,7 @@ describe("IM-05/IM-06 production App material video WebUI acceptance", () => {
 
     await browser.closeWindow();
     await browser.switchToWindow(mainHandle);
-    await expect(await browser.$("h2")).toHaveText("视频制作");
-    await browser.$("div[role='tab']=制作任务").click();
+        await browser.$("div[role='tab']=制作任务").click();
     await expect(await browser.$("body")).toHaveText(expect.stringContaining("还没有真实制作任务"));
     await browser.$("div[role='tab']=成片").click();
     await expect(await browser.$("body")).toHaveText(expect.stringContaining("还没有已导入的成片"));

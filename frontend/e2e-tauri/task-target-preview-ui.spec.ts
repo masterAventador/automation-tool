@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  waitForStartup,
+} from "./navigation";
 
 interface TargetPreviewUiPreparation {
   readonly installationId: string;
@@ -12,7 +15,7 @@ const UUID_V4 =
 
 describe("Task target preview UI production-path acceptance", () => {
   it("loads, excludes, and confirms from the hidden real App UI", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_task_target_preview_ui_for_acceptance"),
     )) as TargetPreviewUiPreparation;
