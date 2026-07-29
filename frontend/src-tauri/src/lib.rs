@@ -1608,6 +1608,42 @@ async fn logout_douyin_session(
         .await
         .map_err(map_executor_connection_error)?;
 
+    // PC-25：删除 Profile 之前，先让浏览器的主人送走浏览器。此前的顺序是
+    // 「紧停 → 删 → 重启 → 由新执行器补记注销」，而登录浏览器由旧执行器经
+    // Playwright 拉起、不在紧停所杀的进程组里——删除刚完成 6 毫秒，垂死的
+    // Chromium 就把目录重建了回来（b5_13 实测时间线），终检于是正确拒绝。
+    // 现在：执行器还在跑就让它优雅关闭登录会话（Playwright 会等浏览器真正
+    // 退出）并记录注销；关不掉就把可重试错误原样抛出去，Profile 一根汗毛
+    // 不动（fail-closed）。执行器本就停着的情况下没有它拉起的浏览器可关，
+    // 跳过即可；更早被紧停遗留的孤儿浏览器仍由删除终检兜底报错。
+    let running = {
+        let service = platform.inner().clone();
+        matches!(
+            service.status().map_err(map_executor_platform_error)?.state(),
+            executor_manager::ExecutorManagerState::Running
+        )
+    };
+    if running {
+        let service = platform.inner().clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            service.execute_session_command(
+                executor_bootstrap::LocalPlatformCommand::CompleteDouyinLogout,
+            )
+        })
+        .await
+        .map_err(|_| ExecutorPlatformCommandError {
+            code: "process_unavailable",
+            retryable: true,
+        })?
+        .map_err(map_executor_platform_error)?;
+        if result.state() != "logged_out" {
+            return Err(ExecutorPlatformCommandError {
+                code: "authentication_rejected",
+                retryable: false,
+            });
+        }
+    }
+
     let service = platform.inner().clone();
     app_logging::record(app_logging::DesktopLogEvent::ExecutorEmergencyStopRequested);
     tauri::async_runtime::spawn_blocking(move || service.emergency_stop())
@@ -1635,22 +1671,27 @@ async fn logout_douyin_session(
         })?
         .map_err(map_executor_platform_error)?;
 
-    let service = platform.inner().clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        service
-            .execute_session_command(executor_bootstrap::LocalPlatformCommand::CompleteDouyinLogout)
-    })
-    .await
-    .map_err(|_| ExecutorPlatformCommandError {
-        code: "process_unavailable",
-        retryable: true,
-    })?
-    .map_err(map_executor_platform_error)?;
-    if result.state() != "logged_out" {
-        return Err(ExecutorPlatformCommandError {
-            code: "authentication_rejected",
-            retryable: false,
-        });
+    if !running {
+        // 执行器本来停着：上面没有任何人发注销信封，投影永远到不了
+        // missing——由重启后的执行器补记（它没有可关的浏览器，只做记录）。
+        let service = platform.inner().clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            service.execute_session_command(
+                executor_bootstrap::LocalPlatformCommand::CompleteDouyinLogout,
+            )
+        })
+        .await
+        .map_err(|_| ExecutorPlatformCommandError {
+            code: "process_unavailable",
+            retryable: true,
+        })?
+        .map_err(map_executor_platform_error)?;
+        if result.state() != "logged_out" {
+            return Err(ExecutorPlatformCommandError {
+                code: "authentication_rejected",
+                retryable: false,
+            });
+        }
     }
 
     match tokio::time::timeout(DOUYIN_LOGOUT_PROJECTION_TIMEOUT, async {
