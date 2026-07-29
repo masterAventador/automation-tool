@@ -23,6 +23,7 @@ from sqlalchemy.exc import IntegrityError
 
 from automation_tool.control_plane.application.materials import (
     MaterialAlreadyRegistered,
+    MaterialDescriptionProtected,
     MaterialNotFound,
     MaterialPersistenceUnavailable,
 )
@@ -446,6 +447,13 @@ async def test_update_description_rewrites_four_columns_and_no_others(
     The whole row is compared afterwards, not just the four columns that should
     have moved. An UPDATE that also rewrote `speech_segments_ms` or reset
     `content_digest` would pass a narrower assertion.
+
+    The two directions run in the order a material really goes through them --
+    model first, person second. The reverse order is not an oversight here, it
+    is the bug: an AI write landing after a user write is exactly what
+    `test_a_stale_snapshot_cannot_walk_an_ai_description_over_the_users` now
+    refuses. This test used to do it that way round and passed, which is how the
+    gap stayed invisible.
     """
     alembic_runner(postgresql_url, "upgrade", "head")
     database = Database.from_url(postgresql_url)
@@ -456,9 +464,21 @@ async def test_update_description_rewrites_four_columns_and_no_others(
         material = make_material(material_id)
         await repository.save(material)
 
-        written_by_user = material.with_user_description("我自己写的描述")
-        await repository.update_description(written_by_user)
+        # The AI direction, on a row the model still owns.
+        rewritten = material.with_ai_description("模型看到的描述", ("夜景", "延时"), LATER)
+        await repository.update_description(rewritten)
+        assert await stored_row(database, material_id.uuid) == row_values(
+            material_id.uuid,
+            ai_description="模型看到的描述",
+            ai_tags=["夜景", "延时"],
+            description_source="ai",
+            described_at=LATER,
+        )
+        assert await repository.get(material_id) == rewritten
 
+        # And the user direction, which is terminal for this field.
+        written_by_user = rewritten.with_user_description("我自己写的描述")
+        await repository.update_description(written_by_user)
         assert await stored_row(database, material_id.uuid) == row_values(
             material_id.uuid,
             ai_description="我自己写的描述",
@@ -468,14 +488,107 @@ async def test_update_description_rewrites_four_columns_and_no_others(
         )
         assert await repository.get(material_id) == written_by_user
 
-        # And the AI direction, so the method is not accidentally specific to
-        # the shape `with_user_description` happens to produce.
-        rewritten = make_material(material_id).with_ai_description(
-            "模型看到的描述", ("夜景", "延时"), LATER
-        )
-        await repository.update_description(rewritten)
-        assert await repository.get(material_id) == rewritten
+        with pytest.raises(MaterialNotFound):
+            await repository.update_description(make_material(MaterialId.new()))
+    finally:
+        await reset_data(database)
+        await database.close()
 
+
+@pytest.mark.asyncio
+async def test_a_stale_snapshot_cannot_walk_an_ai_description_over_the_users(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    """`with_ai_description` guards a snapshot; only the table guards the row.
+
+    Every step below uses the sanctioned method. Nobody constructs a `Material`
+    from parts and nobody calls `replace`, so the AST guard has nothing to say
+    about this -- and the domain check is satisfied, because the object it looks
+    at genuinely says `description_source is AI`. It just says so about a
+    version of the row that stopped existing two steps ago.
+
+    That gap is why the refusal has to be a predicate in the UPDATE rather than
+    a check in Python. A read-then-decide guard here would have the same defect
+    one level down: two describe passes could both read `ai` and both proceed.
+    """
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyMaterialRepository(database)
+    try:
+        await reset_data(database)
+        material_id = MaterialId.new()
+        await repository.save(make_material(material_id))
+
+        # One flow loads the material and hands it to a describe pass that
+        # keeps hold of it -- an ordinary thing for a queued background job.
+        stale = await repository.get(material_id)
+        assert stale.description_source is DescriptionSource.AI
+
+        # Meanwhile the user writes their own description, through the method
+        # that exists to make that stick.
+        await repository.update_description(stale.with_user_description("用户自己写的描述"))
+
+        # The describe pass now finishes. Its snapshot still says `ai`, so
+        # `with_ai_description` hands back a rewritten material rather than
+        # returning `self` -- the domain guard cannot see the row that changed.
+        overwrite = stale.with_ai_description("模型后写的描述", ("夜景",), LATER)
+        assert overwrite.description_source is DescriptionSource.AI
+
+        with pytest.raises(MaterialDescriptionProtected) as captured:
+            await repository.update_description(overwrite)
+
+        # The user's words survive, and so does their claim on the field.
+        assert await stored_row(database, material_id.uuid) == row_values(
+            material_id.uuid,
+            ai_description="用户自己写的描述",
+            ai_tags=[],
+            description_source="user",
+            described_at=None,
+        )
+        loaded = await repository.get(material_id)
+        assert loaded.ai_description == "用户自己写的描述"
+        assert loaded.description_source is DescriptionSource.USER
+        # Refusing is not the same as "the material is gone": LE-06 answers 409
+        # for one and 404 for the other, and LE-13 has to tell "someone took
+        # this over" from "stop retrying, it does not exist".
+        assert not isinstance(captured.value, MaterialNotFound)
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_the_user_may_keep_rewriting_their_own_description(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    """The protection is against AI passes, not against the person.
+
+    A predicate applied to every update would refuse this second edit, which is
+    the obvious way to over-fix the race above.
+    """
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyMaterialRepository(database)
+    try:
+        await reset_data(database)
+        material_id = MaterialId.new()
+        material = make_material(material_id)
+        await repository.save(material)
+
+        await repository.update_description(material.with_user_description("第一次写的"))
+        stored = await repository.get(material_id)
+        await repository.update_description(stored.with_user_description("改了一遍"))
+
+        assert (await repository.get(material_id)).ai_description == "改了一遍"
+
+        # And a row that is not there is still "not found" rather than
+        # "protected", on both branches of the predicate.
+        with pytest.raises(MaterialNotFound):
+            await repository.update_description(
+                make_material(MaterialId.new()).with_user_description("给不存在的素材")
+            )
         with pytest.raises(MaterialNotFound):
             await repository.update_description(make_material(MaterialId.new()))
     finally:

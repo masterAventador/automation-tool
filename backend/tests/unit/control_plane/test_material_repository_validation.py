@@ -25,6 +25,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from automation_tool.control_plane.application.materials import (
     MaterialAlreadyRegistered,
     MaterialDataRejected,
+    MaterialDescriptionProtected,
     MaterialNotFound,
     MaterialPersistenceUnavailable,
 )
@@ -402,6 +403,52 @@ async def test_updating_a_description_that_matched_no_row_is_not_found() -> None
 
         object.__setattr__(database, "_sessions", StubSessions(None, rowcount=1))
         await repository.update_description(make_material())
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_a_row_the_predicate_refused_is_told_apart_from_a_row_that_is_gone() -> None:
+    """Nothing matched, and the two reasons for that need different answers.
+
+    Both arrive as `rowcount == 0`. Reporting either as `MaterialNotFound`
+    would tell a describe pass to stop retrying a material that is sitting
+    right there, and would tell the REST layer above to answer 404 where the
+    honest answer is 409 -- somebody already owns this field.
+
+    The follow-up read runs inside the same transaction as the UPDATE, so what
+    it sees is the snapshot the UPDATE just failed to match. From a separate
+    session a row deleted in between would turn "protected" into "not found".
+    """
+    database = unreachable_database()
+    try:
+        repository = repository_module.SqlAlchemyMaterialRepository(database)
+        object.__setattr__(
+            database,
+            "_sessions",
+            StubSessions(hydration_row(description_source="user"), rowcount=0),
+        )
+        with pytest.raises(MaterialDescriptionProtected):
+            await repository.update_description(make_material())
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_a_user_written_description_is_not_sent_through_the_predicate() -> None:
+    """Covers the other side of the branch that builds the statement.
+
+    The predicate exists to stop an AI pass overwriting a person; applying it
+    to the person's own edit would refuse the one update that must always be
+    allowed. Whether the WHERE clause is really absent is asserted against a
+    real database in the integration suite -- what this pins is that the branch
+    exists and that the ordinary path through it succeeds.
+    """
+    database = unreachable_database()
+    try:
+        repository = repository_module.SqlAlchemyMaterialRepository(database)
+        object.__setattr__(database, "_sessions", StubSessions(None, rowcount=1))
+        await repository.update_description(make_material().with_user_description("用户写的"))
     finally:
         await database.close()
 

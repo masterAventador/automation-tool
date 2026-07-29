@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from automation_tool.control_plane.application.materials import (
     MaterialAlreadyRegistered,
     MaterialDataRejected,
+    MaterialDescriptionProtected,
     MaterialNotFound,
     MaterialPersistenceUnavailable,
 )
@@ -221,46 +222,80 @@ class SqlAlchemyMaterialRepository:
         return None if row is None else _hydrate(row)
 
     async def update_description(self, material: Material) -> None:
-        """Rewrite the four description columns of an existing material.
+        """Rewrite the four description columns, unless a person owns them.
 
-        Whether the rewrite is allowed at all was decided before this point, by
-        `Material.with_ai_description`, which returns the material unchanged
-        when a person wrote the description. That check cannot live here: the
-        repository is handed a finished object and has no way to tell an
-        intended change from an overwrite. Persisting whatever it is given is
-        the correct division -- and it is why a structural test forbids building
-        a `Material` from parts anywhere outside hydration.
+        `Material.with_ai_description` returns the material unchanged when the
+        description came from the user -- but it decides that from the snapshot
+        in the caller's hand, and a snapshot goes stale. Load a material while
+        its description is still the model's, let the user write theirs, and the
+        object that describe pass is holding still says `AI`. Every method call
+        in that sequence is the sanctioned one; no test of behaviour and no
+        structural guard sees anything wrong; and the user's words are gone.
 
-        A row that matched nothing is `MaterialNotFound` rather than a quiet
-        return. Without that branch the caller believes the description was
-        stored, and the only trace is a row that never changed.
+        So the refusal is a predicate inside the UPDATE, for the same reason
+        `save` leans on the primary key rather than looking first: reading the
+        row and then deciding has the identical defect one level down, where two
+        describe passes both read `ai` and both proceed. Only the database sees
+        one statement at a time.
+
+        The predicate is attached for an AI-sourced write and left off for a
+        user-sourced one -- a person rewriting their own description must always
+        be allowed, and applying the guard to every update is the obvious way to
+        over-fix this.
+
+        `rowcount == 0` then has two meanings, and they are told apart by a read
+        in the same transaction: no row at all is `MaterialNotFound`, a row the
+        predicate refused is `MaterialDescriptionProtected`. Within one
+        transaction those are the only two, because the statement's only other
+        condition is the primary key. Collapsing them would tell a caller to
+        stop retrying a material that exists, and leave LE-06 answering 404
+        where 409 is correct.
 
         There is no `IntegrityError` clause, unlike `save`: none of these four
-        columns carries a constraint that an UPDATE could violate. `SQLAlchemyError`
-        would catch one anyway if that ever stopped being true.
+        columns carries a constraint that an UPDATE could violate.
+        `SQLAlchemyError` would catch one anyway if that ever stopped being true.
         """
         if not isinstance(material, Material):
             raise MaterialDataRejected
+        statement = (
+            update(materials)
+            .where(materials.c.material_id == material.material_id.uuid)
+            .values(**_description_values(material))
+        )
+        if material.description_source is DescriptionSource.AI:
+            statement = statement.where(
+                materials.c.description_source != DescriptionSource.USER.value
+            )
         try:
             async with self._database.session() as session:
                 # `AsyncSession.execute` is declared as returning `Result`, and
                 # `rowcount` lives on the `CursorResult` a DML statement really
                 # hands back. The cast records that rather than reaching through
                 # an `Any`, so a SQLAlchemy release that changes it fails here.
-                result = cast(
-                    "CursorResult[Any]",
-                    await session.execute(
-                        update(materials)
-                        .where(materials.c.material_id == material.material_id.uuid)
-                        .values(**_description_values(material))
-                    ),
+                result = cast("CursorResult[Any]", await session.execute(statement))
+                matched = result.rowcount != 0
+                stored = (
+                    None
+                    if matched
+                    else (
+                        await session.execute(
+                            select(materials).where(
+                                materials.c.material_id == material.material_id.uuid
+                            )
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
                 )
         except _CONNECTION_FAILURES:
             raise MaterialPersistenceUnavailable from None
         except Exception:
             raise MaterialPersistenceUnavailable from None
-        if result.rowcount == 0:
+        if matched:
+            return
+        if stored is None:
             raise MaterialNotFound
+        raise MaterialDescriptionProtected
 
     async def _row(self, condition: ColumnElement[bool]) -> RowMapping | None:
         """Read at most one row, with hydration deliberately left to the caller.

@@ -22,22 +22,40 @@ how a domain object gets tested at all, and LE-02's own suite would be illegal
 under a wider sweep. The rule is about production code, and the exemption below
 is about the one production caller that legitimately builds one from parts.
 
-**What this can and cannot see.** Route two is exact: naming the class is the
-only way to call its constructor, so matching the call target is sound. Route
-one is not, because `replace` takes any dataclass and AST has no types. Two
-approximations cover the realistic shapes, and both are stated here rather than
-implied:
+**What this can and cannot see.** Neither route is decided exactly, and the
+approximations are written out here rather than implied.
 
-* a module that imports `Material` may not call `replace` at all -- if you can
-  name the type you are in a position to rebuild one, and the four existing
-  `replace` call sites in `backend/src` are all in modules that do not;
+Route two -- construction -- is matched by the *name being called*, resolved
+against what the module actually bound: the class's own spelling, whatever
+`from ... import Material as X` bound, and any chain of plain `Y = X`
+assignments after it. An earlier version matched the single spelling
+`Material`, and four rewritings of the same call slipped straight past it
+(`as M`, `as _Mat`, `Rebuild = Material`, and a two-step chain). That was not a
+hypothetical: the aliased-import case was warned about in this file's own
+comments while the construction check was still missing it.
+
+Route one -- `replace` -- cannot be resolved at all, because it takes any
+dataclass and AST has no types. Two approximations cover the realistic shapes:
+
+* a module that imports `Material` under any name may not call `replace` at
+  all -- if you can name the type you are in a position to rebuild one, and the
+  four existing `replace` call sites in `backend/src` are all in modules that
+  do not;
 * a `replace` whose first argument is *named* like a material is refused
   wherever it appears, which catches the one shape that does not need the
   import: `replace(material, ...)` on a value handed back by the repository.
 
-A module that obtains a `Material`, never names the type, and passes it to
-`replace` under some other identifier is not caught. Nothing static could catch
-it; recording the gap is the honest alternative to implying it is closed.
+**Registered blind spots, on both routes.** Each has a test below that records
+it, so closing one later fails loudly and sends someone back to this list:
+
+1. **A name produced at run time.** `getattr(module, "Material")(...)`, a lookup
+   through a dict, or a factory returning the class. Nothing static resolves
+   these, and no amount of name-following changes that.
+2. **A `replace` on a `Material` under an unrelated name in a module that never
+   imports the type.** Same root cause as route one generally.
+
+Neither is closable by this technique. Recording them is the honest alternative
+to implying the boundary is airtight.
 """
 
 from __future__ import annotations
@@ -105,6 +123,45 @@ def _imports_protected_class(tree: ast.AST) -> bool:
     )
 
 
+def _local_names_for_protected_class(tree: ast.AST) -> set[str]:
+    """Every local name this module can call the protected class by.
+
+    The class's own spelling is always in the set, because that is what an
+    unaliased import binds and what an attribute access spells. On top of it:
+
+    * `from ... import Material as M` binds `M`, and matching only the original
+      spelling misses it entirely -- renaming on import is the first thing
+      anyone reaches for when a check complains about a name;
+    * `Rebuild = Material` binds another one, and `Build = Rebuild` another
+      after that, so the assignments are followed to a fixed point rather than
+      one level. Stopping at one level leaves a two-line evasion that is
+      obvious the moment the rule is read.
+
+    Only plain `name = name` assignments are followed. A rebinding hidden in a
+    dict, a list or a function return is not, and neither is one built at run
+    time -- see the module docstring's blind spots.
+    """
+    names = {PROTECTED_CLASS}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            names.update(
+                alias.asname or alias.name for alias in node.names if alias.name == PROTECTED_CLASS
+            )
+    while True:
+        discovered = {
+            target.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in names
+            for target in node.targets
+            if isinstance(target, ast.Name)
+        }
+        if discovered <= names:
+            return names
+        names |= discovered
+
+
 def _named_like_a_material(node: ast.expr) -> bool:
     if isinstance(node, ast.Name):
         return "material" in node.id.lower()
@@ -124,6 +181,21 @@ def _exempt_calls(tree: ast.AST, function_name: str | None) -> set[int]:
     return exempt
 
 
+def _constructs_protected_class(call: ast.Call, local_names: set[str]) -> bool:
+    """Whether this call builds the protected class.
+
+    A `Name` is matched against the module's local bindings, so an import alias
+    or an assignment alias counts. An `Attribute` is matched on the attribute
+    itself, because `some_module.Material(...)` spells the class's own name
+    however the module was reached.
+    """
+    if isinstance(call.func, ast.Name):
+        return call.func.id in local_names
+    if isinstance(call.func, ast.Attribute):
+        return call.func.attr == PROTECTED_CLASS
+    return False
+
+
 def construction_violations(
     source: str,
     *,
@@ -132,19 +204,21 @@ def construction_violations(
 ) -> list[str]:
     """Every place in one module that builds or rebuilds a `Material`."""
     tree = ast.parse(source)
+    local_names = _local_names_for_protected_class(tree)
     imports_material = _imports_protected_class(tree)
     exempt = _exempt_calls(tree, exempt_function)
     violations: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or id(node) in exempt:
             continue
-        name = _called_name(node)
-        if name == PROTECTED_CLASS:
+        if _constructs_protected_class(node, local_names):
             violations.append(f"{path}:{node.lineno}: constructs {PROTECTED_CLASS} directly")
-        elif name == REBUILD_FUNCTION and (
+        elif _called_name(node) == REBUILD_FUNCTION and (
             imports_material or (node.args and _named_like_a_material(node.args[0]))
         ):
-            violations.append(f"{path}:{node.lineno}: rebuilds a {PROTECTED_CLASS} with {name}()")
+            violations.append(
+                f"{path}:{node.lineno}: rebuilds a {PROTECTED_CLASS} with {REBUILD_FUNCTION}()"
+            )
     return violations
 
 
@@ -204,6 +278,46 @@ async def describe(repository, material_id, text):
     stored_material = await repository.get(material_id)
     return dataclasses.replace(stored_material, ai_description=text)
 """,
+    # The four forms below rebind the class to another name. Matching the
+    # spelling `Material` alone misses every one of them, and an import alias is
+    # the first thing anyone reaches for when a check complains about a name.
+    "aliased-import": """
+from automation_tool.control_plane.domain import Material as M
+
+def describe(existing, text):
+    return M(material_id=existing.material_id, ai_description=text)
+""",
+    "aliased-import-private-name": """
+from automation_tool.control_plane.domain import Material as _Mat
+
+def describe(existing, text):
+    return _Mat(material_id=existing.material_id, ai_description=text)
+""",
+    "assignment-alias": """
+from automation_tool.control_plane.domain import Material
+
+Rebuild = Material
+
+def describe(existing, text):
+    return Rebuild(material_id=existing.material_id, ai_description=text)
+""",
+    "chained-assignment-alias": """
+from automation_tool.control_plane.domain import Material as M
+
+Rebuild = M
+Build = Rebuild
+
+def describe(existing, text):
+    return Build(material_id=existing.material_id, ai_description=text)
+""",
+    "replace-in-a-module-that-only-imports-an-alias": """
+from dataclasses import replace
+
+from automation_tool.control_plane.domain import Material as M
+
+def describe(existing: M, text: str) -> M:
+    return replace(existing, ai_description=text)
+""",
 }
 
 
@@ -244,6 +358,44 @@ def describe(existing, text, tags, at):
 
 @pytest.mark.parametrize("source", list(CLEAN_SOURCES.values()), ids=list(CLEAN_SOURCES))
 def test_the_checker_leaves_legitimate_code_alone(source: str) -> None:
+    assert construction_violations(source, path="synthetic.py") == []
+
+
+# Both of these go around the rule and both are reported clean. They are listed
+# so the boundary is a recorded fact rather than an unexamined assumption -- and
+# so that anyone who later finds a way to close one is told to come back here
+# and update the docstring, by this test turning red.
+BLIND_SPOTS = {
+    "constructor-named-at-run-time": """
+from automation_tool.control_plane.domain import material as material_module
+
+def describe(existing, text):
+    build = getattr(material_module, "Material")
+    return build(material_id=existing.material_id, ai_description=text)
+""",
+    "replace-on-an-unrelated-name-without-the-import": """
+from dataclasses import replace
+
+async def describe(repository, identifier, text):
+    subject = await repository.get(identifier)
+    return replace(subject, ai_description=text)
+""",
+}
+
+
+@pytest.mark.parametrize("source", list(BLIND_SPOTS.values()), ids=list(BLIND_SPOTS))
+def test_a_name_this_technique_cannot_resolve_is_a_recorded_blind_spot(source: str) -> None:
+    """These are not caught, and asserting so is the point.
+
+    A guard whose limits are undocumented gets read as airtight, and the next
+    person to route around it does so believing the check would have stopped
+    them. Static analysis cannot resolve a class fetched by `getattr` or a
+    dataclass reached under a name that says nothing about its type; what it can
+    do is say which of the two it is looking at.
+
+    If this test ever fails, the checker got stronger -- delete the case and
+    strike the matching entry from the module docstring's blind-spot list.
+    """
     assert construction_violations(source, path="synthetic.py") == []
 
 
