@@ -57,8 +57,23 @@ async function waitForRenderedText(...expected: string[]): Promise<void> {
   }
 }
 
+/**
+ * 等某一条任务出现在运行记录里，按它的标识而不是按它的显示名。
+ *
+ * 列表的行名改版后是创建时刻，不再印 UUID——那是有意的可读性改动；标识仍在，
+ * 作为惰性的 `data-task-id`。任务详情页仍然印完整 UUID，所以下面那句按文本等
+ * 的断言不动。
+ */
+async function waitForTaskRow(taskId: string): Promise<void> {
+  await browser.waitUntil(
+    async () => browser.$(`button[data-task-id="${taskId}"]`).isExisting(),
+    { timeout: 90_000, timeoutMsg: `运行记录里没有出现任务 ${taskId}` },
+  );
+}
+
 async function openTask(taskId: string): Promise<void> {
-  await browser.$(`button=${taskId}`).click();
+  await waitForTaskRow(taskId);
+  await browser.$(`button[data-task-id="${taskId}"]`).click();
   await waitForRenderedText("任务运行详情", taskId, "任务开始", "步骤开始");
 }
 
@@ -82,14 +97,16 @@ describe("Task run production-path acceptance", () => {
     assert.match(preparation.controlledTaskId, UUID_V4);
     assert.match(preparation.emergencyTaskId, UUID_V4);
 
+    // 改版之后开机落在 AI 助理页，`Workbench` 只在运行记录页渲染。
+    await openAutomationRuns();
+
     const retry = await browser.$("button=重新加载工作台");
     await browser.waitUntil(
       async () => {
-        const bodyText = await browser.$("body").getText();
         return (
           (await retry.isExisting()) ||
-          (bodyText.includes(preparation.controlledTaskId) &&
-            bodyText.includes(preparation.emergencyTaskId))
+          ((await browser.$(`button[data-task-id="${preparation.controlledTaskId}"]`).isExisting())
+            && (await browser.$(`button[data-task-id="${preparation.emergencyTaskId}"]`).isExisting()))
         );
       },
       { timeout: 90_000, timeoutMsg: "workbench did not expose Task run fixtures" },
@@ -133,12 +150,9 @@ describe("Task run production-path acceptance", () => {
       return;
     }
 
-    await waitForRenderedText(
-      preparation.controlledTaskId,
-      preparation.emergencyTaskId,
-      "本机执行器在线",
-      "运行中",
-    );
+    await waitForTaskRow(preparation.controlledTaskId);
+    await waitForTaskRow(preparation.emergencyTaskId);
+    await waitForRenderedText("本机执行器在线", "运行中");
 
     await openTask(preparation.controlledTaskId);
     await waitForRenderedText(
@@ -166,7 +180,6 @@ describe("Task run production-path acceptance", () => {
 
     await browser.$("button=返回工作台").click();
     await openAutomationRuns();
-    await waitForRenderedText(preparation.emergencyTaskId);
     await openTask(preparation.emergencyTaskId);
     await browser.$("button=紧急停止").click();
     await browser.$("button=确认紧停").click();
