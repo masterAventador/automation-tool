@@ -16,10 +16,11 @@ import re
 import stat
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Final, Never
+from typing import IO, Final, Never
 
 from automation_tool.protocol.safe_text import contains_control_or_bidi
 
@@ -31,6 +32,18 @@ PROBE_TIMEOUT_SECONDS: float = 30.0
 # reading the header.
 MEASURE_TIMEOUT_SECONDS: float = 15 * 60.0
 MAX_MEASURE_OUTPUT_BYTES: Final = 1024 * 1024
+# How often the report is measured while ffmpeg is still writing it. Reading
+# the size after the process exits says what it wrote; it does not bound what it
+# writes, and the timeout above is the only other thing that would have stopped
+# it — a quarter of an hour. Measured on a 120-second 720p file with a scrambled
+# payload: 2.12 MB of decoder diagnostics in 0.55 s, still climbing.
+#
+# What this buys is a bound of one interval's writing rather than the timeout's.
+# It is deliberately not an exact bound: the measured burst rate is around
+# 12 MB/s, so an interval's overshoot can reach roughly a megabyte. The exact
+# limit still governs what is *read* — an oversized report is rejected unread,
+# which is the part that protects memory. This protects the disk.
+MEASURE_POLL_SECONDS: Final = 0.1
 
 # Anything quieter than this for at least this long counts as silence. Measured
 # against the packaged build: a tone attenuated by 80 dB is reported silent
@@ -42,9 +55,22 @@ SILENCE_MINIMUM_SECONDS: Final = 0.3
 LOUDNESS_FLOOR_LUFS: Final = -70.0
 LOUDNESS_CEILING_LUFS: Final = 0.0
 
-_SILENCE_DURATION_PATTERN = re.compile(r"silence_duration: ([0-9]+(?:\.[0-9]+)?)")
-_SILENCE_START_PATTERN = re.compile(r"silence_start: (-?[0-9]+(?:\.[0-9]+)?)")
-_SILENCE_END_PATTERN = re.compile(r"silence_end: (-?[0-9]+(?:\.[0-9]+)?)")
+# ffmpeg's report is not only the filter's output. The `Input #0, ... from
+# '<path>':` header and the whole metadata dump go into the same stream, and
+# both are chosen by whoever produced the file. Unanchored patterns charged a
+# `silence_duration:` written into a file name or a comment tag as silence the
+# filter never reported, which is enough to reject an audible file. Every
+# pattern below is therefore tied to the line prefix only the filter itself can
+# emit: measured, a tag value holding a newline is continued as
+# `<spaces>: [Parsed_silencedetect_0 @ 0x1] ...`, and that leading `: ` is what
+# `^\[Parsed_` refuses. A path holding a newline never gets this far —
+# `contains_control_or_bidi` rejects it first.
+_SILENCE_LINE_PREFIX = r"^\[Parsed_silencedetect_\d+ @ [^\]]*\] "
+_SILENCE_DURATION_PATTERN = re.compile(
+    _SILENCE_LINE_PREFIX + r".*silence_duration: ([0-9]+(?:\.[0-9]+)?)", re.MULTILINE
+)
+# Already anchored. A tag named `I` cannot reach this shape: the metadata dump
+# pads the key out to a fixed width, so the colon never lands against the `I`.
 _INTEGRATED_LOUDNESS_PATTERN = re.compile(
     r"^\s*I:\s*(-?(?:[0-9]+(?:\.[0-9]+)?|inf|nan))\s+LUFS", re.MULTILINE
 )
@@ -56,7 +82,9 @@ _INTEGRATED_LOUDNESS_PATTERN = re.compile(
 MAX_MATERIAL_DURATION_MS: Final = 4 * 60 * 60 * 1000
 MAX_MATERIAL_DIMENSION: Final = 8192
 
-_PROBE_ENTRIES: Final = "format=duration,format_name:stream=codec_type,codec_name,width,height"
+_PROBE_ENTRIES: Final = (
+    "format=duration,format_name:stream=codec_type,codec_name,width,height,duration"
+)
 
 # Container names ffprobe reports for a single still picture, measured with the
 # packaged build: PNG and BMP demux as `*_pipe`, a JPEG as `image2`.
@@ -117,7 +145,17 @@ class MaterialProbeRejected(RuntimeError):
 
 
 def _reject(rejection: MaterialProbeRejection) -> Never:
-    raise MaterialProbeRejected(rejection)
+    """Raise the rejection with nothing chained behind it.
+
+    Several call sites sit inside `except (OSError, subprocess.SubprocessError)`,
+    and the exception being handled there names the file: `TimeoutExpired.cmd`
+    is the whole argv, `OSError.filename` is the path itself. Python links that
+    exception onto `__context__` automatically, and every default renderer —
+    `logging.exception`, `traceback.print_exc`, an uncaught exception — prints
+    it. Keeping the report text out of every frame's locals therefore closes
+    only half the door; `from None` closes the other half.
+    """
+    raise MaterialProbeRejected(rejection) from None
 
 
 def _has_symlink_component(path: Path) -> bool:
@@ -223,7 +261,13 @@ class PackagedMediaTools:
 
 @dataclass(frozen=True, slots=True)
 class MediaStreamFacts:
-    """What ffprobe knows about one file. Deliberately carries no path."""
+    """What ffprobe knows about one file. Deliberately carries no path.
+
+    `duration_ms` is the container's and `audio_duration_ms` the sound track's;
+    they are different facts and a clip whose sound stops before its picture
+    does has both. `audio_duration_ms` is optional because Matroska and FLV
+    state no per-stream duration at all — measured, not assumed.
+    """
 
     kind: ProbedMaterialKind
     duration_ms: int | None
@@ -231,6 +275,7 @@ class MediaStreamFacts:
     height: int | None
     video_codec: str | None
     audio_codec: str | None
+    audio_duration_ms: int | None
 
 
 def _run_probe(ffprobe: Path, source: Path) -> dict[str, object]:
@@ -240,6 +285,12 @@ def _run_probe(ffprobe: Path, source: Path) -> dict[str, object]:
     the selection additive and drags in `tags`, which is attacker-controlled
     metadata carried inside the file.
     """
+    # Rejected after the handler has been left rather than inside it. `_reject`
+    # already suppresses the chain, but suppression only stops the renderers:
+    # the handled exception stays reachable through `__context__`, and
+    # `TimeoutExpired.cmd` is the argv with the source path in it. Leaving the
+    # handler first drops the reference outright.
+    completed: subprocess.CompletedProcess[bytes] | None
     try:
         completed = subprocess.run(
             [
@@ -270,6 +321,8 @@ def _run_probe(ffprobe: Path, source: Path) -> dict[str, object]:
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
+        completed = None
+    if completed is None:
         _reject(MaterialProbeRejection.PROBE_FAILED)
     if completed.returncode < 0:
         # POSIX reports a signalled child as a negative code. Telling the user
@@ -334,6 +387,32 @@ def _duration_ms(text: object) -> int:
     return milliseconds
 
 
+def _optional_duration_ms(text: object) -> int | None:
+    """One stream's own duration, when ffprobe states a usable one.
+
+    Absence is ordinary rather than malformed: measured against the packaged
+    build, Matroska and FLV state a container duration and no stream duration at
+    all, while MP4, MOV, WAV, FLAC and MPEG-TS state both. Anything unusable is
+    treated as absence for the same reason — the container's duration stays as
+    the bound, which is where this started, rather than rejecting a file over a
+    field that is allowed to be missing.
+
+    The `isfinite` guard is load-bearing here, unlike the one in
+    `_storable_loudness`: `round()` raises on both infinity and NaN, and there
+    is no later range test to reach.
+    """
+    if not isinstance(text, str):
+        return None
+    try:
+        seconds = float(text)
+    except ValueError:
+        return None
+    if not math.isfinite(seconds):
+        return None
+    milliseconds = round(seconds * 1000)
+    return milliseconds if milliseconds >= 1 else None
+
+
 def _frame_edge(stream: dict[str, object], key: str) -> int:
     value = stream.get(key)
     # `type(...) is not int` rather than `isinstance`: `bool` is an `int`
@@ -380,8 +459,45 @@ class AudioFacts:
     loudness_lufs: float | None
 
 
-def _measure(ffmpeg: Path, source: Path, duration_seconds: float) -> _Measurement:
-    """Run the silence and loudness pass, returning ffmpeg's report as text.
+def _run_measure(argv: list[str], sink: IO[bytes], report: Path) -> int:
+    """Run one measuring pass, stopping it if its report outgrows the limit.
+
+    Reading the size once the process has exited says what it wrote; it does
+    not bound what it writes. Between the two moments sits
+    `MEASURE_TIMEOUT_SECONDS`, and a file whose payload decodes badly fills that
+    time with diagnostics. So the report is measured while it grows and the
+    child is killed the moment it is too big — killed rather than left, because
+    leaving it would mean waiting out the very process being abandoned.
+
+    Nothing captured, so neither a `CompletedProcess` nor a `TimeoutExpired`
+    ever holds ffmpeg's text; the argv one would carry is dropped by leaving the
+    handler before rejecting, as in `_run_probe`.
+    """
+    with subprocess.Popen(
+        argv,
+        # The executor's own stdin carries Tauri's bootstrap handshake and
+        # command stream; a child inheriting it could consume bytes out of that
+        # protocol channel.
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=sink,
+    ) as process:
+        deadline = time.monotonic() + MEASURE_TIMEOUT_SECONDS
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                try:
+                    return process.wait(timeout=min(MEASURE_POLL_SECONDS, remaining))
+                except subprocess.TimeoutExpired:
+                    outgrown = report.stat().st_size > MAX_MEASURE_OUTPUT_BYTES
+                if not outgrown:
+                    continue
+            process.kill()
+            _reject(MaterialProbeRejection.PROBE_FAILED)
+
+
+def _measure(ffmpeg: Path, source: Path) -> _Measurement:
+    """Run the silence and loudness pass, reduced to the numbers taken from it.
 
     The report arrives on stderr mixed in with diagnostics that name the file,
     so it is written to a file rather than captured: nothing that could carry
@@ -390,13 +506,16 @@ def _measure(ffmpeg: Path, source: Path, duration_seconds: float) -> _Measuremen
 
     Every rejection here happens before a single byte is read, and the text is
     handed straight to the parser without being bound to a local, so nothing on
-    a raising path can hold it.
+    a raising path can hold it. Every call that touches the filesystem is inside
+    the `try`, the workspace's own cleanup included: an `OSError` escaping as
+    itself would both miss every caller catching `MaterialProbeRejected` and
+    carry the path in its message.
     """
-    with tempfile.TemporaryDirectory(prefix="automation-tool-measure-") as workspace:
-        report = Path(workspace) / "report.log"
-        try:
+    try:
+        with tempfile.TemporaryDirectory(prefix="automation-tool-measure-") as workspace:
+            report = Path(workspace) / "report.log"
             with report.open("wb") as sink:
-                completed = subprocess.run(
+                returncode = _run_measure(
                     [
                         os.fspath(ffmpeg),
                         "-nostdin",
@@ -409,6 +528,12 @@ def _measure(ffmpeg: Path, source: Path, duration_seconds: float) -> _Measuremen
                         # only ever yields an absolute path.
                         "-i",
                         os.fspath(source),
+                        # Nothing here looks at the picture, yet `-f null`
+                        # selects the video stream too and decodes every frame
+                        # into the sink. Measured on a 120-second 1280x720
+                        # clip: 4.10 s of CPU without this against 0.17 s with
+                        # it. An output option, so it goes after the input.
+                        "-vn",
                         # `framelog=quiet` keeps ebur128 from printing a line
                         # every 100 ms: measured 65 stderr lines against 45 on a
                         # 2-second file, a gap that grows with duration until a
@@ -419,46 +544,45 @@ def _measure(ffmpeg: Path, source: Path, duration_seconds: float) -> _Measuremen
                         "null",
                         "-",
                     ],
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=sink,
-                    timeout=MEASURE_TIMEOUT_SECONDS,
-                    check=False,
+                    sink,
+                    report,
                 )
-        except (OSError, subprocess.SubprocessError):
-            _reject(MaterialProbeRejection.PROBE_FAILED)
-        if completed.returncode < 0:
-            _reject(MaterialProbeRejection.PROBE_CRASHED)
-        if completed.returncode != 0:
-            _reject(MaterialProbeRejection.PROBE_FAILED)
-        if report.stat().st_size > MAX_MEASURE_OUTPUT_BYTES:
-            _reject(MaterialProbeRejection.PROBE_FAILED)
-        return _parse_measurement(
-            report.read_text(encoding="utf-8", errors="replace"), duration_seconds
-        )
+            if returncode < 0:
+                _reject(MaterialProbeRejection.PROBE_CRASHED)
+            if returncode != 0:
+                _reject(MaterialProbeRejection.PROBE_FAILED)
+            if report.stat().st_size > MAX_MEASURE_OUTPUT_BYTES:
+                _reject(MaterialProbeRejection.PROBE_FAILED)
+            return _parse_measurement(report.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, subprocess.SubprocessError):
+        # `_reject` raises a `RuntimeError` subclass, so every rejection above
+        # passes through here untouched and keeps its own reason.
+        _reject(MaterialProbeRejection.PROBE_FAILED)
 
 
-def _parse_measurement(report: str, duration_seconds: float) -> _Measurement:
+def _parse_measurement(report: str) -> _Measurement:
     """Reduce the report to numbers. Never raises, so it is never on a raising path."""
     match = _INTEGRATED_LOUDNESS_PATTERN.search(report)
     return _Measurement(
         stated_loudness=match is not None,
         loudness_lufs=None if match is None else _storable_loudness(match.group(1)),
-        silent_seconds=_silent_seconds(report, duration_seconds),
+        silent_seconds=_silent_seconds(report),
     )
 
 
-def _silent_seconds(report: str, duration_seconds: float) -> float:
+def _silent_seconds(report: str) -> float:
     """Total silence the report accounts for.
 
-    A silence that never ends — the file stops while still quiet — is charged
-    to the remaining duration rather than dropped.
+    Every span silencedetect reports is closed, so summing the reported
+    durations is the whole answer. An earlier version also charged an
+    unterminated `silence_start` to the rest of the file — measured against the
+    packaged build, that state does not occur: a wholly silent file, a file that
+    fades to silence, one truncated mid-silence and a sound track ending before
+    its picture all flush a closed `silence_end` at EOF. The assumption is
+    pinned by a test that measures a real silent file rather than left as a
+    branch nothing can enter.
     """
-    total = sum(float(value) for value in _SILENCE_DURATION_PATTERN.findall(report))
-    starts = _SILENCE_START_PATTERN.findall(report)
-    if len(starts) > len(_SILENCE_END_PATTERN.findall(report)):
-        total += max(0.0, duration_seconds - float(starts[-1]))
-    return total
+    return sum(float(value) for value in _SILENCE_DURATION_PATTERN.findall(report))
 
 
 def _storable_loudness(text: str) -> float | None:
@@ -479,6 +603,37 @@ def _storable_loudness(text: str) -> float | None:
     return value
 
 
+def _sound_track_seconds(streams: MediaStreamFacts) -> float:
+    """How much sound the reported silence has to cover for there to be none.
+
+    `silencedetect` measures on the sound track's own timeline, so this is the
+    sound track's extent — not the container's, which is usually the picture's.
+    Comparing against the container reported a wholly silent clip as having
+    sound whenever its sound stopped early, which is an ordinary shape rather
+    than a corner case.
+
+    Where ffprobe states both, the shorter is the sound track's: measured,
+    MPEG-TS states 1.904 s of sound inside a 2.023 s container. Where it states
+    only the container's — Matroska and FLV, measured — that is the only bound
+    available and it is used as before.
+
+    `read_stream_facts` cannot produce facts this rejects, but it is not the
+    only way in: `read_audio_facts` is exported, so a caller can arrive with a
+    `MediaStreamFacts` it built itself. Without this, an absent duration became
+    a window of zero, every file was reported as having no audible sound, and a
+    pure-audio file was rejected outright — after paying for a full decode.
+    """
+    stated = [
+        value for value in (streams.duration_ms, streams.audio_duration_ms) if value is not None
+    ]
+    if not stated:
+        _reject(MaterialProbeRejection.UNUSABLE_DURATION)
+    shortest = min(stated)
+    if shortest < 1:
+        _reject(MaterialProbeRejection.UNUSABLE_DURATION)
+    return shortest / 1000
+
+
 def read_audio_facts(
     tools: PackagedMediaTools, source: Path, streams: MediaStreamFacts
 ) -> AudioFacts:
@@ -494,14 +649,16 @@ def read_audio_facts(
         return AudioFacts(has_audio=False, loudness_lufs=None)
     tools.revalidate()
     path = _require_source_file(source)
-    duration_seconds = 0.0 if streams.duration_ms is None else streams.duration_ms / 1000
-    measurement = _measure(tools.ffmpeg_path, path, duration_seconds)
+    # Before the decode, not after it: facts that cannot answer the question
+    # cannot be made to answer it by measuring harder.
+    sound_track_seconds = _sound_track_seconds(streams)
+    measurement = _measure(tools.ffmpeg_path, path)
     if not measurement.stated_loudness:
         _reject(MaterialProbeRejection.PROBE_FAILED)
     # Measured: a digitally silent 2-second AAC file reports 2.020136 seconds of
     # silence — longer than the stream, because of encoder padding. Comparing
     # with `>=` is what tolerates that.
-    if measurement.silent_seconds >= duration_seconds:
+    if measurement.silent_seconds >= sound_track_seconds:
         if streams.kind is ProbedMaterialKind.AUDIO:
             # `Material` forbids `kind=AUDIO` with `has_audio=False`, so this
             # can never be stored. Rejecting here keeps the failure inside the
@@ -552,6 +709,7 @@ def read_stream_facts(tools: PackagedMediaTools, source: Path) -> MediaStreamFac
         height=None if video is None else _frame_edge(video, "height"),
         video_codec=None if video is None else _codec_name(video),
         audio_codec=None if audio is None else _codec_name(audio),
+        audio_duration_ms=None if audio is None else _optional_duration_ms(audio.get("duration")),
     )
 
 

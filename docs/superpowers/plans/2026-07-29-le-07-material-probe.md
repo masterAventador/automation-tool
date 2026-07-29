@@ -94,9 +94,13 @@ ffprobe -v error -print_format json \
 **音频测量命令**：
 
 ```
-ffmpeg -nostdin -v info -i <path> \
+ffmpeg -nostdin -v info -i <path> -vn \
   -af "silencedetect=noise=-50dB:d=0.3,ebur128=peak=none:framelog=quiet" -f null -
 ```
+
+> `-vn` 是 T3 审查加的。不加时 `-f null` 会连视频轨一起选中并把每一帧解进 `wrapped_avframe`：
+> 实测 120 秒 1280×720，**4.10 s CPU vs 0.17 s**，约 96% 花在解码没人看的画面上。
+> 它是**输出选项**，必须放在 `-i` 之后。
 
 实测：
 
@@ -155,6 +159,15 @@ docs/local-video-editing-roadmap.md                           # 台账行（依�
 失败矩阵有 8 类场景。若它们共用一句固定文案，用户在 LE-18 的素材库界面只会看到「素材探测失败」，唯一能做的就是挨个试。**拒绝理由必须是结构化的类型**，判据是「用户看到它之后知道下一步该干什么」。
 
 仿 `domain/video_creation.py:90` 的 `RenderFailureCode` 写法（`StrEnum` + snake_case 取值）。执行器不 import `control_plane`，故照形状自定义：
+
+> **⚠️ 以下枚举是初稿，成员名与口径已被 T2/T3 的实测推翻，勿照此实现，也勿照此写用户文案。**
+> 已知偏差：`UNSUPPORTED_FORMAT` 与 `CORRUPT` 实测**逐字无法区分**（三种坏文件都是
+> `exit=1` + `stdout={}`），已合并为 `UNDECODABLE`；`EMPTY_DURATION` 改名
+> `UNUSABLE_DURATION` 并同时承载「非数字/负数/不是文本」；`TOO_LARGE` 拆成
+> `UNUSABLE_FRAME_SIZE` 与 `FRAME_TOO_LARGE`；新增 `PROBE_CRASHED`（被信号杀死，
+> 与「你的文件坏了」不是一回事）。`PROBE_FAILED` 的口径也比这里的注释宽——见
+> `docs/development/LE-07.md`「口径扩大」一节。**以落地的 `material_probe.py` 为准，
+> T7 收口时统一校正本节。**
 
 ```python
 class MaterialProbeRejection(StrEnum):
@@ -267,16 +280,34 @@ def probe_material(tools: PackagedMediaTools, path: Path) -> MaterialFacts: ...
 - 无音频流 → `has_audio=False`, `loudness=None`，且**不启动 ffmpeg**（断言未调用，省一次整文件解码）
 - 有音频流且有声 → `has_audio=True`，响度落在 [-70.0, 0.0]
 - 有音频流但全程静音（`silence_duration` ≈ 时长）→ `has_audio=False`, `loudness=None`
-- `I: -70.0 LUFS` 地板 → 判为静音
+- ~~`I: -70.0 LUFS` 地板 → 判为静音~~
 - 部分静音（前半静音后半有声）→ `has_audio=True`
 - ffmpeg returncode != 0 → 拒绝
 - ffmpeg 超时 → 拒绝
 - stderr 无 `I:` 行 → 拒绝（不默认成 0.0）
-- 解析到的响度 > 0.0 或 < -70.0 → 拒绝
+- ~~解析到的响度 > 0.0 或 < -70.0 → 拒绝~~
 - **kind=AUDIO 且判定无有效音频 → 拒绝**（§1.4 的不可表示状态）
 - 异常消息不含路径、不含 ffmpeg stderr
 
-**GREEN**：命令固定为 §1.3 那条（含 `framelog=quiet`）；stderr 按行读且总量设上限。
+> **⚠️ 上面划掉的两条在 T3 被实测推翻，勿照此实现。**
+>
+> **「地板 → 判为静音」是错的**：`-70.0` 是 ebur128「没东西可测」时打印的值，不是「很安静」。
+> 实测一条 **0.1 秒的正弦波清晰可闻，照样报 `-70.0`**——它只是短于 ebur128 的积分窗。
+> 按原判据它会被判成静音，而它有声。落地实现把地板一律记成「测不出」（`loudness=None`），
+> 有没有声音另由静音覆盖判定。
+>
+> **「出界 → 拒绝」也是错的**：拒绝会让一条能用的素材整个进不来，而正确处理是**不报响度**。
+> 落地实现对 `> 0.0`、`< -70.0`、`inf`/`-inf`/`nan` 一律产出 `loudness=None` 且
+> `has_audio` 不受影响。注意区间因此是 `(-70.0, 0.0]` 而非 `[-70.0, 0.0]`——比
+> `material.py:142` 更窄，**探测永远不会产出 -70.0**。
+>
+> **静音判定的比较基准也已改**（T3 审查 C2）：`silencedetect` 量的是**音轨**时间轴，
+> 而 `format.duration` 是**容器**（通常由视频轨决定）时长。实测一条 10 秒画面配 2 秒
+> 数字静音音轨的 mp4，按容器比会判成「有声」。落地实现改用 ffprobe `stream=duration`，
+> 取音轨与容器**两者中较短的那个**；Matroska/FLV 不报流时长时退回容器时长。
+
+**GREEN**：命令固定为 §1.3 那条（含 `framelog=quiet`、`-vn`）；stderr 写入临时文件，
+**边写边查尺寸**并在超限时杀掉子进程——只在进程退出后查尺寸不构成上限。
 
 **门禁**：同上。
 
@@ -347,9 +378,20 @@ def probe_material(tools: PackagedMediaTools, path: Path) -> MaterialFacts: ...
    注意跨层常量一致性测试**拦不住形状组合问题**：两份限值一模一样，也挡不住「视频被判成图片」
    这类 kind / 时长 / 画幅的组合错误（T2 的 Critical 正是此类）。故本 Task 必须逐条素材实际构造
    `Material`，而不只是比对上限数值。
-3. **每一条 ffmpeg / ffprobe 命令行，都必须至少有一个用例用随包真实二进制跑通。**
-   存根用例负责覆盖分支与失败矩阵，真实二进制用例负责证明**这条命令行本身合法**，两者不可
-   互相替代。收口前逐条清点模块里拼出的每一条命令行，确认都有真实二进制用例覆盖。
+3. **每一条 ffmpeg / ffprobe 命令行，都必须至少有一个用例用随包真实二进制跑通；
+   并且每一个从工具输出里解析出来的字段，都必须有一条真实二进制用例实际产生过该字段。**
+   存根用例负责覆盖分支与失败矩阵，真实二进制用例负责证明**这条命令行本身合法**
+   **以及解析器面对的那个输出形状是真的**，三者不可互相替代。收口前逐条清点模块里拼出的
+   每一条命令行**和每一条正则**，确认都有真实二进制用例覆盖。
+
+   后半句是 T3 审查补的，依据是同一个失败模式又下沉了一层：命令行合法性证明之后，
+   **静音解析仍然是纯存根**——唯一的真实二进制用例跑的是连续正弦波，而**连续音调根本不产生
+   任何 `silence_*` 行**，于是三条静音正则从头到尾只对着手写日志验过。代价是一条 Critical：
+   正则没有锚点，`findall` 扫的是**整份 report**，而 report 里还有 ffmpeg 打印的输入路径与
+   完整 metadata dump——**文件名或 comment 标签里写一句 `silence_duration: 9999`，就能把一条
+   有声素材判成无声并硬拒**。真实静音文件的输出是
+   `[Parsed_silencedetect_0 @ 0xb17004a80] silence_start: 0`，那个方括号前缀正是正则本该锚定的
+   东西，而一条真实静音用例本来就会撞见它。
 
    依据是 T3 的实测：`read_audio_facts` 写完时 **110 条单元测试全绿、覆盖率 100%，而六个真实
    文件全部失败**——拼出的 ffmpeg 命令行根本不合法（输入必须在输出选项之前；且 **ffmpeg 不支持
