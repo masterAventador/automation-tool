@@ -243,11 +243,24 @@ class SqlAlchemyMaterialRepository:
         be allowed, and applying the guard to every update is the obvious way to
         over-fix this.
 
-        `rowcount == 0` then has two meanings, and they are told apart by a read
-        in the same transaction: no row at all is `MaterialNotFound`, a row the
-        predicate refused is `MaterialDescriptionProtected`. Within one
-        transaction those are the only two, because the statement's only other
-        condition is the primary key. Collapsing them would tell a caller to
+        `rowcount == 0` then has two meanings, and the follow-up read is a
+        best-effort attempt to say which. It is **not** the second half of the
+        guard: the protection decision was made in full by the UPDATE, in one
+        statement, before this read runs at all.
+
+        Sharing a transaction with the UPDATE does not make the two answers
+        exhaustive, and an earlier version of this comment claimed it did.
+        Measured against this database: `transaction_isolation` is
+        `read committed`, so every statement takes a *fresh* snapshot. Another
+        connection that deletes the row and commits between the two statements
+        makes it invisible to the read -- same transaction or not. The shared
+        transaction saves a trip through the pool; that is all it buys.
+
+        Both answers are safe inside that window: a row that really was deleted
+        is `MaterialNotFound`, and a row still present and owned by the user is
+        `MaterialDescriptionProtected`. Only the label on a concurrently deleted
+        row can come out wrong, and both labels tell the caller the same thing --
+        stop. Collapsing the two would not be safe: it would tell a caller to
         stop retrying a material that exists, and leave LE-06 answering 404
         where 409 is correct.
 

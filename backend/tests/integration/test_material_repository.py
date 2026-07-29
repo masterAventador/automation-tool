@@ -552,6 +552,15 @@ async def test_a_stale_snapshot_cannot_walk_an_ai_description_over_the_users(
         # Refusing is not the same as "the material is gone": LE-06 answers 409
         # for one and 404 for the other, and LE-13 has to tell "someone took
         # this over" from "stop retrying, it does not exist".
+        #
+        # This line is not redundant with the `raises` above, and what it guards
+        # is narrower than it looks: it catches `MaterialDescriptionProtected`
+        # being made a *subclass* of `MaterialNotFound`. That version still
+        # satisfies `pytest.raises(MaterialDescriptionProtected)`, so the whole
+        # suite stays green -- while every caller's `except MaterialNotFound`
+        # silently swallows the protected case and the two become
+        # indistinguishable again. Being siblings is not the reason; being
+        # non-derived is.
         assert not isinstance(captured.value, MaterialNotFound)
     finally:
         await reset_data(database)

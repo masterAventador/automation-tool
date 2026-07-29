@@ -416,9 +416,15 @@ async def test_a_row_the_predicate_refused_is_told_apart_from_a_row_that_is_gone
     right there, and would tell the REST layer above to answer 404 where the
     honest answer is 409 -- somebody already owns this field.
 
-    The follow-up read runs inside the same transaction as the UPDATE, so what
-    it sees is the snapshot the UPDATE just failed to match. From a separate
-    session a row deleted in between would turn "protected" into "not found".
+    The follow-up read is best-effort, not the second half of the guard -- the
+    protection decision is already complete when it runs. Measured: the
+    connection is at `read committed`, so each statement takes its own snapshot,
+    and a row deleted and committed by another connection between the UPDATE and
+    the read is invisible to the read even though both sit in one transaction.
+    Sharing the transaction saves a pool checkout and nothing more.
+
+    Both answers are safe in that window; only which of the two gets reported
+    can be raced, and both tell the caller to stop.
     """
     database = unreachable_database()
     try:

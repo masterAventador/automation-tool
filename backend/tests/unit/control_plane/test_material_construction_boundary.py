@@ -27,12 +27,24 @@ approximations are written out here rather than implied.
 
 Route two -- construction -- is matched by the *name being called*, resolved
 against what the module actually bound: the class's own spelling, whatever
-`from ... import Material as X` bound, and any chain of plain `Y = X`
-assignments after it. An earlier version matched the single spelling
-`Material`, and four rewritings of the same call slipped straight past it
-(`as M`, `as _Mat`, `Rebuild = Material`, and a two-step chain). That was not a
-hypothetical: the aliased-import case was warned about in this file's own
-comments while the construction check was still missing it.
+`from ... import Material as X` bound, and any chain of `Y = X`,
+`Y: type = X` or `Y = module.Material` bindings after it. **It is not exhaustive
+either**, and every widening so far was prompted by a one-line rewrite that had
+sailed through the version before it:
+
+* matching the single spelling `Material` missed `as M`, `as _Mat`,
+  `Rebuild = Material` and a two-step chain -- and the aliased-import case was
+  warned about in this file's own comments while the check still missed it;
+* following only `ast.Assign` missed `Rebuild: type = Material`, where adding a
+  type annotation reads as complying with "plain `Y = X`" while stepping outside
+  it;
+* following only `Name` values missed `Rebuild = module.Material`, so binding
+  the attribute to a name first defeated the one route that had looked reliable.
+
+The pattern is worth naming: each fix closed the shape that had just been
+demonstrated, and the next shape was always one line away. What stops the
+regress is not another branch but the blind-spot list below -- the honest
+statement of where name-following ends.
 
 Route one -- `replace` -- cannot be resolved at all, because it takes any
 dataclass and AST has no types. Two approximations cover the realistic shapes:
@@ -51,11 +63,24 @@ it, so closing one later fails loudly and sends someone back to this list:
 1. **A name produced at run time.** `getattr(module, "Material")(...)`, a lookup
    through a dict, or a factory returning the class. Nothing static resolves
    these, and no amount of name-following changes that.
-2. **A `replace` on a `Material` under an unrelated name in a module that never
+2. **A name bound by unpacking or through a container.** `Rebuild, = (Material,)`
+   binds without either node shape the binding walk understands. Closing it
+   means matching tuple and list targets against tuple and list values position
+   by position -- the first step towards evaluating the module rather than
+   reading it, and the next container shape reopens it anyway.
+3. **A `replace` on a `Material` under an unrelated name in a module that never
    imports the type.** Same root cause as route one generally.
 
-Neither is closable by this technique. Recording them is the honest alternative
-to implying the boundary is airtight.
+None of the three is worth closing by this technique -- the first and third
+cannot be, and the second costs more than it returns. Recording them is the
+honest alternative to implying the boundary is airtight, and it is what keeps
+the next reader from assuming a check they have not read actually stops them.
+
+**What this guard is therefore for.** It makes the sanctioned path the easy one
+and turns an accidental bypass into a failing test. It is not a barrier against
+someone determined to get around it -- three of those are listed above and each
+is one line. The rule it enforces is a design rule, and design rules are kept by
+people who know why they exist; this file's job is to make sure they find out.
 """
 
 from __future__ import annotations
@@ -137,9 +162,20 @@ def _local_names_for_protected_class(tree: ast.AST) -> set[str]:
       one level. Stopping at one level leaves a two-line evasion that is
       obvious the moment the rule is read.
 
-    Only plain `name = name` assignments are followed. A rebinding hidden in a
-    dict, a list or a function return is not, and neither is one built at run
-    time -- see the module docstring's blind spots.
+    Three shapes of binding are followed, each because leaving it out left a
+    one-line way around the rule:
+
+    * `Rebuild = Material` -- the plain case;
+    * `Rebuild: type = Material` -- an annotated binding is still a binding, and
+      an earlier version followed only `ast.Assign`, so adding a type annotation
+      read as complying while stepping outside the letter of the rule;
+    * `Rebuild = material_module.Material` -- calling the attribute directly is
+      caught on the attribute name, but binding it to a plain name first was
+      not, which made "give it another name" work on the one route that was
+      supposed to be the reliable half.
+
+    Not followed: a rebinding produced by unpacking, by a container, or at run
+    time. Those are in the module docstring's blind-spot list, each with a test.
     """
     names = {PROTECTED_CLASS}
     for node in ast.walk(tree):
@@ -148,18 +184,31 @@ def _local_names_for_protected_class(tree: ast.AST) -> set[str]:
                 alias.asname or alias.name for alias in node.names if alias.name == PROTECTED_CLASS
             )
     while True:
-        discovered = {
-            target.id
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Assign)
-            and isinstance(node.value, ast.Name)
-            and node.value.id in names
-            for target in node.targets
-            if isinstance(target, ast.Name)
-        }
+        discovered: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and _binds_protected_class(node.value, names):
+                discovered.update(
+                    target.id for target in node.targets if isinstance(target, ast.Name)
+                )
+            elif (
+                isinstance(node, ast.AnnAssign)
+                and node.value is not None
+                and isinstance(node.target, ast.Name)
+                and _binds_protected_class(node.value, names)
+            ):
+                discovered.add(node.target.id)
         if discovered <= names:
             return names
         names |= discovered
+
+
+def _binds_protected_class(value: ast.expr, names: set[str]) -> bool:
+    """Whether the right-hand side of an assignment is the protected class."""
+    if isinstance(value, ast.Name):
+        return value.id in names
+    if isinstance(value, ast.Attribute):
+        return value.attr == PROTECTED_CLASS
+    return False
 
 
 def _named_like_a_material(node: ast.expr) -> bool:
@@ -318,6 +367,27 @@ from automation_tool.control_plane.domain import Material as M
 def describe(existing: M, text: str) -> M:
     return replace(existing, ai_description=text)
 """,
+    # An annotated binding is still a binding. The rule reads as "plain Y = X",
+    # and adding a type annotation is exactly the sort of thing that reads as
+    # complying while stepping outside the letter of it.
+    "annotated-assignment-alias": """
+from automation_tool.control_plane.domain import Material
+
+Rebuild: type = Material
+
+def describe(existing, text):
+    return Rebuild(material_id=existing.material_id, ai_description=text)
+""",
+    # `material_module.Material(...)` is caught on the attribute; binding that
+    # same attribute to a name first is not, unless the binding is followed.
+    "attribute-bound-to-a-name": """
+from automation_tool.control_plane.domain import material as material_module
+
+Rebuild = material_module.Material
+
+def describe(existing, text):
+    return Rebuild(material_id=existing.material_id, ai_description=text)
+""",
 }
 
 
@@ -379,6 +449,19 @@ from dataclasses import replace
 async def describe(repository, identifier, text):
     subject = await repository.get(identifier)
     return replace(subject, ai_description=text)
+""",
+    # Unpacking binds a name without either of the two node shapes that binding
+    # detection walks. Closing it means teaching the checker to evaluate tuple
+    # and list targets against tuple and list values position by position, which
+    # is the first step down the road of writing an interpreter -- and the next
+    # container shape after that reopens it. Left registered instead.
+    "alias-bound-by-unpacking": """
+from automation_tool.control_plane.domain import Material
+
+Rebuild, = (Material,)
+
+def describe(existing, text):
+    return Rebuild(material_id=existing.material_id, ai_description=text)
 """,
 }
 

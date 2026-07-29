@@ -43,6 +43,33 @@ class MaterialDescriptionProtected(_MaterialPersistenceFailure):
     the field. A caller told "not found" stops retrying and may conclude the
     material was deleted, and the REST layer above answers 404 where 409 is the
     honest reply.
+
+    **Contract for anything that writes a model-generated description** -- this
+    is written here rather than in a task note because this is the file such a
+    caller imports, and a note lives in a document nobody will have open:
+
+    1. **This is a normal terminal outcome, not an error.** It means the user
+       has taken the field over and this model result is discarded. Catch it
+       explicitly and record that; do **not** re-queue the work as a failure.
+       `description_source = USER` is terminal, so a retry can never succeed.
+    2. **Do not fold it into `MaterialNotFound`.** That one means the material
+       is gone, so stop. This one means the material is fine and this one field
+       is no longer yours to write.
+    3. **The absence of this exception does not mean the description was
+       stored.** `Material.with_ai_description` returns the material *unchanged*
+       when the snapshot already says `USER`, and persisting that unchanged
+       object succeeds -- correctly, since the user is rewriting their own
+       field. So the same underlying fact ("the user owns this") reaches the
+       caller two different ways: as this exception when the snapshot was stale,
+       and as a silent success when it was current. A caller that infers "no
+       exception, therefore my description was written" will count a discarded
+       description as a stored one. Compare what came back, or check
+       `description_source`, rather than reading success as proof of a write.
+
+    The window between loading a `Material` and writing its description spans a
+    model call, so this is a real interleaving rather than a theoretical one --
+    though on the current single-user, single-device product it takes a user
+    editing that exact material during that exact call to produce it.
     """
 
     message = "Material description is owned by the user"
