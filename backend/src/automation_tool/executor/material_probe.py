@@ -76,10 +76,19 @@ def _require_tool(path: object) -> None:
         not path.is_absolute()
         or len(encoded) > MAX_TOOL_PATH_CHARACTERS
         or contains_control_or_bidi(encoded)
-        or _has_symlink_component(path)
     ):
         _reject(MaterialProbeRejection.UNSAFE_PATH)
+    # Both calls below touch the filesystem, so both can raise. `is_symlink()`
+    # swallows only ENOENT/ENOTDIR/EBADF/ELOOP (`pathlib._IGNORED_ERRNOS`) —
+    # ENAMETOOLONG propagates, and a component over NAME_MAX is reachable well
+    # inside the length limit above. Escaping here would defeat the whole
+    # design twice over: callers catching `MaterialProbeRejected` would miss a
+    # bare `OSError`, and its message carries the full private path.
+    # `_reject` raises a `RuntimeError` subclass, so the symlink rejection
+    # passes through this `except` untouched.
     try:
+        if _has_symlink_component(path):
+            _reject(MaterialProbeRejection.UNSAFE_PATH)
         metadata = path.stat(follow_symlinks=False)
     except OSError:
         _reject(MaterialProbeRejection.UNREADABLE)

@@ -67,6 +67,22 @@ class TestPackagedMediaToolsRejectsUnsafePaths:
             )
         assert _rejection(excinfo) is MaterialProbeRejection.UNSAFE_PATH
 
+    def test_a_path_at_the_length_limit_passes_the_length_guard(self, tmp_path: Path) -> None:
+        """The endpoint itself is allowed: the limit rejects longer, not equal.
+
+        No file can exist at this length, so the proof is *which* reason comes
+        back — reaching the filesystem check means the length guard let it by.
+        Without this, moving `>` to `>=` changes no test.
+        """
+        at_limit = Path("/" + "a" * (MAX_TOOL_PATH_CHARACTERS - 1))
+        assert len(os.fspath(at_limit)) == MAX_TOOL_PATH_CHARACTERS
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            PackagedMediaTools(
+                ffprobe_path=at_limit,
+                ffmpeg_path=_executable(tmp_path, "ffmpeg"),
+            )
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+
     def test_rejects_a_path_holding_a_control_character(self, tmp_path: Path) -> None:
         with pytest.raises(MaterialProbeRejected) as excinfo:
             PackagedMediaTools(
@@ -108,6 +124,29 @@ class TestPackagedMediaToolsRejectsUnsafePaths:
 
 
 class TestPackagedMediaToolsRejectsUnusableTools:
+    def test_rejects_a_path_component_the_filesystem_cannot_name(self, tmp_path: Path) -> None:
+        """A component over `NAME_MAX` must still come back as a rejection.
+
+        `Path.is_symlink()` only swallows `ENOENT`/`ENOTDIR`/`EBADF`/`ELOOP`
+        (`pathlib._IGNORED_ERRNOS`), so `ENAMETOOLONG` propagates. Left
+        uncaught it escapes as a bare `OSError` — callers catching
+        `MaterialProbeRejected` miss it, and its message carries the full
+        private path.
+
+        The total length here stays well inside the limit, so the earlier
+        length guard cannot shadow this the way it does for a 4097-character
+        single component.
+        """
+        victim = tmp_path / ("a" * 300)
+        assert len(os.fspath(victim)) < MAX_TOOL_PATH_CHARACTERS
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            PackagedMediaTools(
+                ffprobe_path=victim,
+                ffmpeg_path=_executable(tmp_path, "ffmpeg"),
+            )
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+        assert str(tmp_path) not in str(excinfo.value)
+
     def test_rejects_a_missing_file(self, tmp_path: Path) -> None:
         with pytest.raises(MaterialProbeRejected) as excinfo:
             PackagedMediaTools(
