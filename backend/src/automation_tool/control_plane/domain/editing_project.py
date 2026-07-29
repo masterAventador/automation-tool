@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
-from typing import Final, Never
+from datetime import UTC, datetime
+from typing import Final, Never, final
+
+from automation_tool.control_plane.domain.resource_ids import ResourceId
 
 MAX_PROJECT_TITLE_CHARACTERS: Final = 200
 MIN_OUTPUT_DIMENSION: Final = 128
@@ -29,6 +33,35 @@ class InvalidEditingProjectModel(ValueError):
 
 def _reject() -> Never:
     raise InvalidEditingProjectModel
+
+
+def _validate_text(value: object, *, maximum: int, optional: bool = False) -> None:
+    if value is None and optional:
+        return
+    if not isinstance(value, str) or not value or value != value.strip() or len(value) > maximum:
+        _reject()
+    for character in value:
+        if character in {"\n", "\t"}:
+            continue
+        if unicodedata.category(character).startswith("C"):
+            _reject()
+
+
+def _validate_timestamp(value: object) -> None:
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() != UTC.utcoffset(value)
+    ):
+        _reject()
+
+
+@final
+class EditingProjectId(ResourceId):
+    """Stable identifier for one editing project."""
+
+    __slots__ = ()
+    _resource = "editing project"
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +123,31 @@ class CaptionStyle:
             _reject()
 
 
+@dataclass(frozen=True, slots=True)
+class EditingProject:
+    """One editing project: the render settings every job under it inherits.
+
+    It holds no material list and no timeline — those are separate
+    aggregates joined at the repository layer, not object references.
+    """
+
+    project_id: EditingProjectId
+    title: str
+    output: OutputSpec
+    caption_style: CaptionStyle
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.project_id, EditingProjectId)
+            or not isinstance(self.output, OutputSpec)
+            or not isinstance(self.caption_style, CaptionStyle)
+        ):
+            _reject()
+        _validate_text(self.title, maximum=MAX_PROJECT_TITLE_CHARACTERS)
+        _validate_timestamp(self.created_at)
+
+
 __all__ = [
     "MAX_CAPTION_FONT_PX",
     "MAX_CAPTION_LINE_SPACING",
@@ -102,6 +160,8 @@ __all__ = [
     "MIN_OUTPUT_DIMENSION",
     "MIN_OUTPUT_FPS",
     "CaptionStyle",
+    "EditingProject",
+    "EditingProjectId",
     "InvalidEditingProjectModel",
     "OutputSpec",
 ]

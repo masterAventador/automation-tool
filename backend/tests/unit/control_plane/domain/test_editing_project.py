@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta, timezone
+
 import pytest
 
 from automation_tool.control_plane.domain.editing_project import (
@@ -10,11 +12,14 @@ from automation_tool.control_plane.domain.editing_project import (
     MAX_CAPTION_STROKE_PX,
     MAX_OUTPUT_DIMENSION,
     MAX_OUTPUT_FPS,
+    MAX_PROJECT_TITLE_CHARACTERS,
     MIN_CAPTION_FONT_PX,
     MIN_CAPTION_LINE_SPACING,
     MIN_OUTPUT_DIMENSION,
     MIN_OUTPUT_FPS,
     CaptionStyle,
+    EditingProject,
+    EditingProjectId,
     InvalidEditingProjectModel,
     OutputSpec,
 )
@@ -184,3 +189,81 @@ def test_caption_line_spacing_bounds_are_inclusive() -> None:
     assert _caption(line_spacing=MAX_CAPTION_LINE_SPACING).line_spacing == (
         MAX_CAPTION_LINE_SPACING
     )
+
+
+def test_editing_project_id_is_a_uuid4_resource_id() -> None:
+    identifier = EditingProjectId.new()
+    assert EditingProjectId.parse(str(identifier)) == identifier
+
+
+def test_editing_project_id_rejects_a_foreign_identifier_type() -> None:
+    from automation_tool.control_plane.domain.resource_ids import InvalidResourceId
+    from automation_tool.control_plane.domain.timeline import TimelineId
+
+    with pytest.raises(InvalidResourceId):
+        EditingProjectId.parse(TimelineId.new())
+
+
+def _project(**overrides: object) -> EditingProject:
+    defaults: dict[str, object] = {
+        "project_id": EditingProjectId.new(),
+        "title": "国庆探店合集",
+        "output": _output(),
+        "caption_style": _caption(),
+        "created_at": datetime(2026, 7, 29, 10, 0, tzinfo=UTC),
+    }
+    defaults.update(overrides)
+    return EditingProject(**defaults)  # type: ignore[arg-type]
+
+
+def test_a_project_carries_everything_a_render_needs_but_the_timeline() -> None:
+    project = _project()
+    assert project.output.fps == 30
+    assert project.caption_style.font_px == 48
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("project_id", "not-an-id"),
+        ("title", ""),
+        ("title", "   "),
+        ("title", "  前后有空白  "),
+        ("title", "带\x00空字符"),
+        ("title", "x" * (MAX_PROJECT_TITLE_CHARACTERS + 1)),
+        ("title", None),
+        ("output", {"width": 1080, "height": 1920, "fps": 30}),
+        ("output", None),
+        ("caption_style", "noto-sans-sc"),
+        ("caption_style", None),
+        ("created_at", datetime(2026, 7, 29, 10, 0)),
+        ("created_at", "2026-07-29T10:00:00Z"),
+        ("created_at", datetime(2026, 7, 29, 10, 0, tzinfo=timezone(timedelta(hours=8)))),
+    ],
+)
+def test_project_structural_bounds_fail_closed(field: str, value: object) -> None:
+    with pytest.raises(InvalidEditingProjectModel):
+        _project(**{field: value})
+
+
+def test_a_project_title_may_wrap_but_carries_no_control_characters() -> None:
+    assert _project(title="国庆探店\n第二季").title == "国庆探店\n第二季"
+
+
+def test_project_title_length_bound_is_inclusive() -> None:
+    assert len(_project(title="国" * MAX_PROJECT_TITLE_CHARACTERS).title) == (
+        MAX_PROJECT_TITLE_CHARACTERS
+    )
+
+
+def test_validate_text_accepts_a_missing_value_when_optional() -> None:
+    """`title` is required, so `EditingProject` never passes `optional=True`.
+
+    The branch has no caller in this module yet — a future optional field
+    will be its first real user (mirroring how `MAX_PROJECT_TITLE_CHARACTERS`
+    moved from T1 to its first real caller here). Exercised directly so it
+    is not carried as untested dead code in the meantime.
+    """
+    from automation_tool.control_plane.domain.editing_project import _validate_text
+
+    _validate_text(None, maximum=10, optional=True)
