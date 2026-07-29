@@ -171,7 +171,12 @@ def test_a_run_that_carries_indentation_keeps_it() -> None:
         font_css=FONT_CSS,
     )
 
-    assert '<div class="lt-tag">\n  主播·神经科学家\n</div>' in result
+    # The opening tag now carries PC-14's measurement mark; the whitespace this
+    # test is about is the part after it, asserted verbatim.
+    assert (
+        f'<div class="lt-tag" data-motion-slot="{index}">\n  主播·神经科学家\n</div>'
+        in result
+    )
 
 
 def test_copy_addressed_at_a_run_no_slot_declared_fails_closed() -> None:
@@ -384,3 +389,76 @@ def test_a_reference_pointing_outside_the_catalog_is_refused(tmp_path) -> None:
             copy={},
             font_css="",
         )
+
+
+# PC-14: the overflow measurement happens in the browser, and the browser has to
+# be able to find the slots. It must not find them by counting text nodes in
+# JavaScript — the enumeration is `part_document.enumerate_text_nodes`, and a
+# second implementation of it in another language is exactly the错位替换 this
+# whole module refuses to risk (PC-03 §6). So the write marks them instead.
+def test_each_filled_slot_is_marked_so_a_browser_can_measure_it() -> None:
+    name = slot_index_of(PART_HTML, "Maya Chen")
+    tag = slot_index_of(PART_HTML, "Host · Neuroscientist")
+    rendered = render_part_working_copy(
+        PART_HTML,
+        slots=(
+            PartSlot(index=name, original="Maya Chen", parent_tag="div"),
+            PartSlot(index=tag, original="Host · Neuroscientist", parent_tag="div"),
+        ),
+        copy={name: "张三", tag: "主播"},
+        font_css=FONT_CSS,
+    )
+    assert f'data-motion-slot="{name}"' in rendered
+    assert f'data-motion-slot="{tag}"' in rendered
+
+
+def test_a_slot_left_without_copy_is_not_marked() -> None:
+    """Only what this film wrote can overflow beyond what the part shipped.
+
+    An untouched slot still carries the part's own copy, whose overflow is the
+    baseline the budget was measured against — measuring it would compare a
+    reading against itself.
+    """
+    name = slot_index_of(PART_HTML, "Maya Chen")
+    tag = slot_index_of(PART_HTML, "Host · Neuroscientist")
+    rendered = render_part_working_copy(
+        PART_HTML,
+        slots=(
+            PartSlot(index=name, original="Maya Chen", parent_tag="div"),
+            PartSlot(index=tag, original="Host · Neuroscientist", parent_tag="div"),
+        ),
+        copy={name: "张三"},
+        font_css=FONT_CSS,
+    )
+    assert f'data-motion-slot="{name}"' in rendered
+    assert f'data-motion-slot="{tag}"' not in rendered
+
+
+def test_the_mark_lands_on_the_element_that_holds_the_run() -> None:
+    """`div class="lt-name"`, not the document root and not a wrapper.
+
+    Overflow is a property of the box the text sits in, so a mark on anything
+    else would measure the wrong box and report a healthy slot as clipped or
+    the reverse.
+    """
+    name = slot_index_of(PART_HTML, "Maya Chen")
+    rendered = render_part_working_copy(
+        PART_HTML,
+        slots=(PartSlot(index=name, original="Maya Chen", parent_tag="div"),),
+        copy={name: "张三"},
+        font_css=FONT_CSS,
+    )
+    assert f'<div class="lt-name" data-motion-slot="{name}">张三</div>' in rendered
+
+
+def test_the_caption_sharing_the_text_is_never_marked() -> None:
+    """The mark follows the index, not the words — same rule as the substitution."""
+    name = slot_index_of(PART_HTML, "Maya Chen")
+    rendered = render_part_working_copy(
+        PART_HTML,
+        slots=(PartSlot(index=name, original="Maya Chen", parent_tag="div"),),
+        copy={name: "张三"},
+        font_css=FONT_CSS,
+    )
+    assert "<figcaption>Maya Chen</figcaption>" in rendered
+    assert rendered.count("data-motion-slot=") == 1

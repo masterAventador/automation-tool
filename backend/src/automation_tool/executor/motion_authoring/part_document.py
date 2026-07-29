@@ -51,6 +51,17 @@ class TextNode:
     characters. Substitution needs the source span, and it has to come from
     this walker rather than from a search: two runs can read the same thing,
     and a search would edit whichever came first.
+
+    `parent_open_start` and `parent_open_end` bound the *opening tag* of the
+    element holding this run, so a caller can put an attribute on that element
+    without parsing the document a second time. PC-14 needs it: overflow is a
+    property of the box the text sits in, and the browser has to be able to find
+    that box. Marking it here rather than counting text nodes again in
+    JavaScript keeps one enumeration — the reason §6 of `PC-03.md` gives for
+    this walker being shared with the freezing gate in the first place.
+
+    Both are `-1` for a run with no open element above it (text before any tag),
+    which cannot be a slot.
     """
 
     index: int
@@ -59,6 +70,8 @@ class TextNode:
     visible: bool
     start: int
     end: int
+    parent_open_start: int
+    parent_open_end: int
 
 
 class _TextWalker(HTMLParser):
@@ -77,7 +90,10 @@ class _TextWalker(HTMLParser):
         super().__init__(convert_charrefs=True)
         self._source = source
         self._line_starts = _line_starts(source)
-        self._stack: list[str] = []
+        # Tag name plus the source span of its opening tag. The span is what
+        # lets a caller mark the element (PC-14) without walking the document
+        # again; the name is what the original stack held.
+        self._stack: list[tuple[str, int, int]] = []
         self._pending: int | None = None
         self.nodes: list[TextNode] = []
 
@@ -96,12 +112,19 @@ class _TextWalker(HTMLParser):
             visible=node.visible,
             start=node.start,
             end=self._offset(),
+            parent_open_start=node.parent_open_start,
+            parent_open_end=node.parent_open_end,
         )
         self._pending = None
 
     def handle_starttag(self, tag: str, attrs: object) -> None:
         self._close_pending()
-        self._stack.append(tag)
+        start = self._offset()
+        # The literal text of the tag as it appears in the source, so the span
+        # covers whatever attributes and whitespace it happens to carry rather
+        # than an idealised `<div>`.
+        literal = self.get_starttag_text() or f"<{tag}>"
+        self._stack.append((tag, start, start + len(literal)))
 
     def handle_startendtag(self, tag: str, attrs: object) -> None:
         # Self-closing: it opens and closes without ever containing text.
@@ -112,8 +135,8 @@ class _TextWalker(HTMLParser):
         # An unbalanced close (upstream documents contain a few) must not
         # unwind past the element that actually opened, or every later node
         # would be attributed to the wrong parent.
-        if tag in self._stack:
-            while self._stack and self._stack.pop() != tag:
+        if any(open_tag == tag for open_tag, _, _ in self._stack):
+            while self._stack and self._stack.pop()[0] != tag:
                 continue
 
     def handle_comment(self, data: str) -> None:
@@ -130,8 +153,8 @@ class _TextWalker(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         self._close_pending()
-        parent = self._stack[-1] if self._stack else ""
-        painted = not any(tag in NON_RENDERING_TAGS for tag in self._stack)
+        parent, open_start, open_end = self._stack[-1] if self._stack else ("", -1, -1)
+        painted = not any(tag in NON_RENDERING_TAGS for tag, _, _ in self._stack)
         self._pending = len(self.nodes)
         self.nodes.append(
             TextNode(
@@ -143,6 +166,8 @@ class _TextWalker(HTMLParser):
                 # Replaced by `_close_pending`; a run that reaches end of input
                 # is closed against the source length in `enumerate_text_nodes`.
                 end=len(self._source),
+                parent_open_start=open_start,
+                parent_open_end=open_end,
             )
         )
 

@@ -94,17 +94,71 @@ def render_part_working_copy(
                 f"text run {slot.index} moved to a <{node.parent_tag}> element"
             )
 
-    # Right to left: an earlier run's span stays valid while later ones are
-    # rewritten, so no offset has to be adjusted for edits already applied.
+    # Two kinds of edit, applied as one pass from the end of the document
+    # backwards: an earlier offset stays valid while later ones are rewritten,
+    # so nothing has to be adjusted for edits already applied. They have to
+    # share the pass — the mark sits in the opening tag, which is *before* the
+    # run it belongs to, and running the two passes separately would leave the
+    # second one working against offsets the first had already moved.
+    edits = [
+        (nodes[index].start, nodes[index].end,
+         _substituted(html[nodes[index].start : nodes[index].end], copy[index]))
+        for index in copy
+    ]
+    edits.extend(_slot_marks(nodes, declared, copy, html))
     result = html
-    for index in sorted(copy, reverse=True):
-        node = nodes[index]
-        result = (
-            result[: node.start]
-            + _substituted(html[node.start : node.end], copy[index])
-            + result[node.end :]
-        )
+    for start, end, replacement in sorted(edits, reverse=True):
+        result = result[:start] + replacement + result[end:]
     return _with_font_rules(result, font_css)
+
+
+def _slot_marks(
+    nodes: Mapping[int, object],
+    declared: Mapping[int, PartSlot],
+    copy: Mapping[int, str],
+    html: str,
+) -> list[tuple[int, int, str]]:
+    """Mark the box each filled slot sits in, so a browser can measure it.
+
+    PC-14 measures overflow in the packaged Chromium, which has to find the
+    slots. It must not find them by numbering text runs in JavaScript: the
+    numbering is `part_document.enumerate_text_nodes`, and a second
+    implementation of it in another language is the same misplacement risk this
+    module refuses everywhere else (`PC-03.md` §6). So the element is marked
+    here, by the code that already knows where it is.
+
+    Only slots this film wrote are marked. An untouched slot still carries the
+    part's own copy, whose overflow *is* the baseline the budget was measured
+    against, so measuring it would compare a reading against itself.
+
+    Slots sharing one element get one mark listing both indices: they share a
+    box, so they share its overflow, and saying so is more honest than picking
+    one of them to blame.
+    """
+    by_element: dict[tuple[int, int], list[int]] = {}
+    for index in sorted(copy):
+        node = nodes[index]
+        span = (node.parent_open_start, node.parent_open_end)  # type: ignore[attr-defined]
+        if span[0] < 0:
+            raise SlotAnchorRejected(
+                f"text run {index} has no element to mark; a slot always sits "
+                "inside one"
+            )
+        by_element.setdefault(span, []).append(index)
+
+    marks: list[tuple[int, int, str]] = []
+    for (start, end), indices in by_element.items():
+        opening = html[start:end]
+        if not opening.endswith(">"):
+            raise SlotAnchorRejected(
+                f"the element holding slot {indices[0]} has no closing angle "
+                "bracket; this is not the document the slots were frozen against"
+            )
+        # Self-closing (`<img/>`) cannot hold a run, so the only shape here is a
+        # normal open tag; the mark goes just inside its closing bracket.
+        listed = " ".join(str(index) for index in indices)
+        marks.append((start, end, f'{opening[:-1]} data-motion-slot="{listed}">'))
+    return marks
 
 
 def _substituted(raw: str, text: str) -> str:
