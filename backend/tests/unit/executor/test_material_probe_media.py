@@ -17,12 +17,16 @@ number rather than as a range. Three further things are asserted only here:
   only proof that what the executor learns is what the Control Plane can store —
   matching the two layers' limits cannot show it, since identical limits still
   admit a video filed as a still;
-- every member of `MaterialProbeRejection` is **provoked**, and the count is
-  stated the way it was counted: **11 have a real file behind them, 8 of those
-  are read by the packaged tools, and 12 need no stub at all** (`unreadable` and
-  `unsafe_path` have no file to have; `source_not_at_rest` and `file_too_large`
-  have one no tool ever reads). The thirteenth, `probe_crashed`, runs the real
-  ffprobe behind a wrapper — see `_crashing_probe`.
+- every one of the **14** members of `MaterialProbeRejection` is **provoked**, and
+  the count is stated the way it was counted, so that it adds up: **11 have a real
+  file behind them** — 8 of those read by the packaged tools, the file's own
+  content deciding the verdict — **2 have no file to have** (`unreadable`'s path
+  is not there, `unsafe_path`'s is not absolute), and **1 uses a stand-in**. That
+  leaves the three whose file no tool ever opens: `source_not_at_rest` goes
+  through the public window check, `file_too_large` is refused on its `st_size`,
+  and `workspace_unusable` fails before either tool starts. **13 need no
+  stand-in**; the one that does is `probe_crashed`, whose stand-in runs the real
+  ffprobe first — see `_crashing_probe`.
 
 The materials are built under a directory whose name carries a space, `&`, `$`,
 an apostrophe and Chinese, so the whole table is read through an awkward path
@@ -655,7 +659,7 @@ JUDGEMENTS: list[
     ("photo", ProbedMaterialKind.IMAGE, None, (800, 600), "mjpeg", None, False, None),
 ]
 
-# The two of the eight that are refused, and what by. A rejection is the whole
+# The two of the nine that are refused, and what by. A rejection is the whole
 # judgement for these, so they cannot sit in the table above.
 REFUSALS: list[tuple[str, MaterialProbeRejection]] = [
     ("corrupt", MaterialProbeRejection.UNDECODABLE),
@@ -664,7 +668,7 @@ REFUSALS: list[tuple[str, MaterialProbeRejection]] = [
 
 
 class TestTheJudgementTable:
-    """Eight real materials, each judged to the cell.
+    """Nine real materials, each judged to the cell.
 
     The six that produce facts are asserted field by field against exact
     figures; the two that are refused are asserted against their reason. Neither
@@ -1003,15 +1007,16 @@ class TestEveryRejectionIsReachable:
     what to do next, one instruction per member. This line has already found
     members that no test reached and a `-k` filter that hid the test that did.
 
-    The counts, counted rather than rounded: **11 members have a real file
-    behind them, 8 of those are read by the packaged tools, and 12 need no stub**.
-    `unreadable` and `unsafe_path` have no file to have — a path that is not
-    there and a path that is not absolute; `source_not_at_rest` and
-    `file_too_large` have a real file that no tool ever opens, the first being
-    the public window check and the second refused on its `st_size` before either
-    tool runs. `workspace_unusable` is about this module's own scratch space and
-    has no file either. The thirteenth, `probe_crashed`, wraps the real ffprobe;
-    see `_crashing_probe`.
+    The counts, counted rather than rounded, over all **14** members: **11 have a
+    real file behind them**, of which **8 are read by the packaged tools** and the
+    file's own content decides the verdict; **2 have no file to have** —
+    `unreadable`'s path is not there and `unsafe_path`'s is not absolute; and **1
+    uses a stand-in for the tool**. The three files no tool opens are
+    `source_not_at_rest` (the public window check), `file_too_large` (refused on
+    its `st_size`) and `workspace_unusable` (which fails before either tool
+    starts). 11 + 2 + 1 = 14, so **13 need no stand-in** — and the one that does,
+    `probe_crashed`, gets its answer from the real ffprobe anyway; see
+    `_crashing_probe`.
     """
 
     def _provoke(

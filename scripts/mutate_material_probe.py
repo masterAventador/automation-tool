@@ -1101,9 +1101,9 @@ def digest_of(path: Path) -> str:
 def main() -> int:
     """Run every group, or only the ones whose name contains the given text.
 
-    The filter exists because the whole set is 145 mutations over four groups and
-    takes some twenty minutes: iterating on one group's anchors should not mean
-    rerunning the other three. A filtered run says so in its own output, so its
+    The filter exists because the whole set is 160 mutations over five groups and
+    takes some fifteen minutes: iterating on one group's anchors should not mean
+    rerunning the other four. A filtered run says so in its own output, so its
     total cannot be mistaken for the whole set's.
     """
     wanted = sys.argv[1] if len(sys.argv) > 1 else ""
