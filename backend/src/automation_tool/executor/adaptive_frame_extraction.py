@@ -35,6 +35,10 @@ _SCENE_OUTPUT_LIMIT_BYTES = 64 * 1024 * 1024
 _LONG_SCENE_INTERVAL_MS = 8_000
 _SUPPLEMENT_OUTPUT_PREFIX = "supplement-"
 _SUPPLEMENT_OUTPUT_SUFFIX = ".jpg"
+_SHORT_FRAME_LIMIT_DURATION_MS = 15_000
+_MEDIUM_FRAME_LIMIT_DURATION_MS = 60_000
+_LONG_FRAME_LIMIT_DURATION_MS = 300_000
+_EXTRA_LONG_FRAME_LIMIT_DURATION_MS = 1_200_000
 
 
 class AdaptiveFrameRejection(StrEnum):
@@ -100,21 +104,31 @@ def extract_adaptive_frame_candidates(
     *,
     duration_ms: int,
 ) -> tuple[ExtractedFrame, ...] | AdaptiveFrameRejection:
-    """Add an actual frame every eight seconds inside long scenes."""
-    scene_frames = extract_scene_frames(tools, source, approved)
-    if isinstance(scene_frames, AdaptiveFrameRejection):
-        return scene_frames
-    supplement_timestamps = _supplement_timestamps(
-        tuple(frame.timestamp_ms for frame in scene_frames),
+    """Select bounded scene and long-shot candidates before supplemental seeks."""
+    extracted_scene_frames = extract_scene_frames(tools, source, approved)
+    if isinstance(extracted_scene_frames, AdaptiveFrameRejection):
+        return extracted_scene_frames
+    scene_by_timestamp: dict[int, ExtractedFrame] = {}
+    for scene_frame in extracted_scene_frames:
+        scene_by_timestamp.setdefault(scene_frame.timestamp_ms, scene_frame)
+    scene_timestamps = tuple(scene_by_timestamp)
+    planned_supplements = _supplement_timestamps(
+        scene_timestamps,
         duration_ms=duration_ms,
     )
+    selected_scenes, supplement_timestamps = _select_candidate_timestamps(
+        scene_timestamps,
+        planned_supplements,
+        duration_ms=duration_ms,
+    )
+    scene_frames = tuple(scene_by_timestamp[timestamp] for timestamp in selected_scenes)
     if not supplement_timestamps:
         return scene_frames
 
     remaining_bytes = _SCENE_OUTPUT_LIMIT_BYTES - sum(
         len(frame.jpeg_bytes) for frame in scene_frames
     )
-    final_scene_start_ms = scene_frames[-1].timestamp_ms
+    final_scene_start_ms = scene_timestamps[-1]
     deadline = time.monotonic() + _SCENE_TIMEOUT_SECONDS
     supplements: list[ExtractedFrame] = []
     for timestamp_ms in supplement_timestamps:
@@ -160,6 +174,44 @@ def extract_adaptive_frame_candidates(
     for frame in (*scene_frames, *supplements):
         by_timestamp.setdefault(frame.timestamp_ms, frame)
     return tuple(by_timestamp[timestamp] for timestamp in sorted(by_timestamp))
+
+
+def _frame_limit(duration_ms: int) -> int:
+    if duration_ms <= _SHORT_FRAME_LIMIT_DURATION_MS:
+        return 6
+    if duration_ms <= _MEDIUM_FRAME_LIMIT_DURATION_MS:
+        return 12
+    if duration_ms <= _LONG_FRAME_LIMIT_DURATION_MS:
+        return 24
+    if duration_ms <= _EXTRA_LONG_FRAME_LIMIT_DURATION_MS:
+        return 40
+    return 60
+
+
+def _select_candidate_timestamps(
+    scene_timestamps: tuple[int, ...],
+    supplement_timestamps: tuple[int, ...],
+    *,
+    duration_ms: int,
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    limit = _frame_limit(duration_ms)
+    if len(scene_timestamps) >= limit:
+        return _uniformly_sample(scene_timestamps, limit), ()
+    supplement_limit = limit - len(scene_timestamps)
+    return scene_timestamps, _uniformly_sample(supplement_timestamps, supplement_limit)
+
+
+def _uniformly_sample(timestamps: tuple[int, ...], limit: int) -> tuple[int, ...]:
+    if limit < 0:
+        raise ValueError("sample limit must not be negative")
+    if limit == 0:
+        return ()
+    if len(timestamps) <= limit:
+        return timestamps
+    if limit == 1:
+        return (timestamps[len(timestamps) // 2],)
+    last_index = len(timestamps) - 1
+    return tuple(timestamps[index * last_index // (limit - 1)] for index in range(limit))
 
 
 def _supplement_timestamps(
