@@ -519,8 +519,9 @@ async def verify_persisted_editing_graph(
                     ).where(editing_jobs.c.job_id == job_id)
                 )
             ).one()
-            app_session_counts = dict(
-                (
+            app_session_counts: dict[UUID, int] = {
+                session_installation_id: session_count
+                for session_installation_id, session_count in (
                     await session.execute(
                         select(
                             device_sessions.c.installation_id,
@@ -537,8 +538,8 @@ async def verify_persisted_editing_graph(
                         )
                         .group_by(device_sessions.c.installation_id)
                     )
-                ).all()
-            )
+                ).tuples()
+            }
     finally:
         await database.close()
 
