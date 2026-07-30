@@ -6,7 +6,16 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+)
 
 from automation_tool.control_plane.api.editing_errors import translate_editing_error
 from automation_tool.control_plane.api.errors import AppError
@@ -35,6 +44,19 @@ from automation_tool.control_plane.domain.resource_ids import InvalidResourceId
 router = APIRouter(prefix="/api/v1/editing-materials", tags=["editing-materials"])
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
+
+
+def _require_datetime_wire_string(value: object) -> object:
+    """Keep the JSON boundary equal to OpenAPI's RFC 3339 date-time string."""
+    if not isinstance(value, str) or ("T" not in value and "t" not in value):
+        raise ValueError("Date-time input must be an RFC 3339 string")
+    return value
+
+
+StrictAwareDatetime = Annotated[
+    AwareDatetime,
+    BeforeValidator(_require_datetime_wire_string),
+]
 
 
 class EditingMaterialCreateRequest(BaseModel):
@@ -75,7 +97,7 @@ class EditingMaterialCreateRequest(BaseModel):
     )
     ai_tags: list[str] = Field(alias="aiTags", max_length=MAX_TAGS)
     description_source: DescriptionSource = Field(alias="descriptionSource")
-    described_at: datetime | None = Field(alias="describedAt")
+    described_at: StrictAwareDatetime | None = Field(alias="describedAt")
 
     def to_domain(self) -> Material:
         return Material.register(
@@ -140,7 +162,7 @@ class AiMaterialDescriptionRequest(BaseModel):
         strict=True,
     )
     tags: list[str] = Field(max_length=MAX_TAGS)
-    described_at: datetime = Field(alias="describedAt")
+    described_at: StrictAwareDatetime = Field(alias="describedAt")
 
 
 MaterialDescriptionRequest = Annotated[

@@ -23,13 +23,15 @@ hydration through the constructor. **This is the opposite of what 0032 and 0034
 did**, and deliberately so: those tables had no domain object behind them, so
 their constraints were the only validation there was.
 
-Two things do belong in the schema, because no domain object can see both sides:
+Three things do belong in the schema, because no domain object can see both sides:
 
 * `pk_materials`, so a repeated identifier is refused rather than merged;
-* `uq_materials_content_digest`, so the same file cannot be imported twice.
-  `Material` knows a digest's format and nothing about what else is stored, and
-  two callers hashing the same file concurrently would both find nothing and
-  both proceed. The refusal has to be structural.
+* `fk_materials_installation`, so a REST-visible material belongs to a real
+  Installation while pre-REST internal rows retain a NULL namespace;
+* partial unique indexes, so the same file cannot be imported twice inside one
+  Installation while another Installation learns nothing from that digest.
+  `Material` knows a digest's format and nothing about what else is stored, so
+  the refusal has to be structural.
 
 `content_digest` is `char(64)` rather than `varchar`: a SHA-256 hex digest has
 exactly one length. The trade-off is `bpchar` semantics -- a shorter value is
@@ -68,6 +70,11 @@ def upgrade() -> None:
     op.create_table(
         "materials",
         sa.Column("material_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column(
+            "installation_id",
+            postgresql.UUID(as_uuid=True),
+            nullable=True,
+        ),
         sa.Column("kind", sa.String(length=16), nullable=False),
         sa.Column("duration_ms", sa.Integer, nullable=True),
         sa.Column("width", sa.Integer, nullable=True),
@@ -83,8 +90,33 @@ def upgrade() -> None:
         sa.Column("ai_tags", postgresql.JSONB, nullable=False),
         sa.Column("description_source", sa.String(length=16), nullable=False),
         sa.Column("described_at", sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(
+            ["installation_id"],
+            ["installations.id"],
+            name="fk_materials_installation",
+            ondelete="RESTRICT",
+        ),
         sa.PrimaryKeyConstraint("material_id", name="pk_materials"),
-        sa.UniqueConstraint("content_digest", name="uq_materials_content_digest"),
+    )
+    op.create_index(
+        "uq_materials_unscoped_content_digest",
+        "materials",
+        ["content_digest"],
+        unique=True,
+        postgresql_where=sa.text("installation_id IS NULL"),
+    )
+    op.create_index(
+        "uq_materials_installation_content_digest",
+        "materials",
+        ["installation_id", "content_digest"],
+        unique=True,
+        postgresql_where=sa.text("installation_id IS NOT NULL"),
+    )
+    op.create_index(
+        "ix_materials_installation_material",
+        "materials",
+        ["installation_id", "material_id"],
+        unique=False,
     )
 
 

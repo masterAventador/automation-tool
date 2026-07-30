@@ -412,6 +412,47 @@ def test_invalid_description_union_and_queries_fail_closed() -> None:
         assert "private" not in response.text
 
 
+@pytest.mark.parametrize(
+    "invalid_described_at",
+    [
+        0,
+        "0",
+        "2026-07-30",
+        "2026-07-30T09:10:11",
+    ],
+)
+def test_registration_and_ai_update_reject_non_aware_datetime_wire_values(
+    invalid_described_at: object,
+) -> None:
+    client, repository = material_client()
+
+    rejected_registration = client.post(
+        "/api/v1/editing-materials",
+        json={**VALID_PAYLOAD, "describedAt": invalid_described_at},
+    )
+
+    assert rejected_registration.status_code == 422
+    assert rejected_registration.json()["error"]["code"] == "validation"
+    assert repository.materials == {}
+
+    registered = client.post("/api/v1/editing-materials", json=VALID_PAYLOAD)
+    material_id = registered.json()["materialId"]
+    before = repository.materials.copy()
+    rejected_update = client.put(
+        f"/api/v1/editing-materials/{material_id}/description",
+        json={
+            "source": "ai",
+            "description": "不应写入的模型描述",
+            "tags": [],
+            "describedAt": invalid_described_at,
+        },
+    )
+
+    assert rejected_update.status_code == 422
+    assert rejected_update.json()["error"]["code"] == "validation"
+    assert repository.materials == before
+
+
 def test_not_found_duplicate_unavailable_auth_and_missing_service_are_stable() -> None:
     client, repository = material_client()
     for response in (

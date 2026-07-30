@@ -107,6 +107,7 @@ automation-tool/
 - Control Plane 不得直接依赖 Tauri、Playwright、微信窗口、用户本机路径或平台 Cookie；
 - 开发时在本机启动，App 的 `baseUrl` 指向 loopback；客户 Demo 使用同一服务和迁移部署到云端，App 只切换受控 `baseUrl` Profile；
 - 数据库从第一天使用 PostgreSQL，开发使用本机 Docker，Demo 使用服务器 PostgreSQL；
+- 项目首次部署或发布前不存在任何历史兼容负担：代码、API、协议、配置、数据库和构建产物一律直接修改唯一现行实现，并在同一任务同步更新全部调用方、测试和文档；禁止为未发布版本保留旧方法、旧字段、双写、fallback、过渡适配器、废弃 shim、兼容迁移、回填迁移或降级备份。首次正式发布后才启用面向已发布版本的兼容与只增向前迁移规则；
 - 云端客户 Demo 必须使用产品账号认证，并把 Installation/设备凭据绑定到已登录账号；账号或设备任一失效都拒绝业务访问，禁止裸露匿名写接口；
 - local/demo 只允许配置、凭据和基础设施不同，禁止维护两套业务实现。
 
