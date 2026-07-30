@@ -294,6 +294,102 @@ def test_partial_write_rolls_back_only_files_created_by_this_call(
     assert tuple(output.glob("frame-*.jpg")) == ()
 
 
+def test_directory_replacement_rolls_back_through_the_original_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tools = _fake_tools(tmp_path)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"media")
+    source, approved = approve_source(source)
+    output = tmp_path / "output"
+    output.mkdir(mode=0o700)
+    moved = tmp_path / "moved-output"
+    monkeypatch.setattr(
+        adaptive_frame_extraction,
+        "extract_adaptive_frame_candidates",
+        lambda *_args, **_kwargs: (
+            ExtractedFrame(timestamp_ms=0, is_scene_cut=True, jpeg_bytes=b"first"),
+            ExtractedFrame(timestamp_ms=8_000, is_scene_cut=False, jpeg_bytes=b"second"),
+        ),
+    )
+    real_write = os.write
+    write_calls = 0
+
+    def replace_directory_after_first_write(
+        descriptor: int,
+        payload: bytes | bytearray | memoryview[int],
+    ) -> int:
+        nonlocal write_calls
+        written = real_write(descriptor, payload)
+        write_calls += 1
+        if write_calls == 1:
+            output.rename(moved)
+            output.mkdir(mode=0o700)
+        return written
+
+    monkeypatch.setattr(
+        "automation_tool.executor.adaptive_frame_extraction.os.write",
+        replace_directory_after_first_write,
+    )
+
+    result = extract_adaptive_frames(
+        tools,
+        source,
+        approved,
+        output,
+        duration_ms=8_001,
+    )
+
+    assert result is AdaptiveFrameRejection.WORKSPACE_UNUSABLE
+    assert tuple(moved.iterdir()) == ()
+    assert tuple(output.iterdir()) == ()
+
+
+def test_close_failure_removes_the_frame_that_was_just_created(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tools = _fake_tools(tmp_path)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"media")
+    source, approved = approve_source(source)
+    output = tmp_path / "output"
+    output.mkdir(mode=0o700)
+    monkeypatch.setattr(
+        adaptive_frame_extraction,
+        "extract_adaptive_frame_candidates",
+        lambda *_args, **_kwargs: (
+            ExtractedFrame(timestamp_ms=0, is_scene_cut=True, jpeg_bytes=b"first"),
+        ),
+    )
+    real_close = os.close
+    close_calls = 0
+
+    def fail_first_close(descriptor: int) -> None:
+        nonlocal close_calls
+        close_calls += 1
+        real_close(descriptor)
+        if close_calls == 1:
+            raise OSError("late close failure")
+
+    monkeypatch.setattr(
+        "automation_tool.executor.adaptive_frame_extraction.os.close",
+        fail_first_close,
+    )
+
+    result = extract_adaptive_frames(
+        tools,
+        source,
+        approved,
+        output,
+        duration_ms=1,
+    )
+
+    assert result is AdaptiveFrameRejection.WORKSPACE_UNUSABLE
+    assert tuple(output.iterdir()) == ()
+
+
 @pytest.mark.parametrize(
     ("media_name", "duration_ms", "expected_count", "expected_size"),
     [

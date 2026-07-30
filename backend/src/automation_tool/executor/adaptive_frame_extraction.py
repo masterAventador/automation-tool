@@ -84,6 +84,67 @@ class AdaptiveFrameArtifact:
     byte_size: int
 
 
+@dataclass(slots=True)
+class _OutputWorkspace:
+    """An owned directory reference that survives path replacement."""
+
+    path: Path
+    identity: tuple[int, int]
+    directory_descriptor: int | None = None
+    windows_handle: int | None = None
+
+    def revalidate_path(self) -> None:
+        if _output_workspace_identity(self.path) != self.identity:
+            raise OSError("output workspace changed")
+
+    def open_exclusive(self, filename: str) -> int:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        flags |= cast(int, getattr(os, "O_BINARY", 0))
+        flags |= cast(int, getattr(os, "O_NOFOLLOW", 0))
+        if self.directory_descriptor is not None:
+            return os.open(
+                filename,
+                flags,
+                0o600,
+                dir_fd=self.directory_descriptor,
+            )
+        return os.open(self._current_path() / filename, flags, 0o600)
+
+    def stat_frame(self, filename: str) -> os.stat_result:
+        if self.directory_descriptor is not None:
+            return os.stat(
+                filename,
+                dir_fd=self.directory_descriptor,
+                follow_symlinks=False,
+            )
+        return (self._current_path() / filename).lstat()
+
+    def unlink(self, filename: str) -> None:
+        if self.directory_descriptor is not None:
+            os.unlink(filename, dir_fd=self.directory_descriptor)
+            return
+        (self._current_path() / filename).unlink()
+
+    def fsync(self) -> None:
+        if self.directory_descriptor is not None:
+            os.fsync(self.directory_descriptor)
+
+    def close(self) -> None:
+        if self.directory_descriptor is not None:
+            descriptor = self.directory_descriptor
+            self.directory_descriptor = None
+            os.close(descriptor)
+        if self.windows_handle is not None:
+            handle = self.windows_handle
+            self.windows_handle = None
+            _close_windows_directory_handle(handle)
+
+    def _current_path(self) -> Path:
+        if self.windows_handle is not None:
+            return _windows_directory_path(self.windows_handle)
+        return self.path
+
+
 def extract_adaptive_frames(
     tools: PackagedMediaTools,
     source: Path,
@@ -93,22 +154,22 @@ def extract_adaptive_frames(
     duration_ms: int,
 ) -> tuple[AdaptiveFrameArtifact, ...] | AdaptiveFrameRejection:
     """Extract, resize and persist final JPEGs under controlled names."""
-    workspace_identity = _output_workspace_identity(output_directory)
-    if workspace_identity is None:
+    workspace = _open_output_workspace(output_directory)
+    if workspace is None:
         return AdaptiveFrameRejection.WORKSPACE_UNUSABLE
-    candidates = extract_adaptive_frame_candidates(
-        tools,
-        source,
-        approved,
-        duration_ms=duration_ms,
-    )
-    if isinstance(candidates, AdaptiveFrameRejection):
-        return candidates
-    return _write_final_frames(
-        output_directory,
-        workspace_identity,
-        candidates,
-    )
+    try:
+        candidates = extract_adaptive_frame_candidates(
+            tools,
+            source,
+            approved,
+            duration_ms=duration_ms,
+        )
+        if isinstance(candidates, AdaptiveFrameRejection):
+            return candidates
+        return _write_final_frames(workspace, candidates)
+    finally:
+        with suppress(OSError):
+            workspace.close()
 
 
 def extract_scene_frames(
@@ -486,22 +547,66 @@ def _output_workspace_identity(output_directory: Path) -> tuple[int, int] | None
     return metadata.st_dev, metadata.st_ino
 
 
+def _open_output_workspace(output_directory: Path) -> _OutputWorkspace | None:
+    identity = _output_workspace_identity(output_directory)
+    if identity is None:
+        return None
+    if os.name == "nt":
+        handle: int | None = None
+        try:
+            handle = _open_windows_directory_handle(output_directory)
+            current = _windows_directory_path(handle)
+            if _output_workspace_identity(current) != identity:
+                raise OSError("output workspace changed while opening")
+            return _OutputWorkspace(
+                path=output_directory,
+                identity=identity,
+                windows_handle=handle,
+            )
+        except OSError:
+            if handle is not None:
+                with suppress(OSError):
+                    _close_windows_directory_handle(handle)
+            return None
+
+    descriptor: int | None = None
+    try:
+        flags = os.O_RDONLY
+        flags |= cast(int, getattr(os, "O_DIRECTORY", 0))
+        flags |= cast(int, getattr(os, "O_NOFOLLOW", 0))
+        descriptor = os.open(output_directory, flags)
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or _is_reparse_point(metadata)
+            or (metadata.st_dev, metadata.st_ino) != identity
+        ):
+            raise OSError("output workspace changed while opening")
+        return _OutputWorkspace(
+            path=output_directory,
+            identity=identity,
+            directory_descriptor=descriptor,
+        )
+    except OSError:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+        return None
+
+
 def _write_final_frames(
-    output_directory: Path,
-    workspace_identity: tuple[int, int],
+    workspace: _OutputWorkspace,
     candidates: tuple[ExtractedFrame, ...],
 ) -> tuple[AdaptiveFrameArtifact, ...] | AdaptiveFrameRejection:
-    created: list[Path] = []
+    created: list[str] = []
     artifacts: list[AdaptiveFrameArtifact] = []
     try:
         for index, candidate in enumerate(candidates, start=1):
-            _require_output_workspace(output_directory, workspace_identity)
+            workspace.revalidate_path()
             filename = (
                 f"{_FINAL_OUTPUT_PREFIX}{index:0{_FINAL_OUTPUT_DIGITS}d}{_FINAL_OUTPUT_SUFFIX}"
             )
-            path = output_directory / filename
-            _write_exclusive_frame(path, candidate.jpeg_bytes)
-            created.append(path)
+            _write_exclusive_frame(workspace, filename, candidate.jpeg_bytes, created)
             artifacts.append(
                 AdaptiveFrameArtifact(
                     filename=filename,
@@ -510,40 +615,32 @@ def _write_final_frames(
                     byte_size=len(candidate.jpeg_bytes),
                 )
             )
-        _fsync_output_directory(output_directory)
-        _require_output_workspace(output_directory, workspace_identity)
-        for path, artifact in zip(created, artifacts, strict=True):
-            _require_written_frame(path, artifact.byte_size)
+        workspace.fsync()
+        workspace.revalidate_path()
+        for filename, artifact in zip(created, artifacts, strict=True):
+            _require_written_frame(workspace, filename, artifact.byte_size)
         return tuple(artifacts)
     except OSError:
-        if _output_workspace_identity(output_directory) == workspace_identity:
-            for path in reversed(created):
-                with suppress(OSError):
-                    path.unlink()
+        for filename in reversed(created):
             with suppress(OSError):
-                _fsync_output_directory(output_directory)
+                workspace.unlink(filename)
+        with suppress(OSError):
+            workspace.fsync()
         return AdaptiveFrameRejection.WORKSPACE_UNUSABLE
 
 
-def _require_output_workspace(
-    output_directory: Path,
-    expected_identity: tuple[int, int],
+def _write_exclusive_frame(
+    workspace: _OutputWorkspace,
+    filename: str,
+    payload: bytes,
+    created: list[str],
 ) -> None:
-    if _output_workspace_identity(output_directory) != expected_identity:
-        raise OSError("output workspace changed")
-
-
-def _write_exclusive_frame(path: Path, payload: bytes) -> None:
     descriptor: int | None = None
-    created = False
     try:
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-        flags |= cast(int, getattr(os, "O_BINARY", 0))
-        flags |= cast(int, getattr(os, "O_NOFOLLOW", 0))
-        descriptor = os.open(path, flags, 0o600)
-        created = True
+        descriptor = workspace.open_exclusive(filename)
+        created.append(filename)
         if os.name != "nt":  # pragma: no branch - native platform split
-            os.fchmod(descriptor, 0o600)
+            cast(Callable[[int, int], None], vars(os)["fchmod"])(descriptor, 0o600)
         view = memoryview(payload)
         written = 0
         while written < len(view):
@@ -553,22 +650,22 @@ def _write_exclusive_frame(path: Path, payload: bytes) -> None:
             written += count
         os.fsync(descriptor)
         _validate_written_frame(os.fstat(descriptor), len(payload))
+        closing_descriptor = descriptor
+        descriptor = None
+        os.close(closing_descriptor)
     except Exception:
         if descriptor is not None:
             with suppress(OSError):
                 os.close(descriptor)
-            descriptor = None
-        if created:
-            with suppress(OSError):
-                path.unlink()
         raise
-    finally:
-        if descriptor is not None:
-            os.close(descriptor)
 
 
-def _require_written_frame(path: Path, expected_size: int) -> None:
-    metadata = path.lstat()
+def _require_written_frame(
+    workspace: _OutputWorkspace,
+    filename: str,
+    expected_size: int,
+) -> None:
+    metadata = workspace.stat_frame(filename)
     _validate_written_frame(metadata, expected_size)
 
 
@@ -583,21 +680,90 @@ def _validate_written_frame(metadata: os.stat_result, expected_size: int) -> Non
         raise OSError("final frame changed")
 
 
-def _fsync_output_directory(output_directory: Path) -> None:
-    if os.name == "nt":
-        return
-    flags = os.O_RDONLY | cast(int, getattr(os, "O_DIRECTORY", 0))
-    descriptor = os.open(output_directory, flags)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
 def _is_reparse_point(metadata: os.stat_result) -> bool:
     reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
     attributes = getattr(metadata, "st_file_attributes", 0)
     return stat.S_ISLNK(metadata.st_mode) or bool(reparse_flag and attributes & reparse_flag)
+
+
+def _open_windows_directory_handle(path: Path) -> int:
+    if os.name != "nt":
+        raise OSError("Windows directory handles are unavailable")
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.CDLL("kernel32.dll", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    create_file.restype = wintypes.HANDLE
+    handle = create_file(
+        os.fspath(path),
+        0x0001,  # FILE_LIST_DIRECTORY
+        0x00000001 | 0x00000002,  # FILE_SHARE_READ | FILE_SHARE_WRITE
+        None,
+        3,  # OPEN_EXISTING
+        0x02000000 | 0x00200000,  # BACKUP_SEMANTICS | OPEN_REPARSE_POINT
+        None,
+    )
+    invalid_handle = ctypes.c_void_p(-1).value
+    if handle in {None, invalid_handle}:
+        raise OSError(_windows_last_error(ctypes), "cannot open output workspace")
+    return cast(int, handle)
+
+
+def _windows_directory_path(handle: int) -> Path:
+    if os.name != "nt":
+        raise OSError("Windows directory handles are unavailable")
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.CDLL("kernel32.dll", use_last_error=True)
+    get_final_path = kernel32.GetFinalPathNameByHandleW
+    get_final_path.argtypes = [
+        wintypes.HANDLE,
+        wintypes.LPWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+    ]
+    get_final_path.restype = wintypes.DWORD
+    required = get_final_path(handle, None, 0, 0)
+    if required == 0:
+        raise OSError(_windows_last_error(ctypes), "cannot resolve output workspace")
+    buffer = ctypes.create_unicode_buffer(required + 1)
+    written = get_final_path(handle, buffer, len(buffer), 0)
+    if written == 0 or written >= len(buffer):
+        raise OSError(_windows_last_error(ctypes), "cannot resolve output workspace")
+    return Path(buffer.value)
+
+
+def _close_windows_directory_handle(handle: int) -> None:
+    if os.name != "nt":
+        raise OSError("Windows directory handles are unavailable")
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.CDLL("kernel32.dll", use_last_error=True)
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = [wintypes.HANDLE]
+    close_handle.restype = wintypes.BOOL
+    if not close_handle(handle):
+        raise OSError(_windows_last_error(ctypes), "cannot close output workspace")
+
+
+def _windows_last_error(ctypes_module: object) -> int:
+    getter = vars(ctypes_module).get("get_last_error")
+    if not callable(getter):
+        raise OSError("Windows last-error state is unavailable")
+    value = getter()
+    return value if type(value) is int else 0
 
 
 def _run_bounded_ffmpeg(
