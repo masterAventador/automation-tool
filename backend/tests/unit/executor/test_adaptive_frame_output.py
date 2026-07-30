@@ -437,6 +437,65 @@ def test_memory_failure_after_exclusive_create_removes_the_partial_frame(
     assert tuple(output.iterdir()) == ()
 
 
+def test_registered_frame_is_unlinked_only_once_during_rollback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tools = _fake_tools(tmp_path)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"media")
+    source, approved = approve_source(source)
+    output = tmp_path / "output"
+    output.mkdir(mode=0o700)
+    monkeypatch.setattr(
+        adaptive_frame_extraction,
+        "extract_adaptive_frame_candidates",
+        lambda *_args, **_kwargs: (
+            ExtractedFrame(timestamp_ms=0, is_scene_cut=True, jpeg_bytes=b"first"),
+        ),
+    )
+
+    def fail_memoryview(_payload: bytes) -> memoryview:
+        raise MemoryError("injected allocation failure")
+
+    monkeypatch.setattr(
+        adaptive_frame_extraction,
+        "memoryview",
+        fail_memoryview,
+        raising=False,
+    )
+    real_unlink = adaptive_frame_extraction._OutputWorkspace.unlink
+    unlink_calls = 0
+
+    def replace_after_first_unlink(
+        workspace: adaptive_frame_extraction._OutputWorkspace,
+        filename: str,
+    ) -> None:
+        nonlocal unlink_calls
+        real_unlink(workspace, filename)
+        unlink_calls += 1
+        if unlink_calls == 1:
+            (output / filename).write_bytes(b"concurrent writer")
+
+    monkeypatch.setattr(
+        adaptive_frame_extraction._OutputWorkspace,
+        "unlink",
+        replace_after_first_unlink,
+    )
+
+    with pytest.raises(MemoryError, match="injected allocation failure"):
+        extract_adaptive_frames(
+            tools,
+            source,
+            approved,
+            output,
+            duration_ms=1,
+        )
+
+    assert unlink_calls == 1
+    assert (output / "frame-000001.jpg").read_bytes() == b"concurrent writer"
+
+
 @pytest.mark.parametrize(
     ("media_name", "duration_ms", "expected_count", "expected_size"),
     [

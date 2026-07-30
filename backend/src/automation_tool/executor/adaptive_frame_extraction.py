@@ -639,10 +639,12 @@ def _write_exclusive_frame(
 ) -> None:
     descriptor: int | None = None
     opened = False
+    registered = False
     try:
         descriptor = workspace.open_exclusive(filename)
         opened = True
         created.append(filename)
+        registered = True
         if os.name != "nt":  # pragma: no branch - native platform split
             cast(Callable[[int, int], None], vars(os)["fchmod"])(descriptor, 0o600)
         view = memoryview(payload)
@@ -661,7 +663,7 @@ def _write_exclusive_frame(
         if descriptor is not None:
             with suppress(OSError):
                 os.close(descriptor)
-        if opened:
+        if opened and not registered:
             with suppress(OSError):
                 workspace.unlink(filename)
         raise
