@@ -22,6 +22,7 @@ from urllib.parse import urlencode
 from urllib.request import ProxyHandler, Request, build_opener
 from uuid import UUID, uuid4
 
+import pytest
 from conftest import (
     AlembicRunner,
     process_ids_matching,
@@ -73,6 +74,31 @@ class RunningUvicorn:
     process: subprocess.Popen[bytes]
     port: int
     process_marker: str
+
+
+class FakeUvicornProcess:
+    def __init__(self) -> None:
+        self.returncode: int | None = None
+        self.sent_signal: int | None = None
+        self.terminated = False
+        self.communicated = False
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def send_signal(self, selected_signal: int) -> None:
+        self.sent_signal = selected_signal
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def kill(self) -> None:
+        self.returncode = -9
+
+    def communicate(self, *, timeout: float) -> tuple[bytes, bytes]:
+        self.communicated = True
+        self.returncode = 0
+        return b"", b""
 
 
 def request_json(
@@ -143,6 +169,30 @@ def bounded_process_output(
     )
 
 
+def uvicorn_creation_flags() -> int:
+    if sys.platform == "win32":
+        return int(subprocess.CREATE_NEW_PROCESS_GROUP)
+    return 0
+
+
+def uvicorn_shutdown_signal() -> int:
+    if sys.platform == "win32":
+        return int(signal.CTRL_BREAK_EVENT)
+    return int(signal.SIGINT)
+
+
+def reap_failed_uvicorn_startup(
+    process: subprocess.Popen[bytes],
+) -> tuple[bytes, bytes]:
+    if process.poll() is None:
+        process.terminate()
+    try:
+        return process.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        return process.communicate(timeout=5)
+
+
 def start_uvicorn(postgresql_url: str) -> RunningUvicorn:
     port = reserve_control_plane_port()
     assert port in CONTROL_PLANE_PORT_RANGE
@@ -174,6 +224,7 @@ def start_uvicorn(postgresql_url: str) -> RunningUvicorn:
             "warning",
         ],
         cwd=BACKEND_ROOT,
+        creationflags=uvicorn_creation_flags(),
         env=environment,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
@@ -181,38 +232,37 @@ def start_uvicorn(postgresql_url: str) -> RunningUvicorn:
     )
     deadline = time.monotonic() + 10
     last_observation = "no connection attempt"
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            stdout, stderr = process.communicate(timeout=1)
-            raise AssertionError(
-                "The LE-06 Uvicorn process exited during startup: "
-                + bounded_process_output(stdout, stderr)
-            )
-        try:
-            health = request_json(port, "GET", "/api/v1/health", timeout=0.5)
-        except (OSError, URLError) as error:
-            last_observation = repr(error)
-            time.sleep(0.05)
-            continue
-        last_observation = f"status={health.status}, body={health.body!r}"
-        if health.status == 200:
-            assert health.body == {
-                "service": "control-plane",
-                "status": "ok",
-                "version": __version__,
-            }
-            return RunningUvicorn(
-                process=process,
-                port=port,
-                process_marker=process_marker,
-            )
-        time.sleep(0.05)
-    process.terminate()
     try:
-        stdout, stderr = process.communicate(timeout=5)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        stdout, stderr = process.communicate(timeout=5)
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                stdout, stderr = process.communicate(timeout=1)
+                raise AssertionError(
+                    "The LE-06 Uvicorn process exited during startup: "
+                    + bounded_process_output(stdout, stderr)
+                )
+            try:
+                health = request_json(port, "GET", "/api/v1/health", timeout=0.5)
+            except (OSError, URLError) as error:
+                last_observation = repr(error)
+                time.sleep(0.05)
+                continue
+            last_observation = f"status={health.status}, body={health.body!r}"
+            if health.status == 200:
+                assert health.body == {
+                    "service": "control-plane",
+                    "status": "ok",
+                    "version": __version__,
+                }
+                return RunningUvicorn(
+                    process=process,
+                    port=port,
+                    process_marker=process_marker,
+                )
+            time.sleep(0.05)
+    except BaseException:
+        reap_failed_uvicorn_startup(process)
+        raise
+    stdout, stderr = reap_failed_uvicorn_startup(process)
     raise AssertionError(
         "The LE-06 Uvicorn process did not become healthy "
         f"(last_observation={last_observation}): " + bounded_process_output(stdout, stderr)
@@ -221,7 +271,7 @@ def start_uvicorn(postgresql_url: str) -> RunningUvicorn:
 
 def stop_uvicorn(server: RunningUvicorn) -> None:
     if server.process.poll() is None:
-        server.process.send_signal(signal.SIGINT)
+        server.process.send_signal(uvicorn_shutdown_signal())
     try:
         stdout, stderr = server.process.communicate(timeout=10)
     except subprocess.TimeoutExpired:
@@ -245,6 +295,116 @@ def real_control_plane(postgresql_url: str) -> Iterator[RunningUvicorn]:
         yield server
     finally:
         stop_uvicorn(server)
+
+
+def test_uvicorn_process_uses_the_windows_process_group_and_break_signal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = FakeUvicornProcess()
+    popen_arguments: dict[str, Any] = {}
+    windows_process_group = 512
+    windows_break_signal = 21
+
+    def fake_popen(*arguments: Any, **keywords: Any) -> FakeUvicornProcess:
+        popen_arguments.update(keywords)
+        return process
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(
+        subprocess,
+        "CREATE_NEW_PROCESS_GROUP",
+        windows_process_group,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        signal,
+        "CTRL_BREAK_EVENT",
+        windows_break_signal,
+        raising=False,
+    )
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "reserve_control_plane_port",
+        lambda: CONTROL_PLANE_PORT_RANGE.start,
+    )
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "require_reserved_port_still_free",
+        lambda port: None,
+    )
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "port_is_available",
+        lambda port: True,
+    )
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "process_ids_matching",
+        lambda marker: set(),
+    )
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "request_json",
+        lambda *arguments, **keywords: HttpResponse(
+            status=200,
+            body={
+                "service": "control-plane",
+                "status": "ok",
+                "version": __version__,
+            },
+            text="",
+        ),
+    )
+
+    server = start_uvicorn("postgresql+asyncpg://redacted")
+    stop_uvicorn(server)
+
+    assert popen_arguments["creationflags"] == windows_process_group
+    assert process.sent_signal == windows_break_signal
+
+
+def test_uvicorn_startup_contract_failure_still_reaps_the_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = FakeUvicornProcess()
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *arguments, **keywords: process)
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "reserve_control_plane_port",
+        lambda: CONTROL_PLANE_PORT_RANGE.start,
+    )
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "require_reserved_port_still_free",
+        lambda port: None,
+    )
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "port_is_available",
+        lambda port: True,
+    )
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "process_ids_matching",
+        lambda marker: set(),
+    )
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "request_json",
+        lambda *arguments, **keywords: HttpResponse(
+            status=200,
+            body={"service": "control-plane", "status": "changed"},
+            text="",
+        ),
+    )
+
+    with pytest.raises(AssertionError):
+        start_uvicorn("postgresql+asyncpg://redacted")
+
+    assert process.terminated
+    assert process.communicated
 
 
 async def seed_credentials(
@@ -312,6 +472,7 @@ async def verify_persisted_editing_graph(
     postgresql_url: str,
     *,
     installation_id: InstallationId,
+    outsider_installation_id: InstallationId,
     project_id: UUID,
     material_id: UUID,
     timeline_id: UUID,
@@ -358,10 +519,25 @@ async def verify_persisted_editing_graph(
                     ).where(editing_jobs.c.job_id == job_id)
                 )
             ).one()
-            app_session_count = await session.scalar(
-                select(func.count())
-                .select_from(device_sessions)
-                .where(device_sessions.c.capability == "app.control-plane")
+            app_session_counts = dict(
+                (
+                    await session.execute(
+                        select(
+                            device_sessions.c.installation_id,
+                            func.count(),
+                        )
+                        .where(
+                            device_sessions.c.capability == "app.control-plane",
+                            device_sessions.c.installation_id.in_(
+                                (
+                                    installation_id.uuid,
+                                    outsider_installation_id.uuid,
+                                )
+                            ),
+                        )
+                        .group_by(device_sessions.c.installation_id)
+                    )
+                ).all()
             )
     finally:
         await database.close()
@@ -377,7 +553,10 @@ async def verify_persisted_editing_graph(
         1,
         "queued",
     )
-    assert app_session_count is not None and app_session_count >= 2
+    assert app_session_counts == {
+        installation_id.uuid: 1,
+        outsider_installation_id.uuid: 1,
+    }
 
 
 def test_real_uvicorn_process_round_trips_the_editing_surface_through_postgresql(
@@ -661,6 +840,7 @@ def test_real_uvicorn_process_round_trips_the_editing_surface_through_postgresql
         verify_persisted_editing_graph(
             postgresql_url,
             installation_id=owner.installation_id,
+            outsider_installation_id=outsider.installation_id,
             project_id=project_id,
             material_id=material_id,
             timeline_id=timeline_id,
