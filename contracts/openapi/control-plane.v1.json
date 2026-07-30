@@ -358,6 +358,159 @@
         "title": "DouyinSearchExposureAction",
         "type": "string"
       },
+      "EditingCaptionStyle": {
+        "additionalProperties": false,
+        "properties": {
+          "fontKey": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Fontkey",
+            "type": "string"
+          },
+          "fontPx": {
+            "maximum": 200.0,
+            "minimum": 12.0,
+            "title": "Fontpx",
+            "type": "integer"
+          },
+          "lineSpacing": {
+            "maximum": 3.0,
+            "minimum": 1.0,
+            "title": "Linespacing",
+            "type": "number"
+          },
+          "strokePx": {
+            "maximum": 20.0,
+            "minimum": 0.0,
+            "title": "Strokepx",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fontKey",
+          "fontPx",
+          "strokePx",
+          "lineSpacing"
+        ],
+        "title": "EditingCaptionStyle",
+        "type": "object"
+      },
+      "EditingOutputSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "fps": {
+            "maximum": 60.0,
+            "minimum": 12.0,
+            "title": "Fps",
+            "type": "integer"
+          },
+          "height": {
+            "maximum": 4096.0,
+            "minimum": 128.0,
+            "title": "Height",
+            "type": "integer"
+          },
+          "width": {
+            "maximum": 4096.0,
+            "minimum": 128.0,
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "width",
+          "height",
+          "fps"
+        ],
+        "title": "EditingOutputSpec",
+        "type": "object"
+      },
+      "EditingProjectCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "captionStyle": {
+            "$ref": "#/components/schemas/EditingCaptionStyle"
+          },
+          "output": {
+            "$ref": "#/components/schemas/EditingOutputSpec"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "output",
+          "captionStyle"
+        ],
+        "title": "EditingProjectCreateRequest",
+        "type": "object"
+      },
+      "EditingProjectListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EditingProjectResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "title": "EditingProjectListResponse",
+        "type": "object"
+      },
+      "EditingProjectResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "captionStyle": {
+            "$ref": "#/components/schemas/EditingCaptionStyle"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "output": {
+            "$ref": "#/components/schemas/EditingOutputSpec"
+          },
+          "projectId": {
+            "title": "Projectid",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "title",
+          "output",
+          "captionStyle",
+          "createdAt"
+        ],
+        "title": "EditingProjectResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2101,6 +2254,164 @@
         "summary": "Exchange Device Session",
         "tags": [
           "device-sessions"
+        ]
+      }
+    },
+    "/api/v1/editing-projects": {
+      "get": {
+        "operationId": "listEditingProjects",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingProjectListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "List Editing Projects",
+        "tags": [
+          "editing-projects"
+        ]
+      },
+      "post": {
+        "operationId": "createEditingProject",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditingProjectCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingProjectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Create Editing Project",
+        "tags": [
+          "editing-projects"
+        ]
+      }
+    },
+    "/api/v1/editing-projects/{project_id}": {
+      "get": {
+        "operationId": "getEditingProject",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingProjectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Get Editing Project",
+        "tags": [
+          "editing-projects"
         ]
       }
     },

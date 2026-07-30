@@ -2359,6 +2359,35 @@ editing_projects = Table(
     PrimaryKeyConstraint("project_id", name="pk_editing_projects"),
 )
 
+editing_project_installations = Table(
+    "editing_project_installations",
+    metadata,
+    Column("project_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    ForeignKeyConstraint(
+        ["project_id"],
+        ["editing_projects.project_id"],
+        name="fk_editing_project_installations_project",
+        ondelete="RESTRICT",
+    ),
+    ForeignKeyConstraint(
+        ["installation_id"],
+        ["installations.id"],
+        name="fk_editing_project_installations_installation",
+        ondelete="RESTRICT",
+    ),
+    PrimaryKeyConstraint(
+        "project_id",
+        name="pk_editing_project_installations",
+    ),
+)
+
+Index(
+    "ix_editing_project_installations_installation_project",
+    editing_project_installations.c.installation_id,
+    editing_project_installations.c.project_id,
+)
+
 materials = Table(
     "materials",
     metadata,

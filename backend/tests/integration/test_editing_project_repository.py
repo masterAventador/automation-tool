@@ -7,6 +7,7 @@ its own writes proves nothing about what actually landed.
 
 from __future__ import annotations
 
+import secrets
 import traceback
 from datetime import UTC, datetime
 from typing import cast
@@ -21,6 +22,7 @@ from sqlalchemy.exc import IntegrityError
 
 from automation_tool.control_plane.application.editing_projects import (
     EditingProjectAlreadyRegistered,
+    EditingProjectDataRejected,
     EditingProjectNotFound,
     EditingProjectPersistenceUnavailable,
 )
@@ -29,10 +31,16 @@ from automation_tool.control_plane.domain import (
     CaptionStyle,
     EditingProject,
     EditingProjectId,
+    InstallationId,
     InvalidEditingProjectModel,
     OutputSpec,
 )
-from automation_tool.control_plane.infrastructure.database import Database, editing_projects
+from automation_tool.control_plane.infrastructure.database import (
+    Database,
+    editing_project_installations,
+    editing_projects,
+    installations,
+)
 from automation_tool.control_plane.infrastructure.database.editing_project_repository import (
     SqlAlchemyEditingProjectRepository,
 )
@@ -120,7 +128,20 @@ def row_values(project_id: UUID, **overrides: object) -> dict[str, object]:
 
 async def reset_data(database: Database) -> None:
     async with database.session() as session:
+        await session.execute(delete(editing_project_installations))
         await session.execute(delete(editing_projects))
+
+
+async def seed_installation(database: Database) -> InstallationId:
+    installation_id = InstallationId.new()
+    async with database.session() as session:
+        await session.execute(
+            insert(installations).values(
+                id=installation_id.uuid,
+                device_public_key=secrets.token_bytes(32),
+            )
+        )
+    return installation_id
 
 
 async def stored_row(database: Database, project_id: EditingProjectId) -> dict[str, object]:
@@ -282,6 +303,181 @@ async def test_missing_project_and_duplicate_save_are_refused_differently(
         assert (await repository.get(project_id)).title == TITLE
     finally:
         await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_project_pages_use_created_at_and_project_id_as_one_total_order(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    """Equal timestamps cannot make a project repeat or disappear across pages."""
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyEditingProjectRepository(database)
+    identifiers = tuple(
+        EditingProjectId.parse(f"00000000-0000-4000-8000-{suffix:012x}") for suffix in range(1, 5)
+    )
+    try:
+        await reset_data(database)
+        for index, project_id in enumerate(identifiers):
+            await repository.save(
+                make_project(
+                    project_id,
+                    title=f"同一时刻项目 {index}",
+                    created_at=CREATED_AT,
+                )
+            )
+
+        first = await repository.list_page(
+            before_created_at=None,
+            before_project_id=None,
+            limit=2,
+        )
+        second = await repository.list_page(
+            before_created_at=first[-1].created_at,
+            before_project_id=first[-1].project_id,
+            limit=2,
+        )
+
+        assert tuple(project.project_id for project in first + second) == tuple(
+            reversed(identifiers)
+        )
+        assert len({project.project_id for project in first + second}) == 4
+
+        with pytest.raises(EditingProjectDataRejected):
+            await repository.list_page(
+                before_created_at=CREATED_AT,
+                before_project_id=None,
+                limit=2,
+            )
+        with pytest.raises(EditingProjectDataRejected):
+            await repository.list_page(
+                before_created_at=None,
+                before_project_id=None,
+                limit=102,
+            )
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_editing_projects_have_a_database_enforced_installation_owner(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    """Scoped writes and reads enforce one owner in PostgreSQL, not in memory."""
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyEditingProjectRepository(database)
+    owner_ids: tuple[InstallationId, ...] = ()
+    try:
+        await reset_data(database)
+        owner = await seed_installation(database)
+        other = await seed_installation(database)
+        owner_ids = (owner, other)
+        owned = make_project(EditingProjectId.new(), title="当前设备项目")
+        foreign = make_project(
+            EditingProjectId.new(),
+            title="其它设备私有项目",
+            created_at=LATER,
+        )
+
+        await repository.save_for_installation(owned, owner)
+        await repository.save_for_installation(foreign, other)
+
+        assert await repository.get_for_installation(owned.project_id, owner) == owned
+        with pytest.raises(EditingProjectNotFound):
+            await repository.get_for_installation(foreign.project_id, owner)
+        assert await repository.list_page_for_installation(
+            installation_id=owner,
+            before_created_at=None,
+            before_project_id=None,
+            limit=20,
+        ) == (owned,)
+
+        async with database.session() as session:
+            ownership_rows = (
+                (
+                    await session.execute(
+                        select(editing_project_installations).order_by(
+                            editing_project_installations.c.project_id
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            columns = {
+                cast(str, row["column_name"]): (
+                    cast(str, row["data_type"]),
+                    cast(str, row["is_nullable"]),
+                )
+                for row in (
+                    await session.execute(
+                        text(
+                            "select column_name, data_type, is_nullable "
+                            "from information_schema.columns "
+                            "where table_schema = 'public' "
+                            "and table_name = 'editing_project_installations'"
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            }
+            constraints = set(
+                await session.scalars(
+                    text(
+                        "select conname from pg_constraint where conrelid = "
+                        "'public.editing_project_installations'::regclass"
+                    )
+                )
+            )
+            indexes = set(
+                await session.scalars(
+                    text(
+                        "select indexname from pg_indexes "
+                        "where schemaname = 'public' "
+                        "and tablename = 'editing_project_installations'"
+                    )
+                )
+            )
+        assert {(row["project_id"], row["installation_id"]) for row in ownership_rows} == {
+            (owned.project_id.uuid, owner.uuid),
+            (foreign.project_id.uuid, other.uuid),
+        }
+        assert columns == {
+            "project_id": ("uuid", "NO"),
+            "installation_id": ("uuid", "NO"),
+        }
+        assert constraints >= {
+            "pk_editing_project_installations",
+            "fk_editing_project_installations_project",
+            "fk_editing_project_installations_installation",
+        }
+        assert "ix_editing_project_installations_installation_project" in indexes
+
+        with pytest.raises(IntegrityError):
+            async with database.session() as session:
+                await session.execute(
+                    insert(editing_project_installations).values(
+                        project_id=owned.project_id.uuid,
+                        installation_id=other.uuid,
+                    )
+                )
+    finally:
+        await reset_data(database)
+        if owner_ids:
+            async with database.session() as session:
+                await session.execute(
+                    delete(installations).where(
+                        installations.c.id.in_(
+                            installation_id.uuid for installation_id in owner_ids
+                        )
+                    )
+                )
         await database.close()
 
 

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import cast
 
-from sqlalchemy import insert, select
+from sqlalchemy import and_, desc, insert, or_, select
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -19,13 +19,14 @@ from automation_tool.control_plane.domain import (
     CaptionStyle,
     EditingProject,
     EditingProjectId,
+    InstallationId,
     InvalidEditingProjectModel,
     InvalidResourceId,
     OutputSpec,
 )
 
 from .hydration import normalise_timestamp
-from .schema import editing_projects
+from .schema import editing_project_installations, editing_projects
 from .session import Database
 
 # A refused or timed-out connection surfaces as an `OSError`, not a
@@ -33,6 +34,21 @@ from .session import Database
 # dialect only wraps asyncpg's own exceptions. `session.py` and four other
 # repositories catch the same pair for the same reason.
 _CONNECTION_FAILURES = (OSError, SQLAlchemyError)
+
+
+def _column_values(project: EditingProject) -> dict[str, object]:
+    return {
+        "project_id": project.project_id.uuid,
+        "title": project.title,
+        "output_width": project.output.width,
+        "output_height": project.output.height,
+        "output_fps": project.output.fps,
+        "caption_font_key": project.caption_style.font_key,
+        "caption_font_px": project.caption_style.font_px,
+        "caption_stroke_px": project.caption_style.stroke_px,
+        "caption_line_spacing": project.caption_style.line_spacing,
+        "created_at": project.created_at,
+    }
 
 
 def _hydrate(row: RowMapping) -> EditingProject:
@@ -91,22 +107,41 @@ class SqlAlchemyEditingProjectRepository:
             raise EditingProjectDataRejected
         try:
             async with self._database.session() as session:
-                await session.execute(
-                    insert(editing_projects).values(
-                        project_id=project.project_id.uuid,
-                        title=project.title,
-                        output_width=project.output.width,
-                        output_height=project.output.height,
-                        output_fps=project.output.fps,
-                        caption_font_key=project.caption_style.font_key,
-                        caption_font_px=project.caption_style.font_px,
-                        caption_stroke_px=project.caption_style.stroke_px,
-                        caption_line_spacing=project.caption_style.line_spacing,
-                        created_at=project.created_at,
-                    )
-                )
+                await session.execute(insert(editing_projects).values(**_column_values(project)))
         except IntegrityError:
             raise EditingProjectAlreadyRegistered from None
+        except _CONNECTION_FAILURES:
+            raise EditingProjectPersistenceUnavailable from None
+        except Exception:
+            raise EditingProjectPersistenceUnavailable from None
+
+    async def save_for_installation(
+        self,
+        project: EditingProject,
+        installation_id: InstallationId,
+    ) -> None:
+        """Atomically create a project and bind its only owning Installation."""
+        if not isinstance(project, EditingProject) or not isinstance(
+            installation_id, InstallationId
+        ):
+            raise EditingProjectDataRejected
+        try:
+            async with self._database.session() as session:
+                await session.execute(insert(editing_projects).values(**_column_values(project)))
+                await session.execute(
+                    insert(editing_project_installations).values(
+                        project_id=project.project_id.uuid,
+                        installation_id=installation_id.uuid,
+                    )
+                )
+        except IntegrityError as error:
+            constraint = getattr(getattr(error.orig, "__cause__", None), "constraint_name", None)
+            if constraint in {
+                "pk_editing_projects",
+                "pk_editing_project_installations",
+            }:
+                raise EditingProjectAlreadyRegistered from None
+            raise EditingProjectDataRejected from None
         except _CONNECTION_FAILURES:
             raise EditingProjectPersistenceUnavailable from None
         except Exception:
@@ -150,6 +185,134 @@ class SqlAlchemyEditingProjectRepository:
         if row is None:
             raise EditingProjectNotFound
         return _hydrate(row)
+
+    async def get_for_installation(
+        self,
+        project_id: EditingProjectId,
+        installation_id: InstallationId,
+    ) -> EditingProject:
+        if not isinstance(project_id, EditingProjectId) or not isinstance(
+            installation_id, InstallationId
+        ):
+            raise EditingProjectDataRejected
+        statement = (
+            select(editing_projects)
+            .join(
+                editing_project_installations,
+                editing_project_installations.c.project_id == editing_projects.c.project_id,
+            )
+            .where(
+                editing_projects.c.project_id == project_id.uuid,
+                editing_project_installations.c.installation_id == installation_id.uuid,
+            )
+        )
+        try:
+            async with self._database.session() as session:
+                row = (await session.execute(statement)).mappings().one_or_none()
+        except _CONNECTION_FAILURES:
+            raise EditingProjectPersistenceUnavailable from None
+        except Exception:
+            raise EditingProjectPersistenceUnavailable from None
+        if row is None:
+            raise EditingProjectNotFound
+        return _hydrate(row)
+
+    async def list_page(
+        self,
+        *,
+        before_created_at: datetime | None,
+        before_project_id: EditingProjectId | None,
+        limit: int,
+    ) -> tuple[EditingProject, ...]:
+        if (
+            type(limit) is not int
+            or not 1 <= limit <= 101
+            or (before_created_at is None) != (before_project_id is None)
+        ):
+            raise EditingProjectDataRejected
+        statement = select(editing_projects)
+        if before_created_at is not None and before_project_id is not None:
+            if (
+                not isinstance(before_created_at, datetime)
+                or before_created_at.tzinfo is None
+                or before_created_at.utcoffset() != UTC.utcoffset(before_created_at)
+                or not isinstance(before_project_id, EditingProjectId)
+            ):
+                raise EditingProjectDataRejected
+            statement = statement.where(
+                or_(
+                    editing_projects.c.created_at < before_created_at,
+                    and_(
+                        editing_projects.c.created_at == before_created_at,
+                        editing_projects.c.project_id < before_project_id.uuid,
+                    ),
+                )
+            )
+        statement = statement.order_by(
+            desc(editing_projects.c.created_at),
+            desc(editing_projects.c.project_id),
+        ).limit(limit)
+        try:
+            async with self._database.session() as session:
+                rows = (await session.execute(statement)).mappings().all()
+        except _CONNECTION_FAILURES:
+            raise EditingProjectPersistenceUnavailable from None
+        except Exception:
+            raise EditingProjectPersistenceUnavailable from None
+        return tuple(_hydrate(row) for row in rows)
+
+    async def list_page_for_installation(
+        self,
+        *,
+        installation_id: InstallationId,
+        before_created_at: datetime | None,
+        before_project_id: EditingProjectId | None,
+        limit: int,
+    ) -> tuple[EditingProject, ...]:
+        if (
+            not isinstance(installation_id, InstallationId)
+            or type(limit) is not int
+            or not 1 <= limit <= 101
+            or (before_created_at is None) != (before_project_id is None)
+        ):
+            raise EditingProjectDataRejected
+        statement = (
+            select(editing_projects)
+            .join(
+                editing_project_installations,
+                editing_project_installations.c.project_id == editing_projects.c.project_id,
+            )
+            .where(editing_project_installations.c.installation_id == installation_id.uuid)
+        )
+        if before_created_at is not None and before_project_id is not None:
+            if (
+                not isinstance(before_created_at, datetime)
+                or before_created_at.tzinfo is None
+                or before_created_at.utcoffset() != UTC.utcoffset(before_created_at)
+                or not isinstance(before_project_id, EditingProjectId)
+            ):
+                raise EditingProjectDataRejected
+            statement = statement.where(
+                or_(
+                    editing_projects.c.created_at < before_created_at,
+                    and_(
+                        editing_projects.c.created_at == before_created_at,
+                        editing_projects.c.project_id < before_project_id.uuid,
+                    ),
+                )
+            )
+        statement = statement.order_by(
+            desc(editing_projects.c.created_at),
+            desc(editing_projects.c.project_id),
+        ).limit(limit)
+        try:
+            async with self._database.session() as session:
+                rows = (await session.execute(statement)).mappings().all()
+        except _CONNECTION_FAILURES:
+            raise EditingProjectPersistenceUnavailable from None
+        except Exception:
+            raise EditingProjectPersistenceUnavailable from None
+        return tuple(_hydrate(row) for row in rows)
 
 
 __all__ = ["SqlAlchemyEditingProjectRepository"]
