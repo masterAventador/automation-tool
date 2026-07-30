@@ -95,44 +95,55 @@ const forbiddenContentMarkers = [
 ].map((marker) => Buffer.from(marker));
 forbiddenContentMarkers.push(Buffer.from(developmentVerifyingKey, "base64url"));
 const maximumMarkerLength = Math.max(...forbiddenContentMarkers.map((marker) => marker.length));
+const rejectionPrefix = "Release bundle is rejected";
 
-function rejected() {
-  return new Error("Release bundle is rejected");
+class ReleaseBundleRejection extends Error {
+  constructor(reason, rendered) {
+    super(
+      `${rejectionPrefix}: ${reason}${rendered === undefined ? "" : ` (${rendered})`}`,
+    );
+    this.name = "ReleaseBundleRejection";
+  }
+}
+
+function rejected(reason, rendered) {
+  return new ReleaseBundleRejection(reason, rendered);
 }
 
 async function requireContainedSymlink(link, root, state) {
+  const linkRendered = normalizedRelative(root, link);
   let target;
   try {
     target = await realpath(link);
   } catch {
     // Missing target or a link loop: it cannot be shown to stay inside, and at
     // runtime it is an unexplained failure rather than a missing file.
-    throw rejected();
+    throw rejected("symlink target cannot be resolved", linkRendered);
   }
   const packageRoot = await realpath(root);
   const rendered = relative(packageRoot, target).replaceAll("\\", "/");
   if (isAbsolute(rendered) || rendered.startsWith("../")) {
-    throw rejected();
+    throw rejected("symlink target escapes the bundle", linkRendered);
   }
   // Only file links are legitimate. A directory link gives one tree two paths,
   // which would let a payload sit somewhere the "executor lives here" checks
   // never look. PyInstaller only ever links individual libraries.
   if (!(await lstat(target)).isFile()) {
-    throw rejected();
+    throw rejected("symlink target is not a regular file", linkRendered);
   }
   if (
     state.embeddedBrowser !== undefined &&
     (rendered === state.embeddedBrowser ||
       rendered.startsWith(`${state.embeddedBrowser}/`))
   ) {
-    throw rejected();
+    throw rejected("symlink targets the digest-gated browser tree", linkRendered);
   }
 }
 
 function normalizedRelative(root, path) {
   const rendered = relative(root, path).replaceAll("\\", "/");
   if (rendered === "" || rendered === "." || isAbsolute(rendered) || rendered.startsWith("../")) {
-    throw rejected();
+    throw rejected("path is outside the bundle boundary");
   }
   return rendered;
 }
@@ -173,7 +184,7 @@ async function readCatalogManifest(root, platform) {
     const raw = await readFile(resolve(root, catalogRoot, "manifest.json"), "utf8");
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed.files)) {
-      throw rejected();
+      throw rejected("catalog manifest has no files array", `${catalogRoot}/manifest.json`);
     }
     return {
       catalogRoot,
@@ -183,7 +194,10 @@ async function readCatalogManifest(root, platform) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return { catalogRoot: undefined, catalogFiles: undefined };
     }
-    throw rejected();
+    if (error instanceof ReleaseBundleRejection) {
+      throw error;
+    }
+    throw rejected("catalog manifest is unreadable or invalid", `${catalogRoot}/manifest.json`);
   }
 }
 
@@ -197,23 +211,23 @@ function assertSafePath(rendered, state) {
       forbiddenSegments.has(lowered) ||
       forbiddenNames.has(lowered)
     ) {
-      throw rejected();
+      throw rejected("forbidden path or name", rendered);
     }
     if (
       forbiddenSuffixes.some((suffix) => lowered.endsWith(suffix)) &&
       !accountedForByCatalog(rendered, state)
     ) {
-      throw rejected();
+      throw rejected("unaccounted media or secret-bearing suffix", rendered);
     }
   }
 }
 
-async function assertSafeContent(path) {
+async function assertSafeContent(path, rendered) {
   let tail = Buffer.alloc(0);
   for await (const chunk of createReadStream(path, { highWaterMark: scanChunkSize })) {
     const combined = Buffer.concat([tail, chunk]);
     if (forbiddenContentMarkers.some((marker) => combined.indexOf(marker) !== -1)) {
-      throw rejected();
+      throw rejected("forbidden content marker", rendered);
     }
     tail = combined.subarray(Math.max(0, combined.length - maximumMarkerLength + 1));
   }
@@ -245,31 +259,41 @@ async function collectBundleFiles(directory, root, state) {
       continue;
     }
     if (!metadata.isFile()) {
-      throw rejected();
+      throw rejected("special file is forbidden", rendered);
     }
     state.fileCount += 1;
     state.packageSize += metadata.size;
-    if (state.fileCount > maximumFiles || state.packageSize > maximumBytes) {
-      throw rejected();
+    if (state.fileCount > maximumFiles) {
+      throw rejected("file count exceeds the release limit", rendered);
     }
-    await assertSafeContent(path);
+    if (state.packageSize > maximumBytes) {
+      throw rejected("package bytes exceed the release limit", rendered);
+    }
+    await assertSafeContent(path, rendered);
     state.files.add(rendered);
   }
 }
 
-async function declaredDistributionTarget(browser) {
-  const manifest = JSON.parse(
-    await readFile(resolve(browser, "distribution-manifest.v1.json"), "utf8"),
-  );
+async function declaredDistributionTarget(browser, browserRendered) {
+  const rendered = `${browserRendered}/distribution-manifest.v1.json`;
+  let manifest;
+  try {
+    manifest = JSON.parse(
+      await readFile(resolve(browser, "distribution-manifest.v1.json"), "utf8"),
+    );
+  } catch {
+    throw rejected("embedded browser distribution manifest is unreadable or invalid", rendered);
+  }
   const target = manifest?.target;
   if (typeof target !== "string" || !/^[a-z0-9][a-z0-9_-]{0,31}$/.test(target)) {
-    throw rejected();
+    throw rejected("embedded browser distribution target is invalid", rendered);
   }
   return target;
 }
 
 async function requireEmbeddedBrowserDigestGate(root, browser, platform) {
-  const target = await declaredDistributionTarget(browser);
+  const browserRendered = normalizedRelative(root, browser);
+  const target = await declaredDistributionTarget(browser, browserRendered);
   const parameters = [
     embeddedBrowserGate,
     "--bundle-root",
@@ -279,14 +303,12 @@ async function requireEmbeddedBrowserDigestGate(root, browser, platform) {
     "--platform",
     platform,
   ];
-  let lastFailure;
   for (const interpreter of pythonCandidates) {
     try {
       await execFileAsync(interpreter, parameters, { maxBuffer: 16 * 1024 * 1024 });
       return;
     } catch (error) {
       if (error?.code === "ENOENT") {
-        lastFailure = error;
         continue;
       }
       // Fixed rejection for the caller; the gate's own fixed message keeps a
@@ -296,11 +318,10 @@ async function requireEmbeddedBrowserDigestGate(root, browser, platform) {
       // would leak repository and bundle absolute paths, so it is dropped.
       const [firstLine = ""] = String(error?.stdout ?? "").split("\n");
       process.stderr.write(`${firstLine}\n`);
-      throw rejected();
+      throw rejected("embedded browser digest gate failed", browserRendered);
     }
   }
-  process.stderr.write(`embedded browser digest gate interpreter unavailable: ${lastFailure}\n`);
-  throw rejected();
+  throw rejected("embedded browser digest gate interpreter is unavailable", browserRendered);
 }
 
 export async function auditReleaseBundle({
@@ -311,7 +332,7 @@ export async function auditReleaseBundle({
 }) {
   try {
     if (platform !== "macos" && platform !== "windows") {
-      throw rejected();
+      throw rejected("platform must be macos or windows");
     }
     const root = resolve(bundleRoot);
     const executor = resolve(executorPackagePath);
@@ -320,16 +341,25 @@ export async function auditReleaseBundle({
         ? "Contents/Resources/local-executor/package"
         : "local-executor/package";
     if (normalizedRelative(root, executor) !== expectedExecutor) {
-      throw rejected();
+      throw rejected("executor package is not at the required release path", expectedExecutor);
     }
-    const [rootMetadata, executorMetadata] = await Promise.all([lstat(root), lstat(executor)]);
-    if (
-      !rootMetadata.isDirectory() ||
-      rootMetadata.isSymbolicLink() ||
-      !executorMetadata.isDirectory() ||
-      executorMetadata.isSymbolicLink()
-    ) {
-      throw rejected();
+    let rootMetadata;
+    try {
+      rootMetadata = await lstat(root);
+    } catch {
+      throw rejected("bundle root is missing or unreadable");
+    }
+    let executorMetadata;
+    try {
+      executorMetadata = await lstat(executor);
+    } catch {
+      throw rejected("executor package is missing or unreadable", expectedExecutor);
+    }
+    if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
+      throw rejected("bundle root is not a regular directory");
+    }
+    if (!executorMetadata.isDirectory() || executorMetadata.isSymbolicLink()) {
+      throw rejected("executor package is not a regular directory", expectedExecutor);
     }
 
     // The embedded Chromium distribution is the one subtree this scanner
@@ -350,7 +380,10 @@ export async function auditReleaseBundle({
       embeddedBrowserPath !== undefined &&
       normalizedRelative(root, resolve(embeddedBrowserPath)) !== expectedBrowser
     ) {
-      throw rejected();
+      throw rejected(
+        "declared embedded browser is not at the required release path",
+        expectedBrowser,
+      );
     }
     let browserMetadata;
     try {
@@ -359,18 +392,18 @@ export async function auditReleaseBundle({
       // Only a genuinely absent resource means "this bundle ships no browser";
       // anything else (permission, I/O) must not degrade into skipping it.
       if (error?.code !== "ENOENT") {
-        throw rejected();
+        throw rejected("embedded browser cannot be inspected", expectedBrowser);
       }
     }
     let embeddedBrowser;
     if (browserMetadata !== undefined) {
       if (!browserMetadata.isDirectory() || browserMetadata.isSymbolicLink()) {
-        throw rejected();
+        throw rejected("embedded browser is not a regular directory", expectedBrowser);
       }
       await requireEmbeddedBrowserDigestGate(root, browser, platform);
       embeddedBrowser = expectedBrowser;
     } else if (embeddedBrowserPath !== undefined) {
-      throw rejected();
+      throw rejected("declared embedded browser is missing", expectedBrowser);
     }
 
     const { catalogRoot, catalogFiles } = await readCatalogManifest(root, platform);
@@ -392,15 +425,15 @@ export async function auditReleaseBundle({
       `${expectedExecutor}/executor-manifest.v1.sig`,
     ]) {
       if (!state.files.has(required)) {
-        throw rejected();
+        throw rejected("required release file is missing", required);
       }
     }
     return Object.freeze({ fileCount: state.fileCount, packageSize: state.packageSize });
   } catch (error) {
-    if (error instanceof Error && error.message === "Release bundle is rejected") {
+    if (error instanceof ReleaseBundleRejection) {
       throw error;
     }
-    throw rejected();
+    throw rejected("unexpected audit failure");
   }
 }
 
@@ -410,7 +443,7 @@ function parseArguments(arguments_) {
     const key = arguments_[index];
     const value = arguments_[index + 1];
     if (!key?.startsWith("--") || value === undefined || values.has(key)) {
-      throw rejected();
+      throw rejected("command arguments must be unique --key value pairs");
     }
     values.set(key, value);
   }
@@ -420,7 +453,7 @@ function parseArguments(arguments_) {
     required.some((key) => !values.has(key)) ||
     [...values.keys()].some((key) => !required.includes(key) && !optional.includes(key))
   ) {
-    throw rejected();
+    throw rejected("required command arguments are missing or unknown");
   }
   return values;
 }
@@ -440,5 +473,14 @@ async function runCommand() {
 
 const isCommand = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isCommand) {
-  await runCommand();
+  try {
+    await runCommand();
+  } catch (error) {
+    const safe =
+      error instanceof ReleaseBundleRejection
+        ? error
+        : rejected("unexpected command failure");
+    process.stderr.write(`${safe.message}\n`);
+    process.exitCode = 1;
+  }
 }

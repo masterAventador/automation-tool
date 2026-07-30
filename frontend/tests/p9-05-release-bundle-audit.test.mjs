@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { auditReleaseBundle } from "../scripts/audit-release-bundle.mjs";
 
 const CATALOG_ROOT = "Contents/Resources/motion-catalog";
+const AUDITOR = fileURLToPath(new URL("../scripts/audit-release-bundle.mjs", import.meta.url));
 
 /**
  * Write the frozen catalog tree the release now installs, with `files` naming
@@ -99,6 +102,67 @@ test("P9-05 rejects runtime data, user material, credentials, and test/debug con
   }
 });
 
+test("P9-05 rejection names the rule and bundle-relative file without leaking the host path", async () => {
+  const unsafePath = await createBundle();
+  try {
+    const relativePath = "logs/executor.log";
+    const target = join(unsafePath.bundle, relativePath);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, "log");
+    await assert.rejects(
+      auditReleaseBundle({
+        bundleRoot: unsafePath.bundle,
+        executorPackagePath: unsafePath.executor,
+        platform: "macos",
+      }),
+      (error) => {
+        assert.match(error.message, /forbidden path or name/u);
+        // The directory itself is forbidden, so the scanner refuses it before
+        // opening or enumerating the child file.
+        assert.match(error.message, /\(logs\)$/u);
+        assert.ok(!error.message.includes(unsafePath.root));
+        return true;
+      },
+    );
+  } finally {
+    await rm(unsafePath.root, { recursive: true, force: true });
+  }
+
+  const unsafeContent = await createBundle();
+  try {
+    const relativePath = "assets/driver.bin";
+    const target = join(unsafeContent.bundle, relativePath);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, "TAURI_WEBDRIVER_PORT");
+    await assert.rejects(
+      auditReleaseBundle({
+        bundleRoot: unsafeContent.bundle,
+        executorPackagePath: unsafeContent.executor,
+        platform: "macos",
+      }),
+      (error) => {
+        assert.match(error.message, /forbidden content marker/u);
+        assert.match(error.message, /assets\/driver\.bin/u);
+        assert.ok(!error.message.includes(unsafeContent.root));
+        return true;
+      },
+    );
+  } finally {
+    await rm(unsafeContent.root, { recursive: true, force: true });
+  }
+});
+
+test("P9-05 command rejection is one safe line without an absolute-path stack", () => {
+  const result = spawnSync(process.execPath, [AUDITOR], { encoding: "utf8" });
+  assert.notEqual(result.status, 0);
+  assert.equal(
+    result.stderr,
+    "Release bundle is rejected: required command arguments are missing or unknown\n",
+  );
+  assert.ok(!result.stderr.includes(AUDITOR));
+  assert.doesNotMatch(result.stderr, /\n\s+at /u);
+});
+
 test("P9-05 detects a forbidden marker split across streaming chunks", async () => {
   const fixture = await createBundle();
   try {
@@ -127,7 +191,7 @@ test("P9-05 rejects misplaced Executors, links, and incomplete package trust met
         executorPackagePath: join(misplaced.bundle, "executor"),
         platform: "macos",
       }),
-      /Release bundle is rejected/,
+      /executor package is not at the required release path.*Contents\/Resources\/local-executor\/package/u,
     );
   } finally {
     await rm(misplaced.root, { recursive: true, force: true });
@@ -171,7 +235,7 @@ test("P9-05 rejects misplaced Executors, links, and incomplete package trust met
         executorPackagePath: linked.executor,
         platform: "macos",
       }),
-      /Release bundle is rejected/,
+      /symlink target is not a regular file.*\(linked\)/u,
     );
   } finally {
     await rm(linked.root, { recursive: true, force: true });
@@ -186,7 +250,7 @@ test("P9-05 rejects misplaced Executors, links, and incomplete package trust met
         executorPackagePath: incomplete.executor,
         platform: "macos",
       }),
-      /Release bundle is rejected/,
+      /required release file is missing.*executor-manifest\.v1\.sig/u,
     );
   } finally {
     await rm(incomplete.root, { recursive: true, force: true });
