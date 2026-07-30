@@ -12,6 +12,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import StrEnum
+from functools import partial
 from pathlib import Path
 
 from automation_tool.executor.material_probe import (
@@ -31,6 +32,9 @@ _SCENE_OUTPUT_SUFFIX = ".jpg"
 _SCENE_TIMESTAMP_DIGITS = 12
 _SCENE_TIMEOUT_SECONDS = 15 * 60
 _SCENE_OUTPUT_LIMIT_BYTES = 64 * 1024 * 1024
+_LONG_SCENE_INTERVAL_MS = 8_000
+_SUPPLEMENT_OUTPUT_PREFIX = "supplement-"
+_SUPPLEMENT_OUTPUT_SUFFIX = ".jpg"
 
 
 class AdaptiveFrameRejection(StrEnum):
@@ -89,6 +93,145 @@ def extract_scene_frames(
     return _parse_scene_frames(output)
 
 
+def extract_adaptive_frame_candidates(
+    tools: PackagedMediaTools,
+    source: Path,
+    approved: os.stat_result,
+    *,
+    duration_ms: int,
+) -> tuple[ExtractedFrame, ...] | AdaptiveFrameRejection:
+    """Add an actual frame every eight seconds inside long scenes."""
+    scene_frames = extract_scene_frames(tools, source, approved)
+    if isinstance(scene_frames, AdaptiveFrameRejection):
+        return scene_frames
+    supplement_timestamps = _supplement_timestamps(
+        tuple(frame.timestamp_ms for frame in scene_frames),
+        duration_ms=duration_ms,
+    )
+    if not supplement_timestamps:
+        return scene_frames
+
+    remaining_bytes = _SCENE_OUTPUT_LIMIT_BYTES - sum(
+        len(frame.jpeg_bytes) for frame in scene_frames
+    )
+    deadline = time.monotonic() + _SCENE_TIMEOUT_SECONDS
+    supplements: list[ExtractedFrame] = []
+    for timestamp_ms in supplement_timestamps:
+        remaining_seconds = deadline - time.monotonic()
+        if remaining_seconds <= 0:
+            return AdaptiveFrameRejection.TIMED_OUT
+        try:
+            tools.revalidate()
+        except MaterialProbeRejected:
+            return AdaptiveFrameRejection.TOOL_FAILED
+        try:
+            path, checked = require_source_unchanged(source, approved)
+        except MaterialProbeRejected:
+            return AdaptiveFrameRejection.SOURCE_UNAVAILABLE
+        output = _run_bounded_ffmpeg(
+            partial(
+                _supplement_ffmpeg_argv,
+                tools.ffmpeg_path,
+                path,
+                timestamp_ms=timestamp_ms,
+            ),
+            seconds=remaining_seconds,
+            output_limit_bytes=remaining_bytes,
+        )
+        try:
+            require_source_unchanged(path, checked)
+        except MaterialProbeRejected:
+            return AdaptiveFrameRejection.SOURCE_UNAVAILABLE
+        if isinstance(output, AdaptiveFrameRejection):
+            return output
+        frame = _parse_supplement_frame(output)
+        if isinstance(frame, AdaptiveFrameRejection):
+            return frame
+        supplements.append(frame)
+        remaining_bytes -= len(frame.jpeg_bytes)
+
+    by_timestamp: dict[int, ExtractedFrame] = {}
+    for frame in (*scene_frames, *supplements):
+        by_timestamp.setdefault(frame.timestamp_ms, frame)
+    return tuple(by_timestamp[timestamp] for timestamp in sorted(by_timestamp))
+
+
+def _supplement_timestamps(
+    scene_timestamps: tuple[int, ...],
+    *,
+    duration_ms: int,
+) -> tuple[int, ...]:
+    supplements: list[int] = []
+    for index, scene_start in enumerate(scene_timestamps):
+        scene_end = (
+            scene_timestamps[index + 1] if index + 1 < len(scene_timestamps) else duration_ms
+        )
+        timestamp = scene_start + _LONG_SCENE_INTERVAL_MS
+        while timestamp < scene_end:
+            supplements.append(timestamp)
+            timestamp += _LONG_SCENE_INTERVAL_MS
+    return tuple(supplements)
+
+
+def _supplement_ffmpeg_argv(
+    ffmpeg: Path,
+    source: Path,
+    workspace: Path,
+    *,
+    timestamp_ms: int,
+) -> list[str]:
+    timestamp = f"{timestamp_ms // 1000}.{timestamp_ms % 1000:03d}"
+    return [
+        os.fspath(ffmpeg),
+        "-y",
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-copyts",
+        "-start_at_zero",
+        "-ss",
+        timestamp,
+        "-i",
+        os.fspath(source),
+        "-map",
+        "0:v:0",
+        "-vf",
+        "settb=1/1000",
+        "-frames:v",
+        "1",
+        "-fps_mode",
+        "passthrough",
+        "-enc_time_base",
+        "filter",
+        "-frame_pts",
+        "1",
+        "-q:v",
+        "2",
+        os.fspath(workspace / f"{_SUPPLEMENT_OUTPUT_PREFIX}%012d{_SUPPLEMENT_OUTPUT_SUFFIX}"),
+    ]
+
+
+def _parse_supplement_frame(
+    output: BoundedFfmpegOutput,
+) -> ExtractedFrame | AdaptiveFrameRejection:
+    if len(output.files) != 1:
+        return AdaptiveFrameRejection.UNDECODABLE
+    name, content = output.files[0]
+    timestamp = _timestamp_from_name(
+        name,
+        prefix=_SUPPLEMENT_OUTPUT_PREFIX,
+        suffix=_SUPPLEMENT_OUTPUT_SUFFIX,
+    )
+    if timestamp is None:
+        return AdaptiveFrameRejection.TOOL_FAILED
+    return ExtractedFrame(
+        timestamp_ms=timestamp,
+        is_scene_cut=False,
+        jpeg_bytes=content,
+    )
+
+
 def _scene_ffmpeg_argv(ffmpeg: Path, source: Path, workspace: Path) -> list[str]:
     return [
         os.fspath(ffmpeg),
@@ -134,9 +277,17 @@ def _parse_scene_frames(
 
 
 def _scene_timestamp(name: str) -> int | None:
-    if not name.startswith(_SCENE_OUTPUT_PREFIX) or not name.endswith(_SCENE_OUTPUT_SUFFIX):
+    return _timestamp_from_name(
+        name,
+        prefix=_SCENE_OUTPUT_PREFIX,
+        suffix=_SCENE_OUTPUT_SUFFIX,
+    )
+
+
+def _timestamp_from_name(name: str, *, prefix: str, suffix: str) -> int | None:
+    if not name.startswith(prefix) or not name.endswith(suffix):
         return None
-    digits = name[len(_SCENE_OUTPUT_PREFIX) : -len(_SCENE_OUTPUT_SUFFIX)]
+    digits = name[len(prefix) : -len(suffix)]
     if len(digits) != _SCENE_TIMESTAMP_DIGITS or not digits.isascii() or not digits.isdigit():
         return None
     return int(digits)
