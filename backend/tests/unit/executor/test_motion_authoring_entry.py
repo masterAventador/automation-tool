@@ -644,7 +644,13 @@ def test_the_shared_contract_declares_which_findings_are_not_refusals() -> None:
     # Vacuous membership is the failure mode this guards: a class that exists
     # but classifies nothing would let every one of these findings keep telling
     # the user to rewrite a sentence nothing read.
-    assert outcomes["model_transport_failed"] == {"video_creation_model_transport_failed"}
+    # PC-26 widened this class: a TTS round that fails is transport to a model
+    # service failing, and answering it as a refusal would send the user to
+    # rewrite a sentence the narrator never read.
+    assert outcomes["model_transport_failed"] == {
+        "agent_voiceover_synthesis_failed",
+        "video_creation_model_transport_failed",
+    }
     assert outcomes["model_timed_out"] == {"video_creation_model_timed_out"}
     assert "video_creation_model_unavailable" in outcomes["model_configuration_required"]
     assert (

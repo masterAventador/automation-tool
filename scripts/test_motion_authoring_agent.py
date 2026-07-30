@@ -2134,5 +2134,153 @@ class SlotOverflowProbeTests(unittest.TestCase):
         self.assertIn("slot probe", str(ctx.exception))
 
 
+# --------------------------------------------------------------------------- #
+# PC-26: narration into the one-sentence chain — the voice arm, finally chosen
+# --------------------------------------------------------------------------- #
+
+
+class ScriptedNarrator:
+    """Stands in for TTS + ffprobe: text in, (audio path, real seconds) out."""
+
+    def __init__(self, seconds: float) -> None:
+        self._seconds = seconds
+        self.calls: list[tuple[str, str]] = []
+
+    def __call__(self, beat_id: str, text: str) -> tuple[str, float]:
+        self.calls.append((beat_id, text))
+        return (f"narration/{beat_id}.wav", self._seconds)
+
+
+def _narrated_payload(
+    narration: str = "本周销售额环比增长了百分之十二",
+) -> str:
+    """One beat, one narration line — the 1:1 shape the contract now asks for."""
+    script = _valid_script()
+    script["beats"] = [narration]
+    return json.dumps(
+        {
+            "design": _valid_design(),
+            "script": script,
+            "storyboard": _valid_storyboard([_probe_beat()]),
+        }
+    )
+
+
+class NarrationTests(unittest.TestCase):
+    """语音主导、画面跟随：语音臂第一次真的被选中。"""
+
+    def _agent(
+        self,
+        workspace: AuthoringWorkspace,
+        model: ScriptedModel,
+        narrator: object,
+        catalog_root: Path | None,
+    ) -> MotionAuthoringAgent:
+        return MotionAuthoringAgent(
+            workspace=workspace,
+            tools=MotionAuthoringTools(workspace),
+            workflow=load_locked_authoring_workflow(
+                vendor_root=VENDOR_ROOT, contract_path=WORKFLOW_CONTRACT
+            ),
+            model_config=_model_config(),
+            model_call=model,
+            catalog_root=catalog_root,
+            narrator=narrator,
+        )
+
+    def test_the_voice_arm_lengthens_the_shot_past_its_motion(self) -> None:
+        """8 秒旁白配 4.8 秒动效、6 秒声明：max 臂取 8 秒 → 240 帧。
+        在此之前 `voice_seconds` 恒为 None，这条臂从未被选中过（PC-08）。"""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            narrator = ScriptedNarrator(8.0)
+            model = ScriptedModel([_narrated_payload()])
+            agent = self._agent(workspace, model, narrator, _probe_catalog(root))
+            submission = agent.author(_brief()).submission
+
+            self.assertEqual(
+                narrator.calls, [("hook", "本周销售额环比增长了百分之十二")]
+            )
+            self.assertEqual(len(submission.segments), 1)
+            self.assertEqual(submission.segments[0].frame_count, 240)
+
+    def test_without_a_narrator_the_film_stays_exactly_as_before(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            model = ScriptedModel([_narrated_payload()])
+            agent = self._agent(workspace, model, None, _probe_catalog(root))
+            submission = agent.author(_brief()).submission
+        # 零件拍的镜头长 = max(动效, 语音)；无声时就是动效 4.8 秒 → 144 帧，
+        # 与接线前逐字节相同（声明时长只在模板拍无其它信号时兜底）。
+        self.assertEqual(submission.segments[0].frame_count, 144)
+
+    def test_script_beats_must_match_storyboard_beats_when_narrating(self) -> None:
+        """三条旁白词配一段分镜没有归属可言——拒绝，不猜。"""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            model = ScriptedModel(
+                [_valid_model_payload(_valid_storyboard([_probe_beat()]))]
+            )
+            agent = self._agent(
+                workspace, model, ScriptedNarrator(2.0), _probe_catalog(root)
+            )
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                agent.author(_brief())
+        self.assertIn("one to one", str(ctx.exception))
+
+    def test_a_narrator_failure_is_a_closed_refusal_not_a_silent_film(self) -> None:
+        """TTS 挂了不许悄悄出一条无声片——那是本项目最恨的那类静默降级。"""
+
+        class _DeadNarrator:
+            def __call__(self, beat_id: str, text: str) -> tuple[str, float]:
+                raise RuntimeError("tts service is down")
+
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            model = ScriptedModel([_narrated_payload()])
+            agent = self._agent(workspace, model, _DeadNarrator(), _probe_catalog(root))
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                agent.author(_brief())
+        self.assertIn("voiceover synthesis failed", str(ctx.exception))
+
+    def test_an_install_without_the_catalog_stays_silent_and_never_calls_tts(
+        self,
+    ) -> None:
+        """无目录安装走单次整片捕捉，没有逐拍分段供语音臂消费——保持无声，
+        也不为一条用不上的音轨花一次 TTS。边界记录在 PC-26.md。"""
+        with TemporaryDirectory() as raw:
+            workspace = _make_workspace(Path(raw))
+            narrator = ScriptedNarrator(8.0)
+            model = ScriptedModel([_valid_model_payload()])
+            agent = self._agent(workspace, model, narrator, None)
+            agent.author(_brief())
+        self.assertEqual(narrator.calls, [])
+
+    def test_a_narrator_that_is_not_callable_is_refused_at_construction(self) -> None:
+        with TemporaryDirectory() as raw:
+            workspace = _make_workspace(Path(raw))
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                MotionAuthoringAgent(
+                    workspace=workspace,
+                    tools=MotionAuthoringTools(workspace),
+                    workflow=load_locked_authoring_workflow(
+                        vendor_root=VENDOR_ROOT, contract_path=WORKFLOW_CONTRACT
+                    ),
+                    model_config=_model_config(),
+                    model_call=ScriptedModel([]),
+                    narrator="not-a-narrator",
+                )
+        self.assertIn("narrator", str(ctx.exception))
+
+    def test_the_first_message_states_the_one_to_one_narration_contract(self) -> None:
+        message = _first_message_contract(_brief())
+        self.assertIn("旁白", message)
+        self.assertIn("一一对应", message)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

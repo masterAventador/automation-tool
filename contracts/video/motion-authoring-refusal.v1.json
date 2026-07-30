@@ -52,6 +52,7 @@
     "agent_motion_part_slot_table_is_unreadable",
     "agent_motion_part_usability_contract_drifted",
     "agent_motion_part_usability_contract_is_unreadable",
+    "agent_narrator_must_be_callable_or_absent",
     "agent_no_motion_part_is_selectable",
     "agent_not_a_motionauthoringtools_instance",
     "agent_one_message_is_out_of_range",
@@ -75,6 +76,7 @@
     "agent_render_canvas_contract_is_unreadable",
     "agent_repair_response_must_carry_the_storyboard_alone",
     "agent_repair_round_altered_more_than_copy",
+    "agent_script_beats_must_match_storyboard_beats_one_to_one",
     "agent_script_has_an_unexpected_key_set",
     "agent_script_must_be_an_object",
     "agent_secondary_color_must_be_a_rrggbb_color",
@@ -98,6 +100,7 @@
     "agent_unsupported_language",
     "agent_video_creative_purpose_missing",
     "agent_video_model_id_missing",
+    "agent_voiceover_synthesis_failed",
     "agent_workflow_contract_is_malformed",
     "agent_workflow_contract_is_unreadable",
     "agent_workflow_reference_exceeded_its_budget",
@@ -174,6 +177,7 @@
       "workspace_unusable"
     ],
     "executor_defect": [
+      "agent_narrator_must_be_callable_or_absent",
       "agent_not_a_motionauthoringtools_instance",
       "agent_slot_overflow_probe_failed_to_measure",
       "agent_slot_probe_must_be_callable_or_absent",
@@ -210,6 +214,7 @@
       "video_creation_model_timed_out"
     ],
     "model_transport_failed": [
+      "agent_voiceover_synthesis_failed",
       "video_creation_model_transport_failed"
     ]
   },

@@ -1989,6 +1989,8 @@ def _first_message_contract(brief: MotionBrief) -> str:
         "不能是对象或数组；typography 用不超过 100 字的一句话描述字体风格。\n"
         f"script 键：{{one_message, language, beats(1..{MAX_SCRIPT_BEATS} 条)}}；"
         "script.beats 的每一条都是一句纯文本字符串，不是对象。\n"
+        "script.beats 是逐段旁白词，与 storyboard.beats 一一对应：条数必须相同，"
+        "第 i 条就是第 i 段分镜要念出来的话，写成口语可朗读的完整句子。\n"
         "storyboard 键：{beats:[{beat_id, purpose, start_seconds, duration_seconds, "
         "catalog_parts[], layout, headline, body, items[]}]}。\n"
         # Both stated because a real model got both wrong: `beat_id` came back
@@ -2039,6 +2041,7 @@ class MotionAuthoringAgent:
         model_timeout_seconds: int = MODEL_TIMEOUT_SECONDS,
         catalog_root: Path | None = None,
         slot_probe: Callable[[tuple[Path, ...]], Sequence[ProbeReading]] | None = None,
+        narrator: Callable[[str, str], tuple[str, float]] | None = None,
     ) -> None:
         # Supplied by the App, which resolves it beside the other packaged
         # resources; this process does not go looking for it. `None` means this
@@ -2057,6 +2060,12 @@ class MotionAuthoringAgent:
             slot_probe is None or callable(slot_probe),
             "slot probe must be callable or absent",
         )
+        # Same terms as the probe: `None` means a silent film — the caller had
+        # no way to synthesize narration — never "narrated and inaudible".
+        _require(
+            narrator is None or callable(narrator),
+            "narrator must be callable or absent",
+        )
         _require(type(fps) is int and 1 <= fps <= 120, "fps out of range")
         _require(
             type(model_timeout_seconds) is int
@@ -2072,6 +2081,7 @@ class MotionAuthoringAgent:
         self._fps = fps
         self._model_timeout_seconds = model_timeout_seconds
         self._slot_probe = slot_probe
+        self._narrator = narrator
 
     def _call(self, messages: list[dict[str, str]]) -> dict[str, Any]:
         assert self._model_config is not None  # guarded in author()
@@ -2097,6 +2107,7 @@ class MotionAuthoringAgent:
         template_entry: str,
         template_assets: tuple[str, ...],
         template_frames: int,
+        narration: Mapping[str, tuple[str, float]] | None = None,
     ) -> tuple[RenderSegment, ...]:
         """One render per beat, with catalog beats drawn on their own stage.
 
@@ -2154,7 +2165,14 @@ class MotionAuthoringAgent:
                     # one stage is the sub-composition mechanism route B adds.
                     part=beat.catalog_parts[0] if beat.catalog_parts else None,
                     copy=copies[beat.beat_id],
-                    voice_seconds=None,
+                    # PC-26: the measured narration length, when this run has a
+                    # narrator. `plan_film`'s max(voice, motion) arm — built in
+                    # PC-08, never selected until now — does the stretching.
+                    voice_seconds=(
+                        narration[beat.beat_id][1]
+                        if narration is not None and beat.beat_id in narration
+                        else None
+                    ),
                     declared_seconds=beat.duration_seconds,
                     start_seconds=beat.start_seconds,
                 )
@@ -2321,6 +2339,32 @@ class MotionAuthoringAgent:
         script = self._tools.write_script(data["script"])
         storyboard = self._tools.write_storyboard(data["storyboard"])
 
+        # PC-26: narrate before anything is assembled — the measured seconds
+        # are an input to the film plan, and finding out *after* rendering that
+        # a line does not fit its shot is the ordering the design forbids.
+        # Synthesized once: the repair round may only change on-screen copy,
+        # and the guard holds beat count and ids byte-stable.
+        #
+        # Without the catalog the film is a single capture of the whole
+        # composition — there is no per-beat segment for the voice arm to
+        # lengthen — so that install stays silent and spends no TTS call.
+        narration: dict[str, tuple[str, float]] | None = None
+        if self._narrator is not None and self._catalog is not None:
+            _require(
+                len(script.beats) == len(storyboard.beats),
+                "script beats must match storyboard beats one to one",
+            )
+            narration = {}
+            for beat, line in zip(storyboard.beats, script.beats):
+                try:
+                    audio, seconds = self._narrator(beat.beat_id, line)
+                except Exception:
+                    # A TTS service that fails must never quietly ship a
+                    # silent film — that is the degradation this project bans.
+                    _reject("voiceover synthesis failed")
+                    raise AssertionError from None  # pragma: no cover
+                narration[beat.beat_id] = (audio, float(seconds))
+
         # One cheap repair round (PC-14): measured overflow is the one failure
         # a further model round can actually fix — the fix is shorter copy, a
         # few dozen bytes, not the 13KB document rewrite T92 removed.
@@ -2357,6 +2401,7 @@ class MotionAuthoringAgent:
                     template_entry=composition_path,
                     template_assets=allowed_assets,
                     template_frames=snapshot.frame_count,
+                    narration=narration,
                 )
                 break
             except SlotProbeRejected as overflow:
