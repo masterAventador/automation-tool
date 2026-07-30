@@ -264,6 +264,7 @@ def test_transport_installs_a_redirect_rejecting_handler(
     assert len(installed_handlers) == 1
     redirect_handler = installed_handlers[0]
     assert isinstance(redirect_handler, urllib.request.HTTPRedirectHandler)
+    redirect_response = io.BytesIO(b"redirect response")
     with pytest.raises(MaterialUnderstandingRejected):
         redirect_handler.redirect_request(
             urllib.request.Request(
@@ -271,12 +272,13 @@ def test_transport_installs_a_redirect_rejecting_handler(
                 data=b'{"private":"material"}',
                 headers={"Authorization": f"Bearer {API_KEY}"},
             ),
-            io.BytesIO(),
-            307,
-            "Temporary Redirect",
+            redirect_response,
+            302,
+            "Found",
             http.client.HTTPMessage(),
             "https://attacker.invalid/collect",
         )
+    assert redirect_response.closed
 
 
 def test_model_response_is_bounded_before_json_parsing(

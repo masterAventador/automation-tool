@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import http.client
 import json
 import re
@@ -42,6 +43,8 @@ class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
         headers: http.client.HTTPMessage,
         newurl: str,
     ) -> urllib.request.Request | None:
+        with contextlib.suppress(OSError, ValueError):
+            fp.close()
         _reject()
 
 
