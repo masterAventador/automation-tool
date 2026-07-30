@@ -39,6 +39,8 @@ VAD_THRESHOLD: Final = 0.5
 MIN_SPEECH_CHUNKS: Final = 8
 MIN_SILENCE_CHUNKS: Final = 4
 SPEECH_PADDING_MS: Final = 64
+MIN_PRIMARY_SPEECH_DURATION_MS: Final = 5_000
+MIN_PRIMARY_SPEECH_COVERAGE_PERCENT: Final = 30
 MAX_PCM_BYTES: Final = 4 * 60 * 60 * SAMPLE_RATE_HZ * PCM_BYTES_PER_SAMPLE
 MAX_ASR_BATCH_DURATION_MS: Final = 180_000
 MAX_ASR_WAV_BYTES: Final = 6 * 1024 * 1024
@@ -89,6 +91,7 @@ class SpeechAudioBatch:
             or math.ceil(frame_count * 1_000 / SAMPLE_RATE_HZ) != self.duration_ms
         ):
             _reject()
+        object.__setattr__(self, "wav_bytes", _pcm_wav(payload))
 
 
 @runtime_checkable
@@ -199,6 +202,11 @@ class LocalAudibleSpeechAnalyzer:
             )
             if not segments:
                 return MaterialSpeechAnalysis(False, (), None)
+            if not _has_primary_speech_evidence(
+                segments,
+                duration_ms=facts.duration_ms,
+            ):
+                _reject()
             transcripts: list[str] = []
             transcript_characters = 0
             batches = _speech_audio_batches(
@@ -491,6 +499,19 @@ def _append_segment(
         segments.append((bounded_start, bounded_end))
 
 
+def _has_primary_speech_evidence(
+    segments: tuple[tuple[int, int], ...],
+    *,
+    duration_ms: int,
+) -> bool:
+    speech_duration_ms = sum(end_ms - start_ms for start_ms, end_ms in segments)
+    return (
+        speech_duration_ms >= MIN_PRIMARY_SPEECH_DURATION_MS
+        or speech_duration_ms * 100
+        >= duration_ms * MIN_PRIMARY_SPEECH_COVERAGE_PERCENT
+    )
+
+
 def _speech_audio_batches(
     pcm_path: Path,
     *,
@@ -525,9 +546,7 @@ def _speech_audio_batches(
             yielded = True
             yield SpeechAudioBatch(
                 wav_bytes=wav_bytes,
-                duration_ms=math.ceil(
-                    len(payload) / PCM_BYTES_PER_SAMPLE * 1_000 / SAMPLE_RATE_HZ
-                ),
+                duration_ms=math.ceil(len(payload) / PCM_BYTES_PER_SAMPLE * 1_000 / SAMPLE_RATE_HZ),
             )
         if not yielded:
             _reject()

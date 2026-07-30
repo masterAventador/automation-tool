@@ -201,6 +201,24 @@ def test_asr_batch_rejects_a_fake_header_and_a_duration_mismatch() -> None:
         SpeechAudioBatch(wav_bytes=output.getvalue(), duration_ms=99)
 
 
+def test_asr_batch_canonicalizes_wav_and_discards_trailing_private_bytes() -> None:
+    output = io.BytesIO()
+    with wave.open(output, "wb") as destination:
+        destination.setnchannels(1)
+        destination.setsampwidth(2)
+        destination.setframerate(16_000)
+        destination.writeframes(b"\0\0" * 1_600)
+    canonical = output.getvalue()
+
+    batch = SpeechAudioBatch(
+        wav_bytes=canonical + PRIVATE_VIDEO_BYTES,
+        duration_ms=100,
+    )
+
+    assert batch.wav_bytes == canonical
+    assert PRIVATE_VIDEO_BYTES not in batch.wav_bytes
+
+
 def test_the_t1_lazy_factory_constructs_the_concrete_lower_funnel_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

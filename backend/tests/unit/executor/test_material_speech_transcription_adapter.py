@@ -178,6 +178,28 @@ def test_catalog_locks_the_snapshot_and_private_repr_redacts_the_key() -> None:
     assert API_KEY not in repr(adapter.config)
 
 
+def test_non_numeric_timeout_is_a_fixed_redacted_configuration_rejection() -> None:
+    with pytest.raises(
+        SpeechTranscriptionRejected,
+        match=r"^speech transcription request rejected$",
+    ) as captured:
+        load_bailian_speech_transcription_config(
+            catalog_path=CATALOG_PATH,
+            api_key=API_KEY,
+            timeout_seconds=cast(float, PRIVATE_PATH),
+        )
+
+    rendered = "".join(
+        traceback.format_exception(
+            type(captured.value),
+            captured.value,
+            captured.value.__traceback__,
+        )
+    )
+    assert PRIVATE_PATH not in rendered
+    assert captured.value.__context__ is None
+
+
 @pytest.mark.parametrize(
     "body",
     [

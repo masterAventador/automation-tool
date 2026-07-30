@@ -180,6 +180,8 @@ def load_bailian_speech_transcription_config(
         or model.get("image_input") is not False
     ):
         _reject()
+    if type(timeout_seconds) not in {int, float}:
+        _reject()
     return BailianSpeechTranscriptionConfig(
         base_url=BAILIAN_BASE_URL,
         model_id=BAILIAN_ASR_MODEL_ID,
