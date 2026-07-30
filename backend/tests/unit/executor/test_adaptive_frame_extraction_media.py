@@ -64,6 +64,7 @@ def scene_media(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     long_scene = root / "sixty second gradual scene.mp4"
     nonzero_start = root / "nonzero start.mp4"
     ntsc_boundary = root / "ntsc just over eight seconds.mp4"
+    short_video_long_audio = root / "short video long audio.mp4"
     _encode(
         tools.ffmpeg_path,
         "-f",
@@ -140,12 +141,35 @@ def scene_media(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         "yuv420p",
         os.fspath(ntsc_boundary),
     )
+    _encode(
+        tools.ffmpeg_path,
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=black:s=160x90:r=10:d=1",
+        "-f",
+        "lavfi",
+        "-i",
+        "sine=frequency=440:sample_rate=44100:duration=20",
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        os.fspath(short_video_long_audio),
+    )
     return {
         "hard_cuts": hard_cuts,
         "single_scene": single_scene,
         "long_scene": long_scene,
         "nonzero_start": nonzero_start,
         "ntsc_boundary": ntsc_boundary,
+        "short_video_long_audio": short_video_long_audio,
     }
 
 
@@ -319,6 +343,22 @@ def test_missing_tail_frame_at_an_ntsc_duration_boundary_is_not_bad_media(
     assert tuple(frame.timestamp_ms for frame in result) == (0,)
 
 
+def test_video_stream_may_end_before_the_container_and_audio_stream(
+    scene_media: dict[str, Path],
+) -> None:
+    source, approved = approve_source(scene_media["short_video_long_audio"])
+
+    result = extract_adaptive_frame_candidates(
+        _packaged_tools(),
+        source,
+        approved,
+        duration_ms=20_000,
+    )
+
+    assert isinstance(result, tuple)
+    assert tuple(frame.timestamp_ms for frame in result) == (0,)
+
+
 def test_non_tail_supplement_failure_still_rejects_the_material(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -380,7 +420,12 @@ def test_non_tail_empty_supplement_output_still_rejects_the_material(
     source, approved = approve_source(source)
     outputs = iter(
         (
-            BoundedFfmpegOutput(files=(("scene-000000000000.jpg", b"scene"),)),
+            BoundedFfmpegOutput(
+                files=(
+                    ("scene-000000000000.jpg", b"scene"),
+                    ("scene-000000010000.jpg", b"later-scene"),
+                )
+            ),
             BoundedFfmpegOutput(files=()),
         )
     )
@@ -398,7 +443,7 @@ def test_non_tail_empty_supplement_output_still_rejects_the_material(
         tools,
         source,
         approved,
-        duration_ms=16_001,
+        duration_ms=11_000,
     )
 
     assert result is AdaptiveFrameRejection.UNDECODABLE

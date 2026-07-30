@@ -118,9 +118,7 @@ def extract_adaptive_frame_candidates(
     deadline = time.monotonic() + _SCENE_TIMEOUT_SECONDS
     supplements: list[ExtractedFrame] = []
     for timestamp_ms in supplement_timestamps:
-        is_tail_target = (
-            timestamp_ms == supplement_timestamps[-1] and timestamp_ms > final_scene_start_ms
-        )
+        is_in_final_scene = timestamp_ms > final_scene_start_ms
         remaining_seconds = deadline - time.monotonic()
         if remaining_seconds <= 0:
             return AdaptiveFrameRejection.TIMED_OUT
@@ -148,17 +146,17 @@ def extract_adaptive_frame_candidates(
             return AdaptiveFrameRejection.SOURCE_UNAVAILABLE
         if isinstance(output, AdaptiveFrameRejection):
             # The scene pass immediately above decoded the unchanged source through
-            # EOF. Some containers nevertheless state a duration just beyond their
-            # last frame PTS, so only the final planned seek may legitimately find
-            # no frame; an earlier seek failure still rejects the material.
-            if output is AdaptiveFrameRejection.UNDECODABLE and is_tail_target:
+            # EOF. A container (or its audio stream) may continue beyond the final
+            # video frame, so the first empty seek in the final scene means video
+            # EOF; an empty seek in an earlier scene still rejects the material.
+            if output is AdaptiveFrameRejection.UNDECODABLE and is_in_final_scene:
                 break
             return output
         frame = _parse_supplement_frame(output)
         if isinstance(frame, AdaptiveFrameRejection):
             return frame
         if frame is None:
-            if is_tail_target:
+            if is_in_final_scene:
                 break
             return AdaptiveFrameRejection.UNDECODABLE
         supplements.append(frame)
