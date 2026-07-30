@@ -89,6 +89,7 @@ def test_bounded_ffmpeg_accepts_the_exact_limit_and_reads_output_files(
 
     assert isinstance(result, BoundedFfmpegOutput)
     assert result.files == (("frame-000001.jpg", b"x" * 64),)
+    assert "files" not in repr(result)
     assert marker.read_text(encoding="ascii") == "finished"
     assert observed_popen["stdin"] is subprocess.DEVNULL
     assert observed_popen["stdout"] is subprocess.DEVNULL
