@@ -50,7 +50,7 @@ def _declared_response_bytes(response: object) -> int | None:
         if type(raw_value) is not str:
             _reject()
         for token in raw_value.split(","):
-            token = token.strip()
+            token = token.strip(" \t")
             if not token or not token.isascii() or not token.isdigit():
                 _reject()
             values.append(int(token))
