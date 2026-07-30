@@ -10,6 +10,7 @@ import http.client
 import json
 import os
 import re
+import signal
 import stat
 import subprocess
 import sys
@@ -19,7 +20,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, NoReturn, cast
+from typing import IO, NoReturn
 
 from run_le_13_acceptance import Le13AcceptanceFailure
 from run_le_13_acceptance import (
@@ -54,6 +55,10 @@ LICENSE_SOURCE_URL = DATASET_HOMEPAGE
 MAXIMUM_CONTRACT_BYTES = 64 * 1024
 MAXIMUM_FIXTURE_BYTES = 256 * 1024
 FETCH_TIMEOUT_SECONDS = 120
+ACCEPTANCE_TIMEOUT_SECONDS = 300
+CLEANUP_TIMEOUT_SECONDS = 60
+PROCESS_STOP_TIMEOUT_SECONDS = 10
+PROCESS_KILL_TIMEOUT_SECONDS = 5
 _PASS_SUMMARY_PATTERN = re.compile(r"^1 passed in \d+(?:\.\d+)?s$", re.MULTILINE)
 
 
@@ -181,7 +186,12 @@ def _fetch_fixture(url: str) -> bytes:
             ):
                 _reject("LE-14 speech fixture is unavailable")
             payload = bytes(response.read(MAXIMUM_FIXTURE_BYTES + 1))
-    except (OSError, ValueError, urllib.error.URLError):
+    except (
+        OSError,
+        ValueError,
+        http.client.HTTPException,
+        urllib.error.URLError,
+    ):
         _reject("LE-14 speech fixture is unavailable")
     if len(payload) > MAXIMUM_FIXTURE_BYTES:
         _reject("LE-14 speech fixture is unavailable")
@@ -224,7 +234,9 @@ def prepare_voice_fixture(
     descriptor: int | None = None
     created = False
     try:
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        flags |= getattr(os, "O_BINARY", 0)
+        flags |= getattr(os, "O_CLOEXEC", 0)
         flags |= getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(destination, flags, 0o600)
         created = True
@@ -263,23 +275,118 @@ def prepare_voice_fixture(
 
 def read_bailian_api_key(secret_path: Path) -> str:
     try:
-        return cast(str, _read_bailian_api_key(secret_path))
+        return _read_bailian_api_key(secret_path)
     except Le13AcceptanceFailure:
         _reject("LE-14 model credential is unavailable")
 
 
 def prepare_verified_media_toolchain(resource_root: Path) -> Path:
     try:
-        return cast(Path, _prepare_verified_media_toolchain(resource_root))
+        return _prepare_verified_media_toolchain(resource_root)
     except Le13AcceptanceFailure:
         _reject("LE-14 packaged media toolchain is unavailable")
 
 
 def ensure_silero_vad_assets() -> Path:
     try:
-        return cast(Path, _ensure_silero_vad_assets())
+        return _ensure_silero_vad_assets()
     except (OSError, SileroVadAssetContractRejected, SileroVadAssetUnavailable):
         _reject("LE-14 Silero VAD runtime is unavailable")
+
+
+def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
+    """Stop only the process tree placed in this driver's private group."""
+
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=CLEANUP_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            with contextlib.suppress(OSError):
+                process.kill()
+        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+            process.wait(timeout=PROCESS_KILL_TIMEOUT_SECONDS)
+        return
+
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    except OSError:
+        with contextlib.suppress(OSError):
+            process.terminate()
+    try:
+        process.wait(timeout=PROCESS_STOP_TIMEOUT_SECONDS)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    except OSError:
+        with contextlib.suppress(OSError):
+            process.kill()
+    with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+        process.wait(timeout=PROCESS_KILL_TIMEOUT_SECONDS)
+
+
+def _cleanup_postgres_resources(pytest_pid: int) -> None:
+    """Remove only the Docker Compose project derived from the owned child PID."""
+
+    if os.name == "nt":
+        return
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("PYTEST_")
+        and key
+        not in {
+            SECRET_PATH_ENVIRONMENT,
+            TOOLCHAIN_ROOT_ENVIRONMENT,
+            VOICE_PATH_ENVIRONMENT,
+        }
+    }
+    environment.update(
+        {
+            "AUTOMATION_TOOL_DEV_DB_USER": "cleanup",
+            "AUTOMATION_TOOL_DEV_DB_PASSWORD": "cleanup",
+            "AUTOMATION_TOOL_DEV_DB_NAME": "cleanup",
+            "AUTOMATION_TOOL_DEV_DB_PORT": "1",
+            "AUTOMATION_TOOL_TEST_DB_USER": "cleanup",
+            "AUTOMATION_TOOL_TEST_DB_PASSWORD": "cleanup",
+            "AUTOMATION_TOOL_TEST_DB_NAME": "cleanup",
+            "AUTOMATION_TOOL_TEST_DB_PORT": "1",
+        }
+    )
+    try:
+        subprocess.run(
+            [
+                "docker",
+                "compose",
+                "--project-name",
+                f"automation-tool-pytest-{pytest_pid}",
+                "--env-file",
+                os.devnull,
+                "--file",
+                os.fspath(REPOSITORY_ROOT / "compose.yaml"),
+                "down",
+                "--volumes",
+                "--remove-orphans",
+            ],
+            cwd=REPOSITORY_ROOT,
+            env=environment,
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=CLEANUP_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
 
 def run_acceptance(secret_path: Path) -> None:
@@ -301,22 +408,56 @@ def run_acceptance(secret_path: Path) -> None:
         environment[SECRET_PATH_ENVIRONMENT] = os.fspath(secret_path)
         environment[TOOLCHAIN_ROOT_ENVIRONMENT] = os.fspath(toolchain)
         environment[VOICE_PATH_ENVIRONMENT] = os.fspath(voice)
-        completed = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                ACCEPTANCE_TEST,
-                "-q",
-                "-s",
-                "-o",
-                "addopts=",
-            ],
+        command = [
+            sys.executable,
+            "-m",
+            "pytest",
+            ACCEPTANCE_TEST,
+            "-q",
+            "-s",
+            "-o",
+            "addopts=",
+        ]
+        process = subprocess.Popen(
+            command,
             cwd=BACKEND_ROOT,
             env=environment,
-            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            check=False,
+            creationflags=(
+                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                if os.name == "nt"
+                else 0
+            ),
+            start_new_session=os.name != "nt",
+        )
+        timed_out = False
+        try:
+            stdout, stderr = process.communicate(timeout=ACCEPTANCE_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            _terminate_process_tree(process)
+            _cleanup_postgres_resources(process.pid)
+            timed_out = True
+            stdout = ""
+            stderr = ""
+        except BaseException:
+            _terminate_process_tree(process)
+            _cleanup_postgres_resources(process.pid)
+            raise
+        if timed_out:
+            _reject("LE-14 real acceptance failed")
+        returncode = process.returncode
+        if returncode is None:
+            _terminate_process_tree(process)
+            _cleanup_postgres_resources(process.pid)
+            _reject("LE-14 real acceptance failed")
+        completed = subprocess.CompletedProcess(
+            command,
+            returncode,
+            stdout,
+            stderr,
         )
     combined = completed.stdout + completed.stderr
     if api_key in combined or os.fspath(secret_path) in combined:
