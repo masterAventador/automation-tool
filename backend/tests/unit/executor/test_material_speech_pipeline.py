@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import os
+import wave
 from pathlib import Path
 from typing import ClassVar
 
@@ -180,6 +182,23 @@ def test_only_extracted_wav_audio_crosses_the_asr_boundary(
     assert os.fspath(source).encode() not in audio.wav_bytes
     assert not hasattr(audio, "source")
     assert not hasattr(audio, "path")
+
+
+def test_asr_batch_rejects_a_fake_header_and_a_duration_mismatch() -> None:
+    with pytest.raises(MaterialSpeechRejected):
+        SpeechAudioBatch(
+            wav_bytes=b"RIFF" + b"\0" * 4 + b"WAVE" + b"\0" * 32,
+            duration_ms=100,
+        )
+
+    output = io.BytesIO()
+    with wave.open(output, "wb") as destination:
+        destination.setnchannels(1)
+        destination.setsampwidth(2)
+        destination.setframerate(16_000)
+        destination.writeframes(b"\0\0" * 1_600)
+    with pytest.raises(MaterialSpeechRejected):
+        SpeechAudioBatch(wav_bytes=output.getvalue(), duration_ms=99)
 
 
 def test_the_t1_lazy_factory_constructs_the_concrete_lower_funnel_once(

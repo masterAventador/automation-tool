@@ -70,6 +70,25 @@ class SpeechAudioBatch:
             or not 1 <= self.duration_ms <= MAX_ASR_BATCH_DURATION_MS
         ):
             _reject()
+        try:
+            with wave.open(io.BytesIO(self.wav_bytes), "rb") as source:
+                frame_count = source.getnframes()
+                valid_shape = (
+                    source.getnchannels() == 1
+                    and source.getsampwidth() == PCM_BYTES_PER_SAMPLE
+                    and source.getframerate() == SAMPLE_RATE_HZ
+                    and source.getcomptype() == "NONE"
+                    and frame_count > 0
+                )
+                payload = source.readframes(frame_count)
+        except (EOFError, wave.Error):
+            _reject()
+        if (
+            not valid_shape
+            or len(payload) != frame_count * PCM_BYTES_PER_SAMPLE
+            or math.ceil(frame_count * 1_000 / SAMPLE_RATE_HZ) != self.duration_ms
+        ):
+            _reject()
 
 
 @runtime_checkable
