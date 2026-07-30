@@ -127,7 +127,7 @@ function parseMotionJob(value: unknown): MotionRenderJobSnapshot {
   if (
     !exactRecord(value, [
       "artifactId", "artifactSizeBytes", "failureCode", "progressPercent", "renderJobId",
-      "revision", "status", "styleDisplayName", "subject",
+      "revision", "shotStructure", "status", "styleDisplayName", "subject",
     ]) ||
     typeof value.renderJobId !== "string" || !UUID_V4.test(value.renderJobId) ||
     typeof value.revision !== "number" || !Number.isSafeInteger(value.revision) || value.revision < 1 ||
@@ -140,6 +140,7 @@ function parseMotionJob(value: unknown): MotionRenderJobSnapshot {
     (value.artifactId !== null && (typeof value.artifactId !== "string" || !UUID_V4.test(value.artifactId))) ||
     (value.artifactSizeBytes !== null && (typeof value.artifactSizeBytes !== "number" ||
       !Number.isSafeInteger(value.artifactSizeBytes) || value.artifactSizeBytes <= 0)) ||
+    !validMotionShotStructure(value.shotStructure, value.status) ||
     (value.failureCode !== null && (typeof value.failureCode !== "string" ||
       !MOTION_FAILURES.has(value.failureCode))) ||
     ((value.artifactId === null) !== (value.artifactSizeBytes === null)) ||
@@ -151,6 +152,72 @@ function parseMotionJob(value: unknown): MotionRenderJobSnapshot {
     throw new MaterialVideoStudioGatewayError("protocol_mismatch", false);
   }
   return value as unknown as MotionRenderJobSnapshot;
+}
+
+const MOTION_PART_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+
+function validMotionShotStructure(value: unknown, status: unknown): boolean {
+  if (!Array.isArray(value) || value.length > 100) return false;
+  // Checkpoints created before T2.2 deserialize to an empty table. New native
+  // jobs always carry at least one shot, while old jobs remain readable.
+  if (value.length === 0) return true;
+  let declaredStart = 0;
+  let renderedStart = 0;
+  const measured =
+    exactRecord(value[0], [
+      "frameCount", "index", "narrationSeconds", "part",
+      "renderedFrameCount", "renderedStartFrame", "startFrame",
+    ]) && value[0].renderedFrameCount !== null;
+  for (const [offset, shot] of value.entries()) {
+    if (
+      !exactRecord(shot, [
+        "frameCount", "index", "narrationSeconds", "part",
+        "renderedFrameCount", "renderedStartFrame", "startFrame",
+      ]) ||
+      shot.index !== offset + 1 ||
+      shot.startFrame !== declaredStart ||
+      typeof shot.frameCount !== "number" ||
+      !Number.isSafeInteger(shot.frameCount) ||
+      shot.frameCount <= 0 ||
+      (shot.part !== null &&
+        (typeof shot.part !== "string" || !MOTION_PART_ID.test(shot.part))) ||
+      (shot.narrationSeconds !== null &&
+        (typeof shot.narrationSeconds !== "number" ||
+          !Number.isFinite(shot.narrationSeconds) ||
+          shot.narrationSeconds <= 0 ||
+          shot.narrationSeconds > shot.frameCount / 30 + 0.5))
+    ) {
+      return false;
+    }
+    declaredStart += shot.frameCount;
+    if (!Number.isSafeInteger(declaredStart)) return false;
+    if (measured) {
+      if (
+        typeof shot.renderedStartFrame !== "number" ||
+        !Number.isSafeInteger(shot.renderedStartFrame) ||
+        shot.renderedStartFrame !== renderedStart ||
+        Math.abs(shot.renderedStartFrame - shot.startFrame) > 1 ||
+        typeof shot.renderedFrameCount !== "number" ||
+        !Number.isSafeInteger(shot.renderedFrameCount) ||
+        shot.renderedFrameCount <= 0
+      ) {
+        return false;
+      }
+      renderedStart += shot.renderedFrameCount;
+      if (
+        !Number.isSafeInteger(renderedStart) ||
+        Math.abs(renderedStart - declaredStart) > 1
+      ) {
+        return false;
+      }
+    } else if (
+      shot.renderedStartFrame !== null ||
+      shot.renderedFrameCount !== null
+    ) {
+      return false;
+    }
+  }
+  return status !== "succeeded" || measured;
 }
 
 function parseMotionJobs(value: unknown): readonly MotionRenderJobSnapshot[] {

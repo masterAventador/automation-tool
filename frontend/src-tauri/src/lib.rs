@@ -909,7 +909,6 @@ fn run_motion_render_job(
         // person watching the progress bar sees the film being made in the
         // order they will watch it.
         let mut encoded = Vec::with_capacity(segments.len());
-        let mut total_frames: u32 = 0;
         for (index, segment) in segments.iter().enumerate() {
             if motion_video_studio::cancellation_requested(&workspaces, render_job_id)
                 .map_err(|_| MotionRenderStageFailure::Render)?
@@ -1015,9 +1014,6 @@ fn run_motion_render_job(
                 &film_canvas,
                 segment.frame_count(),
             )?;
-            total_frames = total_frames
-                .checked_add(segment.frame_count())
-                .ok_or(MotionRenderStageFailure::Encoding)?;
             encoded.push(encoded_segment);
         }
         motion_video_studio::advance(
@@ -1029,15 +1025,29 @@ fn run_motion_render_job(
             None,
         )
         .map_err(|_| MotionRenderStageFailure::Encoding)?;
-        motion_video_studio::join_motion_film(
+        let expected_segment_frames = segments
+            .iter()
+            .map(motion_video_studio::MotionRenderSegment::frame_count)
+            .collect::<Vec<_>>();
+        let rendered_frames = motion_video_studio::join_motion_film(
             &encoded,
             &film,
             &film_canvas,
             &ffmpeg,
             &ffprobe,
-            total_frames,
+            &expected_segment_frames,
         )
         .map_err(|_| MotionRenderStageFailure::Encoding)?;
+        motion_video_studio::record_rendered_shot_frames(
+            &workspaces,
+            render_job_id,
+            &rendered_frames,
+        )
+        .map_err(|_| MotionRenderStageFailure::Encoding)?;
+        let total_frames = rendered_frames
+            .iter()
+            .try_fold(0_u32, |total, frames| total.checked_add(*frames))
+            .ok_or(MotionRenderStageFailure::Encoding)?;
         // PC-26: lay each shot's narration onto the joined film. A silent film
         // returns immediately, so the pre-narration pipeline is byte-identical.
         motion_video_studio::mix_narration_into_film(
@@ -1694,7 +1704,10 @@ async fn logout_douyin_session(
     let running = {
         let service = platform.inner().clone();
         matches!(
-            service.status().map_err(map_executor_platform_error)?.state(),
+            service
+                .status()
+                .map_err(map_executor_platform_error)?
+                .state(),
             executor_manager::ExecutorManagerState::Running
         )
     };
@@ -4972,7 +4985,10 @@ mod tests {
             mapped(Code::InvalidProfileId),
             ("profile_marker_invalid", false)
         );
-        assert_eq!(mapped(Code::StorageUnavailable), ("storage_unavailable", false));
+        assert_eq!(
+            mapped(Code::StorageUnavailable),
+            ("storage_unavailable", false)
+        );
 
         let codes = [
             Code::ProfileInUse,

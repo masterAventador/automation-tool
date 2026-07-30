@@ -164,6 +164,7 @@ export class TestHarnessVideoStudio implements MaterialVideoStudioGateway {
       progressPercent: 20,
       subject,
       styleDisplayName,
+      shotStructure: [],
       artifactId: null,
       artifactSizeBytes: null,
       failureCode: null,

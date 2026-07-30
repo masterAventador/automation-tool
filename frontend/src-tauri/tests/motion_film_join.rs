@@ -197,10 +197,14 @@ fn segments_captured_on_different_stages_become_one_film_on_one_canvas() {
         // The command production runs, spawned here rather than through the
         // render job's own wait loop: that loop exists to notice a cancelled
         // job, which is a thing this test has none of.
-        let status = motion_segment_encode_command(&ffmpeg, &frames_directory, &segment, &canvas, frames)
-            .status()
-            .expect("the packaged ffmpeg must run");
-        assert!(status.success(), "a captured shot encodes onto the film's canvas");
+        let status =
+            motion_segment_encode_command(&ffmpeg, &frames_directory, &segment, &canvas, frames)
+                .status()
+                .expect("the packaged ffmpeg must run");
+        assert!(
+            status.success(),
+            "a captured shot encodes onto the film's canvas"
+        );
         // Each shot arrives on the canvas as it is encoded, so the join itself
         // never has to reconcile anything.
         assert_eq!(
@@ -211,8 +215,13 @@ fn segments_captured_on_different_stages_become_one_film_on_one_canvas() {
     }
 
     let film = root.0.join("film.mp4");
-    join_motion_film(&segments, &film, &canvas, &ffmpeg, &ffprobe, 45)
+    let measured = join_motion_film(&segments, &film, &canvas, &ffmpeg, &ffprobe, &[30, 15])
         .expect("segments already on the canvas join into the film");
+    assert_eq!(
+        measured,
+        [30, 15],
+        "decoded shot counts become product data"
+    );
 
     assert_eq!(probe(&ffprobe, &film), (1920, 1080, 45));
 }
@@ -238,7 +247,7 @@ fn a_join_that_exits_zero_is_still_refused_when_the_film_is_not_what_was_asked_f
         &canvas,
         &ffmpeg,
         &ffprobe,
-        45,
+        &[30, 15],
     )
     .expect_err("a film whose second half is the wrong shape is not a film");
     assert_eq!(error.code(), MotionVideoStudioErrorCode::RenderUnavailable);
@@ -258,7 +267,7 @@ fn a_film_missing_frames_it_was_promised_is_refused() {
     clip(&ffmpeg, &only, 1920, 1080, 30, "red");
 
     let film = root.0.join("film.mp4");
-    let error = join_motion_film(&[only], &film, &canvas, &ffmpeg, &ffprobe, 45)
+    let error = join_motion_film(&[only], &film, &canvas, &ffmpeg, &ffprobe, &[45])
         .expect_err("30 frames is not the 45 the film's shots account for");
     assert_eq!(error.code(), MotionVideoStudioErrorCode::RenderUnavailable);
 }
@@ -268,7 +277,14 @@ fn a_film_needs_at_least_one_shot() {
     let (ffmpeg, ffprobe) = toolchain();
     let root = TempDirectory::new();
     let canvas = film_canvas("16:9").unwrap();
-    let error = join_motion_film(&[], &root.0.join("film.mp4"), &canvas, &ffmpeg, &ffprobe, 0)
-        .expect_err("there is no film without a shot");
+    let error = join_motion_film(
+        &[],
+        &root.0.join("film.mp4"),
+        &canvas,
+        &ffmpeg,
+        &ffprobe,
+        &[],
+    )
+    .expect_err("there is no film without a shot");
     assert_eq!(error.code(), MotionVideoStudioErrorCode::RenderUnavailable);
 }

@@ -84,6 +84,16 @@ export type MotionRenderJobStatus =
   | "failed"
   | "cancelled";
 
+export interface MotionRenderShotSnapshot {
+  readonly index: number;
+  readonly startFrame: number;
+  readonly frameCount: number;
+  readonly renderedStartFrame: number | null;
+  readonly renderedFrameCount: number | null;
+  readonly part: string | null;
+  readonly narrationSeconds: number | null;
+}
+
 export interface MotionRenderJobSnapshot {
   readonly renderJobId: string;
   readonly revision: number;
@@ -91,6 +101,8 @@ export interface MotionRenderJobSnapshot {
   readonly progressPercent: number;
   readonly subject: string;
   readonly styleDisplayName: string;
+  /** The authored table plus counts decoded from each encoded shot. */
+  readonly shotStructure: readonly MotionRenderShotSnapshot[];
   readonly artifactId: string | null;
   readonly artifactSizeBytes: number | null;
   readonly failureCode:

@@ -2293,9 +2293,14 @@ class NarrationTests(unittest.TestCase):
             payload = agent.author(_brief()).submission.segments[0].to_payload()
         self.assertEqual(payload["narrationAudio"], "narration/hook.wav")
         self.assertEqual(payload["narrationSeconds"], 8.0)
+        self.assertEqual(
+            payload["part"],
+            "lt-accent-underline",
+            "T2.2: the App cannot persist which part made a shot if the answer drops it",
+        )
 
-    def test_a_silent_films_answer_keeps_its_exact_old_shape(self) -> None:
-        """正式 App 的段解析是 deny_unknown_fields：无声片的形状一个键都不能多。"""
+    def test_a_silent_films_answer_still_declares_which_part_made_the_shot(self) -> None:
+        """无旁白只省略音频对；T2.2 的镜头来源仍是产品数据。"""
         with TemporaryDirectory() as raw:
             root = Path(raw)
             workspace = _make_workspace(root / "job")
@@ -2309,6 +2314,7 @@ class NarrationTests(unittest.TestCase):
                 "canvas",
                 "entryHtml",
                 "frameCount",
+                "part",
                 "sourceEndMillis",
                 "sourceStartMillis",
             ],

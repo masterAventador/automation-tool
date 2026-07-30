@@ -2,11 +2,12 @@ use automation_tool_desktop_lib::local_video_orchestrator::{
     VideoWorkerRenderCanvas, VideoWorkerRenderSandboxRequest, VideoWorkerSourceWindow,
 };
 use automation_tool_desktop_lib::motion_video_studio::{
-    TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR, TEMPLATE_CANVAS_HEIGHT, TEMPLATE_CANVAS_WIDTH,
     advance, cancel, cancel_marker_file_name, cancellation_requested, delete_artifact,
-    duration_limits, import_rendered_output, prepare_manual_render_job, render_sandbox_budget,
-    rendered_film_is_static, snapshot, MotionRenderFailureCode, MotionRenderJobStatus,
-    MotionVideoBeatDraft, MotionVideoDraftRequest, MotionVideoStudioErrorCode,
+    duration_limits, import_rendered_output, prepare_manual_render_job,
+    record_rendered_shot_frames, render_sandbox_budget, rendered_film_is_static, snapshot,
+    MotionRenderFailureCode, MotionRenderJobStatus, MotionVideoBeatDraft, MotionVideoDraftRequest,
+    MotionVideoStudioErrorCode, TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR, TEMPLATE_CANVAS_HEIGHT,
+    TEMPLATE_CANVAS_WIDTH,
 };
 use automation_tool_desktop_lib::video_job_workspace::{
     VideoJobWorkspacePolicy, VideoJobWorkspaceStore,
@@ -235,7 +236,7 @@ fn the_render_sandbox_budget_follows_the_frame_count_instead_of_a_fixed_number()
                 TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
             )
             .expect("the template canvas is inside the declared bounds"),
-        VideoWorkerSourceWindow::new(0, 6_000).expect("a window inside the declared bounds"),
+            VideoWorkerSourceWindow::new(0, 6_000).expect("a window inside the declared bounds"),
             Vec::new(),
             frames,
             budget.wall_seconds(),
@@ -306,6 +307,17 @@ fn artifact_import_removes_the_working_copy_and_user_delete_removes_the_only_vid
     let working_video = output.join("brand-motion-result.mp4");
     fs::write(&working_video, b"verified-mp4-payload").unwrap();
 
+    advance(
+        &store,
+        prepared.render_job_id(),
+        MotionRenderJobStatus::Encoding,
+        85,
+        None,
+        None,
+    )
+    .unwrap();
+    record_rendered_shot_frames(&store, prepared.render_job_id(), &[prepared.frame_count()])
+        .unwrap();
     let artifact = import_rendered_output(&store, prepared.render_job_id()).unwrap();
     assert!(
         !working_video.exists(),
@@ -324,6 +336,27 @@ fn artifact_import_removes_the_working_copy_and_user_delete_removes_the_only_vid
 
     assert!(store.list_artifacts().unwrap().is_empty());
     assert!(!working_video.exists());
+}
+
+#[test]
+fn decoded_shot_frames_are_retained_separately_from_the_declared_table() {
+    let root = TempDirectory::new();
+    let store = store(&root.0);
+    let prepared = prepare_manual_render_job(&store, &draft()).unwrap();
+    let job = prepared.render_job_id();
+    advance(&store, job, MotionRenderJobStatus::Encoding, 85, None, None).unwrap();
+
+    let measured = record_rendered_shot_frames(&store, job, &[prepared.frame_count()]).unwrap();
+    let value = serde_json::to_value(measured).unwrap();
+    assert_eq!(value["shotStructure"][0]["startFrame"], 0);
+    assert_eq!(
+        value["shotStructure"][0]["renderedStartFrame"], 0,
+        "the measured boundary is not copied from an absent test artifact",
+    );
+    assert_eq!(
+        value["shotStructure"][0]["renderedFrameCount"],
+        prepared.frame_count(),
+    );
 }
 
 #[test]
@@ -575,7 +608,8 @@ fn a_cancellation_marker_that_escapes_the_workspace_is_not_a_render_request() {
                     TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
                 )
                 .expect("the template canvas is inside the declared bounds"),
-        VideoWorkerSourceWindow::new(0, 6_000).expect("a window inside the declared bounds"),
+                VideoWorkerSourceWindow::new(0, 6_000)
+                    .expect("a window inside the declared bounds"),
                 Vec::new(),
                 90,
                 20,
@@ -717,6 +751,7 @@ fn a_film_that_finished_before_the_executor_saw_the_cancel_is_not_lost() {
 
     // The operator presses cancel in the window between FFmpeg exiting and the
     // render thread importing what it produced.
+    record_rendered_shot_frames(&store, job, &[prepared.frame_count()]).unwrap();
     cancel(&store, job).unwrap();
     let artifact = import_rendered_output(&store, job).unwrap();
     let settled = advance(

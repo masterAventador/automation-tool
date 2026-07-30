@@ -168,6 +168,15 @@ describe("Tauri material video studio gateway", () => {
       artifactId: null,
       artifactSizeBytes: null,
       failureCode: null,
+      shotStructure: [{
+        index: 1,
+        startFrame: 0,
+        frameCount: 360,
+        renderedStartFrame: null,
+        renderedFrameCount: null,
+        part: null,
+        narrationSeconds: null,
+      }],
     });
     await expect(gateway.submitMotionDraft(request)).resolves.toMatchObject({
       status: "queued",
@@ -227,9 +236,21 @@ describe("Tauri material video studio gateway", () => {
       artifactId: null,
       artifactSizeBytes: null,
       failureCode: null,
+      shotStructure: [
+        {
+          index: 1,
+          startFrame: 0,
+          frameCount: 150,
+          renderedStartFrame: null,
+          renderedFrameCount: null,
+          part: "lt-bold-block",
+          narrationSeconds: 4.24,
+        },
+      ],
     });
     await expect(gateway.submitMotionBrief(request)).resolves.toMatchObject({
       status: "queued",
+      shotStructure: [{ part: "lt-bold-block", frameCount: 150 }],
     });
     expect(invoke).toHaveBeenCalledWith("submit_motion_video_brief", { request });
   });
@@ -313,6 +334,15 @@ describe("Tauri material video studio gateway", () => {
         artifactId: null,
         artifactSizeBytes: null,
         failureCode: "static_render",
+        shotStructure: [{
+          index: 1,
+          startFrame: 0,
+          frameCount: 360,
+          renderedStartFrame: null,
+          renderedFrameCount: null,
+          part: null,
+          narrationSeconds: null,
+        }],
       },
     ]);
     await expect(gateway.motionJobs()).resolves.toMatchObject([

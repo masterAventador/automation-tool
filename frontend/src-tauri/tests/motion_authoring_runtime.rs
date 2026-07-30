@@ -185,7 +185,11 @@ fn every_length_the_entry_offers_is_one_the_render_plan_accepts() {
     use automation_tool_desktop_lib::motion_video_studio::duration_limits;
 
     let limits = duration_limits().unwrap();
-    for seconds in [1, limits.total_seconds_maximum(), limits.brief_seconds_maximum()] {
+    for seconds in [
+        1,
+        limits.total_seconds_maximum(),
+        limits.brief_seconds_maximum(),
+    ] {
         MotionVideoBriefRequest::one_sentence(
             "用蓝色商务风做一段本周销售增长说明".to_owned(),
             "16:9".to_owned(),
@@ -197,7 +201,9 @@ fn every_length_the_entry_offers_is_one_the_render_plan_accepts() {
             .brief_plan(seconds)
             .unwrap_or_else(|_| panic!("{seconds} 秒过了请求校验，渲染计划就不能再拒它"));
     }
-    assert!(limits.brief_plan(limits.brief_seconds_maximum() + 1).is_err());
+    assert!(limits
+        .brief_plan(limits.brief_seconds_maximum() + 1)
+        .is_err());
     assert!(limits.brief_plan(0).is_err());
 }
 
@@ -397,7 +403,8 @@ fn an_authored_answer_is_rechecked_against_the_brief_before_it_becomes_a_render_
 #[test]
 fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
     use automation_tool_desktop_lib::motion_video_studio::{
-        accept_authored_render_job, MOTION_COMPOSITION_FILE, TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
+        accept_authored_render_job, advance, record_rendered_shot_frames, snapshot,
+        MotionRenderJobStatus, MOTION_COMPOSITION_FILE, TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
         TEMPLATE_CANVAS_HEIGHT, TEMPLATE_CANVAS_WIDTH,
     };
 
@@ -426,6 +433,7 @@ fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
     .unwrap();
 
     let template_segment = serde_json::json!({
+        "part": null,
         "entryHtml": MOTION_COMPOSITION_FILE,
         "allowedAssets": [AUTHORING_RUNTIME_ASSET],
         "canvas": {
@@ -440,6 +448,7 @@ fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
         "sourceEndMillis": 3000,
     });
     let part_segment = serde_json::json!({
+        "part": "lt-bold-block",
         "entryHtml": part_entry,
         "allowedAssets": [part_asset],
         // The part's own stage, at factor 1: it already is the output
@@ -486,6 +495,47 @@ fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
     // line or the part's own motion, so the requested length steers the
     // storyboard rather than truncating the film.
     assert_eq!(prepared.film_frame_count(), 234);
+    let persisted = serde_json::to_value(snapshot(&store, workspace.job_id()).unwrap()).unwrap();
+    assert_eq!(
+        persisted["shotStructure"],
+        serde_json::json!([
+            {
+                "index": 1,
+                "startFrame": 0,
+                "frameCount": 90,
+                "renderedStartFrame": null,
+                "renderedFrameCount": null,
+                "part": null,
+                "narrationSeconds": null,
+            },
+            {
+                "index": 2,
+                "startFrame": 90,
+                "frameCount": 144,
+                "renderedStartFrame": null,
+                "renderedFrameCount": null,
+                "part": "lt-bold-block",
+                "narrationSeconds": null,
+            },
+        ]),
+        "T2.2: the accepted answer's shot table must survive in the RenderJob checkpoint",
+    );
+    advance(
+        &store,
+        workspace.job_id(),
+        MotionRenderJobStatus::Encoding,
+        85,
+        None,
+        None,
+    )
+    .unwrap();
+    record_rendered_shot_frames(&store, workspace.job_id(), &[91, 145])
+        .expect_err("two one-frame length drifts move the second boundary by two frames");
+    let measured = record_rendered_shot_frames(&store, workspace.job_id(), &[90, 145])
+        .expect("every decoded start/end boundary stays within one frame");
+    let measured = serde_json::to_value(measured).unwrap();
+    assert_eq!(measured["shotStructure"][1]["renderedStartFrame"], 90);
+    assert_eq!(measured["shotStructure"][1]["renderedFrameCount"], 145);
 
     for mutation in [
         // 一部影片至少要有一段
@@ -591,7 +641,9 @@ fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
             document[key] = value.clone();
         }
         let error = accept_authored_render_job(&store, &workspace, &request, &document.to_string())
-            .expect_err(&format!("a segment this side cannot render must not become a RenderJob: {document}"));
+            .expect_err(&format!(
+                "a segment this side cannot render must not become a RenderJob: {document}"
+            ));
         assert_eq!(
             error.code(),
             MotionVideoStudioErrorCode::AuthoringAnswerInvalid,
@@ -670,7 +722,8 @@ fn the_authoring_request_tells_the_child_where_the_packaged_parts_are() {
     )
     .unwrap();
     let work = Path::new("/tmp/automation-tool-example/work");
-    let catalog = Path::new("/tmp/automation-tool-example/resources").join(MOTION_CATALOG_DIRECTORY);
+    let catalog =
+        Path::new("/tmp/automation-tool-example/resources").join(MOTION_CATALOG_DIRECTORY);
     let browser = Path::new("/tmp/automation-tool-example/resources/chromium/chrome");
     let ffprobe = Path::new("/tmp/automation-tool-example/resources/media-toolchain/bin/ffprobe");
     let document = motion_authoring_request(
@@ -683,10 +736,19 @@ fn the_authoring_request_tells_the_child_where_the_packaged_parts_are() {
         "sk-example",
     );
 
-    assert_eq!(document["catalogRoot"].as_str().unwrap(), catalog.to_str().unwrap());
-    assert_eq!(document["workspace"].as_str().unwrap(), work.to_str().unwrap());
+    assert_eq!(
+        document["catalogRoot"].as_str().unwrap(),
+        catalog.to_str().unwrap()
+    );
+    assert_eq!(
+        document["workspace"].as_str().unwrap(),
+        work.to_str().unwrap()
+    );
     assert_eq!(document["brief"].as_str().unwrap(), request.brief());
-    assert_eq!(document["aspectRatio"].as_str().unwrap(), request.aspect_ratio());
+    assert_eq!(
+        document["aspectRatio"].as_str().unwrap(),
+        request.aspect_ratio()
+    );
     assert_eq!(document["durationSeconds"].as_u64().unwrap(), 6);
     assert_eq!(document["language"].as_str().unwrap(), request.language());
     // PC-14：溢出探针启动的就是这个字段指的浏览器。catalogRoot 的教训逐字适用——
@@ -733,6 +795,7 @@ fn a_narrated_segment_is_accepted_and_its_narration_reaches_the_mix() {
     .unwrap();
     let segment = |narration: serde_json::Value| {
         let mut base = serde_json::json!({
+            "part": "lt-bold-block",
             "entryHtml": part_entry,
             "allowedAssets": [],
             "canvas": {"width": 1920, "height": 1080, "deviceScaleFactor": 1},
@@ -779,10 +842,22 @@ fn a_narrated_segment_is_accepted_and_its_narration_reaches_the_mix() {
         .map(|argument| argument.to_string_lossy().into_owned())
         .collect::<Vec<_>>()
         .join(" ");
-    assert!(rendered.contains("adelay=0|0"), "第一镜的旁白从 0ms 开始: {rendered}");
-    assert!(rendered.contains("amix"), "多条旁白要混在同一条音轨上: {rendered}");
-    assert!(rendered.contains("narration/hook.wav"), "音频输入必须是工作区里那个文件");
-    assert!(rendered.contains("-c:v copy"), "视频流原样穿透，混音不许重编码画面");
+    assert!(
+        rendered.contains("adelay=0|0"),
+        "第一镜的旁白从 0ms 开始: {rendered}"
+    );
+    assert!(
+        rendered.contains("amix"),
+        "多条旁白要混在同一条音轨上: {rendered}"
+    );
+    assert!(
+        rendered.contains("narration/hook.wav"),
+        "音频输入必须是工作区里那个文件"
+    );
+    assert!(
+        rendered.contains("-c:v copy"),
+        "视频流原样穿透，混音不许重编码画面"
+    );
 
     for mutation in [
         // 只带音频不带秒数——两者是一对
@@ -900,8 +975,8 @@ fn the_second_narration_starts_where_the_first_shot_ends() {
 #[test]
 fn every_progress_the_render_loop_reports_is_one_the_job_accepts() {
     use automation_tool_desktop_lib::motion_video_studio::{
-        accept_authored_render_job, advance, rendering_progress_percent,
-        MotionRenderJobStatus, MOTION_COMPOSITION_FILE,
+        accept_authored_render_job, advance, rendering_progress_percent, MotionRenderJobStatus,
+        MOTION_COMPOSITION_FILE,
     };
 
     let root = TempDirectory::new();
@@ -941,8 +1016,9 @@ fn every_progress_the_render_loop_reports_is_one_the_job_accepts() {
                 "sourceEndMillis": 1000,
             })).collect::<Vec<_>>(),
         });
-        let prepared = accept_authored_render_job(&store, &workspace, &request, &answer.to_string())
-            .expect("the answer is accepted");
+        let prepared =
+            accept_authored_render_job(&store, &workspace, &request, &answer.to_string())
+                .expect("the answer is accepted");
         assert_eq!(prepared.segments().len(), total);
         let job = workspace.job_id();
         let mut previous = 0_u8;
@@ -971,7 +1047,10 @@ fn every_progress_the_render_loop_reports_is_one_the_job_accepts() {
         // The encode stage still owns the top of the band, so no shot may reach
         // it — a bar that hits 85 while shots are still being captured tells the
         // person watching that the render finished.
-        assert!(previous < 85, "{total} shots ran the bar into the encode stage");
+        assert!(
+            previous < 85,
+            "{total} shots ran the bar into the encode stage"
+        );
     }
 }
 

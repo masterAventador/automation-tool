@@ -1454,6 +1454,9 @@ class RenderSegment:
     frame_count: int
     source_start_millis: int
     source_end_millis: int
+    # T2.2: product metadata, not a rendering hint. The App verifies it against
+    # the catalog working-copy path before retaining it in the RenderJob.
+    part: str | None = None
     # PC-26: which narration belongs to this shot, and how long it really is.
     # None on a silent film, and then absent from the payload entirely — the
     # shipped App parses segments with deny_unknown_fields, so a silent film's
@@ -1469,6 +1472,7 @@ class RenderSegment:
             "frameCount": self.frame_count,
             "sourceStartMillis": self.source_start_millis,
             "sourceEndMillis": self.source_end_millis,
+            "part": self.part,
         }
         if self.narration_audio is not None:
             payload["narrationAudio"] = self.narration_audio
@@ -2214,6 +2218,7 @@ class MotionAuthoringAgent:
                 frame_count=segment.frames,
                 source_start_millis=segment.source_start_millis,
                 source_end_millis=segment.source_end_millis,
+                part=segment.part,
                 narration_audio=(
                     narration[segment.beat_id][0]
                     if narration is not None and segment.beat_id in narration

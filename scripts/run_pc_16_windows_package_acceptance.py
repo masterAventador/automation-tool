@@ -427,6 +427,7 @@ def run_desktop_acceptance(
     binary: Path,
     api_key: str,
     evidence_video: Path,
+    evidence_shots: Path,
     environment: dict[str, str],
 ) -> None:
     webdriver_port = int(environment["TAURI_WEBDRIVER_PORT"])
@@ -436,6 +437,7 @@ def run_desktop_acceptance(
             "PC16_WINDOWS_APP_BINARY": os.fspath(binary),
             "AUTOMATION_TOOL_T36_MODEL_KEY": api_key,
             "AUTOMATION_TOOL_T36_EVIDENCE_VIDEO": os.fspath(evidence_video),
+            "AUTOMATION_TOOL_T36_EVIDENCE_SHOTS": os.fspath(evidence_shots),
         }
     )
     require_port_closed(webdriver_port)
@@ -505,6 +507,7 @@ def main() -> int:
         shutil.rmtree(EVIDENCE)
     EVIDENCE.mkdir(parents=True)
     evidence_video = EVIDENCE / "pc16-windows-package-one-sentence.mp4"
+    evidence_shots = EVIDENCE / "pc16-windows-package-shot-structure.json"
     if app_data.exists():
         shutil.rmtree(app_data)
     if build_directory.exists():
@@ -607,9 +610,10 @@ def main() -> int:
             binary=binary,
             api_key=api_key,
             evidence_video=evidence_video,
+            evidence_shots=evidence_shots,
             environment=environment,
         )
-        inspect_film(evidence_video)
+        inspect_film(evidence_video, evidence_shots)
         run_failed = False
     finally:
         if server is not None:

@@ -262,6 +262,7 @@ describe("video studio watched from anywhere in the app", () => {
     progressPercent: 40,
     subject: "用蓝色商务风做一段本周销售增长说明",
     styleDisplayName: "一句话自动制作",
+    shotStructure: [],
     artifactId: null,
     artifactSizeBytes: null,
     failureCode: null,

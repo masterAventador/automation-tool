@@ -38,6 +38,7 @@ from motion_shot_structure import (  # noqa: E402
     ShotStructureRejected,
     describe_shots,
     plan_shots,
+    require_declared_shot_boundaries,
     refuse_duplicate_shots,
 )
 
@@ -127,11 +128,51 @@ def test_the_table_states_what_a_reader_can_check() -> None:
     check("20.000s total" in table, f"the total is stated: {table}")
 
 
+def test_declared_and_decoded_shot_boundaries_may_differ_by_one_frame() -> None:
+    """Container rounding may move one boundary, but never the next one too."""
+    shots = require_declared_shot_boundaries(
+        declared_frames=[90, 450, 60],
+        rendered_frames=[90, 451, 59],
+        frames_per_second=30,
+        tolerance_frames=1,
+    )
+    expected_starts = [0.0, 3.0, 541 / 30]
+    check(
+        all(
+            abs(actual.start_seconds - expected) < 1e-9
+            for actual, expected in zip(shots, expected_starts)
+        ),
+        f"decoded starts are returned for the acceptance table: {shots}",
+    )
+    expected_seconds = [3.0, 451 / 30, 59 / 30]
+    check(
+        all(
+            abs(actual.seconds - expected) < 1e-9
+            for actual, expected in zip(shots, expected_seconds)
+        ),
+        f"decoded lengths are returned for the acceptance table: {shots}",
+    )
+
+
+def test_cumulative_boundary_drift_is_refused_even_if_each_shot_is_only_one_frame_off() -> None:
+    """Two +1 shot errors make the third boundary +2; per-shot checks miss it."""
+    message = expect_rejected(
+        "cumulative boundary drift",
+        lambda: require_declared_shot_boundaries(
+            declared_frames=[90, 450, 60],
+            rendered_frames=[91, 451, 58],
+            frames_per_second=30,
+            tolerance_frames=1,
+        ),
+    )
+    check("shot 2" in message and "2 frames" in message, message)
+
+
 def main() -> int:
     for name, function in sorted(globals().items()):
         if name.startswith("test_") and callable(function):
             function()
-    print(f"motion shot structure tests passed")
+    print("motion shot structure tests passed")
     print(f"executed checks: {CHECKS}")
     return 0
 
