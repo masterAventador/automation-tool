@@ -182,6 +182,59 @@ def test_the_authorized_browser_reaches_the_agent_as_a_probe(
     assert without_field is None
 
 
+def test_a_relative_ffprobe_executable_is_refused_before_the_model(
+    workspace: Path,
+) -> None:
+    """Narration length is measured by whatever this path names (PC-26), so a
+    path the App did not resolve absolutely is a caller error."""
+    model = _NeverCalledModel()
+    with pytest.raises(MotionAuthoringEntryRejected) as caught:
+        run_motion_authoring_entry(
+            _request(workspace, ffprobeExecutable="relative/ffprobe"),
+            model_call=model,
+        )
+    assert caught.value.rejection_reason == "ffprobe_executable_not_absolute"
+    assert model.calls == 0
+
+
+def test_an_empty_ffprobe_executable_is_refused_before_the_model(
+    workspace: Path,
+) -> None:
+    model = _NeverCalledModel()
+    with pytest.raises(MotionAuthoringEntryRejected) as caught:
+        run_motion_authoring_entry(
+            _request(workspace, ffprobeExecutable=""), model_call=model
+        )
+    assert caught.value.rejection_reason == "ffprobe_executable_missing"
+    assert model.calls == 0
+
+
+def test_the_ffprobe_path_reaches_the_agent_as_a_narrator(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the field the agent gets a narrator; without it, a silent film —
+    an older App keeps today's behaviour instead of a crash or a fake voice."""
+    seen: list[object] = []
+
+    class _RecordingAgent:
+        def __init__(self, **keywords: object) -> None:
+            seen.append(keywords.get("narrator"))
+
+        def author(self, _brief: object) -> None:
+            raise AssertionError("the recording agent never authors")
+
+    monkeypatch.setattr(motion_authoring_entry, "MotionAuthoringAgent", _RecordingAgent)
+    for request in (
+        _request(workspace, ffprobeExecutable=str(workspace / "ffprobe")),
+        _request(workspace),
+    ):
+        with pytest.raises(Exception):
+            run_motion_authoring_entry(request, model_call=_NeverCalledModel())
+    with_field, without_field = seen
+    assert callable(with_field)
+    assert without_field is None
+
+
 def test_a_workspace_outside_the_request_is_refused(tmp_path: Path) -> None:
     """A relative or non-existent workspace is a caller error, not a directory to create.
 

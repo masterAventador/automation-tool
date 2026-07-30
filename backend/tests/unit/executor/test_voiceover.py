@@ -76,6 +76,28 @@ class _Gateway:
         return self.audio
 
 
+def test_the_catalog_config_builds_from_a_key_the_request_carried() -> None:
+    """PC-26：执行器子进程里没有 secret 文件——apiKey 随授权书请求到达，
+    配置只能从（打包的目录契约 + 请求里的 key）建。与 load_voiceover_config
+    共用同一段目录解析，不允许第二份实现。"""
+    from pathlib import Path
+
+    from automation_tool.executor.motion_authoring.voiceover import (
+        voiceover_config_from_catalog,
+    )
+
+    catalog = (
+        Path(__file__).resolve().parents[4]
+        / "contracts/video/bailian-model-catalog.v1.json"
+    )
+    config = voiceover_config_from_catalog(
+        catalog_path=catalog, api_key="sk-" + "a" * 40
+    )
+    assert config.base_url.startswith("https://")
+    assert config.model_id
+    assert config.audio_host_suffixes
+
+
 def test_the_api_key_never_reaches_a_representation() -> None:
     assert _KEY not in repr(_config())
 

@@ -1454,9 +1454,15 @@ class RenderSegment:
     frame_count: int
     source_start_millis: int
     source_end_millis: int
+    # PC-26: which narration belongs to this shot, and how long it really is.
+    # None on a silent film, and then absent from the payload entirely — the
+    # shipped App parses segments with deny_unknown_fields, so a silent film's
+    # answer must keep its exact old shape.
+    narration_audio: str | None = None
+    narration_seconds: float | None = None
 
     def to_payload(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "entryHtml": self.entry_html,
             "allowedAssets": list(self.allowed_assets),
             "canvas": dict(self.canvas),
@@ -1464,6 +1470,10 @@ class RenderSegment:
             "sourceStartMillis": self.source_start_millis,
             "sourceEndMillis": self.source_end_millis,
         }
+        if self.narration_audio is not None:
+            payload["narrationAudio"] = self.narration_audio
+            payload["narrationSeconds"] = self.narration_seconds
+        return payload
 
 
 @dataclass(frozen=True)
@@ -2204,6 +2214,16 @@ class MotionAuthoringAgent:
                 frame_count=segment.frames,
                 source_start_millis=segment.source_start_millis,
                 source_end_millis=segment.source_end_millis,
+                narration_audio=(
+                    narration[segment.beat_id][0]
+                    if narration is not None and segment.beat_id in narration
+                    else None
+                ),
+                narration_seconds=(
+                    narration[segment.beat_id][1]
+                    if narration is not None and segment.beat_id in narration
+                    else None
+                ),
             )
             for segment in film.segments
         )

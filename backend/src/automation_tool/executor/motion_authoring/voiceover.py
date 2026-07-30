@@ -277,6 +277,27 @@ def load_voiceover_config(
     api_key = secret.get("apiKey")
     if not isinstance(api_key, str):
         return None
+    return voiceover_config_from_catalog(catalog_path=catalog_path, api_key=api_key)
+
+
+def voiceover_config_from_catalog(
+    *, catalog_path: Path, api_key: str
+) -> VoiceoverConfig:
+    """The config from the packaged catalog contract and a key already in hand.
+
+    The Executor's authoring child has no secret file — the key arrives on
+    stdin with the authoring request (PC-26) — so the catalog parsing stands
+    on its own here and `load_voiceover_config` delegates to it. One parser,
+    two entry points, never a second copy of what the contract means.
+    """
+    try:
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise VoiceoverRejected(
+            "voiceover rejected: model catalog or secret is unreadable"
+        ) from error
+    if not isinstance(catalog, dict):
+        _reject("config shape invalid")
     purposes = catalog.get("purposes")
     _require(isinstance(purposes, list), "catalog purposes missing")
     purpose = next(
@@ -311,4 +332,5 @@ __all__ = [
     "measure_audio_seconds",
     "resolve_audio_url",
     "synthesize_voiceover",
+    "voiceover_config_from_catalog",
 ]

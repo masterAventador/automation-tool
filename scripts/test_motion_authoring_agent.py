@@ -2281,6 +2281,39 @@ class NarrationTests(unittest.TestCase):
         self.assertIn("旁白", message)
         self.assertIn("一一对应", message)
 
+    def test_the_answer_carries_each_segments_narration(self) -> None:
+        """App 侧混音需要知道哪段音频属于哪个镜头——段自己带着走。"""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            model = ScriptedModel([_narrated_payload()])
+            agent = self._agent(
+                workspace, model, ScriptedNarrator(8.0), _probe_catalog(root)
+            )
+            payload = agent.author(_brief()).submission.segments[0].to_payload()
+        self.assertEqual(payload["narrationAudio"], "narration/hook.wav")
+        self.assertEqual(payload["narrationSeconds"], 8.0)
+
+    def test_a_silent_films_answer_keeps_its_exact_old_shape(self) -> None:
+        """正式 App 的段解析是 deny_unknown_fields：无声片的形状一个键都不能多。"""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            model = ScriptedModel([_narrated_payload()])
+            agent = self._agent(workspace, model, None, _probe_catalog(root))
+            payload = agent.author(_brief()).submission.segments[0].to_payload()
+        self.assertEqual(
+            sorted(payload),
+            [
+                "allowedAssets",
+                "canvas",
+                "entryHtml",
+                "frameCount",
+                "sourceEndMillis",
+                "sourceStartMillis",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

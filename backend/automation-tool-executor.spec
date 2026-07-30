@@ -50,6 +50,9 @@ motion_authoring_resources = [
     # room it has there.
     "contracts/video/motion-part-slots.v1.json",
     "contracts/video/motion-part-slot-budget.v1.json",
+    # PC-26: the narrator's voice model id and audio hosts come from the same
+    # catalog declaration the App reads.
+    "contracts/video/bailian-model-catalog.v1.json",
     "vendor/hyperframes/skills/hyperframes-core/references/minimal-composition.md",
     "vendor/hyperframes/skills/hyperframes-core/references/determinism-rules.md",
 ]

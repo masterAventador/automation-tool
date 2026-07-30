@@ -35,6 +35,11 @@ from automation_tool.executor.motion_authoring.slot_probe_browser import (
     SLOT_PROBE_PROFILE_DIRECTORY,
     PackagedSlotProbe,
 )
+from automation_tool.executor.motion_authoring.voiceover import (
+    measure_audio_seconds,
+    synthesize_voiceover,
+    voiceover_config_from_catalog,
+)
 
 SCHEMA_VERSION: Final = 1
 MAX_REQUEST_BYTES: Final = 64 * 1024
@@ -62,6 +67,10 @@ _OPTIONAL_REQUEST_FIELDS: Final = frozenset(
         # without the overflow probe — today's behaviour, never a fake pass.
         "browserExecutable",
         "catalogRoot",
+        # PC-26: narration length is measured with the App's own toolchain
+        # ffprobe. Absent means an App too old to send it — the film then stays
+        # silent, which is what every film was before narration existed.
+        "ffprobeExecutable",
         # Optional so an older caller keeps today's behaviour: reasoning stays
         # on unless somebody asked for it to be off. Measured 2026-07-28, that
         # phase is 31 of the 42 seconds authoring takes — worth offering, not
@@ -186,6 +195,10 @@ _ENTRY_REASON_TOKENS: Final = {
     "browser executable is missing": "browser_executable_missing",
     "browser executable must be an absolute path the App authorized": (
         "browser_executable_not_absolute"
+    ),
+    "ffprobe executable is missing": "ffprobe_executable_missing",
+    "ffprobe executable must be an absolute path the App resolved": (
+        "ffprobe_executable_not_absolute"
     ),
     "brand assets are not the declared shape": "brand_assets_shape_invalid",
     "duration must be a whole number of seconds": "duration_not_whole_seconds",
@@ -510,6 +523,63 @@ def _browser_executable(document: dict[str, Any]) -> Path | None:
     return path
 
 
+def _ffprobe_executable(document: dict[str, Any]) -> Path | None:
+    """The toolchain ffprobe narration is measured with, or nothing.
+
+    Absent means an App too old to send it — the agent then authors a silent
+    film, exactly as every film was before narration existed. Present, it is
+    checked on the browser executable's terms: this path is executed, so a
+    relative one would resolve against whatever the working directory is.
+    """
+    payload = document.get("ffprobeExecutable")
+    if payload is None:
+        return None
+    if not isinstance(payload, str) or not payload:
+        raise _reject("ffprobe executable is missing")
+    path = Path(payload)
+    if not path.is_absolute():
+        raise _reject("ffprobe executable must be an absolute path the App resolved")
+    return path
+
+
+# Where each beat's narration lands inside the RenderJob workspace, and the
+# contract every beat file follows: one WAV per beat id.
+NARRATION_DIRECTORY: Final = "narration"
+
+
+def _narrator_for(
+    workspace: AuthoringWorkspace, api_key: str, ffprobe: Path
+) -> Callable[[str, str], tuple[str, float]]:
+    """One narrator: synthesize a beat's line, land it, measure it for real.
+
+    Built per request because everything it closes over is per request: the
+    workspace the audio must land in, the key that arrived on stdin, and the
+    toolchain ffprobe the App resolved. The voice model id comes from the
+    packaged catalog contract — the same declaration `load_voiceover_config`
+    reads on the App side.
+    """
+    config = voiceover_config_from_catalog(
+        catalog_path=AUTHORING_WORKFLOW_CONTRACT.with_name(
+            "bailian-model-catalog.v1.json"
+        ),
+        api_key=api_key,
+    )
+
+    def narrate(beat_id: str, text: str) -> tuple[str, float]:
+        synthesized = synthesize_voiceover(
+            config,
+            text,
+            workspace=workspace,
+            relative_path=f"{NARRATION_DIRECTORY}/{beat_id}.wav",
+        )
+        seconds = measure_audio_seconds(
+            workspace.resolve(synthesized.relative_path), ffprobe=ffprobe
+        )
+        return (synthesized.relative_path, seconds)
+
+    return narrate
+
+
 def _brief(document: dict[str, Any]) -> MotionBrief:
     assets = document["brandAssets"]
     if not isinstance(assets, list) or not all(type(a) is str for a in assets):
@@ -550,6 +620,7 @@ def run_motion_authoring_entry(
     brief = _brief(document)
     model = _model(document["model"])
     browser = _browser_executable(document)
+    ffprobe = _ffprobe_executable(document)
     try:
         thinking = document.get("modelThinking", load_thinking_default())
         if type(thinking) is not bool:
@@ -572,6 +643,11 @@ def run_motion_authoring_entry(
                     browser_executable=browser,
                     profile_directory=workspace.root / SLOT_PROBE_PROFILE_DIRECTORY,
                 )
+            ),
+            narrator=(
+                None
+                if ffprobe is None
+                else _narrator_for(workspace, model.api_key, ffprobe)
             ),
         )
         result = agent.author(brief)
