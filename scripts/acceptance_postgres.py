@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Cross-platform isolated PostgreSQL lifecycle for acceptance scripts."""
 
 from __future__ import annotations
@@ -12,12 +11,40 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+WINDOWS_POSTGRES_ROOT_ENVIRONMENT = "AUTOMATION_TOOL_ACCEPTANCE_WINDOWS_POSTGRES_ROOT"
+
 
 def _required_postgres_tool(name: str) -> str:
     executable = shutil.which(name)
     if executable is None:
-        raise RuntimeError(f"{name} is required for native Windows PostgreSQL acceptance")
+        raise RuntimeError(
+            f"{name} is required for native Windows PostgreSQL acceptance"
+        )
     return executable
+
+
+@contextmanager
+def _windows_postgres_root(
+    environment: dict[str, str],
+) -> Iterator[Path]:
+    parent_owned = environment.get(WINDOWS_POSTGRES_ROOT_ENVIRONMENT)
+    if parent_owned is None:
+        with tempfile.TemporaryDirectory(
+            prefix="automation-tool-postgres-",
+            ignore_cleanup_errors=True,
+        ) as directory:
+            yield Path(directory)
+        return
+    root = Path(parent_owned)
+    if not root.is_absolute():
+        raise RuntimeError("Windows PostgreSQL acceptance root must be absolute")
+    try:
+        root.mkdir(mode=0o700)
+    except OSError as error:
+        raise RuntimeError(
+            "Windows PostgreSQL acceptance root is unavailable"
+        ) from error
+    yield root
 
 
 @contextmanager
@@ -35,11 +62,7 @@ def _native_windows_postgres(
     process_environment = environment.copy()
     process_environment["PGPASSWORD"] = password
 
-    with tempfile.TemporaryDirectory(
-        prefix="automation-tool-postgres-",
-        ignore_cleanup_errors=True,
-    ) as directory:
-        root = Path(directory)
+    with _windows_postgres_root(environment) as root:
         data_directory = root / "data"
         password_path = root / "postgres-password"
         server_log = root / "postgres.log"

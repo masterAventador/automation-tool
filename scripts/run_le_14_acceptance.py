@@ -10,6 +10,7 @@ import http.client
 import json
 import os
 import re
+import shutil
 import signal
 import stat
 import subprocess
@@ -22,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, NoReturn
 
+from acceptance_postgres import WINDOWS_POSTGRES_ROOT_ENVIRONMENT
 from run_le_13_acceptance import Le13AcceptanceFailure
 from run_le_13_acceptance import (
     prepare_verified_media_toolchain as _prepare_verified_media_toolchain,
@@ -59,6 +61,8 @@ ACCEPTANCE_TIMEOUT_SECONDS = 300
 CLEANUP_TIMEOUT_SECONDS = 60
 PROCESS_STOP_TIMEOUT_SECONDS = 10
 PROCESS_KILL_TIMEOUT_SECONDS = 5
+MAXIMUM_WINDOWS_DESCENDANTS = 4096
+WINDOWS_CLEANUP_ROOT_PID_ENVIRONMENT = "AUTOMATION_TOOL_CLEANUP_ROOT_PID"
 _PASS_SUMMARY_PATTERN = re.compile(r"^1 passed in \d+(?:\.\d+)?s$", re.MULTILINE)
 
 
@@ -294,23 +298,93 @@ def ensure_silero_vad_assets() -> Path:
         _reject("LE-14 Silero VAD runtime is unavailable")
 
 
+def _windows_descendant_process_ids(root_pid: int) -> tuple[int, ...]:
+    """Snapshot the bounded descendants used if Windows tree termination fails."""
+
+    environment = os.environ.copy()
+    environment[WINDOWS_CLEANUP_ROOT_PID_ENVIRONMENT] = str(root_pid)
+    script = (
+        "$root = [int]$env:AUTOMATION_TOOL_CLEANUP_ROOT_PID; "
+        "$records = @(Get-CimInstance Win32_Process | "
+        "Select-Object ProcessId,ParentProcessId); "
+        "$owned = @($root); "
+        "do { "
+        "$before = $owned.Count; "
+        "$parents = $owned; "
+        "$owned += @($records | Where-Object { "
+        "$parents -contains [int]$_.ParentProcessId "
+        "} | ForEach-Object { [int]$_.ProcessId }); "
+        "$owned = @($owned | Sort-Object -Unique); "
+        "} while ($owned.Count -gt $before); "
+        "$owned | Where-Object { $_ -ne $root } | Sort-Object -Descending"
+    )
+    try:
+        completed = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                script,
+            ],
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=PROCESS_STOP_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ()
+    if completed.returncode != 0:
+        return ()
+    descendants: list[int] = []
+    for line in completed.stdout.splitlines():
+        rendered = line.strip()
+        if not rendered.isdigit():
+            continue
+        process_id = int(rendered)
+        if process_id <= 0 or process_id == root_pid or process_id in descendants:
+            continue
+        descendants.append(process_id)
+        if len(descendants) >= MAXIMUM_WINDOWS_DESCENDANTS:
+            break
+    return tuple(descendants)
+
+
+def _taskkill_tree(process_id: int) -> bool:
+    try:
+        completed = subprocess.run(
+            ["taskkill", "/PID", str(process_id), "/T", "/F"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=CLEANUP_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return completed.returncode == 0
+
+
 def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
     """Stop only the process tree placed in this driver's private group."""
 
     if os.name == "nt":
-        try:
-            subprocess.run(
-                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=CLEANUP_TIMEOUT_SECONDS,
-            )
-        except (OSError, subprocess.TimeoutExpired):
+        descendants = _windows_descendant_process_ids(process.pid)
+        tree_stopped = _taskkill_tree(process.pid)
+        if not tree_stopped:
+            for process_id in descendants:
+                _taskkill_tree(process_id)
             with contextlib.suppress(OSError):
                 process.kill()
-        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+        try:
             process.wait(timeout=PROCESS_KILL_TIMEOUT_SECONDS)
+        except (OSError, subprocess.TimeoutExpired):
+            for process_id in descendants:
+                _taskkill_tree(process_id)
+            with contextlib.suppress(OSError):
+                process.kill()
+            with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+                process.wait(timeout=PROCESS_KILL_TIMEOUT_SECONDS)
         return
 
     try:
@@ -335,10 +409,61 @@ def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
         process.wait(timeout=PROCESS_KILL_TIMEOUT_SECONDS)
 
 
-def _cleanup_postgres_resources(pytest_pid: int) -> None:
+def _cleanup_postgres_resources(
+    pytest_pid: int,
+    windows_postgres_root: Path,
+) -> None:
     """Remove only the Docker Compose project derived from the owned child PID."""
 
     if os.name == "nt":
+        try:
+            root_metadata = windows_postgres_root.lstat()
+            data_directory = windows_postgres_root / "data"
+            data_metadata = data_directory.lstat()
+        except OSError:
+            return
+        pg_ctl = shutil.which("pg_ctl")
+        if (
+            stat.S_ISLNK(root_metadata.st_mode)
+            or not stat.S_ISDIR(root_metadata.st_mode)
+            or stat.S_ISLNK(data_metadata.st_mode)
+            or not stat.S_ISDIR(data_metadata.st_mode)
+            or pg_ctl is None
+            or not os.path.isabs(pg_ctl)
+        ):
+            return
+        command = [
+            pg_ctl,
+            "--pgdata",
+            os.fspath(data_directory),
+            "--mode",
+            "fast",
+            "--wait",
+            "stop",
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=CLEANUP_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            completed = None
+        if completed is None or completed.returncode != 0:
+            immediate_command = [*command]
+            immediate_command[immediate_command.index("fast")] = "immediate"
+            try:
+                subprocess.run(
+                    immediate_command,
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=CLEANUP_TIMEOUT_SECONDS,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                pass
         return
     environment = {
         key: value
@@ -400,6 +525,7 @@ def run_acceptance(secret_path: Path) -> None:
         root = Path(directory)
         toolchain = prepare_verified_media_toolchain(root / "runtime").resolve()
         voice = prepare_voice_fixture(root / "human-speech.flac").resolve()
+        windows_postgres_root = root / "windows-postgres"
         environment = {
             key: value
             for key, value in os.environ.items()
@@ -408,6 +534,9 @@ def run_acceptance(secret_path: Path) -> None:
         environment[SECRET_PATH_ENVIRONMENT] = os.fspath(secret_path)
         environment[TOOLCHAIN_ROOT_ENVIRONMENT] = os.fspath(toolchain)
         environment[VOICE_PATH_ENVIRONMENT] = os.fspath(voice)
+        environment[WINDOWS_POSTGRES_ROOT_ENVIRONMENT] = os.fspath(
+            windows_postgres_root
+        )
         command = [
             sys.executable,
             "-m",
@@ -418,40 +547,83 @@ def run_acceptance(secret_path: Path) -> None:
             "-o",
             "addopts=",
         ]
-        process = subprocess.Popen(
-            command,
-            cwd=BACKEND_ROOT,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            creationflags=(
-                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-                if os.name == "nt"
-                else 0
-            ),
-            start_new_session=os.name != "nt",
+        process: subprocess.Popen[str] | None = None
+        cancellation_requested = False
+        cleanup_started = False
+        handler_restored = False
+
+        def request_cancellation(
+            _signal_number: int,
+            _frame: object,
+        ) -> None:
+            nonlocal cancellation_requested
+            cancellation_requested = True
+            if process is not None and not cleanup_started:
+                _reject("LE-14 real acceptance failed")
+
+        previous_sigterm_handler = signal.signal(
+            signal.SIGTERM,
+            request_cancellation,
         )
+
+        def restore_sigterm_handler() -> None:
+            nonlocal handler_restored
+            if not handler_restored:
+                signal.signal(signal.SIGTERM, previous_sigterm_handler)
+                handler_restored = True
+
         timed_out = False
         try:
-            stdout, stderr = process.communicate(timeout=ACCEPTANCE_TIMEOUT_SECONDS)
-        except subprocess.TimeoutExpired:
-            _terminate_process_tree(process)
-            _cleanup_postgres_resources(process.pid)
-            timed_out = True
-            stdout = ""
-            stderr = ""
+            process = subprocess.Popen(
+                command,
+                cwd=BACKEND_ROOT,
+                env=environment,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                creationflags=(
+                    getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                    if os.name == "nt"
+                    else 0
+                ),
+                start_new_session=os.name != "nt",
+            )
+            if cancellation_requested:
+                _reject("LE-14 real acceptance failed")
+            try:
+                stdout, stderr = process.communicate(timeout=ACCEPTANCE_TIMEOUT_SECONDS)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                stdout = ""
+                stderr = ""
         except BaseException:
-            _terminate_process_tree(process)
-            _cleanup_postgres_resources(process.pid)
+            cleanup_started = True
+            if process is not None:
+                _terminate_process_tree(process)
+                _cleanup_postgres_resources(
+                    process.pid,
+                    windows_postgres_root,
+                )
             raise
+        finally:
+            restore_sigterm_handler()
         if timed_out:
+            cleanup_started = True
+            _terminate_process_tree(process)
+            _cleanup_postgres_resources(
+                process.pid,
+                windows_postgres_root,
+            )
             _reject("LE-14 real acceptance failed")
         returncode = process.returncode
         if returncode is None:
+            cleanup_started = True
             _terminate_process_tree(process)
-            _cleanup_postgres_resources(process.pid)
+            _cleanup_postgres_resources(
+                process.pid,
+                windows_postgres_root,
+            )
             _reject("LE-14 real acceptance failed")
         completed = subprocess.CompletedProcess(
             command,
