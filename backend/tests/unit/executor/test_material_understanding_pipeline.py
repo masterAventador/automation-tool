@@ -24,8 +24,9 @@ JPEG_TWO = b"\xff\xd8\xff\xe0second-frame\xff\xd9"
 
 
 class RecordingAdapter:
-    def __init__(self, content: str) -> None:
+    def __init__(self, content: str, *, finish_reason: str = "stop") -> None:
         self.content = content
+        self.finish_reason = finish_reason
         self.calls: list[object] = []
 
     def understand(
@@ -38,7 +39,7 @@ class RecordingAdapter:
         return MaterialUnderstandingReply(
             request_id="req-understanding-t2",
             content=self.content,
-            finish_reason="stop",
+            finish_reason=self.finish_reason,
         )
 
 
@@ -131,14 +132,81 @@ def test_closed_result_cannot_be_constructed_with_overlapping_shots() -> None:
         )
 
 
-def test_closed_result_rejects_a_control_character_in_request_id() -> None:
+@pytest.mark.parametrize("request_id", ["req\nforged", "req\tforged"])
+def test_closed_result_rejects_multiline_request_ids(request_id: str) -> None:
     with pytest.raises(MaterialUnderstandingRejected):
         MaterialUnderstandingResult(
-            request_id="req-safe\x1b[31m-forged",
+            request_id=request_id,
             description="有效描述",
             tags=(),
             shots=(MaterialUnderstandingShot(0, 9_000, "全片"),),
         )
+
+
+def test_structured_result_recursion_overflow_is_a_fixed_rejection(
+    tmp_path: Path,
+) -> None:
+    artifacts = _persist_artifacts(tmp_path)
+    deeply_nested_shots = "[" * 10_000 + "0" + "]" * 10_000
+    content = '{"description":"有效","tags":[],"shots":' + deeply_nested_shots + "}"
+
+    with pytest.raises(
+        MaterialUnderstandingRejected,
+        match="material understanding request rejected",
+    ):
+        understand_material_artifacts(
+            RecordingAdapter(content),
+            output_directory=tmp_path,
+            artifacts=artifacts,
+            duration_ms=9_000,
+            options=MaterialUnderstandingOptions(),
+        )
+
+
+@pytest.mark.parametrize("description", ["", " \t\n "])
+def test_empty_material_description_never_produces_a_partial_result(
+    tmp_path: Path,
+    description: str,
+) -> None:
+    artifacts = _persist_artifacts(tmp_path)
+    adapter = RecordingAdapter(_content(description=description))
+
+    with pytest.raises(
+        MaterialUnderstandingRejected,
+        match="material understanding request rejected",
+    ):
+        understand_material_artifacts(
+            adapter,
+            output_directory=tmp_path,
+            artifacts=artifacts,
+            duration_ms=9_000,
+            options=MaterialUnderstandingOptions(),
+        )
+
+    assert len(adapter.calls) == 1
+
+
+@pytest.mark.parametrize("finish_reason", ["length", "content_filter", "future_reason"])
+def test_incomplete_or_unknown_finish_reasons_never_parse_partial_content(
+    tmp_path: Path,
+    finish_reason: str,
+) -> None:
+    artifacts = _persist_artifacts(tmp_path)
+    adapter = RecordingAdapter(_content(), finish_reason=finish_reason)
+
+    with pytest.raises(
+        MaterialUnderstandingRejected,
+        match="material understanding request rejected",
+    ):
+        understand_material_artifacts(
+            adapter,
+            output_directory=tmp_path,
+            artifacts=artifacts,
+            duration_ms=9_000,
+            options=MaterialUnderstandingOptions(),
+        )
+
+    assert len(adapter.calls) == 1
 
 
 @pytest.mark.parametrize(

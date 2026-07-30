@@ -161,6 +161,13 @@ def _validate_result_text(value: object, *, maximum: int) -> str:
     return value
 
 
+def _validate_request_id(value: object) -> str:
+    validated = _validate_result_text(value, maximum=512)
+    if any(unicodedata.category(character).startswith("C") for character in validated):
+        _reject()
+    return validated
+
+
 @dataclass(frozen=True, slots=True)
 class MaterialUnderstandingShot:
     """One supplier-neutral, duration-relative shot interval."""
@@ -190,7 +197,7 @@ class MaterialUnderstandingResult:
     shots: tuple[MaterialUnderstandingShot, ...]
 
     def __post_init__(self) -> None:
-        _validate_result_text(self.request_id, maximum=512)
+        _validate_request_id(self.request_id)
         _validate_result_text(self.description, maximum=_MAX_DESCRIPTION_CHARACTERS)
         if (
             not isinstance(self.tags, tuple)
@@ -310,7 +317,7 @@ def _parse_understanding_result(
             tags=tags,
             shots=tuple(shots),
         )
-    except (KeyError, TypeError, UnicodeError, ValueError):
+    except (KeyError, RecursionError, TypeError, UnicodeError, ValueError):
         pass
     _reject()
 
