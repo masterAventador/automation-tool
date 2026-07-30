@@ -17,9 +17,9 @@ from sqlalchemy import delete, insert, select
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, os.fspath(REPOSITORY_ROOT / "scripts"))
 from run_le_13_acceptance import (  # noqa: E402
+    TOOLCHAIN_ROOT_ENVIRONMENT,
     read_bailian_api_key,
 )
-from video_runtime_cache import cache_root  # noqa: E402
 
 from automation_tool.control_plane.application.materials import MaterialService  # noqa: E402
 from automation_tool.control_plane.domain import (  # noqa: E402
@@ -55,16 +55,15 @@ from automation_tool.executor.material_understanding import (  # noqa: E402
 
 CATALOG_PATH = REPOSITORY_ROOT / "contracts/video/bailian-model-catalog.v1.json"
 SECRET_PATH_ENVIRONMENT = "AUTOMATION_TOOL_LE13_SECRET_PATH"
-PACKAGED_TOOL_SUBDIRECTORY = "media-toolchain/bin"
 pytestmark = pytest.mark.skipif(
-    SECRET_PATH_ENVIRONMENT not in os.environ,
+    any(name not in os.environ for name in (SECRET_PATH_ENVIRONMENT, TOOLCHAIN_ROOT_ENVIRONMENT)),
     reason="run through scripts/run_le_13_acceptance.py",
 )
 
 
 def _packaged_tools() -> PackagedMediaTools:
     suffix = ".exe" if os.name == "nt" else ""
-    root = cache_root() / PACKAGED_TOOL_SUBDIRECTORY
+    root = Path(os.environ[TOOLCHAIN_ROOT_ENVIRONMENT]) / "bin"
     return PackagedMediaTools(
         ffprobe_path=root / f"ffprobe{suffix}",
         ffmpeg_path=root / f"ffmpeg{suffix}",
