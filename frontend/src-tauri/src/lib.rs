@@ -607,6 +607,7 @@ pub fn motion_authoring_request(
     work: &std::path::Path,
     catalog_root: &std::path::Path,
     browser: &std::path::Path,
+    ffprobe: &std::path::Path,
     request: &motion_video_studio::MotionVideoBriefRequest,
     model_id: &str,
     api_key: &str,
@@ -620,6 +621,10 @@ pub fn motion_authoring_request(
         // would not fail anything; the child would simply author unmeasured,
         // which is the catalogRoot silence all over again.
         "browserExecutable": browser,
+        // PC-26: narration length is measured with the packaged toolchain's
+        // ffprobe — the same binary the render loop already trusts. Omitting
+        // it would not fail anything either; the film would simply be silent.
+        "ffprobeExecutable": ffprobe,
         "brief": request.brief(),
         "aspectRatio": request.aspect_ratio(),
         "durationSeconds": request.duration_seconds(),
@@ -781,6 +786,7 @@ async fn submit_motion_video_brief(
                     &work,
                     &runtime.catalog,
                     &runtime.browser,
+                    runtime.toolchain.ffprobe_path(),
                     &request,
                     credential.model_id().as_str(),
                     credential.api_key(),
@@ -976,6 +982,18 @@ fn run_motion_render_job(
         motion_video_studio::join_motion_film(
             &encoded,
             &film,
+            &film_canvas,
+            &ffmpeg,
+            &ffprobe,
+            total_frames,
+        )
+        .map_err(|_| MotionRenderStageFailure::Encoding)?;
+        // PC-26: lay each shot's narration onto the joined film. A silent film
+        // returns immediately, so the pre-narration pipeline is byte-identical.
+        motion_video_studio::mix_narration_into_film(
+            &film,
+            &work,
+            &segments,
             &film_canvas,
             &ffmpeg,
             &ffprobe,

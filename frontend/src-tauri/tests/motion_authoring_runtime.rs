@@ -251,6 +251,7 @@ fn the_thinking_choice_reaches_the_authoring_request() {
             &root.0,
             &root.0.join("catalog"),
             &root.0.join("chromium/chrome"),
+            &root.0.join("media-toolchain/bin/ffprobe"),
             &request,
             "qwen3.7-max-2026-06-08",
             "sk-not-a-real-key",
@@ -671,10 +672,12 @@ fn the_authoring_request_tells_the_child_where_the_packaged_parts_are() {
     let work = Path::new("/tmp/automation-tool-example/work");
     let catalog = Path::new("/tmp/automation-tool-example/resources").join(MOTION_CATALOG_DIRECTORY);
     let browser = Path::new("/tmp/automation-tool-example/resources/chromium/chrome");
+    let ffprobe = Path::new("/tmp/automation-tool-example/resources/media-toolchain/bin/ffprobe");
     let document = motion_authoring_request(
         work,
         &catalog,
         browser,
+        ffprobe,
         &request,
         "qwen-example",
         "sk-example",
@@ -692,6 +695,192 @@ fn the_authoring_request_tells_the_child_where_the_packaged_parts_are() {
         document["browserExecutable"].as_str().unwrap(),
         browser.to_str().unwrap()
     );
+    // PC-26：旁白时长用工具链的 ffprobe 量。字段缺了不会红任何测试——
+    // 子进程只会安静地出一条无声片，所以断言落在发出的请求文档上。
+    assert_eq!(
+        document["ffprobeExecutable"].as_str().unwrap(),
+        ffprobe.to_str().unwrap()
+    );
+}
+
+/// PC-26：旁白随段到达。音频必须真在工作区里，秒数必须装得进这一拍——
+/// 镜头长 = max(语音, 动效) 是子进程排的，这里是它的话不再被直接采信的边界。
+#[test]
+fn a_narrated_segment_is_accepted_and_its_narration_reaches_the_mix() {
+    use automation_tool_desktop_lib::motion_video_studio::{
+        accept_authored_render_job, narration_mix_arguments, MOTION_COMPOSITION_FILE,
+    };
+
+    let root = TempDirectory::new();
+    let store = store(&root.0);
+    let workspace = store.create_new().unwrap();
+    let work = store.worker_asset_directory(&workspace).unwrap();
+    fs::create_dir_all(work.join("runtime")).unwrap();
+    fs::write(work.join(AUTHORING_RUNTIME_ASSET), b"/* runtime */").unwrap();
+    fs::write(work.join(MOTION_COMPOSITION_FILE), b"<html></html>").unwrap();
+    let part_entry = "catalog/items/lt-bold-block/lt-bold-block.html";
+    fs::create_dir_all(work.join("catalog/items/lt-bold-block")).unwrap();
+    fs::write(work.join(part_entry), b"<html></html>").unwrap();
+    fs::create_dir_all(work.join("narration")).unwrap();
+    fs::write(work.join("narration/hook.wav"), b"RIFFfake").unwrap();
+
+    let request = MotionVideoBriefRequest::one_sentence(
+        "用蓝色商务风做一段本周销售增长说明".to_owned(),
+        "16:9".to_owned(),
+        6,
+        "zh".to_owned(),
+    )
+    .unwrap();
+    let segment = |narration: serde_json::Value| {
+        let mut base = serde_json::json!({
+            "entryHtml": part_entry,
+            "allowedAssets": [],
+            "canvas": {"width": 1920, "height": 1080, "deviceScaleFactor": 1},
+            "frameCount": 144,
+            "sourceStartMillis": 0,
+            "sourceEndMillis": 4800,
+        });
+        base.as_object_mut()
+            .unwrap()
+            .extend(narration.as_object().unwrap().clone());
+        base
+    };
+    let answer = |narration: serde_json::Value| {
+        serde_json::json!({
+            "schemaVersion": 1,
+            "status": "authored",
+            "entryHtml": MOTION_COMPOSITION_FILE,
+            "allowedAssets": [AUTHORING_RUNTIME_ASSET],
+            "frameCount": 6 * 30,
+            "framesPerSecond": 30,
+            "durationSeconds": 6,
+            "aspectRatio": "16:9",
+            "segments": [segment(narration)],
+        })
+        .to_string()
+    };
+
+    let narrated = serde_json::json!({
+        "narrationAudio": "narration/hook.wav",
+        "narrationSeconds": 4.0,
+    });
+    let prepared = accept_authored_render_job(&store, &workspace, &request, &answer(narrated))
+        .expect("a narrated segment whose audio exists and fits its shot is accepted");
+    let segments = prepared.segments();
+    assert_eq!(segments[0].narration_audio(), Some("narration/hook.wav"));
+
+    // 混音参数：每条旁白铺在它自己镜头的起点；无声片不混（None）。
+    let film = Path::new("/tmp/automation-tool-example/film.mp4");
+    let output = Path::new("/tmp/automation-tool-example/film-voiced.mp4");
+    let arguments =
+        narration_mix_arguments(film, &work, segments, 30, output).expect("narrated film mixes");
+    let rendered = arguments
+        .iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(rendered.contains("adelay=0|0"), "第一镜的旁白从 0ms 开始: {rendered}");
+    assert!(rendered.contains("amix"), "多条旁白要混在同一条音轨上: {rendered}");
+    assert!(rendered.contains("narration/hook.wav"), "音频输入必须是工作区里那个文件");
+    assert!(rendered.contains("-c:v copy"), "视频流原样穿透，混音不许重编码画面");
+
+    for mutation in [
+        // 只带音频不带秒数——两者是一对
+        serde_json::json!({"narrationAudio": "narration/hook.wav"}),
+        // 秒数装不进这一拍：144 帧 @30fps 只有 4.8 秒
+        serde_json::json!({"narrationAudio": "narration/hook.wav", "narrationSeconds": 9.5}),
+        // 音频在工作区里不存在
+        serde_json::json!({"narrationAudio": "narration/absent.wav", "narrationSeconds": 4.0}),
+        // 音频路径爬出工作区
+        serde_json::json!({"narrationAudio": "../../../etc/passwd", "narrationSeconds": 4.0}),
+    ] {
+        accept_authored_render_job(&store, &workspace, &request, &answer(mutation))
+            .expect_err("a narration the workspace cannot honour must be refused");
+    }
+}
+
+/// 两镜两条旁白：第二条要铺在第一镜结束的位置，不是零点；无声片不混。
+#[test]
+fn the_second_narration_starts_where_the_first_shot_ends() {
+    use automation_tool_desktop_lib::motion_video_studio::{
+        accept_authored_render_job, narration_mix_arguments, MOTION_COMPOSITION_FILE,
+        TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR, TEMPLATE_CANVAS_HEIGHT, TEMPLATE_CANVAS_WIDTH,
+    };
+
+    let root = TempDirectory::new();
+    let store = store(&root.0);
+    let workspace = store.create_new().unwrap();
+    let work = store.worker_asset_directory(&workspace).unwrap();
+    fs::create_dir_all(work.join("runtime")).unwrap();
+    fs::write(work.join(AUTHORING_RUNTIME_ASSET), b"/* runtime */").unwrap();
+    fs::write(work.join(MOTION_COMPOSITION_FILE), b"<html></html>").unwrap();
+    fs::create_dir_all(work.join("narration")).unwrap();
+    fs::write(work.join("narration/a.wav"), b"RIFFfake").unwrap();
+    fs::write(work.join("narration/b.wav"), b"RIFFfake").unwrap();
+
+    let request = MotionVideoBriefRequest::one_sentence(
+        "用蓝色商务风做一段本周销售增长说明".to_owned(),
+        "16:9".to_owned(),
+        6,
+        "zh".to_owned(),
+    )
+    .unwrap();
+    let canvas = serde_json::json!({
+        "width": TEMPLATE_CANVAS_WIDTH,
+        "height": TEMPLATE_CANVAS_HEIGHT,
+        "deviceScaleFactor": TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
+    });
+    let answer = serde_json::json!({
+        "schemaVersion": 1,
+        "status": "authored",
+        "entryHtml": MOTION_COMPOSITION_FILE,
+        "allowedAssets": [AUTHORING_RUNTIME_ASSET],
+        "frameCount": 6 * 30,
+        "framesPerSecond": 30,
+        "durationSeconds": 6,
+        "aspectRatio": "16:9",
+        "segments": [
+            {
+                "entryHtml": MOTION_COMPOSITION_FILE,
+                "allowedAssets": [AUTHORING_RUNTIME_ASSET],
+                "canvas": canvas.clone(),
+                "frameCount": 90,
+                "sourceStartMillis": 0,
+                "sourceEndMillis": 3000,
+                "narrationAudio": "narration/a.wav",
+                "narrationSeconds": 2.5,
+            },
+            {
+                "entryHtml": MOTION_COMPOSITION_FILE,
+                "allowedAssets": [AUTHORING_RUNTIME_ASSET],
+                "canvas": canvas,
+                "frameCount": 90,
+                "sourceStartMillis": 3000,
+                "sourceEndMillis": 6000,
+                "narrationAudio": "narration/b.wav",
+                "narrationSeconds": 2.5,
+            },
+        ],
+    });
+    let prepared = accept_authored_render_job(&store, &workspace, &request, &answer.to_string())
+        .expect("two narrated template shots are accepted");
+
+    let arguments = narration_mix_arguments(
+        Path::new("/tmp/film.mp4"),
+        &work,
+        prepared.segments(),
+        30,
+        Path::new("/tmp/film-voiced.mp4"),
+    )
+    .expect("both shots narrated");
+    let rendered = arguments
+        .iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join(" ");
+    // 第一镜 90 帧 @30fps = 3000ms，第二条旁白从这里开始。
+    assert!(rendered.contains("adelay=0|0"), "{rendered}");
+    assert!(rendered.contains("adelay=3000|3000"), "{rendered}");
 }
 
 /// The progress the render loop reports must be progress the job will accept.

@@ -393,6 +393,20 @@ def inspect_film(video: Path) -> None:
             f"the film is {stream['width']}x{stream['height']}, not the "
             f"{canvas['width']}x{canvas['height']} canvas a 16:9 film is delivered on"
         )
+    # PC-26: narration is product behaviour now — a catalog-backed film with no
+    # audio track means the TTS-and-mix half quietly fell off, which is exactly
+    # the silent degradation the closed refusals exist to prevent.
+    audio_probe = subprocess.run(
+        [
+            str(ffprobe), "-v", "error", "-select_streams", "a:0",
+            "-show_entries", "stream=codec_name,duration", "-of", "json", str(video),
+        ],
+        capture_output=True, text=True, check=True, timeout=300,
+    )
+    audio_streams = json.loads(audio_probe.stdout).get("streams", [])
+    if not audio_streams:
+        raise RuntimeError("the film carries no narration audio track (PC-26)")
+    print(f"T36 evidence narration: {json.dumps(audio_streams[0], ensure_ascii=False)}")
     require_no_repeated_stretch(video, float(stream["duration"]))
 
 

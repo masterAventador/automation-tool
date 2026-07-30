@@ -853,6 +853,10 @@ pub struct MotionRenderSegment {
     frame_count: u32,
     source_start_millis: u32,
     source_end_millis: u32,
+    // PC-26: the workspace-relative narration for this shot, verified real at
+    // acceptance. None on a silent shot; the mix skips films where every shot
+    // is None, which keeps the pre-narration pipeline byte-identical.
+    narration_audio: Option<String>,
 }
 
 impl MotionRenderSegment {
@@ -896,6 +900,10 @@ impl MotionRenderSegment {
 
     pub const fn frame_count(&self) -> u32 {
         self.frame_count
+    }
+
+    pub fn narration_audio(&self) -> Option<&str> {
+        self.narration_audio.as_deref()
     }
 }
 
@@ -1143,6 +1151,8 @@ fn prepare_inside_workspace(
             // load one document.
             source_start_millis: 0,
             source_end_millis: plan.beat_count() * plan.seconds_per_beat() * 1000,
+            // The fixed-template path predates narration and stays silent.
+            narration_audio: None,
         }],
         // The fixed template draws a 16:9 stage and offers no choice of
         // framing, so its film is delivered on the 16:9 canvas.
@@ -1252,6 +1262,13 @@ struct RenderSegmentAnswer {
     frame_count: u32,
     source_start_millis: u32,
     source_end_millis: u32,
+    // PC-26: which narration belongs to this shot and how long it really is.
+    // Optional as a pair — a silent film's answer carries neither, and the
+    // child only writes them together.
+    #[serde(default)]
+    narration_audio: Option<String>,
+    #[serde(default)]
+    narration_seconds: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -1524,7 +1541,7 @@ pub fn accept_authored_render_job(
     {
         return Err(authoring_answer_invalid());
     }
-    let segments = accepted_segments(&work, &answer.segments)?;
+    let segments = accepted_segments(&work, &answer.segments, plan.frames_per_second())?;
     let snapshot = MotionRenderJobSnapshot {
         render_job_id: workspace.job_id(),
         revision: 1,
@@ -1578,8 +1595,9 @@ fn workspace_relative_file(work: &Path, relative: &str) -> Result<String, Motion
 fn accepted_segments(
     work: &Path,
     answered: &[RenderSegmentAnswer],
+    frames_per_second: u32,
 ) -> Result<Vec<MotionRenderSegment>, MotionVideoStudioError> {
-    if answered.is_empty() {
+    if answered.is_empty() || frames_per_second == 0 {
         return Err(authoring_answer_invalid());
     }
     let mut segments = Vec::with_capacity(answered.len());
@@ -1617,6 +1635,23 @@ fn accepted_segments(
         if segment.source_end_millis <= segment.source_start_millis {
             return Err(authoring_answer_invalid());
         }
+        // PC-26: narration arrives as a pair, its audio must really be in the
+        // workspace, and its measured seconds must fit inside this shot — the
+        // child laid the timeline as max(voice, motion), so a line longer than
+        // its own shot means the answer is not the one that plan produced.
+        // Half a frame of float grace: frames = ceil(seconds x fps).
+        let narration_audio = match (&segment.narration_audio, segment.narration_seconds) {
+            (None, None) => None,
+            (Some(audio), Some(seconds)) => {
+                let shot_seconds =
+                    f64::from(segment.frame_count) / f64::from(frames_per_second);
+                if !seconds.is_finite() || seconds <= 0.0 || seconds > shot_seconds + 0.5 {
+                    return Err(authoring_answer_invalid());
+                }
+                Some(workspace_relative_file(work, audio)?)
+            }
+            _ => return Err(authoring_answer_invalid()),
+        };
         segments.push(MotionRenderSegment {
             entry_html,
             allowed_assets,
@@ -1626,6 +1661,7 @@ fn accepted_segments(
             frame_count: segment.frame_count,
             source_start_millis: segment.source_start_millis,
             source_end_millis: segment.source_end_millis,
+            narration_audio,
         });
     }
     Ok(segments)
@@ -2121,6 +2157,129 @@ pub fn join_motion_film(
         return Err(refuse(output));
     }
     Ok(())
+}
+
+/// The ffmpeg argument list that lays each shot's narration onto the joined
+/// film, or None for a silent film.
+///
+/// Pure on purpose: the offsets arithmetic — each line starts where its own
+/// shot starts, which is the sum of the frames before it — is the part a test
+/// can hold still, and an encoder run is not. The video stream passes through
+/// untouched (`-c:v copy`): mixing narration must never re-encode the frames
+/// the still-image gate and the join already verified.
+pub fn narration_mix_arguments(
+    film: &Path,
+    work: &Path,
+    segments: &[MotionRenderSegment],
+    frames_per_second: u32,
+    output: &Path,
+) -> Option<Vec<std::ffi::OsString>> {
+    if frames_per_second == 0 {
+        return None;
+    }
+    let mut narrated: Vec<(PathBuf, u64)> = Vec::new();
+    let mut start_frames: u64 = 0;
+    for segment in segments {
+        if let Some(audio) = segment.narration_audio() {
+            let start_millis = start_frames * 1000 / u64::from(frames_per_second);
+            narrated.push((work.join(audio), start_millis));
+        }
+        start_frames += u64::from(segment.frame_count());
+    }
+    if narrated.is_empty() {
+        return None;
+    }
+    let mut arguments: Vec<std::ffi::OsString> = ["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i"]
+        .iter()
+        .map(std::ffi::OsString::from)
+        .collect();
+    arguments.push(film.into());
+    for (audio, _) in &narrated {
+        arguments.push("-i".into());
+        arguments.push(audio.clone().into());
+    }
+    let mut filter = String::new();
+    for (index, (_, start_millis)) in narrated.iter().enumerate() {
+        // adelay wants one delay per channel; naming it twice covers stereo
+        // sources while a mono one reads the first value only.
+        filter.push_str(&format!(
+            "[{}:a]adelay={start_millis}|{start_millis}[n{index}];",
+            index + 1
+        ));
+    }
+    for index in 0..narrated.len() {
+        filter.push_str(&format!("[n{index}]"));
+    }
+    // normalize=0: amix's default divides every input by the input count, so a
+    // film with three lines would be three times quieter than one with one.
+    // The lines never overlap — each shot holds its own — so no headroom is
+    // needed.
+    filter.push_str(&format!("amix=inputs={}:normalize=0[voice]", narrated.len()));
+    for argument in [
+        "-filter_complex",
+        &filter,
+        "-map",
+        "0:v:0",
+        "-map",
+        "[voice]",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-movflags",
+        "+faststart",
+    ] {
+        arguments.push(argument.into());
+    }
+    arguments.push(output.into());
+    Some(arguments)
+}
+
+/// Mix the narration into the joined film, in place, or do nothing for a
+/// silent film.
+///
+/// The mixed file replaces the original only after the re-probe agrees the
+/// video stream is intact — same frame count, same canvas — so a failed mix
+/// can never swap a verified film for a damaged one.
+pub fn mix_narration_into_film(
+    film: &Path,
+    work: &Path,
+    segments: &[MotionRenderSegment],
+    canvas: &MotionFilmCanvas,
+    ffmpeg: &Path,
+    ffprobe: &Path,
+    expected_frames: u32,
+) -> Result<(), MotionVideoStudioError> {
+    let voiced = film.with_extension("voiced.mp4");
+    let Some(arguments) =
+        narration_mix_arguments(film, work, segments, canvas.frames_per_second, &voiced)
+    else {
+        return Ok(());
+    };
+    let refuse = |partial: &Path| {
+        let _ = std::fs::remove_file(partial);
+        render_unavailable()
+    };
+    let mixed = std::process::Command::new(ffmpeg)
+        .args(&arguments)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    if !mixed.map(|status| status.success()).unwrap_or(false) {
+        return Err(refuse(&voiced));
+    }
+    let probed = probe_film(ffprobe, &voiced, FrameCount::Decode).map_err(|_| refuse(&voiced))?;
+    if probed.frames != Some(expected_frames)
+        || probed.width != canvas.width
+        || probed.height != canvas.height
+        || probed.pixel_format != FILM_PIXEL_FORMAT
+    {
+        return Err(refuse(&voiced));
+    }
+    std::fs::rename(&voiced, film).map_err(|_| refuse(&voiced))
 }
 
 /// The demuxer's list file.
