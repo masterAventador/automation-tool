@@ -209,9 +209,47 @@ def _uniformly_sample(timestamps: tuple[int, ...], limit: int) -> tuple[int, ...
     if len(timestamps) <= limit:
         return timestamps
     if limit == 1:
-        return (timestamps[len(timestamps) // 2],)
-    last_index = len(timestamps) - 1
-    return tuple(timestamps[index * last_index // (limit - 1)] for index in range(limit))
+        midpoint_numerator = timestamps[0] + timestamps[-1]
+        midpoint_index = _nearest_timestamp_index(
+            timestamps,
+            first_index=0,
+            last_index=len(timestamps) - 1,
+            target_numerator=midpoint_numerator,
+            target_denominator=2,
+        )
+        return (timestamps[midpoint_index],)
+
+    target_denominator = limit - 1
+    time_span = timestamps[-1] - timestamps[0]
+    selected = [timestamps[0]]
+    previous_index = 0
+    for position in range(1, limit - 1):
+        target_numerator = timestamps[0] * target_denominator + time_span * position
+        selected_index = _nearest_timestamp_index(
+            timestamps,
+            first_index=previous_index + 1,
+            last_index=len(timestamps) - limit + position,
+            target_numerator=target_numerator,
+            target_denominator=target_denominator,
+        )
+        selected.append(timestamps[selected_index])
+        previous_index = selected_index
+    selected.append(timestamps[-1])
+    return tuple(selected)
+
+
+def _nearest_timestamp_index(
+    timestamps: tuple[int, ...],
+    *,
+    first_index: int,
+    last_index: int,
+    target_numerator: int,
+    target_denominator: int,
+) -> int:
+    return min(
+        range(first_index, last_index + 1),
+        key=lambda index: abs(timestamps[index] * target_denominator - target_numerator),
+    )
 
 
 def _supplement_timestamps(

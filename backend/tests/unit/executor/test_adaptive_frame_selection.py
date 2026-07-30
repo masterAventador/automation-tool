@@ -46,15 +46,15 @@ def test_selection_keeps_all_scene_cuts_then_uniformly_fills_the_remaining_slots
     assert selected_supplements == (4_000, 8_000)
 
 
-def test_one_remaining_supplement_slot_selects_the_time_midpoint() -> None:
+def test_one_remaining_supplement_slot_selects_nearest_to_the_time_midpoint() -> None:
     selected_scenes, selected_supplements = adaptive_frame_extraction._select_candidate_timestamps(
-        (0, 1_000, 2_000, 3_000, 4_000),
-        (5_000, 6_000, 7_000, 8_000, 9_000),
-        duration_ms=15_000,
+        (0, 3_707, 5_563, 6_003, 11_082, 23_663, 48_233, 53_017, 54_756, 55_644, 56_565),
+        (19_082, 31_663, 39_663, 47_663),
+        duration_ms=60_000,
     )
 
-    assert selected_scenes == (0, 1_000, 2_000, 3_000, 4_000)
-    assert selected_supplements == (7_000,)
+    assert len(selected_scenes) == 11
+    assert selected_supplements == (31_663,)
 
 
 def test_too_many_scene_cuts_are_uniformly_sampled_with_first_and_tail_retained() -> None:
@@ -64,7 +64,35 @@ def test_too_many_scene_cuts_are_uniformly_sampled_with_first_and_tail_retained(
         duration_ms=15_000,
     )
 
-    assert selected_scenes == (0, 1_000, 3_000, 5_000, 7_000, 9_000)
+    assert selected_scenes == (0, 2_000, 4_000, 5_000, 7_000, 9_000)
+    assert selected_supplements == ()
+
+
+def test_scene_cut_sampling_follows_time_not_dense_candidate_indices() -> None:
+    selected_scenes, selected_supplements = adaptive_frame_extraction._select_candidate_timestamps(
+        (
+            0,
+            100,
+            200,
+            300,
+            400,
+            500,
+            600,
+            700,
+            800,
+            900,
+            1_000,
+            3_000,
+            6_000,
+            9_000,
+            12_000,
+            14_999,
+        ),
+        (),
+        duration_ms=15_000,
+    )
+
+    assert selected_scenes == (0, 3_000, 6_000, 9_000, 12_000, 14_999)
     assert selected_supplements == ()
 
 
