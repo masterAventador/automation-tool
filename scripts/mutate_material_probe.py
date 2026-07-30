@@ -38,6 +38,7 @@ REPOSITORY = Path(__file__).resolve().parent.parent
 BACKEND = REPOSITORY / "backend"
 RELATIVE_MODULE = Path("automation_tool/executor/material_probe.py")
 TESTS = BACKEND / "tests/unit/executor/test_material_probe.py"
+MEDIA_TESTS = BACKEND / "tests/unit/executor/test_material_probe_media.py"
 PYTHON = BACKEND / ".venv/bin/python"
 
 SELECTION = (
@@ -289,28 +290,30 @@ T5_MUTATIONS: list[tuple[str, str, str]] = [
         "    path, before = _require_source_file(source)",
         "    path, before = source, os.stat(source)",
     ),
+    # The closing check is `require_source_unchanged`'s body since T7; the
+    # orchestration calls it rather than restating it, so these mutate the one
+    # implementation both sides use.
     (
         "closing check deleted",
-        "    _, after = _require_source_file(path)\n"
-        "    if not _held_still(before, after):\n"
-        "        _reject(MaterialProbeRejection.SOURCE_NOT_AT_REST)\n",
+        "    require_source_unchanged(path, before)\n",
         "",
     ),
     (
         "closing check inverted",
-        "    if not _held_still(before, after):",
-        "    if _held_still(before, after):",
+        "    if not _held_still(approved, after):",
+        "    if _held_still(approved, after):",
     ),
     (
         "closing check compares the file with itself",
-        "    if not _held_still(before, after):",
+        "    if not _held_still(approved, after):",
         "    if not _held_still(after, after):",
     ),
     (
         "closing reason SOURCE_NOT_AT_REST -> UNREADABLE",
-        "    if not _held_still(before, after):\n"
+        "    if not _held_still(approved, after):\n"
         "        _reject(MaterialProbeRejection.SOURCE_NOT_AT_REST)",
-        "    if not _held_still(before, after):\n        _reject(MaterialProbeRejection.UNREADABLE)",
+        "    if not _held_still(approved, after):\n"
+        "        _reject(MaterialProbeRejection.UNREADABLE)",
     ),
     # --- the three terms of "it held still", one at a time ---
     (
@@ -349,8 +352,8 @@ T5_MUTATIONS: list[tuple[str, str, str]] = [
     # start dying, and a survivor list that never changes says nothing.
     (
         "held-still arguments swapped",
-        "_held_still(before, after)",
-        "_held_still(after, before)",
+        "_held_still(approved, after)",
+        "_held_still(after, approved)",
     ),
     # The whole stat result compared instead of the three fields. It dies, but
     # in the loosening direction only: `stat_result.__eq__` compares the
@@ -620,8 +623,9 @@ T6_MUTATIONS: list[tuple[str, str, str]] = [
     # --- the state directory, and what may be read as one ---
     (
         "a file passes for the state directory",
-        "    if not isinstance(state_directory, Path) or not state_directory.is_dir():",
-        "    if not isinstance(state_directory, Path):",
+        "    if not stat.S_ISDIR(metadata.st_mode):\n"
+        "        _reject_registry(MaterialPathRegistryRejection.REGISTRY_UNREADABLE)\n",
+        "",
     ),
     (
         "a directory passes for the document",
@@ -775,10 +779,181 @@ T6_MUTATIONS: list[tuple[str, str, str]] = [
     ),
 ]
 
-GROUPS: list[tuple[str, str, list[tuple[str, str, str]]]] = [
-    ("T4 the content digest", SELECTION, MUTATIONS),
-    ("T5 the orchestration", T5_SELECTION, T5_MUTATIONS),
-    ("T6 the path registry", T6_SELECTION, T6_MUTATIONS),
+T7_SELECTION = ""
+
+T7_MUTATIONS: list[tuple[str, str, str]] = [
+    # --- the bound on what a pass may write, now shared by both of them ---
+    (
+        "the size is only looked at once the tool has exited",
+        "                    if not outgrown:\n                        continue",
+        "                    continue",
+    ),
+    (
+        "mid-flight limit `>` -> `>=`",
+        "                        outgrown = output.stat().st_size > limit",
+        "                        outgrown = output.stat().st_size >= limit",
+    ),
+    (
+        "mid-flight limit off by one up",
+        "                        outgrown = output.stat().st_size > limit",
+        "                        outgrown = output.stat().st_size > limit + 1",
+    ),
+    (
+        "the poll waits out the whole timeout",
+        "process.wait(timeout=min(OUTPUT_POLL_SECONDS, remaining))",
+        "process.wait(timeout=remaining)",
+    ),
+    (
+        "the timeout is ten seconds longer than asked for",
+        "            deadline = time.monotonic() + seconds",
+        "            deadline = time.monotonic() + seconds + 10",
+    ),
+    (
+        "the child is left running on the way out",
+        "            process.kill()\n            raise",
+        "            raise",
+    ),
+    (
+        "the child inherits the parent's stdin",
+        "            stdin=subprocess.DEVNULL,\n            stdout=sink,",
+        "            stdout=sink,",
+    ),
+    # --- what the reading pass does with the answer ---
+    (
+        "the answer's size is not checked after the exit",
+        "            if answer.stat().st_size > MAX_PROBE_OUTPUT_BYTES:\n"
+        "                # The bound above stops a tool still writing; this is the exact\n"
+        "                # limit, and it is what keeps an oversized answer from being\n"
+        "                # read at all — one written and finished between two polls\n"
+        "                # arrives here without the loop having had a chance to see it.\n"
+        "                _reject(MaterialProbeRejection.PROBE_FAILED)\n",
+        "",
+    ),
+    (
+        "after-the-exit limit `>` -> `>=`",
+        "            if answer.stat().st_size > MAX_PROBE_OUTPUT_BYTES:",
+        "            if answer.stat().st_size >= MAX_PROBE_OUTPUT_BYTES:",
+    ),
+    # Anchored on the comment above it: the two passes have the same two lines at
+    # the same indentation, so the shape alone matches twice.
+    (
+        "a signalled probe reported as an undecodable file",
+        "                # drifts with locale.\n"
+        "                _reject(MaterialProbeRejection.PROBE_CRASHED)",
+        "                # drifts with locale.\n"
+        "                _reject(MaterialProbeRejection.UNDECODABLE)",
+    ),
+    (
+        "the reading pass's own timeout ignored",
+        "                seconds=PROBE_TIMEOUT_SECONDS,",
+        "                seconds=MEASURE_TIMEOUT_SECONDS,",
+    ),
+    (
+        "the reading pass borrows the measuring pass's limit",
+        "                limit=MAX_PROBE_OUTPUT_BYTES,",
+        "                limit=MAX_MEASURE_OUTPUT_BYTES,",
+    ),
+    # --- the public check a consumer closes its window with ---
+    (
+        "the public check skips the import guard",
+        "    path, after = _require_source_file(source)\n"
+        "    if not _held_still(approved, after):",
+        "    path, after = source, source.stat()\n    if not _held_still(approved, after):",
+    ),
+    (
+        "the orchestration checks the window itself instead of calling it",
+        "    require_source_unchanged(path, before)",
+        "    _, again = _require_source_file(path)\n"
+        "    if not _held_still(before, again):\n"
+        "        _reject(MaterialProbeRejection.SOURCE_NOT_AT_REST)",
+    ),
+    # Returns the stat it was handed rather than the one it took. Expected to
+    # survive, and kept for what it says: the function only returns when the two
+    # describe one unchanged file, so every field `_held_still` compares is equal
+    # between them by construction. Only the access and change times differ, and
+    # nothing reads those — deliberately, since being read is not a change.
+    (
+        "the public check hands back the stat it was given",
+        "    return path, after\n\n\ndef probe_material",
+        "    return path, approved\n\n\ndef probe_material",
+    ),
+    # --- the private state directory the whole threat model rests on ---
+    (
+        "the state directory's mode is not checked",
+        "        or stat.S_IMODE(metadata.st_mode) != _PRIVATE_DIRECTORY_MODE\n",
+        "",
+    ),
+    (
+        "the state directory's mode may be anything more open",
+        "        or stat.S_IMODE(metadata.st_mode) != _PRIVATE_DIRECTORY_MODE",
+        "        or stat.S_IMODE(metadata.st_mode) < _PRIVATE_DIRECTORY_MODE",
+    ),
+    (
+        "the private mode is world-readable",
+        "_PRIVATE_DIRECTORY_MODE: Final = 0o700",
+        "_PRIVATE_DIRECTORY_MODE: Final = 0o755",
+    ),
+    (
+        "the state directory's owner is not checked",
+        '        metadata.st_uid != cast(Callable[[], int], vars(os)["getuid"])()\n        or ',
+        "        ",
+    ),
+    (
+        "the state directory is stated through the link",
+        "        metadata = state_directory.lstat()",
+        "        metadata = state_directory.stat()",
+    ),
+    (
+        "a state path that cannot be stated escapes as an OSError",
+        "    try:\n        metadata = state_directory.lstat()\n    except OSError:",
+        "    if True:\n        metadata = state_directory.lstat()\n    if False:",
+    ),
+    (
+        "the state directory may be given as text",
+        "    if not isinstance(state_directory, Path):\n"
+        "        _reject_registry(MaterialPathRegistryRejection.REGISTRY_UNREADABLE)\n",
+        "",
+    ),
+    (
+        "the Windows ACL is never asked about",
+        "        try:\n            validate_private_acl(state_directory)\n"
+        "        except ValueError:\n"
+        "            _reject_registry(MaterialPathRegistryRejection.REGISTRY_UNREADABLE)",
+        "        validate_private_acl",
+    ),
+    (
+        "a refused Windows ACL is swallowed",
+        "        except ValueError:\n"
+        "            _reject_registry(MaterialPathRegistryRejection.REGISTRY_UNREADABLE)",
+        "        except ValueError:\n            pass",
+    ),
+    (
+        "the POSIX mode is demanded on Windows too",
+        '    if os.name != "nt" and (',
+        "    if True and (",
+    ),
+    # --- canary: must die ---
+    (
+        "CANARY the public check never refuses",
+        "    if not _held_still(approved, after):",
+        "    if False:",
+    ),
+]
+
+GROUPS: list[tuple[str, str, list[tuple[str, str, str]], tuple[Path, ...]]] = [
+    ("T4 the content digest", SELECTION, MUTATIONS, (TESTS,)),
+    ("T5 the orchestration", T5_SELECTION, T5_MUTATIONS, (TESTS,)),
+    ("T6 the path registry", T6_SELECTION, T6_MUTATIONS, (TESTS,)),
+    # The only group that runs the real-material file as well. Several of its
+    # mutations are about what the packaged tools are actually asked for, and a
+    # stub answers those the same either way — which is the failure mode the
+    # acceptance file exists for.
+    (
+        "T7 the bounds, the public check and the private directory",
+        T7_SELECTION,
+        T7_MUTATIONS,
+        (TESTS, MEDIA_TESTS),
+    ),
 ]
 
 
@@ -791,7 +966,7 @@ def _environment(clone_source: Path) -> dict[str, str]:
     }
 
 
-def run_tests(clone_source: Path, selection: str) -> bool:
+def run_tests(clone_source: Path, selection: str, tests: tuple[Path, ...]) -> bool:
     """True when the suite passed. A hang counts as a detection, not a survival."""
     for cache in clone_source.rglob("__pycache__"):
         shutil.rmtree(cache, ignore_errors=True)
@@ -801,7 +976,7 @@ def run_tests(clone_source: Path, selection: str) -> bool:
             "-B",
             "-m",
             "pytest",
-            str(TESTS),
+            *(str(test) for test in tests),
             "-x",
             "-q",
             *(["-k", selection] if selection else []),
@@ -814,9 +989,9 @@ def run_tests(clone_source: Path, selection: str) -> bool:
     return completed.returncode == 0
 
 
-def run_tests_guarded(clone_source: Path, selection: str) -> bool:
+def run_tests_guarded(clone_source: Path, selection: str, tests: tuple[Path, ...]) -> bool:
     try:
-        return run_tests(clone_source, selection)
+        return run_tests(clone_source, selection, tests)
     except subprocess.TimeoutExpired:
         print("    (suite hung — counted as killed)", flush=True)
         return False
@@ -827,9 +1002,24 @@ def digest_of(path: Path) -> str:
 
 
 def main() -> int:
+    """Run every group, or only the ones whose name contains the given text.
+
+    The filter exists because the whole set is 145 mutations over four groups and
+    takes some twenty minutes: iterating on one group's anchors should not mean
+    rerunning the other three. A filtered run says so in its own output, so its
+    total cannot be mistaken for the whole set's.
+    """
+    wanted = sys.argv[1] if len(sys.argv) > 1 else ""
+    groups = [group for group in GROUPS if wanted in group[0]]
+    if not groups:
+        print(f"no group matches {wanted!r}")
+        return 1
+
     tree_module = BACKEND / "src" / RELATIVE_MODULE
     before = digest_of(tree_module)
     print("module sha256:", before)
+    if wanted:
+        print("running only:", ", ".join(group[0] for group in groups))
 
     survivors: list[str] = []
     with tempfile.TemporaryDirectory(prefix="automation-tool-mutate-") as workspace:
@@ -857,9 +1047,9 @@ def main() -> int:
         print("mutating a copy at", clone_module, flush=True)
 
         total = 0
-        for group, selection, mutations in GROUPS:
+        for group, selection, mutations, tests in groups:
             print(f"--- {group} ---", flush=True)
-            if not run_tests_guarded(clone_source, selection):
+            if not run_tests_guarded(clone_source, selection, tests):
                 print("BASELINE IS RED — stopping")
                 return 1
             print("baseline green\n", flush=True)
@@ -874,7 +1064,7 @@ def main() -> int:
                     survivors.append(f"{label} (anchor)")
                     continue
                 clone_module.write_text(pristine.replace(old, new), encoding="utf-8")
-                alive = run_tests_guarded(clone_source, selection)
+                alive = run_tests_guarded(clone_source, selection, tests)
                 print(f"{label}: {'SURVIVED' if alive else 'killed'}", flush=True)
                 if alive:
                     survivors.append(label)

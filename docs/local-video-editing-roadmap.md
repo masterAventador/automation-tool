@@ -55,7 +55,7 @@
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| LE-07 | 素材探测 | Local Executor 侧用随包 ffprobe 读时长/分辨率/编码，`silencedetect` 判有无有效音频与响度，内容摘要去重；路径映射只存本机不上报 Control Plane。**T7 收口必须补三项**：① `_run_probe` 的 stdout 是 `PIPE` + `subprocess.run`，`MAX_PROBE_OUTPUT_BYTES` 在读完之后才比，即 ffprobe 输出被无上限读进内存；与 T3 的测量 sink 同形，修法同款（边读边量、超限即杀）；② **`register`↔`probe_material` 之间的窗口无人看管**——`MaterialPathRegistry` 记的是它自己 stat 到的身份，不是探测那一刻的身份，语义只到「登记时这条路径是这个文件」，不是「这是被探测的那个文件」；③ **`resolve`→实际使用之间的窗口由消费方闭合**——`resolve` 已交回 `os.stat_result`，消费方必须用 `_held_still` 自行比对，且**必须把交出的路径当用户提供的路径对待**、走 `_require_source_file` 全套（注册表的信任边界是私有 state 目录，不是它存的内容）。依据见 `docs/development/LE-07.md` T6 与 T6 修复轮 | LE-02 | 🚧 实现中 |
+| LE-07 | 素材探测 | Local Executor 侧用随包 ffprobe 读时长/分辨率/编码，`silencedetect` 判有无有效音频与响度，内容摘要去重；路径映射只存本机不上报 Control Plane。T1–T7 全部完成，三项收口已补：① `_run_probe` 与测量 sink 合到同一个 `_run_bounded`，输出落文件、边写边量、超限即杀；② `probe_material` 与 `register` 之间的残余写在两处 docstring 上，并由 `require_source_unchanged` 关掉——调用方探测前取一次 stat、登记后再交回来核；③ `resolve`→使用的窗口用同一个公开操作闭合（它内部走 `_require_source_file` 全套 + `_held_still`，消费方不再自己拼窗口，也不再需要引私有名）。**补验收依赖：LE-18 素材库界面**——正式 App 用户路径（导入素材 → 看到时长/画幅/有无声音）尚无入口，故不标 ✅。已有证据：8 类真实素材端到端判定逐格、13 个拒绝码逐个 provoke（12 个由真实文件产生）、每条素材的事实真造出 `Material`。依据见 `docs/development/LE-07.md` T7 与收口节 | LE-02 | 🔍 待验收 |
 | LE-08 | 自适应抽帧 | `select='eq(n,0)+gt(scene,TH)'` 场景检测抽帧、长镜头按时间补抽、按时长分档封顶、超限时保切点降采样；产出 768px JPEG 并断言帧数与文件存在 | LE-07 | ⬜ 未开始 |
 | LE-09 | 字幕渲染与 fallback 机制 | PIL 渲染字幕 PNG；`fontTools` 读 cmap 实现缺字 fallback **机制**；换行、描边、行距可控；产出 PNG 并断言像素尺寸与非空。**只用现有 Noto Sans SC 加一个拉丁字体验证 fallback 链路本身**，生僻字字体的引入与装配属于 LE-19，两者不得互相阻塞 | LE-01 | ⬜ 未开始 |
 | LE-10 | 视频渲染管线 | trim(in/out) → scale/crop → fps 归一 → concat → `xfade` 转场 → 字幕 overlay；补齐 `ffmpeg-toolchain.v1.json` 的 `required_capabilities.filters` 声明（xfade/select/scdet 等，**无需重建 ffmpeg**）；产出 mp4 并以 ffprobe 断言编码/分辨率/帧数/时长 | LE-03,LE-09 | ⬜ 未开始 |
@@ -100,8 +100,8 @@
 
 - 任务总数：24
 - ✅ 已完成：3
-- 🔍 待验收：0
-- 🧪 RED / 🚧 实现中：2
+- 🔍 待验收：1
+- 🧪 RED / 🚧 实现中：1
 - ⬜ 未开始：19
 
 ## 5. 当前下一步
