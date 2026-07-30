@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 import os
+import traceback
 import urllib.request
 from pathlib import Path
 from typing import Any, cast
@@ -13,6 +14,7 @@ import pytest
 
 from automation_tool.executor.material_understanding import (
     BailianMaterialUnderstandingAdapter,
+    BailianMaterialUnderstandingConfig,
     MaterialUnderstandingAdapter,
     MaterialUnderstandingFrame,
     MaterialUnderstandingOptions,
@@ -35,7 +37,7 @@ class _Response:
     def __exit__(self, *_args: object) -> None:
         return None
 
-    def read(self) -> bytes:
+    def read(self, _size: int = -1) -> bytes:
         return self._body
 
 
@@ -178,7 +180,10 @@ def test_transport_failure_is_fixed_and_redacted(
         *,
         timeout: float,
     ) -> _Response:
-        raise OSError(f"private upstream error {API_KEY} after {timeout}")
+        raise OSError(
+            f"private upstream error {API_KEY} after {timeout} "
+            "/Users/operator/Private Videos/source clip.mp4"
+        )
 
     monkeypatch.setattr(urllib.request, "urlopen", fail_transport)
 
@@ -200,6 +205,67 @@ def test_transport_failure_is_fixed_and_redacted(
     assert API_KEY not in str(captured.value)
     assert API_KEY not in repr(captured.value)
     assert os.fspath(REPOSITORY_ROOT) not in str(captured.value)
+    formatted = "".join(
+        traceback.format_exception(
+            type(captured.value),
+            captured.value,
+            captured.value.__traceback__,
+        )
+    )
+    assert API_KEY not in formatted
+    assert "/Users/operator/Private Videos/source clip.mp4" not in formatted
+    assert captured.value.__context__ is None
+
+
+def test_direct_config_cannot_bypass_the_locked_endpoint() -> None:
+    with pytest.raises(MaterialUnderstandingRejected):
+        BailianMaterialUnderstandingConfig(
+            base_url="http://attacker.invalid/v1",
+            model_id="attacker-model",
+            api_key=API_KEY,
+            timeout_seconds=-1,
+        )
+
+
+def test_model_response_is_bounded_before_json_parsing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    read_sizes: list[int] = []
+
+    class _OversizedResponse:
+        def __enter__(self) -> _OversizedResponse:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, size: int = -1) -> bytes:
+            read_sizes.append(size)
+            return b"x" * (300_000 if size < 0 else size)
+
+    def open_request(
+        _request: urllib.request.Request,
+        *,
+        timeout: float,
+    ) -> _OversizedResponse:
+        assert timeout == 12.5
+        return _OversizedResponse()
+
+    monkeypatch.setattr(urllib.request, "urlopen", open_request)
+
+    with pytest.raises(MaterialUnderstandingRejected):
+        _adapter().understand(
+            (
+                MaterialUnderstandingFrame(
+                    timestamp_ms=0,
+                    is_scene_cut=True,
+                    jpeg_bytes=b"\xff\xd8\xff\xd9",
+                ),
+            ),
+            options=MaterialUnderstandingOptions(),
+        )
+
+    assert read_sizes == [262_145]
 
 
 def test_public_types_do_not_leak_provider_names() -> None:
