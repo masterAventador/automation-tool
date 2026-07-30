@@ -88,8 +88,84 @@
       "__hyperframes"
     ]
   },
+  "runtimeDataInlining": {
+    "encoding": "data-url-base64",
+    "items": [
+      {
+        "name": "spain-map",
+        "document": "items/spain-map/spain-map.html",
+        "references": [
+          {
+            "literal": "../../offline-deps/data/es-atlas-0.6.0/es/autonomous_regions.json",
+            "source": "offline-deps/data/es-atlas-0.6.0/es/autonomous_regions.json",
+            "mediaType": "application/json"
+          }
+        ]
+      },
+      {
+        "name": "us-map",
+        "document": "items/us-map/us-map.html",
+        "references": [
+          {
+            "literal": "../../offline-deps/data/us-atlas-3.0.1/states-10m.json",
+            "source": "offline-deps/data/us-atlas-3.0.1/states-10m.json",
+            "mediaType": "application/json"
+          }
+        ]
+      },
+      {
+        "name": "us-map-bubble",
+        "document": "items/us-map-bubble/us-map-bubble.html",
+        "references": [
+          {
+            "literal": "../../offline-deps/data/us-atlas-3.0.1/states-10m.json",
+            "source": "offline-deps/data/us-atlas-3.0.1/states-10m.json",
+            "mediaType": "application/json"
+          }
+        ]
+      },
+      {
+        "name": "us-map-flow",
+        "document": "items/us-map-flow/us-map-flow.html",
+        "references": [
+          {
+            "literal": "../../offline-deps/data/us-atlas-3.0.1/states-10m.json",
+            "source": "offline-deps/data/us-atlas-3.0.1/states-10m.json",
+            "mediaType": "application/json"
+          }
+        ]
+      },
+      {
+        "name": "world-map",
+        "document": "items/world-map/world-map.html",
+        "references": [
+          {
+            "literal": "../../offline-deps/data/world-atlas-2.0.2/countries-110m.json",
+            "source": "offline-deps/data/world-atlas-2.0.2/countries-110m.json",
+            "mediaType": "application/json"
+          }
+        ]
+      },
+      {
+        "name": "vfx-iphone-device",
+        "document": "items/vfx-iphone-device/vfx-iphone-device.html",
+        "references": [
+          {
+            "literal": "models/portable-device.glb",
+            "source": "items/vfx-iphone-device/models/portable-device.glb",
+            "mediaType": "model/gltf-binary"
+          },
+          {
+            "literal": "models/portable-display.glb",
+            "source": "items/vfx-iphone-device/models/portable-display.glb",
+            "mediaType": "model/gltf-binary"
+          }
+        ]
+      }
+    ]
+  },
   "generated": {
     "fileCount": 337,
-    "aggregateSha256": "c88975a1fa19c4c4d16d5abe89acf7ece5b812517150079d22506fabb09bc9e4"
+    "aggregateSha256": "cf2d812441236767aa52e756ad77e60e1c385096c79f477d6f2b86ad25efd517"
   }
 }

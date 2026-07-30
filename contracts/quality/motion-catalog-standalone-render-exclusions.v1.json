@@ -1,8 +1,8 @@
 {
   "version": "motion-catalog-standalone-render-exclusions.v1",
-  "decidedAt": "2026-07-29",
-  "evidence": "docs/development/PC-21.md §18.6",
-  "total": 25,
+  "decidedAt": "2026-07-30",
+  "evidence": "docs/development/PC-21.md §18.6; docs/development/PC-24.md",
+  "total": 19,
   "items": {
     "code-snippet-dark-2026": {
       "class": "template-host-instantiated",
@@ -63,30 +63,6 @@
     "lower-third-bild": {
       "class": "static-by-design-overlay",
       "reason": "字幕条叠加层，时间轴唯一事件是终点隐藏自己，[0,8s) 全程静止即正确形态；产品里作为叠加轨道与运动内容合成"
-    },
-    "spain-map": {
-      "class": "runtime-fetch-blocked",
-      "reason": "运行时 fetch() 地图数据，file:// 沙箱下被 Chromium CORS 拒（数据在发布树内）；等 loopback 数据供给或构建期内联"
-    },
-    "us-map": {
-      "class": "runtime-fetch-blocked",
-      "reason": "同 spain-map"
-    },
-    "us-map-bubble": {
-      "class": "runtime-fetch-blocked",
-      "reason": "同 spain-map"
-    },
-    "us-map-flow": {
-      "class": "runtime-fetch-blocked",
-      "reason": "同 spain-map"
-    },
-    "world-map": {
-      "class": "runtime-fetch-blocked",
-      "reason": "同 spain-map"
-    },
-    "vfx-iphone-device": {
-      "class": "runtime-fetch-blocked",
-      "reason": "three.js 运行时 fetch() 3D 模型，同 spain-map 的 CORS 边界"
     },
     "texture-mask-text": {
       "class": "absolute-path-reference",

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import importlib.util
 import json
@@ -104,6 +105,50 @@ def test_release_lock_contract() -> None:
     generated = lock["generated"]
     assert generated["fileCount"] > 0
     assert SHA256_PATTERN.match(generated["aggregateSha256"])
+    runtime_items = lock["runtimeDataInlining"]["items"]
+    assert {entry["name"] for entry in runtime_items} == {
+        "spain-map",
+        "us-map",
+        "us-map-bubble",
+        "us-map-flow",
+        "vfx-iphone-device",
+        "world-map",
+    }
+    assert sum(len(entry["references"]) for entry in runtime_items) == 7
+
+
+def test_runtime_data_is_inlined_only_in_the_release_tree() -> None:
+    build = load_module(BUILD)
+    with tempfile.TemporaryDirectory(prefix="automation-tool-pc24-test-") as temporary:
+        root = Path(temporary)
+        document = root / "items/map/map.html"
+        source = root / "offline-deps/data/map.json"
+        document.parent.mkdir(parents=True)
+        source.parent.mkdir(parents=True)
+        document.write_text('fetch("../../offline-deps/data/map.json")', encoding="utf-8")
+        source.write_bytes(b'{"kind":"map"}')
+        rule = {
+            "encoding": "data-url-base64",
+            "items": [
+                {
+                    "name": "map",
+                    "document": "items/map/map.html",
+                    "references": [
+                        {
+                            "literal": "../../offline-deps/data/map.json",
+                            "source": "offline-deps/data/map.json",
+                            "mediaType": "application/json",
+                        }
+                    ],
+                }
+            ]
+        }
+        applied = build.inline_runtime_data(root, rule)
+        expected = "data:application/json;base64," + base64.b64encode(
+            source.read_bytes()
+        ).decode("ascii")
+        assert document.read_text(encoding="utf-8") == f'fetch("{expected}")'
+        assert applied == {"documents": 1, "references": 1, "sourceBytes": 14}
 
 
 def test_trademark_rules() -> None:
@@ -225,6 +270,11 @@ def _mini_fixture(root: Path) -> tuple[Path, dict, dict, dict, dict]:
                 "trademarkReplacements": 1,
             }
         ],
+        "runtimeDataInlining": {
+            "documents": 0,
+            "references": 0,
+            "sourceBytes": 0,
+        },
         "files": files,
     }
     manifest_path = release_root / "manifest.json"
@@ -243,6 +293,10 @@ def _mini_fixture(root: Path) -> tuple[Path, dict, dict, dict, dict]:
         "trademarkScan": {
             "forms": {"instagram": ["instagram"]},
             "technicalKeeplist": ["-apple-system"],
+        },
+        "runtimeDataInlining": {
+            "encoding": "data-url-base64",
+            "items": [],
         },
         "generated": {"fileCount": len(files), "aggregateSha256": aggregate},
     }
@@ -489,13 +543,14 @@ def test_real_release_build_is_reproducible() -> None:
 
 def main() -> None:
     test_release_lock_contract()
+    test_runtime_data_is_inlined_only_in_the_release_tree()
     test_trademark_rules()
     test_composed_asset_path()
     test_release_gate_tamper_matrix()
     test_windows_unicode_and_read_only_path_semantics()
     test_real_release_build_is_reproducible()
     print("motion catalog release tests passed")
-    print("executed checks: 6")
+    print("executed checks: 7")
 
 
 if __name__ == "__main__":

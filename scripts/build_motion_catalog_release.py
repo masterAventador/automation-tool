@@ -17,6 +17,7 @@ URLs, unregistered assets, indicator leftovers or digest drift fail the build.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import importlib.util
 import json
@@ -35,6 +36,7 @@ STAGED_GATE_PATH = REPOSITORY_ROOT / "scripts/check_offline_motion_catalog.py"
 TEXT_SUFFIXES = frozenset({".html", ".js", ".css", ".svg"})
 READ_ONLY_MODE = 0o444
 WRITABLE_MODE = 0o644
+RUNTIME_DATA_MEDIA_TYPES = frozenset({"application/json", "model/gltf-binary"})
 
 
 class BuildError(SystemExit):
@@ -205,6 +207,84 @@ def _reset_release_root(release_root: Path) -> None:
     release_root.mkdir(parents=True)
 
 
+def _release_file(release_root: Path, relative: object, purpose: str) -> Path:
+    if (
+        not isinstance(relative, str)
+        or not relative
+        or relative.startswith("/")
+        or "\\" in relative
+        or any(part in {"", ".", ".."} for part in relative.split("/"))
+    ):
+        raise BuildError(f"{purpose} path is not canonical: {relative!r}")
+    path = release_root.joinpath(*relative.split("/"))
+    if not path.is_file() or path.is_symlink():
+        raise BuildError(f"{purpose} file is missing or linked: {relative}")
+    return path
+
+
+def inline_runtime_data(release_root: Path, contract: dict) -> dict[str, int]:
+    """Embed reviewed local fetch targets into release-tree documents.
+
+    Only the composed release is changed. The frozen vendor submodule and the
+    BM-12 staging tree remain byte-for-byte inputs, while the render sandbox no
+    longer needs a network origin or the unsafe file-origin access flag.
+    """
+    if contract.get("encoding") != "data-url-base64":
+        raise BuildError("runtime data inlining must use data-url-base64")
+    items = contract.get("items")
+    if not isinstance(items, list):
+        raise BuildError("runtime data inlining items must be a list")
+    documents: set[str] = set()
+    references = 0
+    source_bytes = 0
+    for item in items:
+        if not isinstance(item, dict):
+            raise BuildError("runtime data inlining item must be an object")
+        name = item.get("name")
+        document_relative = item.get("document")
+        if not isinstance(name, str) or not name:
+            raise BuildError("runtime data inlining item name is missing")
+        if not isinstance(document_relative, str):
+            raise BuildError(f"{name} runtime data document is missing")
+        if not document_relative.startswith(f"items/{name}/"):
+            raise BuildError(f"{name} runtime data document belongs to another item")
+        if document_relative in documents:
+            raise BuildError(f"runtime data document is declared twice: {document_relative}")
+        documents.add(document_relative)
+        document = _release_file(release_root, document_relative, f"{name} document")
+        text = document.read_text(encoding="utf-8")
+        declared_references = item.get("references")
+        if not isinstance(declared_references, list) or not declared_references:
+            raise BuildError(f"{name} has no runtime data references")
+        for reference in declared_references:
+            if not isinstance(reference, dict):
+                raise BuildError(f"{name} runtime data reference must be an object")
+            literal = reference.get("literal")
+            media_type = reference.get("mediaType")
+            if not isinstance(literal, str) or not literal:
+                raise BuildError(f"{name} runtime data literal is missing")
+            if media_type not in RUNTIME_DATA_MEDIA_TYPES:
+                raise BuildError(f"{name} runtime data media type is not allowed: {media_type}")
+            if text.count(literal) != 1:
+                raise BuildError(
+                    f"{name} runtime data literal must occur exactly once: {literal}"
+                )
+            source = _release_file(
+                release_root, reference.get("source"), f"{name} runtime data source"
+            )
+            data = source.read_bytes()
+            encoded = base64.b64encode(data).decode("ascii")
+            text = text.replace(literal, f"data:{media_type};base64,{encoded}")
+            references += 1
+            source_bytes += len(data)
+        document.write_text(text, encoding="utf-8", newline="\n")
+    return {
+        "documents": len(documents),
+        "references": references,
+        "sourceBytes": source_bytes,
+    }
+
+
 def _compose_item(
     item: dict,
     overlay_item: dict | None,
@@ -366,6 +446,10 @@ def build_release(
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, destination)
 
+    runtime_data_inlining = inline_runtime_data(
+        release_root, release_lock["runtimeDataInlining"]
+    )
+
     files = []
     casefold_paths: dict[str, str] = {}
     for path in sorted(release_root.rglob("*")):
@@ -388,6 +472,7 @@ def build_release(
         "inputs": release_lock["inputs"],
         "counts": {"items": len(manifest_items), "files": len(files)},
         "items": manifest_items,
+        "runtimeDataInlining": runtime_data_inlining,
         "files": files,
     }
     (release_root / "manifest.json").write_text(
@@ -500,7 +585,8 @@ def main() -> None:
         "motion catalog release built: "
         f"version {manifest['catalogVersion']}, {manifest['counts']['items']} items, "
         f"{manifest['counts']['files']} files, {applied} asset replacements, "
-        f"{replaced_items} items with trademark replacements"
+        f"{replaced_items} items with trademark replacements, "
+        f"{manifest['runtimeDataInlining']['references']} runtime data references inlined"
     )
 
 

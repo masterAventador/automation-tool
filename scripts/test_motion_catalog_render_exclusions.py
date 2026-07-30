@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """独立渲染豁免清单的卫生门禁。
 
-BM-16 的逐项 sweep 允许一张带原因的豁免清单（25 个目录项渲染不出来的根因
+BM-16 的逐项 sweep 允许一张带原因的豁免清单（19 个目录项渲染不出来的根因
 全部在内容/上游侧，PC-21 §18.6 逐类定性）。豁免机制的通病是腐烂成万能
 通行证——往里加个名字就能绕过（§9.1 的教训）。这里守三条：
 
@@ -27,7 +27,6 @@ KNOWN_CLASSES = frozenset(
         "template-host-instantiated",
         "replacement-stub-api",
         "static-by-design-overlay",
-        "runtime-fetch-blocked",
         "absolute-path-reference",
         "experimental-api-dependency",
         "frozen-render-pipeline",
@@ -54,6 +53,14 @@ class RenderExclusionTests(unittest.TestCase):
 
     def test_the_exclusion_count_matches_the_declared_total(self) -> None:
         self.assertEqual(len(self.exclusions["items"]), self.exclusions["total"])
+
+    def test_resolved_runtime_fetch_items_cannot_return_to_the_exclusion_list(self) -> None:
+        runtime_fetch = sorted(
+            name
+            for name, entry in self.exclusions["items"].items()
+            if entry["class"] == "runtime-fetch-blocked"
+        )
+        self.assertEqual(runtime_fetch, [])
 
 
 if __name__ == "__main__":
