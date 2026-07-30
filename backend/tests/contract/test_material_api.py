@@ -419,6 +419,9 @@ def test_invalid_description_union_and_queries_fail_closed() -> None:
         "0",
         "2026-07-30",
         "2026-07-30T09:10:11",
+        "2026-07-30T09:10Z",
+        "2026-07-30T09:10:11+0800",
+        "2026-07-30T09:10:11,1Z",
     ],
 )
 def test_registration_and_ai_update_reject_non_aware_datetime_wire_values(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Annotated, Literal
 
@@ -44,11 +45,18 @@ from automation_tool.control_plane.domain.resource_ids import InvalidResourceId
 router = APIRouter(prefix="/api/v1/editing-materials", tags=["editing-materials"])
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
+_RFC3339_DATETIME_PATTERN = re.compile(
+    r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}"
+    r"(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})$"
+)
 
 
 def _require_datetime_wire_string(value: object) -> object:
     """Keep the JSON boundary equal to OpenAPI's RFC 3339 date-time string."""
-    if not isinstance(value, str) or ("T" not in value and "t" not in value):
+    if (
+        not isinstance(value, str)
+        or _RFC3339_DATETIME_PATTERN.fullmatch(value) is None
+    ):
         raise ValueError("Date-time input must be an RFC 3339 string")
     return value
 
