@@ -51,7 +51,7 @@ executor = [
     # LE-14 runs the digest-locked Silero model locally. CPU-only ONNX Runtime
     # has native wheels for both release targets; NumPy is a direct dependency
     # because the production inference boundary constructs its tensors.
-    "onnxruntime==1.24.3",
+    "onnxruntime==1.23.2",
     "numpy==2.5.1",
     # Captions are drawn by PIL and overlaid by ffmpeg: the shipped ffmpeg has
     # no freetype/libass, so drawtext/subtitles/ass are all unavailable (see

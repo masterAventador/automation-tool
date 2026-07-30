@@ -63,7 +63,7 @@ def _contract(path: Path) -> tuple[dict[str, object], Path]:
         },
         "runtime": {
             "distribution": "onnxruntime",
-            "version": "1.24.3",
+            "version": "1.23.2",
             "provider": "CPUExecutionProvider",
             "licenseSpdx": "MIT",
             "packagedLicensePath": "onnxruntime/LICENSE",

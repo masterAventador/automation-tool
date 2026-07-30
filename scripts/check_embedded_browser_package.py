@@ -102,8 +102,9 @@ RELEASE_PAYLOAD_PARTS_MIB: Final = {
     # Locked Chrome for Testing 149.0.7827.55 after Widevine exclusion
     # (328 files, 339,257,128 bytes).
     "embedded-chromium": 324,
-    # Frozen RPA Executor sidecar (284 files, 184,686,384 bytes).
-    "local-executor": 177,
+    # Frozen Executor with the minimal Silero/ONNX inference runtime
+    # (349 files, 257,004,128 bytes).
+    "local-executor": 246,
     # Frozen intelligent-material worker after the unreachable-module trim, the
     # unlicensed background-music removal and the replacement of the four
     # proprietary system fonts with two open-licensed ones (369,452,875 bytes;

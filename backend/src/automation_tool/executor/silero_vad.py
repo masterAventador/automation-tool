@@ -33,7 +33,7 @@ OUTPUT_NAMES: Final = ("output", "stateN")
 CPU_PROVIDER: Final = "CPUExecutionProvider"
 CONTRACT_ID: Final = "automation-tool.silero-vad-runtime.v1"
 UPSTREAM_COMMIT: Final = "7e30209a3e901f9842f81b225f3e93d8199902b1"
-ONNXRUNTIME_VERSION: Final = "1.24.3"
+ONNXRUNTIME_VERSION: Final = "1.23.2"
 MAXIMUM_CONTRACT_BYTES: Final = 64 * 1024
 _READ_CHUNK_BYTES: Final = 1024 * 1024
 ONNXRUNTIME_LICENSE_RELATIVE_PATH: Final = PurePosixPath("onnxruntime/LICENSE")
@@ -247,7 +247,7 @@ def _load_contract(path: Path) -> _RuntimeContract:
     )
 
 
-def _verify_regular_file(path: Path, locked: _LockedFile) -> None:
+def _verified_regular_file_bytes(path: Path, locked: _LockedFile) -> bytes:
     payload = _read_stable_regular_file(
         path,
         maximum_bytes=locked.bytes,
@@ -255,9 +255,10 @@ def _verify_regular_file(path: Path, locked: _LockedFile) -> None:
     )
     if payload is None or hashlib.sha256(payload).hexdigest() != locked.sha256:
         _reject()
+    return payload
 
 
-def _resolved_assets(package_root: Path | None) -> tuple[Path, _RuntimeContract]:
+def _resolved_assets(package_root: Path | None) -> tuple[bytes, _RuntimeContract]:
     frozen = getattr(sys, "_MEIPASS", None)
     if package_root is not None:
         root = Path(package_root)
@@ -275,18 +276,18 @@ def _resolved_assets(package_root: Path | None) -> tuple[Path, _RuntimeContract]
         model_path = root / MODEL_FILE_NAME
         license_path = root / LICENSE_FILE_NAME
     contract = _load_contract(contract_path)
-    _verify_regular_file(model_path, contract.model)
-    _verify_regular_file(license_path, contract.license)
-    return model_path, contract
+    model_payload = _verified_regular_file_bytes(model_path, contract.model)
+    _verified_regular_file_bytes(license_path, contract.license)
+    return model_payload, contract
 
 
 def audit_packaged_silero_vad_runtime(bundle_directory: Path) -> None:
     """Fail unless a real onedir candidate carries the model and CPU runtime."""
 
     package_root = Path(bundle_directory) / "_internal"
-    _model, contract = _resolved_assets(package_root)
+    _model_payload, contract = _resolved_assets(package_root)
     runtime_license = package_root.joinpath(*contract.onnxruntime_license.relative_path.parts)
-    _verify_regular_file(runtime_license, contract.onnxruntime_license)
+    _verified_regular_file_bytes(runtime_license, contract.onnxruntime_license)
     capi = package_root / "onnxruntime/capi"
     try:
         metadata = capi.lstat()
@@ -334,7 +335,7 @@ class _OnnxRuntime(Protocol):
 
     def InferenceSession(
         self,
-        path: str,
+        model: bytes,
         *,
         providers: list[str],
         sess_options: _SessionOptions,
@@ -421,7 +422,7 @@ def create_silero_vad(
 ) -> SileroVad:
     """Verify packaged bytes, then create exactly one CPU ONNX session."""
 
-    model_path, _contract = _resolved_assets(package_root)
+    model_payload, _contract = _resolved_assets(package_root)
     failed = False
     session: object = None
     try:
@@ -440,7 +441,7 @@ def create_silero_vad(
             options.inter_op_num_threads = 1
             options.intra_op_num_threads = 1
             session = runtime.InferenceSession(
-                os.fspath(model_path),
+                model_payload,
                 providers=[CPU_PROVIDER],
                 sess_options=options,
             )

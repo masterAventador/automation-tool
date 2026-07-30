@@ -67,7 +67,7 @@
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
 | LE-13 | 素材理解 | 抽帧送百炼多模态，产出描述、标签与镜头时间区间并写回 Material；**关闭深度思考**（`enable_thinking=false`，作为配置项非硬编码，见设计文档 §4.5）；超时/拒答/空描述/token 超限的失败矩阵；真实模型调用验收。T1～T4、Codex Review finding 修复与真实纵向复验全部完成，证据见 `docs/development/LE-13.md` | LE-08 | ✅ 已完成 |
-| LE-14 | 人声检测与转写 | 三级漏斗：`silencedetect` 判有无声音 → Silero VAD（本地 ONNX，约 2 MB）判是人声还是纯环境音 → 仅对人声素材调百炼语音识别转写（只传音轨不传视频，避免为筛选步骤打包 140 MB+ 的本地 Whisper）。产出 `has_speech`、`speech_segments_ms`、`speech_transcript` 写回 Material；**onnxruntime 与 VAD 模型必须进安装包并有出厂门禁核对**；纯音乐误判人声、人声判成环境音、转写为空、方言/嘈杂环境、ASR 超时、路人背景说话被当主体的失败矩阵。T1 已完成并通过最终 Codex Review；T2 已完成真实模型推理、摘要缓存、权利/许可证登记及 macOS/Windows 出厂门禁，最终实现检查点待一次 Codex Review；T3～T5 待继续，证据见 `docs/development/LE-14.md` | LE-07 | 🚧 实现中 |
+| LE-14 | 人声检测与转写 | 三级漏斗：`silencedetect` 判有无声音 → Silero VAD（本地 ONNX，约 2 MB）判是人声还是纯环境音 → 仅对人声素材调百炼语音识别转写（只传音轨不传视频，避免为筛选步骤打包 140 MB+ 的本地 Whisper）。产出 `has_speech`、`speech_segments_ms`、`speech_transcript` 写回 Material；**onnxruntime 与 VAD 模型必须进安装包并有出厂门禁核对**；纯音乐误判人声、人声判成环境音、转写为空、方言/嘈杂环境、ASR 超时、路人背景说话被当主体的失败矩阵。T1 已完成并通过最终 Codex Review；T2 已完成真实模型推理、摘要缓存、权利/许可证登记及 macOS/Windows 出厂门禁，唯一一轮 Codex Review 的 Intel macOS wheel 与过度打包两项 P1 均已按 RED→GREEN 修复；T3～T5 待继续，证据见 `docs/development/LE-14.md` | LE-07 | 🚧 实现中 |
 | LE-15 | 文案分句与旁白合成 | 一句话经百炼文本模型产出脚本分句（**关闭深度思考**，见设计文档 §4.5）；TTS 合成每句并取真实音频时长；支持用户上传录音替代（转写后对齐句子，复用 LE-14 的 ASR） | LE-06,LE-14 | ⬜ 未开始 |
 | LE-16 | 语义匹配与片段选择 | 句子与素材描述语义匹配（有转写的素材把转写文本一并纳入匹配依据；**关闭深度思考**，见设计文档 §4.5）；在选中素材的镜头区间内挑最贴片段产出 in/out 点；**有人声素材按"自带旁白片段"编排：时长由原声内容决定、独立占段、用原声与转写字幕、不配 TTS**；文案句子只分配给无人声素材；素材不足、单条过短、匹配全低于阈值、全部素材均有人声的处理；产出 Timeline 草稿。**LE-07 交接的硬约束**：探测报出的 duration 取自容器头，**不保证时长内每一帧都存在**——实测 faststart 截断件（半个下载）报出的是完整时长，截到 25% 仍报 60000 ms 而实际只剩 268/1500 帧，且它不产生任何拒绝码、按码分支看不见；挑 in/out 点不得默认「时长内帧完备」。依据见 `docs/development/LE-07.md` Q2 | LE-13,LE-15 | ⬜ 未开始 |
 
@@ -84,7 +84,7 @@
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| LE-20 | 中文字体扩充与装配 | **本任务的前提已被 LE-09 调研推翻，开工前必须先重估必要性**：设计文档 §6.1 称「Noto Sans SC 覆盖约 3 万字、扩展 B 以上是豆腐块」，但生产在册的中文字体其实是 `contracts/quality/asset-rights-policy.v1.json` 锁的 **Noto Sans CJK SC**（静态 OTF，`Sans2.004`，由 `scripts/subtitle_font_assets.py` 按 SHA-256 取到构建缓存），LE-09 实测 `𠮷`（U+20BB7，扩展 B）在其 cmap 中映射到真实字形 `cid59625`。**先量清楚它到底缺哪些字**，再决定是否引入 Plangothic/文津宋体/霞鹜文楷 GB；若确需引入：锁版本、锁 SHA256、登记许可证与 SBOM，**必须有生产装配路径与出厂门禁**，不允许只有测试路径；用户可选字体。**装配整体归本任务**（LE-09 只交付机制，完成后最多 `🔍 待验收`）；同时处理 `scripts/check_embedded_browser_package.py:106` 硬编码的 `local-executor: 177 MiB` 上限——LE-09 引入 pillow(约 14 MB) + fonttools(约 18 MB) + brotli 会冲击它 | LE-09 | ⬜ 未开始 |
+| LE-20 | 中文字体扩充与装配 | **本任务的前提已被 LE-09 调研推翻，开工前必须先重估必要性**：设计文档 §6.1 称「Noto Sans SC 覆盖约 3 万字、扩展 B 以上是豆腐块」，但生产在册的中文字体其实是 `contracts/quality/asset-rights-policy.v1.json` 锁的 **Noto Sans CJK SC**（静态 OTF，`Sans2.004`，由 `scripts/subtitle_font_assets.py` 按 SHA-256 取到构建缓存），LE-09 实测 `𠮷`（U+20BB7，扩展 B）在其 cmap 中映射到真实字形 `cid59625`。**先量清楚它到底缺哪些字**，再决定是否引入 Plangothic/文津宋体/霞鹜文楷 GB；若确需引入：锁版本、锁 SHA256，登记许可证与 SBOM，**必须有生产装配路径与出厂门禁**，不允许只有测试路径；用户可选字体。**装配整体归本任务**（LE-09 只交付机制，完成后最多 `🔍 待验收`）。原先硬编码的 `local-executor: 177 MiB` 已在 LE-14 T2 按最小 ONNX Runtime 实包重测并更新为 246 MiB；若本任务再引入字体资产，仍须按最终实包重新核对声明负载与正式包上限 | LE-09 | ⬜ 未开始 |
 
 ### 3.8 验收（3 项）
 
@@ -106,9 +106,9 @@
 
 ## 5. 当前下一步
 
-**LE-14 人声检测与转写 T2。** 先定 Silero VAD 模型来源与摘要、ONNX Runtime 和模型的
-唯一随包装配路径、缓存键、运行时解析边界与出厂门禁，再从模型缺失/损坏必须明确拒绝的
-RED 开始实现。
+**LE-14 人声检测与转写 T3。** 先定有界音轨抽取的输入/输出/超时/字节上限、VAD
+概率到语音区间的聚合规则、百炼 ASR Adapter 契约和 Material 写回边界；复用 LE-08
+bounded 运行器形状但不跨模块导入私有函数，从“只上传音轨、从不上传视频”的 RED 开始。
 
 ## 7. 已知问题：用户可见文案门禁当前为红
 

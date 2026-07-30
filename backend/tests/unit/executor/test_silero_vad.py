@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import numpy as np
 import onnxruntime  # type: ignore[import-untyped]
 import pytest
+
 from automation_tool.executor import silero_vad as silero_vad_module
 from automation_tool.executor.silero_vad import (
     SileroVad,
@@ -85,7 +86,7 @@ def _contract() -> dict[str, object]:
         },
         "runtime": {
             "distribution": "onnxruntime",
-            "version": "1.24.3",
+            "version": "1.23.2",
             "provider": "CPUExecutionProvider",
             "licenseSpdx": "MIT",
             "packagedLicensePath": "onnxruntime/LICENSE",
@@ -116,7 +117,7 @@ def _write_candidate(root: Path) -> Path:
     capi = package / "onnxruntime/capi"
     capi.mkdir(parents=True)
     (capi / "onnxruntime_pybind11_state.so").write_bytes(b"binding")
-    (capi / "libonnxruntime.1.24.3.dylib").write_bytes(b"runtime")
+    (capi / "libonnxruntime.1.23.2.dylib").write_bytes(b"runtime")
     return bundle
 
 
@@ -137,7 +138,7 @@ class RecordingSession:
 
 
 class RecordingRuntime:
-    __version__ = "1.24.3"
+    __version__ = "1.23.2"
 
     def __init__(
         self,
@@ -162,12 +163,12 @@ class RecordingRuntime:
 
     def InferenceSession(
         self,
-        path: str,
+        model: object,
         *,
         providers: list[str],
         sess_options: object,
     ) -> object:
-        self.session_calls.append((path, tuple(providers), sess_options))
+        self.session_calls.append((model, tuple(providers), sess_options))
         if self.failure is not None:
             raise self.failure
         return self.session
@@ -281,8 +282,8 @@ def test_factory_creates_one_cpu_session_and_inference_keeps_state_and_context(
 
     assert isinstance(vad, SileroVad)
     assert len(runtime.session_calls) == 1
-    path, providers, options = runtime.session_calls[0]
-    assert path == os.fspath(package / MODEL_RELATIVE)
+    model, providers, options = runtime.session_calls[0]
+    assert model == FIXTURE_MODEL
     assert providers == ("CPUExecutionProvider",)
     assert isinstance(options, SimpleNamespace)
     assert options.inter_op_num_threads == 1
@@ -311,6 +312,40 @@ def test_factory_creates_one_cpu_session_and_inference_keeps_state_and_context(
     )
 
 
+def test_factory_never_reopens_the_model_after_digest_verification(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "package"
+    _write_package(package)
+    model_path = package / MODEL_RELATIVE
+
+    class ReplacingRuntime(RecordingRuntime):
+        def InferenceSession(
+            self,
+            model: object,
+            *,
+            providers: list[str],
+            sess_options: object,
+        ) -> object:
+            model_path.write_bytes(b"unverified replacement")
+            assert model == FIXTURE_MODEL
+            return super().InferenceSession(
+                model,
+                providers=providers,
+                sess_options=sess_options,
+            )
+
+    runtime = ReplacingRuntime()
+
+    vad = create_silero_vad(
+        package_root=package,
+        runtime_loader=lambda: runtime,
+    )
+
+    assert isinstance(vad, SileroVad)
+    assert runtime.session_calls[0][0] == FIXTURE_MODEL
+
+
 @pytest.mark.parametrize(
     "missing",
     [
@@ -318,7 +353,7 @@ def test_factory_creates_one_cpu_session_and_inference_keeps_state_and_context(
         LICENSE_RELATIVE,
         "onnxruntime/LICENSE",
         "onnxruntime/capi/onnxruntime_pybind11_state.so",
-        "onnxruntime/capi/libonnxruntime.1.24.3.dylib",
+        "onnxruntime/capi/libonnxruntime.1.23.2.dylib",
     ],
 )
 def test_candidate_gate_rejects_each_missing_shipped_vad_runtime_part(

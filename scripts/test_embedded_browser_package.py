@@ -170,6 +170,7 @@ class EmbeddedBrowserPackageTests(unittest.TestCase):
     def test_release_size_bounds_admit_the_declared_production_payload(self) -> None:
         payload = sum(RELEASE_PAYLOAD_PARTS_MIB.values()) * 1024 * 1024
         self.assertEqual(RELEASE_PAYLOAD_PARTS_MIB["embedded-chromium"], 324)
+        self.assertEqual(RELEASE_PAYLOAD_PARTS_MIB["local-executor"], 246)
         self.assertEqual(
             RELEASE_SIZE_BOUNDS.max_package_bytes,
             1125 * 1024 * 1024,

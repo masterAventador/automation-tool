@@ -2,7 +2,12 @@
 
 import sys
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_all, copy_metadata
+from PyInstaller.utils.hooks import (
+    collect_all,
+    collect_data_files,
+    collect_dynamic_libs,
+    copy_metadata,
+)
 
 backend_root = Path(SPECPATH)
 source_root = backend_root / "src"
@@ -36,8 +41,11 @@ def remove_direct_url_metadata(entries):
 
 playwright_datas, playwright_binaries, playwright_hiddenimports = collect_all("playwright")
 playwright_hiddenimports.append("automation_tool.executor.browser_runtime")
-onnxruntime_datas, onnxruntime_binaries, onnxruntime_hiddenimports = collect_all("onnxruntime")
+onnxruntime_datas = collect_data_files("onnxruntime", includes=["LICENSE"])
+onnxruntime_binaries = collect_dynamic_libs("onnxruntime")
+onnxruntime_hiddenimports = ["onnxruntime"]
 onnxruntime_metadata = copy_metadata("onnxruntime")
+executor_hiddenimports = ["automation_tool.executor.silero_vad"]
 
 # LE-14's local speech gate may never download a model at runtime. Fetch and
 # verify the one pinned model before Analysis, then package those exact bytes
@@ -110,7 +118,11 @@ analysis = Analysis(
         *silero_vad_datas,
         *motion_authoring_datas,
     ],
-    hiddenimports=[*playwright_hiddenimports, *onnxruntime_hiddenimports],
+    hiddenimports=[
+        *playwright_hiddenimports,
+        *onnxruntime_hiddenimports,
+        *executor_hiddenimports,
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

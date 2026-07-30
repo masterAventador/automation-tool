@@ -170,7 +170,7 @@ def load_silero_vad_contract(
     runtime = _object(root.get("runtime"), "runtime")
     if (
         runtime.get("distribution") != "onnxruntime"
-        or runtime.get("version") != "1.24.3"
+        or runtime.get("version") != "1.23.2"
         or runtime.get("provider") != "CPUExecutionProvider"
         or runtime.get("licenseSpdx") != "MIT"
         or runtime.get("packagedLicensePath") != "onnxruntime/LICENSE"

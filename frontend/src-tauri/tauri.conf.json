@@ -36,7 +36,10 @@
     }
   },
   "bundle": {
-    "active": true
+    "active": true,
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    }
   },
   "plugins": {
     "updater": {
