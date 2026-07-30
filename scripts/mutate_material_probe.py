@@ -90,7 +90,7 @@ MUTATIONS: list[tuple[str, str, str]] = [
     ),
     (
         "digest O_NONBLOCK not guarded for Windows",
-        "os.O_RDONLY | cast(int, getattr(os, \"O_NONBLOCK\", 0)))",
+        'os.O_RDONLY | cast(int, getattr(os, "O_NONBLOCK", 0)))',
         "os.O_RDONLY | os.O_NONBLOCK)",
     ),
     (
@@ -190,8 +190,10 @@ MUTATIONS: list[tuple[str, str, str]] = [
     ),
     (
         "outcome discriminated on the wrong type",
-        "    if isinstance(outcome, MaterialProbeRejection):",
-        "    if not isinstance(outcome, MaterialProbeRejection):",
+        "    if isinstance(outcome, MaterialProbeRejection):\n        _reject(outcome)\n"
+        "    return outcome",
+        "    if not isinstance(outcome, MaterialProbeRejection):\n        _reject(outcome)\n"
+        "    return outcome",
     ),
     (
         "except OSError -> except Exception",
@@ -223,7 +225,7 @@ MUTATIONS: list[tuple[str, str, str]] = [
     # --- the open itself ---
     (
         "O_NONBLOCK dropped",
-        "os.O_RDONLY | cast(int, getattr(os, \"O_NONBLOCK\", 0)))",
+        'os.O_RDONLY | cast(int, getattr(os, "O_NONBLOCK", 0)))',
         "os.O_RDONLY)",
     ),
     (
@@ -573,11 +575,11 @@ T6_MUTATIONS: list[tuple[str, str, str]] = [
     ),
     (
         "the scratch file is published directly",
-        "            with os.fdopen(descriptor, \"wb\") as sink:",
+        '            with os.fdopen(descriptor, "wb") as sink:',
         "            scratch = os.fspath(self._document)\n"
         "            os.close(descriptor)\n"
         "            descriptor = os.open(scratch, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)\n"
-        "            with os.fdopen(descriptor, \"wb\") as sink:",
+        '            with os.fdopen(descriptor, "wb") as sink:',
     ),
     (
         "the scratch file is left behind",
@@ -623,7 +625,7 @@ T6_MUTATIONS: list[tuple[str, str, str]] = [
     # --- the state directory, and what may be read as one ---
     (
         "a file passes for the state directory",
-        "    if not stat.S_ISDIR(metadata.st_mode):\n"
+        "    if not stat.S_ISDIR(metadata.st_mode) or _is_reparse_point(metadata):\n"
         "        _reject_registry(MaterialPathRegistryRejection.REGISTRY_UNREADABLE)\n",
         "",
     ),
@@ -708,8 +710,7 @@ T6_MUTATIONS: list[tuple[str, str, str]] = [
         "a broken path component reported as unreadable",
         "    except (FileNotFoundError, NotADirectoryError):\n"
         "        return MaterialPathRegistryRejection.FILE_MISSING",
-        "    except FileNotFoundError:\n"
-        "        return MaterialPathRegistryRejection.FILE_MISSING",
+        "    except FileNotFoundError:\n        return MaterialPathRegistryRejection.FILE_MISSING",
     ),
     (
         "gone and unusable swapped",
@@ -782,21 +783,21 @@ T6_MUTATIONS: list[tuple[str, str, str]] = [
 T7_SELECTION = ""
 
 T7_MUTATIONS: list[tuple[str, str, str]] = [
-    # --- the bound on what a pass may write, now shared by both of them ---
+    # --- the bound on what a pass may write, shared by both of them ---
     (
         "the size is only looked at once the tool has exited",
-        "                    if not outgrown:\n                        continue",
-        "                    continue",
+        "                if not outgrown:\n                    continue",
+        "                continue",
     ),
     (
         "mid-flight limit `>` -> `>=`",
-        "                        outgrown = output.stat().st_size > limit",
-        "                        outgrown = output.stat().st_size >= limit",
+        "                    outgrown = output.stat().st_size > limit",
+        "                    outgrown = output.stat().st_size >= limit",
     ),
     (
         "mid-flight limit off by one up",
-        "                        outgrown = output.stat().st_size > limit",
-        "                        outgrown = output.stat().st_size > limit + 1",
+        "                    outgrown = output.stat().st_size > limit",
+        "                    outgrown = output.stat().st_size > limit + 1",
     ),
     (
         "the poll waits out the whole timeout",
@@ -805,59 +806,113 @@ T7_MUTATIONS: list[tuple[str, str, str]] = [
     ),
     (
         "the timeout is ten seconds longer than asked for",
-        "            deadline = time.monotonic() + seconds",
-        "            deadline = time.monotonic() + seconds + 10",
+        "        deadline = time.monotonic() + seconds",
+        "        deadline = time.monotonic() + seconds + 10",
     ),
     (
         "the child is left running on the way out",
-        "            process.kill()\n            raise",
-        "            raise",
+        "        process.kill()\n        raise",
+        "        raise",
     ),
     (
         "the child inherits the parent's stdin",
-        "            stdin=subprocess.DEVNULL,\n            stdout=sink,",
-        "            stdout=sink,",
+        "                stdin=subprocess.DEVNULL,\n                stdout=sink,",
+        "                stdout=sink,",
     ),
-    # --- what the reading pass does with the answer ---
+    # --- the answer, and when it may be read ---
     (
-        "the answer's size is not checked after the exit",
-        "            if answer.stat().st_size > MAX_PROBE_OUTPUT_BYTES:\n"
-        "                # The bound above stops a tool still writing; this is the exact\n"
-        "                # limit, and it is what keeps an oversized answer from being\n"
-        "                # read at all — one written and finished between two polls\n"
-        "                # arrives here without the loop having had a chance to see it.\n"
-        "                _reject(MaterialProbeRejection.PROBE_FAILED)\n",
-        "",
+        "the answer's size is not checked before it is read",
+        "        if output.stat().st_size > limit:",
+        "        if False:",
     ),
     (
         "after-the-exit limit `>` -> `>=`",
-        "            if answer.stat().st_size > MAX_PROBE_OUTPUT_BYTES:",
-        "            if answer.stat().st_size >= MAX_PROBE_OUTPUT_BYTES:",
+        "        if output.stat().st_size > limit:",
+        "        if output.stat().st_size >= limit:",
     ),
-    # Anchored on the comment above it: the two passes have the same two lines at
-    # the same indentation, so the shape alone matches twice.
+    (
+        "a failed pass's output is read anyway",
+        '        return _PassOutcome(ended, b"")',
+        "        return _PassOutcome(ended, output.read_bytes())",
+    ),
     (
         "a signalled probe reported as an undecodable file",
-        "                # drifts with locale.\n"
-        "                _reject(MaterialProbeRejection.PROBE_CRASHED)",
-        "                # drifts with locale.\n"
-        "                _reject(MaterialProbeRejection.UNDECODABLE)",
+        "        # diagnostic text is involved, so nothing here drifts with locale.\n"
+        "        _reject(MaterialProbeRejection.PROBE_CRASHED)",
+        "        # diagnostic text is involved, so nothing here drifts with locale.\n"
+        "        _reject(MaterialProbeRejection.UNDECODABLE)",
     ),
     (
         "the reading pass's own timeout ignored",
-        "                seconds=PROBE_TIMEOUT_SECONDS,",
-        "                seconds=MEASURE_TIMEOUT_SECONDS,",
+        "        seconds=PROBE_TIMEOUT_SECONDS,",
+        "        seconds=MEASURE_TIMEOUT_SECONDS,",
     ),
     (
         "the reading pass borrows the measuring pass's limit",
-        "                limit=MAX_PROBE_OUTPUT_BYTES,",
-        "                limit=MAX_MEASURE_OUTPUT_BYTES,",
+        "        limit=MAX_PROBE_OUTPUT_BYTES,",
+        "        limit=MAX_MEASURE_OUTPUT_BYTES,",
     ),
+    # --- the scratch space, and the failures that are not the file's (C1) ---
+    (
+        "a scratch root that cannot be written reads as the tool misbehaving",
+        "    except OSError:\n"
+        "        # Not the file's fault and not the tool's: this module needs somewhere to\n"
+        "        # put a few hundred bytes, and a full volume is what stops it.\n"
+        "        return MaterialProbeRejection.WORKSPACE_UNUSABLE",
+        "    except OSError:\n        return MaterialProbeRejection.PROBE_FAILED",
+    ),
+    (
+        "the scratch file not opening reads as the tool misbehaving",
+        '        sink = output.open("wb")\n    except OSError:\n'
+        "        return MaterialProbeRejection.WORKSPACE_UNUSABLE",
+        '        sink = output.open("wb")\n    except OSError:\n'
+        "        return MaterialProbeRejection.PROBE_FAILED",
+    ),
+    (
+        "a tool that will not start reads as a full disk",
+        "        except OSError:\n            return MaterialProbeRejection.PROBE_FAILED",
+        "        except OSError:\n            return MaterialProbeRejection.WORKSPACE_UNUSABLE",
+    ),
+    (
+        "the in-flight stat failure reads as the tool misbehaving",
+        "                except OSError:\n                    process.kill()\n"
+        "                    return MaterialProbeRejection.WORKSPACE_UNUSABLE",
+        "                except OSError:\n                    process.kill()\n"
+        "                    return MaterialProbeRejection.PROBE_FAILED",
+    ),
+    (
+        "the answer that cannot be read reads as the tool misbehaving",
+        "    except OSError:\n"
+        "        return MaterialProbeRejection.WORKSPACE_UNUSABLE\n\n\ndef _waited_for",
+        "    except OSError:\n"
+        "        return MaterialProbeRejection.PROBE_FAILED\n\n\ndef _waited_for",
+    ),
+    (
+        "clearing up can rewrite the verdict again",
+        "        with suppress(OSError):\n            shutil.rmtree(workspace)",
+        "        shutil.rmtree(workspace)",
+    ),
+    (
+        "the scratch directory is left behind",
+        "        with suppress(OSError):\n            shutil.rmtree(workspace)",
+        "        pass",
+    ),
+    # --- canary: must die. Every group needs one of its own, or a harness that
+    # has stopped running what it thinks it runs reads as a clean sweep.
+    (
+        "CANARY the answer always comes back empty",
+        "        return _PassOutcome(ended, output.read_bytes())",
+        '        return _PassOutcome(ended, b"")',
+    ),
+]
+
+# The second half of the same round, split only so that either can be rerun on
+# its own: the group filter matches on the name, so "T7" still selects both.
+T7B_MUTATIONS: list[tuple[str, str, str]] = [
     # --- the public check a consumer closes its window with ---
     (
         "the public check skips the import guard",
-        "    path, after = _require_source_file(source)\n"
-        "    if not _held_still(approved, after):",
+        "    path, after = _require_source_file(source)\n    if not _held_still(approved, after):",
         "    path, after = source, source.stat()\n    if not _held_still(approved, after):",
     ),
     (
@@ -866,6 +921,13 @@ T7_MUTATIONS: list[tuple[str, str, str]] = [
         "    _, again = _require_source_file(path)\n"
         "    if not _held_still(before, again):\n"
         "        _reject(MaterialProbeRejection.SOURCE_NOT_AT_REST)",
+    ),
+    (
+        "the recipe's first step drops the guard",
+        "def approve_source(source: Path) -> tuple[Path, os.stat_result]:",
+        "def approve_source(source: Path) -> tuple[Path, os.stat_result]:\n"
+        "    return source, source.stat()\n\n\ndef _unused_approve(source: Path) "
+        "-> tuple[Path, os.stat_result]:",
     ),
     # Returns the stat it was handed rather than the one it took. Expected to
     # survive, and kept for what it says: the function only returns when the two
@@ -887,6 +949,11 @@ T7_MUTATIONS: list[tuple[str, str, str]] = [
         "the state directory's mode may be anything more open",
         "        or stat.S_IMODE(metadata.st_mode) != _PRIVATE_DIRECTORY_MODE",
         "        or stat.S_IMODE(metadata.st_mode) < _PRIVATE_DIRECTORY_MODE",
+    ),
+    (
+        "the state directory's mode checked ledger's looser way",
+        "        or stat.S_IMODE(metadata.st_mode) != _PRIVATE_DIRECTORY_MODE",
+        "        or stat.S_IMODE(metadata.st_mode) & 0o077",
     ),
     (
         "the private mode is world-readable",
@@ -915,6 +982,17 @@ T7_MUTATIONS: list[tuple[str, str, str]] = [
         "",
     ),
     (
+        "a reparse point passes for a private directory",
+        " or _is_reparse_point(metadata):",
+        ":",
+    ),
+    (
+        "every directory reads as a reparse point",
+        '    flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)\n'
+        '    return bool(flag and getattr(metadata, "st_file_attributes", 0) & flag)',
+        '    flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)\n    return bool(flag)',
+    ),
+    (
         "the Windows ACL is never asked about",
         "        try:\n            validate_private_acl(state_directory)\n"
         "        except ValueError:\n"
@@ -932,6 +1010,24 @@ T7_MUTATIONS: list[tuple[str, str, str]] = [
         '    if os.name != "nt" and (',
         "    if True and (",
     ),
+    # --- and it is asked again before every operation (fix round #17) ---
+    (
+        "the directory is trusted for the life of the process",
+        "        _require_state_directory(self._state_directory)\n\n    def _load",
+        "        pass\n\n    def _load",
+    ),
+    (
+        "only registering re-checks the directory",
+        "        self._require_its_directory()\n"
+        "        identifier = _usable_identifier(material_id)\n"
+        "        if identifier is None:\n"
+        "            _reject_registry(MaterialPathRegistryRejection.UNUSABLE_IDENTIFIER)\n"
+        "        entry = self._entries.get(identifier)",
+        "        identifier = _usable_identifier(material_id)\n"
+        "        if identifier is None:\n"
+        "            _reject_registry(MaterialPathRegistryRejection.UNUSABLE_IDENTIFIER)\n"
+        "        entry = self._entries.get(identifier)",
+    ),
     # --- canary: must die ---
     (
         "CANARY the public check never refuses",
@@ -948,10 +1044,11 @@ GROUPS: list[tuple[str, str, list[tuple[str, str, str]], tuple[Path, ...]]] = [
     # mutations are about what the packaged tools are actually asked for, and a
     # stub answers those the same either way — which is the failure mode the
     # acceptance file exists for.
+    ("T7a the bounds and the answer", T7_SELECTION, T7_MUTATIONS, (TESTS, MEDIA_TESTS)),
     (
-        "T7 the bounds, the public check and the private directory",
+        "T7b the public check and the private directory",
         T7_SELECTION,
-        T7_MUTATIONS,
+        T7B_MUTATIONS,
         (TESTS, MEDIA_TESTS),
     ),
 ]
@@ -1040,9 +1137,7 @@ def main() -> int:
             env=_environment(clone_source),
         ).stdout.strip()
         if resolved != str(clone_module):
-            print(
-                f"tests would import {resolved}, not the copy — refusing to report anything"
-            )
+            print(f"tests would import {resolved}, not the copy — refusing to report anything")
             return 1
         print("mutating a copy at", clone_module, flush=True)
 

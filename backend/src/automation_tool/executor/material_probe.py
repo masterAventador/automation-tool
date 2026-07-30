@@ -14,6 +14,7 @@ import json
 import math
 import os
 import re
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -31,10 +32,14 @@ from automation_tool.protocol.safe_text import contains_control_or_bidi
 MAX_PATH_CHARACTERS: Final = 4096
 MAX_CODEC_NAME_CHARACTERS: Final = 64
 MAX_PROBE_OUTPUT_BYTES: Final = 1024 * 1024
-# What the reading pass's own output is called inside its scratch directory.
-# Named rather than inlined because the size of that file is what stops an
-# ffprobe printing without end, so a test has to be able to reach it.
-PROBE_OUTPUT_FILE_NAME: Final = "probe.json"
+# Where a pass's output is written and what it is called there. Both passes use
+# one prefix and one name: nothing reads either — the directory lives for one
+# pass and is removed — while a test needs to reach the file (its size is what
+# stops a tool printing without end) and to recognise a leftover directory.
+# Private, because a caller has no use for either; the tests import them by name,
+# which `__all__` has no bearing on.
+_SCRATCH_PREFIX: Final = "automation-tool-probe-"
+_SCRATCH_FILE_NAME: Final = "output"
 # The largest file the digest will read. Unlike the duration and frame-size
 # limits further down this mirrors nothing — `Material` has no size field — so
 # it is not a shape constraint but a bound on work, and it is chosen against the
@@ -299,6 +304,22 @@ class MaterialProbeRejection(StrEnum):
     SILENT_AUDIO = "silent_audio"
     PROBE_CRASHED = "probe_crashed"
     PROBE_FAILED = "probe_failed"
+    # Not about the file at all: both passes need a little scratch space on this
+    # computer — the reading pass since it stopped reading ffprobe's answer
+    # through a pipe — and this is what they say when they cannot have it.
+    #
+    # It earns a member of its own because the next step is the user's and it is
+    # not "try again": measured on a 4 MB ram disk as `TMPDIR`, a full volume
+    # fails at the scratch directory's creation and the same material imports
+    # fine once there is room, so telling the operator their file could not be
+    # read (`UNREADABLE`) or that the tool misbehaved (`PROBE_FAILED`, whose
+    # instruction is to retry) both send them after the wrong thing.
+    #
+    # Only the volume being *full* reaches this, measured: at 4 KiB free the
+    # answer — a few hundred bytes of JSON — still fits and the probe succeeds,
+    # so the case where the tool's own write fails mid-answer is not reachable
+    # with this query and nothing here pretends to handle it.
+    WORKSPACE_UNUSABLE = "workspace_unusable"
 
 
 class ProbedMaterialKind(StrEnum):
@@ -341,20 +362,22 @@ def _reject(rejection: MaterialProbeRejection) -> Never:
     Only that much, though: `from None` sets `__suppress_context__`, so the
     handled exception is still hanging off `__context__` with the path in its
     `filename`. Anything walking the chain itself rather than rendering it still
-    reaches it, and the rejections raised from inside a handler — both path
-    guards, the duration parser, and the two passes' own `except` — have this and
-    nothing more.
+    reaches it.
 
-    What is reachable there is worth stating exactly, because it changed when the
-    reading pass stopped using `subprocess.run`. There is no `TimeoutExpired`
-    anywhere any more: the timeout is `_run_bounded`'s own deadline, so the argv
-    — which held the source path — is never packed into an exception at all. What
-    the two passes can leave on `__context__` is an `OSError` from their scratch
-    workspace or from spawning the tool, and measured on the reading pass with an
-    injected IO error, `filename` is
-    `/var/folders/…/automation-tool-probe-…/probe.json`: this module's own
-    temporary file, not the operator's. The paths that would matter reach
-    `__context__` only through the path guards, whose caller already knows them.
+    **Which rejections have anything chained behind them is worth stating
+    exactly, and it is now a short list.** Measured, walking `__context__`:
+
+    - the path guards and the digest's own `except OSError` leave the
+      filesystem's error, whose `filename` is the path the caller just passed in
+      — it knows it already;
+    - the duration parser and the reading pass's `json.loads` leave a
+      `ValueError` over text this module read out of the tool, never a path;
+    - **the two passes leave nothing.** Every `OSError` from their scratch
+      workspace, and the `TimeoutExpired` that used to sit behind one, is turned
+      into a returned reason inside `_run_bounded` rather than raised through a
+      handler: measured, the chain for a workspace failure is one link long,
+      against `MaterialProbeRejected → OSError → TimeoutExpired` before it —
+      whose `cmd` was the whole argv with the operator's path in it.
     """
     raise MaterialProbeRejected(rejection) from None
 
@@ -495,57 +518,46 @@ def _run_probe(ffprobe: Path, source: Path) -> dict[str, object]:
 
     The answer goes to a scratch file rather than a pipe so that its size is
     known before any of it is read, and bounded while it is being written; see
-    `_run_bounded`. Every call that touches the filesystem is inside the `try`,
-    the workspace's own cleanup included: an `OSError` escaping as itself would
-    both miss every caller catching `MaterialProbeRejected` and carry the path
-    in its message. `ValueError` is in the same handler because
-    `json.loads` and a non-UTF-8 read both raise subclasses of it, and both mean
-    the same thing here.
+    `_run_bounded`, which also states why every reason it can produce is a
+    returned value rather than a raised one.
     """
+    outcome = _run_bounded(
+        [
+            os.fspath(ffprobe),
+            "-v",
+            "error",
+            "-print_format",
+            "json",
+            "-show_entries",
+            _PROBE_ENTRIES,
+            # Stops a name beginning with "-" from being read as an option.
+            "--",
+            os.fspath(source),
+        ],
+        seconds=PROBE_TIMEOUT_SECONDS,
+        limit=MAX_PROBE_OUTPUT_BYTES,
+    )
+    if isinstance(outcome, MaterialProbeRejection):
+        _reject(outcome)
+    if outcome.returncode < 0:
+        # POSIX reports a signalled child as a negative code. Telling the user
+        # their file is unreadable would send them to replace a file that is
+        # fine; the packaged tool is what died. Free to distinguish — no
+        # diagnostic text is involved, so nothing here drifts with locale.
+        _reject(MaterialProbeRejection.PROBE_CRASHED)
+    if outcome.returncode != 0:
+        # Measured: unsupported data, a truncated container and an empty file all
+        # yield exactly `exit=1` with `stdout={}`. Reading the answer without
+        # checking this first would parse that `{}` into an empty mapping and
+        # invent defaults from it. The three cannot be told apart without
+        # matching ffprobe's English diagnostics, and that text names the file,
+        # so it is never read back.
+        _reject(MaterialProbeRejection.UNDECODABLE)
     try:
-        with tempfile.TemporaryDirectory(prefix="automation-tool-probe-") as workspace:
-            answer = Path(workspace) / PROBE_OUTPUT_FILE_NAME
-            returncode = _run_bounded(
-                [
-                    os.fspath(ffprobe),
-                    "-v",
-                    "error",
-                    "-print_format",
-                    "json",
-                    "-show_entries",
-                    _PROBE_ENTRIES,
-                    # Stops a name beginning with "-" from being read as an
-                    # option.
-                    "--",
-                    os.fspath(source),
-                ],
-                answer,
-                seconds=PROBE_TIMEOUT_SECONDS,
-                limit=MAX_PROBE_OUTPUT_BYTES,
-            )
-            if returncode < 0:
-                # POSIX reports a signalled child as a negative code. Telling
-                # the user their file is unreadable would send them to replace a
-                # file that is fine; the packaged tool is what died. Free to
-                # distinguish — no diagnostic text is involved, so nothing here
-                # drifts with locale.
-                _reject(MaterialProbeRejection.PROBE_CRASHED)
-            if returncode != 0:
-                # Measured: unsupported data, a truncated container and an empty
-                # file all yield exactly `exit=1` with `stdout={}`. Reading the
-                # answer without checking this first would parse that `{}` into
-                # an empty mapping and invent defaults from it. The three cannot
-                # be told apart without matching ffprobe's English diagnostics,
-                # and that text names the file, so it is never read back.
-                _reject(MaterialProbeRejection.UNDECODABLE)
-            if answer.stat().st_size > MAX_PROBE_OUTPUT_BYTES:
-                # The bound above stops a tool still writing; this is the exact
-                # limit, and it is what keeps an oversized answer from being
-                # read at all — one written and finished between two polls
-                # arrives here without the loop having had a chance to see it.
-                _reject(MaterialProbeRejection.PROBE_FAILED)
-            payload = json.loads(answer.read_bytes())
-    except (OSError, subprocess.SubprocessError, ValueError):
+        payload = json.loads(outcome.output)
+    except ValueError:
+        # `json.loads` raises this for malformed text and for bytes that are not
+        # UTF-8 alike, and both mean the same thing here.
         _reject(MaterialProbeRejection.PROBE_FAILED)
     if not isinstance(payload, dict):
         _reject(MaterialProbeRejection.PROBE_FAILED)
@@ -641,8 +653,24 @@ class AudioFacts:
     loudness_lufs: float | None
 
 
-def _run_bounded(argv: list[str], output: Path, *, seconds: float, limit: int) -> int:
-    """Run one pass, stopping it if the output it is writing outgrows the limit.
+@dataclass(frozen=True, slots=True)
+class _PassOutcome:
+    """How one pass ended, and what it wrote if it ended well.
+
+    `output` is read only for a pass that exited zero. Nothing needs it
+    otherwise — both callers reject on any other code without looking — and
+    reading it would put a tool's text in a frame that is about to raise, which
+    is the property `_Measurement` exists to keep.
+    """
+
+    returncode: int
+    output: bytes
+
+
+def _run_bounded(
+    argv: list[str], *, seconds: float, limit: int
+) -> _PassOutcome | MaterialProbeRejection:
+    """Run one pass in a scratch directory of its own, bounded, and hand back what it wrote.
 
     Reading the size once the process has exited says what it wrote; it does
     not bound what it writes. Between the two moments sits the timeout — a
@@ -656,48 +684,125 @@ def _run_bounded(argv: list[str], output: Path, *, seconds: float, limit: int) -
     afterwards, which is the same gap one entry point over and worse in one
     respect: what grew without a bound was memory rather than a scratch file.
 
-    Nothing captured, so no `CompletedProcess` ever holds a tool's text — and no
-    `TimeoutExpired` escapes either: the deadline is this loop's, so the one
-    `process.wait` raises is handled here and the argv it carries, which names
-    the source, goes no further. `_reject`'s own docstring records what is left
-    reachable through `__context__` after that, measured.
+    **Every reason is returned, never raised, and that is what makes the verdict
+    safe from the clean-up.** A rejection raised from inside here would travel
+    out through the removal of the scratch directory, and an `OSError` from that
+    removal replaces it: measured, a corrupt file's `UNDECODABLE` — the code a
+    consumer must read as "possibly still downloading" — became `PROBE_FAILED`
+    whenever a tmp sweeper won that race. A returned reason is already the
+    function's value before `finally` runs, so nothing the clean-up does can
+    change it.
+
+    Nothing is captured, so no `CompletedProcess` ever holds a tool's text — and
+    no `TimeoutExpired` escapes either: the deadline is this loop's, so the one
+    `process.wait` raises is handled and dropped inside `_waited_for`.
     """
-    with (
-        output.open("wb") as sink,
-        subprocess.Popen(
-            argv,
-            # The executor's own stdin carries Tauri's bootstrap handshake and
-            # command stream; a child inheriting it could consume bytes out of
-            # that protocol channel.
-            stdin=subprocess.DEVNULL,
-            stdout=sink,
-            # Both tools name the offending file in every diagnostic, and
-            # nothing here reads them.
-            stderr=subprocess.DEVNULL,
-        ) as process,
-    ):
+    try:
+        workspace = tempfile.mkdtemp(prefix=_SCRATCH_PREFIX)
+    except OSError:
+        # Not the file's fault and not the tool's: this module needs somewhere to
+        # put a few hundred bytes, and a full volume is what stops it.
+        return MaterialProbeRejection.WORKSPACE_UNUSABLE
+    try:
+        return _collected(argv, Path(workspace) / _SCRATCH_FILE_NAME, seconds=seconds, limit=limit)
+    finally:
+        # Swallowed on purpose, and the reason is above: what the caller is told
+        # was decided before this line runs, and a sweeper racing us here must
+        # not be able to rewrite it. `mkdtemp` plus this is
+        # `TemporaryDirectory`'s own body minus the finalizer, which is what put
+        # the removal in the exception's path.
+        with suppress(OSError):
+            shutil.rmtree(workspace)
+
+
+def _collected(
+    argv: list[str], output: Path, *, seconds: float, limit: int
+) -> _PassOutcome | MaterialProbeRejection:
+    """Run the child with its output bounded, then read what it wrote.
+
+    The two `OSError`s here are different failures and are told apart: the
+    scratch file not opening is this module's own workspace, while the tool not
+    starting is the tool. One handler for both would answer "free up some disk
+    space" to a packaged binary that went missing between the check and the
+    spawn.
+    """
+    try:
+        sink = output.open("wb")
+    except OSError:
+        return MaterialProbeRejection.WORKSPACE_UNUSABLE
+    with sink:
         try:
-            deadline = time.monotonic() + seconds
-            while True:
-                remaining = deadline - time.monotonic()
-                if remaining > 0:
-                    try:
-                        return process.wait(timeout=min(OUTPUT_POLL_SECONDS, remaining))
-                    except subprocess.TimeoutExpired:
-                        outgrown = output.stat().st_size > limit
-                    if not outgrown:
-                        continue
-                _reject(MaterialProbeRejection.PROBE_FAILED)
-        except BaseException:
-            # Every way out of that loop except the `return` leaves the child
-            # running, and `Popen.__exit__` waits for it *without* a timeout —
-            # so an exception on the way out trades the timeout for the child's
-            # natural life. `output.stat()` is the reachable one: a tmp sweeper,
-            # an unmounted volume or an EIO puts an `OSError` there while the
-            # tool is still writing. Measured before this existed, with a
-            # one-second timeout and a thirty-second child: 30.59 s.
+            process = subprocess.Popen(
+                argv,
+                # The executor's own stdin carries Tauri's bootstrap handshake
+                # and command stream; a child inheriting it could consume bytes
+                # out of that protocol channel.
+                stdin=subprocess.DEVNULL,
+                stdout=sink,
+                # Both tools name the offending file in every diagnostic, and
+                # nothing here reads them.
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            return MaterialProbeRejection.PROBE_FAILED
+        with process:
+            ended = _waited_for(process, output, seconds=seconds, limit=limit)
+    if isinstance(ended, MaterialProbeRejection):
+        return ended
+    if ended != 0:
+        # Nothing reads the output of a pass that failed, so it is not read; see
+        # `_PassOutcome`.
+        return _PassOutcome(ended, b"")
+    try:
+        if output.stat().st_size > limit:
+            # The bound in `_waited_for` stops a tool still writing; this is the
+            # exact limit, and it is what keeps an oversized answer from being
+            # read at all — one written and finished between two polls arrives
+            # here without the loop having had a chance to see it.
+            return MaterialProbeRejection.PROBE_FAILED
+        return _PassOutcome(ended, output.read_bytes())
+    except OSError:
+        return MaterialProbeRejection.WORKSPACE_UNUSABLE
+
+
+def _waited_for(
+    process: subprocess.Popen[bytes], output: Path, *, seconds: float, limit: int
+) -> int | MaterialProbeRejection:
+    """The child's exit code, or the reason it was not allowed to finish."""
+    try:
+        deadline = time.monotonic() + seconds
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                try:
+                    return process.wait(timeout=min(OUTPUT_POLL_SECONDS, remaining))
+                except subprocess.TimeoutExpired:
+                    pass
+                # Deliberately *after* the handler rather than inside it.
+                # `output.stat()` can raise, and a rejection raised while a
+                # `TimeoutExpired` is being handled carries it on `__context__` —
+                # where `cmd` is the whole argv, with the operator's path in it.
+                # Measured before this: the chain was
+                # `MaterialProbeRejected → OSError → TimeoutExpired` and the
+                # source path was reachable through the third link.
+                try:
+                    outgrown = output.stat().st_size > limit
+                except OSError:
+                    process.kill()
+                    return MaterialProbeRejection.WORKSPACE_UNUSABLE
+                if not outgrown:
+                    continue
             process.kill()
-            raise
+            return MaterialProbeRejection.PROBE_FAILED
+    except BaseException:
+        # Every way out of that loop except the returns leaves the child
+        # running, and `Popen.__exit__` waits for it *without* a timeout — so an
+        # exception on the way out trades the timeout for the child's natural
+        # life. `KeyboardInterrupt` is the reachable one now that the `OSError`
+        # above is handled: measured before this existed, with a one-second
+        # timeout and a thirty-second child, 30.59 s.
+        process.kill()
+        raise
 
 
 def _measure(ffmpeg: Path, source: Path) -> _Measurement:
@@ -705,62 +810,53 @@ def _measure(ffmpeg: Path, source: Path) -> _Measurement:
 
     The findings arrive on the filter graph's own metadata channel, written to a
     file rather than captured: nothing that could carry the path ends up on a
-    `CompletedProcess` or a `TimeoutExpired`, and the size can be checked before
-    any of it is read. The diagnostics — which name the file and carry whatever
-    its tags say — go to `DEVNULL` and are never a file at all.
+    `CompletedProcess` or a `TimeoutExpired`, and the size is checked before any
+    of it is read. The diagnostics — which name the file and carry whatever its
+    tags say — go to `DEVNULL` and are never a file at all.
 
-    Every rejection here happens before a single byte is read, and the text is
-    handed straight to the parser without being bound to a local, so nothing on
-    a raising path can hold it. Every call that touches the filesystem is inside
-    the `try`, the workspace's own cleanup included: an `OSError` escaping as
-    itself would both miss every caller catching `MaterialProbeRejected` and
-    carry the path in its message.
+    Every rejection here happens before a single byte of the report is read: the
+    exit code decides first, and `_run_bounded` reads nothing for a pass that
+    failed. What it hands back is bytes rather than a file, so there is no
+    filesystem call left in this function to escape as an `OSError` — every one
+    of them, and the reason each earns, now lives in `_run_bounded`. The decode
+    cannot raise either, which is why the reading pass needs a `ValueError`
+    handler for its `json.loads` and this one needs nothing.
     """
-    try:
-        with tempfile.TemporaryDirectory(prefix="automation-tool-measure-") as workspace:
-            report = Path(workspace) / "report.log"
-            returncode = _run_bounded(
-                [
-                    os.fspath(ffmpeg),
-                    "-nostdin",
-                    # Nothing reads the diagnostics, and this is the level the
-                    # input's metadata dump prints at.
-                    "-v",
-                    "error",
-                    # ffmpeg reads its input before its output options, and it
-                    # has no `--` separator — it opens a literal "--" as a file.
-                    # What keeps a name starting with "-" from being read as an
-                    # option is `_require_source_file`, which only ever yields
-                    # an absolute path.
-                    "-i",
-                    os.fspath(source),
-                    # Nothing here looks at the picture, yet `-f null` selects
-                    # the video stream too and decodes every frame into the
-                    # sink. Measured on a 120-second 1280x720 clip: 4.10 s of
-                    # CPU without this against 0.17 s with it. An output option,
-                    # so it goes after the input.
-                    "-vn",
-                    "-af",
-                    _MEASURE_FILTERS,
-                    "-f",
-                    "null",
-                    "-",
-                ],
-                report,
-                seconds=MEASURE_TIMEOUT_SECONDS,
-                limit=MAX_MEASURE_OUTPUT_BYTES,
-            )
-            if returncode < 0:
-                _reject(MaterialProbeRejection.PROBE_CRASHED)
-            if returncode != 0:
-                _reject(MaterialProbeRejection.PROBE_FAILED)
-            if report.stat().st_size > MAX_MEASURE_OUTPUT_BYTES:
-                _reject(MaterialProbeRejection.PROBE_FAILED)
-            return _parse_measurement(report.read_text(encoding="utf-8", errors="replace"))
-    except (OSError, subprocess.SubprocessError):
-        # `_reject` raises a `RuntimeError` subclass, so every rejection above
-        # passes through here untouched and keeps its own reason.
+    outcome = _run_bounded(
+        [
+            os.fspath(ffmpeg),
+            "-nostdin",
+            # Nothing reads the diagnostics, and this is the level the input's
+            # metadata dump prints at.
+            "-v",
+            "error",
+            # ffmpeg reads its input before its output options, and it has no
+            # `--` separator — it opens a literal "--" as a file. What keeps a
+            # name starting with "-" from being read as an option is
+            # `_require_source_file`, which only ever yields an absolute path.
+            "-i",
+            os.fspath(source),
+            # Nothing here looks at the picture, yet `-f null` selects the video
+            # stream too and decodes every frame into the sink. Measured on a
+            # 120-second 1280x720 clip: 4.10 s of CPU without this against
+            # 0.17 s with it. An output option, so it goes after the input.
+            "-vn",
+            "-af",
+            _MEASURE_FILTERS,
+            "-f",
+            "null",
+            "-",
+        ],
+        seconds=MEASURE_TIMEOUT_SECONDS,
+        limit=MAX_MEASURE_OUTPUT_BYTES,
+    )
+    if isinstance(outcome, MaterialProbeRejection):
+        _reject(outcome)
+    if outcome.returncode < 0:
+        _reject(MaterialProbeRejection.PROBE_CRASHED)
+    if outcome.returncode != 0:
         _reject(MaterialProbeRejection.PROBE_FAILED)
+    return _parse_measurement(outcome.output.decode("utf-8", errors="replace"))
 
 
 def _parse_measurement(report: str) -> _Measurement:
@@ -1078,6 +1174,25 @@ def _held_still(before: os.stat_result, after: os.stat_result) -> bool:
     )
 
 
+def approve_source(source: Path) -> tuple[Path, os.stat_result]:
+    """Check a file the user chose, and hand back the path and the stat that was checked.
+
+    The first step of the recipe `require_source_unchanged` completes, and the
+    reason it is public: the stat that call compares against has to come from
+    somewhere, and the somewhere used to be the caller's own `Path.stat()` — a
+    call with no guard in front of it and no rejection behind it. Measured on a
+    file that has just been moved, that raises a bare `FileNotFoundError` whose
+    `filename` is the operator's private path, which is precisely the leak every
+    other entry point here is built to close.
+
+    It is `_require_source_file` under a name callers may say, and deliberately
+    nothing more: the probe runs the same guard as its own first act, so there is
+    one answer to "may this file be imported at all" rather than two that can
+    disagree.
+    """
+    return _require_source_file(source)
+
+
 def require_source_unchanged(source: Path, approved: os.stat_result) -> tuple[Path, os.stat_result]:
     """Confirm one path still names the file a caller was told about, and re-approve it.
 
@@ -1101,10 +1216,18 @@ def require_source_unchanged(source: Path, approved: os.stat_result) -> tuple[Pa
     again before anything is compared, which is also what turns a file that
     vanished or stopped being readable into the reason it already has.
 
-    `approved` is a stat this module handed back: the one `resolve` returns, the
-    one this function returns, or one the caller took itself before probing.
-    Anything else is a programming error rather than one of the reasons this
-    module rejects.
+    `approved` is a stat this module handed back: `approve_source`'s, `resolve`'s,
+    or this function's own.
+
+    **A caller that passes the wrong file's stat is told the file is still being
+    written.** The types match, mypy is happy, and a function juggling two paths
+    picking the wrong local is an ordinary mistake — what comes back is
+    `SOURCE_NOT_AT_REST`, whose instruction to the operator is "wait, it is still
+    downloading", about a file that is doing nothing of the sort. Nothing here can
+    tell that from the case the code exists for: two stats of different files and
+    two stats of one changed file are the same comparison. So it is stated rather
+    than guarded, and the 13 call sites in the tests all pass the stat of the file
+    they are about.
 
     The fresh stat is returned so the window can be carried forward again: a
     consumer that checks, opens, and then reads has a third moment to close, and
@@ -1175,10 +1298,11 @@ def probe_material(tools: PackagedMediaTools, source: Path) -> MaterialFacts:
     probes and then registers the path has a gap of its own, in which the
     identity `MaterialPathRegistry.register` stats is not the identity probing
     saw. The registry cannot close that: what it compares is the identity at
-    registration, the later of the two moments. A caller closes it by keeping
-    the stat it took before probing and handing it to
-    `require_source_unchanged` once registration has returned — the same call
-    this function ends with, which is why it is public.
+    registration, the later of the two moments. A caller closes it by keeping one
+    stat across the whole sequence — `approve_source` before this call,
+    `require_source_unchanged` once registration has returned — which is why both
+    of those are public and why this function's own last act is the second of
+    them.
     """
     path, before = _require_source_file(source)
     # The size is already in hand, and no tool could say anything that changes
@@ -1486,7 +1610,17 @@ class MaterialPathRegistry:
         already handling them from the probe it just ran, and restating
         `UNSAFE_PATH` against `UNREADABLE` in a second vocabulary would lose the
         distinction to no purpose.
+
+        **What this records is the file as it is now, not the file that was
+        probed.** The identity comes from this method's own `stat`, so a swap
+        between the probe returning and this call is invisible here — and it
+        cannot be otherwise: the only identity this class ever sees is the one it
+        takes. A caller closes that window from the outside, by keeping
+        `approve_source`'s stat across the whole sequence and handing it to
+        `require_source_unchanged` once this method has returned;
+        `probe_material`'s own docstring states the same recipe from its end.
         """
+        self._require_its_directory()
         identifier = _usable_identifier(material_id)
         if identifier is None:
             _reject_registry(MaterialPathRegistryRejection.UNUSABLE_IDENTIFIER)
@@ -1521,6 +1655,7 @@ class MaterialPathRegistry:
         does. The registry's own trust boundary is the private state directory,
         not the contents of what it stores.
         """
+        self._require_its_directory()
         identifier = _usable_identifier(material_id)
         if identifier is None:
             _reject_registry(MaterialPathRegistryRejection.UNUSABLE_IDENTIFIER)
@@ -1546,6 +1681,26 @@ class MaterialPathRegistry:
 
     def __repr__(self) -> str:
         return "MaterialPathRegistry(<redacted>)"
+
+    def _require_its_directory(self) -> None:
+        """Ask again, before each operation, whether the library's home is still private.
+
+        Validity at construction says nothing about validity now — the sentence
+        `PackagedMediaTools.revalidate` is built on, and the same one applies
+        here: an App that started with a private state directory can be running
+        hours later beside a directory somebody relaxed. `local_artifact`
+        re-validates per operation and `ledger` checks either side of a connect;
+        this class asked once and then trusted the answer for the life of the
+        process.
+
+        It notices rather than prevents. Nothing here can hold a directory still
+        while `mkstemp` and `os.replace` run inside it, so a relaxation that lands
+        between this check and those calls is not seen — the same residual as
+        everywhere else in this module, and rejecting on notice still beats
+        writing the operator's library into a directory that is no longer theirs
+        alone.
+        """
+        _require_state_directory(self._state_directory)
 
     def _load(self) -> dict[UUID, _RegisteredFile]:
         """What the document states, refusing rather than rebuilding when it is damaged.
@@ -1680,20 +1835,33 @@ def _require_state_directory(state_directory: object) -> Path:
     while the directory really is private, and `is_dir()` accepts a directory
     anyone can read or write, and a symlink to one, without comment.
 
-    So the grade is `local_artifact._require_private_directory`'s: a directory,
-    not a link to one, owned by this user, and readable by nobody else. Stated
-    again rather than imported, for `_require_tool`'s reason — that is another
-    module's private name — and it is the grade the directory is already created
-    at: `ledger` makes this same state root with `mkdir(mode=0o700)`, so nothing
-    the Executor does is refused by asking.
+    So the grade is `local_artifact._validate_private_owner_and_mode`'s: a
+    directory, not a link or a reparse point, owned by this user, and reachable by
+    nobody else. Stated again rather than imported, for `_require_tool`'s reason —
+    that is another module's private name.
+
+    **What actually makes production satisfy it is Rust, not Python.**
+    `executor_platform::set_private_directory_permissions` sets 0700 on the state
+    directory unconditionally at startup (and is a no-op on Windows, where the
+    ACL is the question instead). `ledger`'s `mkdir(mode=0o700, exist_ok=True)`
+    does not: measured, `exist_ok` leaves an existing directory's mode alone, so
+    citing it as the guarantee would be citing something that does not hold. Nor
+    is `ledger`'s own check this grade — it tests `S_IMODE & 0o077`, which passes
+    a mode this function refuses, `0o1700` among them.
 
     `lstat` rather than `stat`, so a symlink is refused as not being a directory
-    rather than followed to whatever it points at. The mode and owner are POSIX
-    questions: on Windows the mode is whatever the filesystem invented, and the
-    equivalent question is about the DACL, which `windows_acl` answers — the same
-    public function `local_artifact` uses at the same point. It is imported
-    inside the branch because the module opens `advapi32.dll` as it loads and so
-    cannot be imported anywhere else.
+    rather than followed to whatever it points at. A Windows reparse point needs
+    asking about separately: measured, a junction comes back from `lstat` with
+    `S_ISDIR` true and `S_ISLNK` false, so the directory check takes it, the mode
+    check does not run on that platform, and `validate_private_acl` reads the
+    *target's* DACL rather than the junction's. The document would then be
+    written wherever the junction points.
+
+    The mode and owner are POSIX questions: on Windows the mode is whatever the
+    filesystem invented, and the equivalent question is about the DACL, which
+    `windows_acl` answers — the same public function `local_artifact` uses at the
+    same point. It is imported inside the branch because the module opens
+    `advapi32.dll` as it loads and so cannot be imported anywhere else.
 
     The ancestors are not walked. That question belongs to whoever creates the
     root — `ledger` refuses linked ancestors as it makes it — and asking it again
@@ -1709,7 +1877,7 @@ def _require_state_directory(state_directory: object) -> Path:
         # an unreachable parent must still come back as a registry reason rather
         # than as an `OSError` naming the operator's path.
         _reject_registry(MaterialPathRegistryRejection.REGISTRY_UNREADABLE)
-    if not stat.S_ISDIR(metadata.st_mode):
+    if not stat.S_ISDIR(metadata.st_mode) or _is_reparse_point(metadata):
         _reject_registry(MaterialPathRegistryRejection.REGISTRY_UNREADABLE)
     if os.name != "nt" and (
         metadata.st_uid != cast(Callable[[], int], vars(os)["getuid"])()
@@ -1726,6 +1894,25 @@ def _require_state_directory(state_directory: object) -> Path:
     return state_directory
 
 
+def _is_reparse_point(metadata: os.stat_result) -> bool:
+    """Whether Windows says this is a link, a junction or another kind of stand-in.
+
+    `local_artifact._is_reparse_point`'s question, asked again here rather than
+    imported for `_require_tool`'s reason — it is another module's private name.
+    Its `S_ISLNK` term is left out on purpose: this is only ever asked about
+    something `lstat` already called a directory, so that term could never
+    decide anything, and a condition nothing can decide is the shape this module
+    has twice found riding along at full coverage while checking nothing.
+
+    Both `getattr`s are for the platform that does not have the other's names:
+    `FILE_ATTRIBUTE_REPARSE_POINT` and `st_file_attributes` exist only on
+    Windows, and an `AttributeError` here is not one of the reasons this module
+    fails with.
+    """
+    flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    return bool(flag and getattr(metadata, "st_file_attributes", 0) & flag)
+
+
 def _read_document(document: Path) -> bytes | MaterialPathRegistryRejection | None:
     """The document's bytes, `None` when there is none, or why it could not be read.
 
@@ -1734,9 +1921,11 @@ def _read_document(document: Path) -> bytes | MaterialPathRegistryRejection | No
     `OSError` — which carries the path in `filename` — has been let go of.
 
     The size is taken from the descriptor the read will use and checked before
-    a byte is read, so an oversized document costs nothing to refuse. That is
-    the shape `_run_probe` was found not to have: it reads ffprobe's output in
-    full and compares afterwards.
+    a byte is read, so an oversized document costs nothing to refuse. `_run_probe`
+    was the counterexample when this was written — it read ffprobe's answer in
+    full and compared afterwards — and is not any more: both passes now check the
+    size of what a tool wrote before reading it, and bound it while it is being
+    written.
     """
     # `O_NONBLOCK` for `_digest_stable_file`'s reason, which applies here with
     # nothing in front of it to help: the mode cannot be checked until the open
@@ -1836,7 +2025,6 @@ __all__ = [
     "MAX_PATH_CHARACTERS",
     "MAX_PROBE_OUTPUT_BYTES",
     "MAX_SOURCE_FILE_BYTES",
-    "PROBE_OUTPUT_FILE_NAME",
     "AudioFacts",
     "MaterialFacts",
     "MaterialPathRegistry",
@@ -1847,6 +2035,7 @@ __all__ = [
     "MediaStreamFacts",
     "PackagedMediaTools",
     "ProbedMaterialKind",
+    "approve_source",
     "probe_material",
     "read_audio_facts",
     "read_content_digest",

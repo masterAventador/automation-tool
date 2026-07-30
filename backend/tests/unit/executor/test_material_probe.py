@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import random
+import shutil
 import signal
 import stat
 import subprocess
@@ -46,7 +47,6 @@ from automation_tool.executor.material_probe import (  # noqa: E402
     MAX_PATH_CHARACTERS,
     MAX_PROBE_OUTPUT_BYTES,
     MAX_SOURCE_FILE_BYTES,
-    PROBE_OUTPUT_FILE_NAME,
     AudioFacts,
     MaterialFacts,
     MaterialPathRegistry,
@@ -98,12 +98,12 @@ if [ -f "$d/.probe-signal" ]; then kill -9 $$; fi
 if [ -f "$d/.probe-drain" ]; then cat > "$d/.probe-stdin"; fi
 if [ -f "$d/.probe-stderr" ]; then cat "$d/.probe-stderr" >&2; fi
 if [ -f "$d/.probe-stdout" ]; then cat "$d/.probe-stdout"; fi
-if [ -f "$d/.probe-wipe-early" ]; then rm -rf "$d"/automation-tool-measure-*; fi
+if [ -f "$d/.probe-wipe-early" ]; then rm -rf "$d"/automation-tool-probe-*; fi
 if [ -f "$d/.probe-linger" ]; then
   sleep "$(cat "$d/.probe-linger")"
   printf 1 > "$d/.probe-finished"
 fi
-if [ -f "$d/.probe-wipe" ]; then rm -rf "$d"/automation-tool-measure-*; fi
+if [ -f "$d/.probe-wipe" ]; then rm -rf "$d"/automation-tool-probe-*; fi
 if [ -f "$d/.probe-exit" ]; then exit "$(cat "$d/.probe-exit")"; fi
 exit 0
 """
@@ -130,6 +130,7 @@ def _ffprobe_stub(
     stderr: str = "",
     sleep: str = "",
     linger: str = "",
+    wipe_workspace: bool = False,
     huge: bool = False,
     signal: bool = False,
     drain_stdin: bool = False,
@@ -147,6 +148,8 @@ def _ffprobe_stub(
         (directory / ".probe-sleep").write_text(sleep, encoding="ascii")
     if linger:
         (directory / ".probe-linger").write_text(linger, encoding="ascii")
+    if wipe_workspace:
+        (directory / ".probe-wipe").write_text("1", encoding="ascii")
     if stderr:
         (directory / ".probe-stderr").write_text(stderr, encoding="utf-8")
     if signal:
@@ -788,9 +791,10 @@ class TestReadStreamFactsBoundsWhatTheProbeWrites:
     ffprobe printing without end is half a minute of it — into memory, which is
     the part that matters here: the measuring pass at least had a file to fill.
 
-    This is the same gap `_run_measure` was built to close, one entry point
-    over, and it is closed the same way: the output goes to a file, the file is
-    measured as it grows, and the child is killed the moment it is too big.
+    This is the same gap the measuring pass closed first, one entry point over,
+    and it is closed the same way — by the same function now: `_run_bounded` runs
+    both passes, writes the output to a file, measures the file as it grows, and
+    kills the child the moment it is too big.
     """
 
     def test_stops_a_probe_still_writing_past_the_limit(self, tmp_path: Path) -> None:
@@ -870,7 +874,7 @@ class TestReadStreamFactsBoundsWhatTheProbeWrites:
         measure = Path.stat
 
         def interrupt(self: Path, *arguments: Any, **keywords: Any) -> os.stat_result:
-            if self.name == PROBE_OUTPUT_FILE_NAME:
+            if self.name == material_probe._SCRATCH_FILE_NAME:
                 raise KeyboardInterrupt
             return measure(self, *arguments, **keywords)
 
@@ -885,6 +889,170 @@ class TestReadStreamFactsBoundsWhatTheProbeWrites:
         assert len(spawned) == 1
         spawned[0].wait(timeout=10)
         assert spawned[0].returncode == -signal.SIGKILL
+
+
+def _locked_scratch_root(directory: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point both passes' scratch space at a directory they cannot write in.
+
+    A full volume is the case this stands in for — measured on a 4 MB ram disk as
+    `TMPDIR`, a volume with no room fails at exactly this step and with the same
+    `OSError` family. The permission version is deterministic and needs no
+    device, and what is being tested is what the module does with the failure.
+    """
+    locked = directory / "locked-scratch"
+    locked.mkdir(mode=0o500)
+    monkeypatch.setattr(tempfile, "tempdir", os.fspath(locked))
+    return locked
+
+
+class TestScratchSpaceFailuresAreNotTheFilesFault:
+    """Neither pass can run without a little room on disk, and that is not the file.
+
+    The reading pass acquired this dependency when it stopped reading ffprobe's
+    answer through a pipe; the measuring pass always had it. `PROBE_FAILED` told
+    the operator to retry, which does not help until there is room, and
+    `UNDECODABLE` — which a non-zero exit would earn — would send them to replace
+    a file that is fine. `WORKSPACE_UNUSABLE` is the one whose next step is the
+    real one.
+    """
+
+    def test_the_reading_pass_says_so(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        source = _source(tmp_path)
+        tools = _tools(tmp_path, stdout=_probe_json([_video_stream()]))
+        _locked_scratch_root(tmp_path, monkeypatch)
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_stream_facts(tools, source)
+        assert _rejection(excinfo) is MaterialProbeRejection.WORKSPACE_UNUSABLE
+
+    def test_the_measuring_pass_says_so(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        tools = _audio_tools(tmp_path, _measure_log())
+        source = _source(tmp_path)
+        _locked_scratch_root(tmp_path, monkeypatch)
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_audio_facts(tools, source, _stream_facts())
+        assert _rejection(excinfo) is MaterialProbeRejection.WORKSPACE_UNUSABLE
+
+    def test_a_tool_that_will_not_start_is_not_a_scratch_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spawning the tool and writing the scratch file are different failures.
+
+        Both are `OSError` out of the same few lines, so one handler for the pair
+        would answer "free up some disk space" to a packaged tool that has gone
+        missing between the check and the spawn.
+        """
+        source = _source(tmp_path)
+        tools = _tools(tmp_path, stdout=_probe_json([_video_stream()]))
+
+        def refuse(*arguments: Any, **keywords: Any) -> subprocess.Popen[bytes]:
+            raise OSError(8, "Exec format error")
+
+        monkeypatch.setattr(subprocess, "Popen", refuse)
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_stream_facts(tools, source)
+        assert _rejection(excinfo) is MaterialProbeRejection.PROBE_FAILED
+
+    def test_a_scratch_file_that_will_not_open_says_so(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The step after the directory: created, and still nothing can be written in it.
+
+        Reachable on a volume that has room for a directory entry and none for
+        its contents, and separate from the creation failing — a surviving
+        mutation showed nothing was reaching it, because the test above stops one
+        step earlier.
+        """
+        source = _source(tmp_path)
+        tools = _tools(tmp_path, stdout=_probe_json([_video_stream()]))
+        measure = Path.open
+
+        def refuse(self: Path, *arguments: Any, **keywords: Any) -> Any:
+            if self.name == material_probe._SCRATCH_FILE_NAME:
+                raise OSError(28, "No space left on device", os.fspath(self))
+            return measure(self, *arguments, **keywords)
+
+        monkeypatch.setattr(Path, "open", refuse)
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            read_stream_facts(tools, source)
+        assert _rejection(excinfo) is MaterialProbeRejection.WORKSPACE_UNUSABLE
+
+    def test_a_file_the_tool_refused_keeps_its_own_verdict_when_the_scratch_goes_too(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The pass failed *and* the workspace went away. The file's verdict wins.
+
+        `UNDECODABLE` is what a consumer must read as "possibly still
+        downloading", and it is decided by the exit code alone — the output of a
+        failed pass is never read, so a workspace that has gone by then cannot
+        turn that answer into "free up some disk space". A surviving mutation
+        (reading the output regardless) is what showed this had no test: the two
+        differ only when the read would fail.
+        """
+        monkeypatch.setattr(tempfile, "tempdir", os.fspath(tmp_path))
+        excinfo = _reject_from(tmp_path, stdout="{}", exit_code=1, wipe_workspace=True)
+        assert _rejection(excinfo) is MaterialProbeRejection.UNDECODABLE
+
+    def test_the_scratch_directory_does_not_outlive_the_pass(self, tmp_path: Path) -> None:
+        """Whatever is created is removed, or an import per material fills the disk."""
+        source = _source(tmp_path)
+        tools = _tools(tmp_path, stdout=_probe_json([_video_stream()]))
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(tempfile, "tempdir", os.fspath(tmp_path))
+            assert read_stream_facts(tools, source).kind is ProbedMaterialKind.VIDEO
+            assert list(tmp_path.glob(f"{material_probe._SCRATCH_PREFIX}*")) == []
+
+
+class TestClearingUpNeverChangesTheVerdict:
+    """A rejection is decided before the scratch directory is removed, not after.
+
+    Measured on the implementation before this: a corrupt file's `UNDECODABLE`
+    became `PROBE_FAILED` whenever the removal raised, because the rejection was
+    travelling out through the `with` block that did the removing and the new
+    `OSError` replaced it. The code's own comment names the culprit — a tmp
+    sweeper — and the consequence is the one the reason set exists to prevent:
+    `UNDECODABLE` is what a consumer must read as "possibly still downloading",
+    and it was being turned into "retry the tool".
+    """
+
+    @staticmethod
+    def _refuse_to_clear_up(monkeypatch: pytest.MonkeyPatch) -> None:
+        def refuse(*arguments: Any, **keywords: Any) -> None:
+            raise OSError(66, "Directory not empty")
+
+        monkeypatch.setattr(shutil, "rmtree", refuse)
+
+    def test_a_decided_reading_rejection_survives_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._refuse_to_clear_up(monkeypatch)
+        excinfo = _reject_from(tmp_path, stdout="{}", exit_code=1)
+        assert _rejection(excinfo) is MaterialProbeRejection.UNDECODABLE
+
+    def test_a_decided_measuring_rejection_survives_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._refuse_to_clear_up(monkeypatch)
+        excinfo = _audio_reject(tmp_path, _measure_log(), measure_signal=True)
+        assert _rejection(excinfo) is MaterialProbeRejection.PROBE_CRASHED
+
+    def test_a_good_probe_survives_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The other direction: a material that probes fine must not be refused."""
+        self._refuse_to_clear_up(monkeypatch)
+        facts = _facts_from(tmp_path, _probe_json([_video_stream(), _audio_stream()]))
+        assert facts.kind is ProbedMaterialKind.VIDEO
+        assert facts.duration_ms == 3000
+
+    def test_a_good_measure_survives_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._refuse_to_clear_up(monkeypatch)
+        assert _audio_from(tmp_path, _measure_log()).has_audio is True
 
 
 class TestReadStreamFactsDuration:
@@ -1198,41 +1366,57 @@ class TestReadStreamFactsLeaksNothing:
         assert "Invalid data found" not in rendered
         assert str(tmp_path) not in rendered
 
-    def test_the_chain_behind_a_rejection_names_only_our_own_scratch_file(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize("linger", ["", "5"])
+    def test_no_link_in_the_chain_behind_a_rejection_carries_the_argv(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, linger: str
     ) -> None:
         """`from None` hides the chain from renderers; it does not remove it.
 
-        So what is left hanging off `__context__` is worth pinning rather than
-        reasoning about. The reading pass can only get there through an `OSError`
-        out of its own workspace — there is no `TimeoutExpired` any more, the
-        timeout being the runner's own deadline, so the argv that used to carry
-        the source path is never packed into an exception at all.
+        So what is left hanging off `__context__` gets walked here rather than
+        reasoned about. **The lingering case is the one that matters and the one
+        the first version of this test did not have**: with the child already
+        exited, the failing `stat` is the one after the wait and nothing is being
+        handled, so the chain is one link long whatever the code does — the
+        review's "assertion that cannot fail". While the child is still running,
+        the failing `stat` used to sit inside `except TimeoutExpired`, and
+        `TimeoutExpired.cmd` is the whole argv with the source path in it.
+        Measured before the fix: chain[2] was a `TimeoutExpired` and the source
+        path was reachable through it.
 
         The injected failure is the failure matrix's "the file went away
-        underneath us" on our own temporary file, and what the handled exception
-        names is that file.
+        underneath us" on our own temporary file, which is the only way either
+        pass reaches this at all.
         """
         secret = "operator-private-graduation-2018"
         source = _source(tmp_path, f"{secret}.mp4")
-        tools = _tools(tmp_path, stdout=_probe_json([_video_stream()]))
+        tools = _tools(tmp_path, stdout=_probe_json([_video_stream()]), linger=linger)
         measure = Path.stat
 
         def broken(self: Path, *arguments: Any, **keywords: Any) -> os.stat_result:
-            if self.name == PROBE_OUTPUT_FILE_NAME:
+            if self.name == material_probe._SCRATCH_FILE_NAME:
                 raise OSError(5, "Input/output error", os.fspath(self))
             return measure(self, *arguments, **keywords)
 
         monkeypatch.setattr(Path, "stat", broken)
         with pytest.raises(MaterialProbeRejected) as excinfo:
             read_stream_facts(tools, source)
-        assert _rejection(excinfo) is MaterialProbeRejection.PROBE_FAILED
-        context = excinfo.value.__context__
-        assert isinstance(context, OSError)
-        assert context.filename is not None
-        assert Path(context.filename).name == PROBE_OUTPUT_FILE_NAME
-        assert secret not in repr(context)
+        assert _rejection(excinfo) is MaterialProbeRejection.WORKSPACE_UNUSABLE
+        chain: list[BaseException] = []
+        link: BaseException | None = excinfo.value
+        while link is not None:
+            chain.append(link)
+            link = link.__context__
+        for held in chain:
+            assert not isinstance(held, subprocess.TimeoutExpired), [type(x) for x in chain]
+            assert secret not in repr(getattr(held, "filename", ""))
+            assert secret not in repr(getattr(held, "cmd", ""))
         assert secret not in _rendered_traceback(excinfo.value)
+        # Nothing is chained at all any more, in either case: every workspace
+        # `OSError` is turned into a returned reason inside the runner, so the
+        # rejection is raised with no exception being handled. Asserting the
+        # length is what makes a future change that starts chaining something
+        # fail here rather than quietly widening what a crash reporter can walk.
+        assert len(chain) == 1, [type(link) for link in chain]
 
 
 class TestReadAudioFactsWithoutASoundTrack:
@@ -1809,10 +1993,15 @@ class TestReadAudioFactsGuardsItsOwnInputs:
 
         The stub deletes the workspace as its last act, which is the failure
         matrix's "file removed underneath us" rather than an injected error.
+
+        The reason is `WORKSPACE_UNUSABLE` rather than `PROBE_FAILED` since the
+        two were split: what failed is this module's own scratch space, and
+        telling the operator to retry a tool that did nothing wrong sends them
+        after the wrong thing.
         """
         monkeypatch.setattr(tempfile, "tempdir", os.fspath(tmp_path))
         excinfo = _audio_reject(tmp_path, _measure_log(), wipe_workspace=True)
-        assert _rejection(excinfo) is MaterialProbeRejection.PROBE_FAILED
+        assert _rejection(excinfo) is MaterialProbeRejection.WORKSPACE_UNUSABLE
 
     def test_kills_a_measure_whose_report_vanishes_while_it_still_runs(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1833,7 +2022,7 @@ class TestReadAudioFactsGuardsItsOwnInputs:
         """
         monkeypatch.setattr(tempfile, "tempdir", os.fspath(tmp_path))
         excinfo = _audio_reject(tmp_path, _measure_log(), wipe_workspace_early=True, linger="5")
-        assert _rejection(excinfo) is MaterialProbeRejection.PROBE_FAILED
+        assert _rejection(excinfo) is MaterialProbeRejection.WORKSPACE_UNUSABLE
         assert not (tmp_path / ".probe-finished").exists()
 
     def test_kills_a_measure_when_the_import_itself_is_interrupted(
@@ -1868,7 +2057,7 @@ class TestReadAudioFactsGuardsItsOwnInputs:
         stat = Path.stat
 
         def interrupt(self: Path, *arguments: Any, **keywords: Any) -> os.stat_result:
-            if self.name == "report.log":
+            if self.name == material_probe._SCRATCH_FILE_NAME:
                 raise KeyboardInterrupt
             return stat(self, *arguments, **keywords)
 
@@ -4423,18 +4612,28 @@ class TestMaterialPathRegistryWritesAtomically:
             registry.register(uuid.uuid4(), _source(tmp_path))
         assert list(state.iterdir()) == []
 
-    def test_an_unwritable_directory_is_reported_not_crashed(self, tmp_path: Path) -> None:
+    def test_a_write_that_cannot_be_made_is_reported_not_crashed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A directory that is private and still refuses the write.
+
+        This used to `chmod 0o500`, which stopped working when the directory
+        started being re-checked before every operation: a mode of 0500 is not
+        the private mode, so the answer became `REGISTRY_UNREADABLE` and this
+        reason lost its only test. The realistic shapes that leave the mode alone
+        are a full volume and a read-only mount, and both arrive exactly here — as
+        an `OSError` from `mkstemp`.
+        """
         state = _state_directory(tmp_path)
         source = _source(tmp_path)
         registry = MaterialPathRegistry(state_directory=state)
-        state.chmod(0o500)
-        try:
-            with pytest.raises(PermissionError):
-                (state / "canary").write_text("x", encoding="ascii")
-            with pytest.raises(MaterialPathRegistryRejected) as excinfo:
-                registry.register(uuid.uuid4(), source)
-        finally:
-            state.chmod(0o700)
+
+        def refuse(*arguments: Any, **keywords: Any) -> tuple[int, str]:
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr(tempfile, "mkstemp", refuse)
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.register(uuid.uuid4(), source)
         assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNWRITABLE
 
     def test_the_scratch_file_never_becomes_the_document(self, tmp_path: Path) -> None:
@@ -4494,18 +4693,26 @@ class TestMaterialPathRegistryLeaksNoPath:
             registry.resolve(identifier)
         assert secret not in _rendered_traceback(excinfo.value)
 
-    def test_the_unwritable_rejection_chains_nothing(self, tmp_path: Path) -> None:
-        """`OSError.filename` is the path itself, and it survives `from None`."""
+    def test_the_unwritable_rejection_chains_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`OSError.filename` is the path itself, and it survives `from None`.
+
+        Injected rather than provoked with a mode, for the reason above; the
+        `OSError` carries the private path either way, which is what this is
+        about.
+        """
         secret = "operator-private-retirement-2016"
         state = _state_directory(tmp_path, f"{secret}-state")
         source = _source(tmp_path, f"{secret}.mp4")
         registry = MaterialPathRegistry(state_directory=state)
-        state.chmod(0o500)
-        try:
-            with pytest.raises(MaterialPathRegistryRejected) as excinfo:
-                registry.register(uuid.uuid4(), source)
-        finally:
-            state.chmod(0o700)
+
+        def refuse(*arguments: Any, **keywords: Any) -> tuple[int, str]:
+            raise OSError(13, "Permission denied", os.fspath(state / "scratch"))
+
+        monkeypatch.setattr(tempfile, "mkstemp", refuse)
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.register(uuid.uuid4(), source)
         assert excinfo.value.__context__ is None
         assert secret not in _rendered_traceback(excinfo.value)
 
@@ -4977,14 +5184,17 @@ class TestMaterialPathRegistryHandsBackWhatItChecked:
         assert material_probe._identity_of(metadata) == material_probe._identity_of(source.stat())
 
     def test_a_consumer_can_close_its_own_window_with_what_it_got(self, tmp_path: Path) -> None:
-        """The whole recipe a consumer follows, through the public entry point.
+        """The recipe a consumer follows, called the way a consumer would call it.
 
-        An earlier version of this test called `_held_still` on a fresh
-        `path.stat()`, which skipped the middle of the recipe: a registered path
-        is still the user's, so it has to go back through the import guard before
-        anything is compared. It also reached for a private name, which no
-        consumer in another module could do — the reason that recipe is now one
-        public call.
+        An earlier version reached for `_held_still` directly, which no consumer
+        in another module could do — the reason the recipe is now one public call.
+
+        **What this asserts is that the comparison happens, not that the whole
+        recipe ran.** Measured: with the public check reduced to two bare stats,
+        skipping the import guard entirely, this test stays green. The guard's
+        half is held by `TestRequireSourceUnchanged`, where the FIFO, the vanished
+        file and the relative path each need it — four of those tests fail under
+        the same change.
         """
         state = _state_directory(tmp_path)
         source = _source(tmp_path)
@@ -5333,6 +5543,68 @@ class TestRequireSourceUnchanged:
         assert secret not in _rendered_traceback(excinfo.value)
 
 
+class TestApproveSource:
+    """The recipe's first step, which had been left outside every contract.
+
+    `require_source_unchanged` needs a stat taken before the work started, and
+    the documented way to get one was `Path.stat()` — a call with no guard in
+    front of it and no rejection behind it. Measured: on a file that has just
+    been moved it raises a bare `FileNotFoundError` whose `.filename` is the
+    operator's private path, which is the one thing every other entry point in
+    this module spends its guards closing.
+
+    Taking `approved: None` on the check itself was the alternative. It would
+    have made a function whose name states a comparison have a mode where nothing
+    is compared; two named steps say what happens instead, and the first one is
+    the same guard the probe runs first, so there is still one implementation of
+    "may this file be imported at all".
+    """
+
+    def test_hands_back_the_path_and_its_stat(self, tmp_path: Path) -> None:
+        source = _source(tmp_path)
+        path, approved = material_probe.approve_source(source)
+        assert path == source
+        assert _identity_fields(approved) == _identity_fields(source.stat())
+
+    def test_a_file_that_has_gone_is_a_rejection_and_not_a_bare_oserror(
+        self, tmp_path: Path
+    ) -> None:
+        """The leak this exists to close, asserted from both sides."""
+        secret = "operator-private-anniversary-2017"
+        source = tmp_path / f"{secret}.mp4"
+        with pytest.raises(FileNotFoundError) as bare:
+            source.stat()
+        assert secret in os.fspath(str(bare.value.filename))
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            material_probe.approve_source(source)
+        assert _rejection(excinfo) is MaterialProbeRejection.UNREADABLE
+        assert str(excinfo.value) == "material probe rejected"
+        assert secret not in _rendered_traceback(excinfo.value)
+
+    @pytest.mark.parametrize("shape", ["relative", "fifo", "directory"])
+    def test_it_is_the_same_guard_the_probe_runs_first(self, tmp_path: Path, shape: str) -> None:
+        """Whatever this refuses, importing refuses the same way.
+
+        Two guards would be two answers to "may this file be imported", and the
+        consumer would be approving what the probe then rejects — or worse, the
+        other way round.
+        """
+        tools = _tools(tmp_path, stdout=_probe_json([_video_stream()]))
+        if shape == "relative":
+            candidate = Path("holiday.mp4")
+        elif shape == "fifo":
+            candidate = tmp_path / "pipe.mp4"
+            os.mkfifo(candidate)
+        else:
+            candidate = tmp_path / "album"
+            candidate.mkdir()
+        with pytest.raises(MaterialProbeRejected) as approving:
+            material_probe.approve_source(candidate)
+        with pytest.raises(MaterialProbeRejected) as probing:
+            probe_material(tools, candidate)
+        assert _rejection(approving) is _rejection(probing)
+
+
 class TestProbeMaterialClosesItsWindowThroughThePublicCheck:
     """The orchestration's closing check and a consumer's are the same code.
 
@@ -5379,7 +5651,7 @@ class TestTheImportSequenceCanBeClosedEndToEnd:
         state = _state_directory(tmp_path)
         source = _source(tmp_path)
         tools = _tools(tmp_path, stdout=_probe_json([_video_stream()]))
-        approved = source.stat()
+        source, approved = material_probe.approve_source(source)
         facts = probe_material(tools, source)
         registry = MaterialPathRegistry(state_directory=state)
         identifier = uuid.uuid4()
@@ -5394,7 +5666,7 @@ class TestTheImportSequenceCanBeClosedEndToEnd:
         state = _state_directory(tmp_path)
         source = _source(tmp_path)
         tools = _tools(tmp_path, stdout=_probe_json([_video_stream()]))
-        approved = source.stat()
+        source, approved = material_probe.approve_source(source)
         probe_material(tools, source)
         _rewrite_in_place(source, b"\xfe" * approved.st_size)
         registry = MaterialPathRegistry(state_directory=state)
@@ -5463,6 +5735,31 @@ class TestMaterialPathRegistryNeedsAPrivateStateDirectory:
             state.chmod(0o700)
         assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
 
+    def test_rejects_a_private_directory_carrying_the_sticky_bit(self, tmp_path: Path) -> None:
+        """0o1700 is nobody else's business either, and it is still refused.
+
+        This is the one case where this grade and `ledger`'s differ, and the
+        docstring says so — `ledger` asks `S_IMODE & 0o077`, which a sticky
+        directory passes, while an exact 0o700 does not. Written because a
+        mutation swapping this check for `ledger`'s survived every other mode
+        case: 0o755, 0o750, 0o701 and 0o777 all carry group or other bits and so
+        fail both rules.
+
+        Refusing it is the deliberate side: the sibling this grade is taken from
+        (`local_artifact._validate_private_owner_and_mode`) compares the mode
+        exactly, and what the bootstrap creates is 0o700 and nothing else.
+        """
+        state = tmp_path / "state"
+        state.mkdir(mode=0o700)
+        state.chmod(0o1700)
+        assert stat.S_IMODE(state.lstat().st_mode) & 0o077 == 0
+        try:
+            with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+                MaterialPathRegistry(state_directory=state)
+        finally:
+            state.chmod(0o700)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
     def test_rejects_a_symlink_pointing_at_a_private_directory(self, tmp_path: Path) -> None:
         """`is_dir()` follows the link and sees a perfectly good directory.
 
@@ -5478,6 +5775,72 @@ class TestMaterialPathRegistryNeedsAPrivateStateDirectory:
         with pytest.raises(MaterialPathRegistryRejected) as excinfo:
             MaterialPathRegistry(state_directory=link)
         assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+    def test_rejects_a_directory_that_is_a_reparse_point(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A Windows junction is a directory as far as `lstat` is concerned.
+
+        Measured on Windows: a junction (`IO_REPARSE_TAG_MOUNT_POINT`) comes back
+        with `S_ISDIR` true and `S_ISLNK` false, so the directory check takes it
+        and the mode check is skipped there — and `validate_private_acl` cannot
+        save it either, since the DACL it reads is the *target's*. The registry
+        would then write the library's document wherever the junction points.
+
+        The other three guards of this grade in the repository
+        (`local_artifact`, `ledger`, `publish_artifact`) all ask this question;
+        this one did not. It is asserted here by standing in the two things
+        Windows would supply — the attribute constant and a stat carrying the
+        flag — because the platform cannot be had on this machine.
+        """
+        state = tmp_path / "state"
+        state.mkdir(mode=0o700)
+        genuine = state.lstat()
+        monkeypatch.setattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400, raising=False)
+        junction = SimpleNamespace(
+            st_mode=genuine.st_mode,
+            st_uid=genuine.st_uid,
+            st_file_attributes=0x400 | 0x10,
+        )
+        measure = Path.lstat
+
+        def as_a_junction(self: Path, *arguments: Any, **keywords: Any) -> Any:
+            return junction if self == state else measure(self, *arguments, **keywords)
+
+        monkeypatch.setattr(Path, "lstat", as_a_junction)
+        assert stat.S_ISDIR(junction.st_mode) and not stat.S_ISLNK(junction.st_mode)
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            MaterialPathRegistry(state_directory=state)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+    def test_accepts_the_same_directory_without_the_flag(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The other half: the stand-in must not be what does the refusing.
+
+        Without this, a check that refused every directory carrying
+        `st_file_attributes` at all — or one that refused whenever the constant
+        exists — would pass the test above and take every Windows installation
+        with it.
+        """
+        state = tmp_path / "state"
+        state.mkdir(mode=0o700)
+        genuine = state.lstat()
+        monkeypatch.setattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400, raising=False)
+        ordinary = SimpleNamespace(
+            st_mode=genuine.st_mode,
+            st_uid=genuine.st_uid,
+            st_file_attributes=0x10,
+        )
+        measure = Path.lstat
+
+        def as_an_ordinary_directory(self: Path, *arguments: Any, **keywords: Any) -> Any:
+            return ordinary if self == state else measure(self, *arguments, **keywords)
+
+        monkeypatch.setattr(Path, "lstat", as_an_ordinary_directory)
+        assert repr(MaterialPathRegistry(state_directory=state)) == (
+            "MaterialPathRegistry(<redacted>)"
+        )
 
     def test_rejects_a_directory_belonging_to_someone_else(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -5516,12 +5879,80 @@ class TestMaterialPathRegistryNeedsAPrivateStateDirectory:
     def test_neither_answer_names_the_directory(self, tmp_path: Path) -> None:
         secret = "operator-private-state-2026"
         state = tmp_path / secret
-        state.mkdir(mode=0o755)
+        # `mkdir(mode=...)` is masked by the process umask, so a mode meant to be
+        # refused has to be set afterwards: measured under `umask 077` this test
+        # made a 0700 directory, the registry accepted it, and the assertion
+        # became DID NOT RAISE. The sibling above sets the mode with `chmod` for
+        # this reason; this one had been left behind.
+        state.mkdir(mode=0o700)
+        state.chmod(0o755)
         with pytest.raises(MaterialPathRegistryRejected) as excinfo:
             MaterialPathRegistry(state_directory=state)
         assert str(excinfo.value) == "material path registry rejected"
         assert excinfo.value.__context__ is None
         assert secret not in _rendered_traceback(excinfo.value)
+
+
+class TestMaterialPathRegistryRechecksItsDirectory:
+    """Validity at construction says nothing about validity now.
+
+    The whole threat model here rests on the state directory being private, and
+    it was asked once — in `__init__` — after which `register` and `resolve` used
+    it for the life of the process. The module's own `PackagedMediaTools`
+    re-checks its two tools before every single use and says why in the same
+    words; `local_artifact` re-validates per operation, and `ledger` checks either
+    side of a connect. This was the one holdout.
+
+    It notices rather than prevents, like every other check in this module that
+    hands a path to something else afterwards: what it closes is a session that
+    keeps writing into a directory that stopped being private, which is the
+    window an operator's `chmod` — or anything else that relaxes it — opened for
+    as long as the App stayed running.
+    """
+
+    @pytest.mark.parametrize("operation", ["register", "resolve"])
+    def test_a_directory_relaxed_after_construction_is_refused(
+        self, tmp_path: Path, operation: str
+    ) -> None:
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        state.chmod(0o755)
+        try:
+            with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+                if operation == "register":
+                    registry.register(uuid.uuid4(), source)
+                else:
+                    registry.resolve(identifier)
+        finally:
+            state.chmod(0o700)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+    def test_a_directory_swapped_for_a_link_after_construction_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """The sharper shape: the name now leads somewhere else entirely."""
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        elsewhere = _state_directory(tmp_path, "elsewhere")
+        state.rename(tmp_path / "moved-away")
+        state.symlink_to(elsewhere, target_is_directory=True)
+        assert state.is_dir()
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.register(uuid.uuid4(), source)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
+
+    def test_an_untouched_directory_is_not_refused(self, tmp_path: Path) -> None:
+        """The other direction, or the re-check is just a way to refuse everything."""
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        assert registry.resolve(identifier)[0] == source
 
 
 class TestMaterialPathRegistryOnWindows:
@@ -5566,7 +5997,10 @@ class TestMaterialPathRegistryOnWindows:
         real installation.
         """
         state = tmp_path / "state"
-        state.mkdir(mode=0o755)
+        state.mkdir(mode=0o700)
+        # Set rather than created, for the umask reason above: this test is only
+        # about a mode POSIX would refuse, so it has to really have one.
+        state.chmod(0o755)
         asked: list[Path] = []
         monkeypatch.setitem(
             sys.modules,

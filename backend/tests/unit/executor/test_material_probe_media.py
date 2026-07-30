@@ -17,8 +17,12 @@ number rather than as a range. Three further things are asserted only here:
   only proof that what the executor learns is what the Control Plane can store —
   matching the two layers' limits cannot show it, since identical limits still
   admit a video filed as a still;
-- every member of `MaterialProbeRejection` is **provoked**, twelve of the
-  thirteen by a real file rather than a stub.
+- every member of `MaterialProbeRejection` is **provoked**, and the count is
+  stated the way it was counted: **11 have a real file behind them, 8 of those
+  are read by the packaged tools, and 12 need no stub at all** (`unreadable` and
+  `unsafe_path` have no file to have; `source_not_at_rest` and `file_too_large`
+  have one no tool ever reads). The thirteenth, `probe_crashed`, runs the real
+  ffprobe behind a wrapper — see `_crashing_probe`.
 
 The materials are built under a directory whose name carries a space, `&`, `$`,
 an apostrophe and Chinese, so the whole table is read through an awkward path
@@ -34,12 +38,18 @@ import ast
 import dataclasses
 import hashlib
 import os
+import re
 import struct
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
 from test_material_probe import (
+    # The planted statement is the sibling's: one value for one attack, since
+    # both files plant the same line and a second copy could drift from the
+    # patterns it is aimed at.
+    PLANTED_STATEMENT,
     SPECIAL_DIRECTORY_NAME,
     _encode,
     _packaged_tools,
@@ -52,6 +62,7 @@ from automation_tool.control_plane.domain.material import (
     MaterialId,
     MaterialKind,
 )
+from automation_tool.executor import material_probe
 from automation_tool.executor.material_probe import (
     MAX_MATERIAL_DIMENSION,
     MAX_MATERIAL_DURATION_MS,
@@ -86,11 +97,32 @@ SILENT_MS = 2017
 MUTE_MS = 1083
 AUDIO_MS = 2041
 
+# What the JPEG states for itself, measured. Nothing uses it as a duration — a
+# picture container has none — and this is here so that the ignoring is asserted
+# rather than described.
+PHOTO_STATED_SECONDS = 0.04
+
+# How far the module's reading may sit from ebur128's own summary. The module
+# takes the last per-window value and the summary prints one decimal, so they
+# differ in the third: measured 21.774 against 21.8, 21.833 against 21.8, and
+# 22.315 against 22.3. Wide enough for that, narrow enough to catch a systematic
+# shift — a +0.4 LUFS one went unnoticed before this reading existed.
+SUMMARY_LUFS_TOLERANCE = 0.1
+
 # A tone at this level reads here, measured against ebur128's own summary: -21.8
 # LUFS, which it states as -21.776 per window. The tolerance covers the encoder
 # rather than the measurement.
 TONE_LUFS = -21.8
 TONE_LUFS_TOLERANCE = 0.5
+
+# A second of digital silence and a second and a half of tone, both off the grid:
+# the span silencedetect opens at zero has to close when the tone starts, and the
+# closing line is the field nothing else here produces. Measured on the pair:
+# 2540 ms, audible, -22.3 LUFS.
+LEAD_SILENCE_SECONDS = "1.03"
+LEAD_TONE_SECONDS = "1.51"
+LEAD_SILENCE_MS = 2540
+LEAD_SILENCE_LUFS = -22.3
 
 # Over four hours by one second, which no real encode would produce cheaply —
 # see `_state_a_longer_duration`.
@@ -100,10 +132,6 @@ TOO_LONG_SECONDS = 14401
 # costs three kilobytes.
 OVERSIZED_FRAME_WIDTH = 9000
 OVERSIZED_FRAME_HEIGHT = 100
-
-# A tag stating the very thing the silence patterns look for. Written inside the
-# file, where renaming cannot undo it.
-PLANTED_STATEMENT = "silence_duration: 9999"
 
 # Where the truncated copy is cut. The point is not the fraction but that the
 # header — moved to the front by `+faststart` — still parses afterwards.
@@ -231,6 +259,46 @@ def _independent_duration_seconds(source: Path) -> float:
     )
 
 
+def _independent_loudness_lufs(source: Path) -> float:
+    """ebur128's own summary, from an invocation the module does not make.
+
+    The one number in the facts that had nothing behind it. Every other value is
+    cross-read from a second ffprobe query, but the loudness came from the module
+    alone and was only ever asserted inside a tolerance — measured, shifting
+    `_storable_loudness` by +0.4 LUFS left all 49 tests here green.
+
+    This asks a different question of a different tool: no `metadata=1`, no
+    `ametadata` sink, no filter graph of the module's own — just ebur128 printing
+    its own end-of-file summary to the diagnostics, which the module discards and
+    never parses. The two agree to a tenth of a LUFS, which is all the summary
+    prints.
+    """
+    completed = subprocess.run(
+        [
+            os.fspath(_packaged_tools().ffmpeg_path),
+            "-nostdin",
+            "-v",
+            "info",
+            "-i",
+            os.fspath(source),
+            "-vn",
+            "-af",
+            "ebur128=peak=none",
+            "-f",
+            "null",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+        text=True,
+    )
+    # The summary's line, not the running ones: those are prefixed with the
+    # filter's name and address, this one is indented under `Summary:`.
+    stated = re.findall(r"^\s+I:\s+(-?[0-9]+(?:\.[0-9]+)?) LUFS$", completed.stderr, re.MULTILINE)
+    assert stated, completed.stderr[-400:]
+    return float(stated[-1])
+
+
 def _ffprobe(source: Path, *arguments: str) -> str:
     completed = subprocess.run(
         [
@@ -318,6 +386,7 @@ def media(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         "faststart": directory / "faststart.mp4",
         "truncated": directory / "faststart-half.mp4",
         "planted": directory / "planted.mp4",
+        "lead_silence": directory / "lead-silence.m4a",
     }
     # 1. A video with sound: the ordinary import, and the only one that reaches
     #    every parsed field in one pass.
@@ -508,6 +577,31 @@ def media(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         os.fspath(files["faststart"]),
     )
     _truncate_to(files["faststart"], files["truncated"], TRUNCATION_FRACTION)
+    # Silence first, then a tone: the only shape that makes silencedetect *close*
+    # a span. Without it no material in this file produces `lavfi.silence_end` at
+    # all — measured, the pattern for it could be replaced with one that never
+    # matches and all 49 tests here still passed, the sibling file's fixtures
+    # being what actually covered it.
+    _encode(
+        ffmpeg,
+        "-f",
+        "lavfi",
+        "-t",
+        LEAD_SILENCE_SECONDS,
+        "-i",
+        "anullsrc=r=44100:cl=mono",
+        "-f",
+        "lavfi",
+        "-i",
+        f"sine=frequency=440:duration={LEAD_TONE_SECONDS}",
+        "-filter_complex",
+        "[0:a][1:a]concat=n=2:v=0:a=1[out]",
+        "-map",
+        "[out]",
+        "-c:a",
+        "aac",
+        os.fspath(files["lead_silence"]),
+    )
     # And the same video carrying a tag that states silence.
     _encode(
         ffmpeg,
@@ -540,15 +634,25 @@ JUDGEMENTS: list[
         str | None,
         str | None,
         bool,
-        bool,
+        float | None,
     ]
 ] = [
-    ("sound", ProbedMaterialKind.VIDEO, SOUND_MS, (640, 360), "h264", "aac", True, True),
-    ("silent", ProbedMaterialKind.VIDEO, SILENT_MS, (1280, 720), "h264", "aac", False, False),
-    ("mute", ProbedMaterialKind.VIDEO, MUTE_MS, (480, 854), "h264", None, False, False),
-    ("audio", ProbedMaterialKind.AUDIO, AUDIO_MS, (None, None), None, "aac", True, True),
-    ("picture", ProbedMaterialKind.IMAGE, None, (800, 600), "png", None, False, False),
-    ("photo", ProbedMaterialKind.IMAGE, None, (800, 600), "mjpeg", None, False, False),
+    ("sound", ProbedMaterialKind.VIDEO, SOUND_MS, (640, 360), "h264", "aac", True, TONE_LUFS),
+    ("silent", ProbedMaterialKind.VIDEO, SILENT_MS, (1280, 720), "h264", "aac", False, None),
+    ("mute", ProbedMaterialKind.VIDEO, MUTE_MS, (480, 854), "h264", None, False, None),
+    ("audio", ProbedMaterialKind.AUDIO, AUDIO_MS, (None, None), None, "aac", True, TONE_LUFS),
+    (
+        "lead_silence",
+        ProbedMaterialKind.AUDIO,
+        LEAD_SILENCE_MS,
+        (None, None),
+        None,
+        "aac",
+        True,
+        LEAD_SILENCE_LUFS,
+    ),
+    ("picture", ProbedMaterialKind.IMAGE, None, (800, 600), "png", None, False, None),
+    ("photo", ProbedMaterialKind.IMAGE, None, (800, 600), "mjpeg", None, False, None),
 ]
 
 # The two of the eight that are refused, and what by. A rejection is the whole
@@ -570,7 +674,7 @@ class TestTheJudgementTable:
     """
 
     @pytest.mark.parametrize(
-        ("name", "kind", "duration_ms", "frame", "video_codec", "audio_codec", "audible", "loud"),
+        ("name", "kind", "duration_ms", "frame", "video_codec", "audio_codec", "audible", "lufs"),
         JUDGEMENTS,
         ids=[row[0] for row in JUDGEMENTS],
     )
@@ -585,7 +689,7 @@ class TestTheJudgementTable:
         video_codec: str | None,
         audio_codec: str | None,
         audible: bool,
-        loud: bool,
+        lufs: float | None,
     ) -> None:
         facts = probe_material(tools, media[name])
         assert facts.kind is kind
@@ -593,10 +697,10 @@ class TestTheJudgementTable:
         assert (facts.width, facts.height) == frame
         assert (facts.video_codec, facts.audio_codec) == (video_codec, audio_codec)
         assert facts.has_audio is audible
-        if loud:
-            assert facts.audio_loudness_lufs == pytest.approx(TONE_LUFS, abs=TONE_LUFS_TOLERANCE)
-        else:
+        if lufs is None:
             assert facts.audio_loudness_lufs is None
+        else:
+            assert facts.audio_loudness_lufs == pytest.approx(lufs, abs=TONE_LUFS_TOLERANCE)
 
     @pytest.mark.parametrize("name", [row[0] for row in JUDGEMENTS])
     def test_a_second_query_states_the_same_values(
@@ -629,12 +733,19 @@ class TestTheJudgementTable:
         else:
             assert picture == f"{facts.video_codec},{facts.width},{facts.height}"
         if facts.kind is ProbedMaterialKind.IMAGE:
-            # A JPEG states 0.04 s and a PNG states nothing at all; neither is a
-            # material's duration, and the module reports none for either.
+            # A JPEG states 0.04 s and a PNG states nothing at all — and both are
+            # asserted, because "the duration is ignored for a picture" is only
+            # shown by a picture that states one. The comment used to say this
+            # while the test read `stated` and threw it away.
             assert facts.duration_ms is None
+            assert stated == (PHOTO_STATED_SECONDS if name == "photo" else None)
         else:
             assert stated is not None
             assert round(stated * 1000) == facts.duration_ms
+        if facts.audio_loudness_lufs is not None:
+            assert facts.audio_loudness_lufs == pytest.approx(
+                _independent_loudness_lufs(media[name]), abs=SUMMARY_LUFS_TOLERANCE
+            )
 
     @pytest.mark.parametrize(("name", "rejection"), REFUSALS, ids=[row[0] for row in REFUSALS])
     def test_a_refused_material_is_refused_for_the_stated_reason(
@@ -860,15 +971,26 @@ class TestTheLimitsMatchTheDomain:
         assert MAX_MATERIAL_DIMENSION == domain_material.MAX_MATERIAL_DIMENSION
 
 
-def _crashing_probe(directory: Path) -> Path:
-    """A tool that dies from a signal, which the packaged one cannot be asked to do.
+def _crashing_probe(directory: Path, ffprobe: Path) -> Path:
+    """The real ffprobe, wrapped in a script that dies from a signal afterwards.
 
-    The only member of the rejection set with no real file behind it. What it
-    exercises is the operating system's negative return code rather than
-    anything about ffprobe, and a script killing itself reproduces that exactly.
+    A signalled child is the one shape the packaged tool cannot be asked for on
+    demand — what can be done is a race, killing the real ffprobe from a watchdog
+    thread the moment it appears, which is how this was first shown reachable at
+    all (6 trials out of 6, with a 1000-track file to widen the window). A race
+    is not a test, so the wrapper makes it deterministic instead.
+
+    Running the real tool first is the point, not decoration. The answer on
+    stdout is a complete, legal reading of a real file — so what this pins is
+    that the return code is checked **before** the answer is trusted. A script
+    that only killed itself could not: with no output at all, refusing it says
+    nothing about which of the two the code looked at.
     """
     path = directory / "ffprobe"
-    path.write_text("#!/bin/sh\nkill -9 $$\n", encoding="ascii")
+    path.write_text(
+        f'#!/bin/sh\n"{os.fspath(ffprobe)}" "$@"\nkill -9 $$\n',
+        encoding="utf-8",
+    )
     path.chmod(0o755)
     return path
 
@@ -881,8 +1003,15 @@ class TestEveryRejectionIsReachable:
     what to do next, one instruction per member. This line has already found
     members that no test reached and a `-k` filter that hid the test that did.
 
-    Twelve of the thirteen are provoked by a real file read by the packaged
-    tools. The exception is `PROBE_CRASHED`; see `_crashing_probe`.
+    The counts, counted rather than rounded: **11 members have a real file
+    behind them, 8 of those are read by the packaged tools, and 12 need no stub**.
+    `unreadable` and `unsafe_path` have no file to have — a path that is not
+    there and a path that is not absolute; `source_not_at_rest` and
+    `file_too_large` have a real file that no tool ever opens, the first being
+    the public window check and the second refused on its `st_size` before either
+    tool runs. `workspace_unusable` is about this module's own scratch space and
+    has no file either. The thirteenth, `probe_crashed`, wraps the real ffprobe;
+    see `_crashing_probe`.
     """
 
     def _provoke(
@@ -924,9 +1053,20 @@ class TestEveryRejectionIsReachable:
             probe_material(tools, media["silent_audio"])
         elif rejection is MaterialProbeRejection.PROBE_FAILED:
             probe_material(tools, media["nameless_codec"])
+        elif rejection is MaterialProbeRejection.WORKSPACE_UNUSABLE:
+            # Nothing to do with the material: the pass needs a few hundred bytes
+            # of scratch space and this is a scratch root it cannot write in. A
+            # full volume is the real shape and reaches the same line, measured
+            # on a 4 MB ram disk as `TMPDIR`.
+            locked = tmp_path / "locked-scratch"
+            locked.mkdir(mode=0o500)
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(tempfile, "tempdir", os.fspath(locked))
+                probe_material(tools, media["sound"])
         else:
             crashing = PackagedMediaTools(
-                ffprobe_path=_crashing_probe(tmp_path), ffmpeg_path=tools.ffmpeg_path
+                ffprobe_path=_crashing_probe(tmp_path, tools.ffprobe_path),
+                ffmpeg_path=tools.ffmpeg_path,
             )
             read_stream_facts(crashing, media["sound"])
 
@@ -988,6 +1128,36 @@ class TestWhatARealFileCanStillHide:
         assert (half.width, half.height) == (whole.width, whole.height)
         assert (half.video_codec, half.audio_codec) == (whole.video_codec, whole.audio_codec)
         assert half.content_digest != whole.content_digest
+
+    def test_the_lead_silence_material_is_what_covers_the_closing_pattern(
+        self, media: dict[str, Path], tools: PackagedMediaTools, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A silence span that closes, which nothing else in this file produces.
+
+        `_silence_covers_the_track` reads two things off the report: that a span
+        opened at zero, and that nothing closed it. Every other material here
+        either states no silence at all or states silence to the end, so the
+        closing line was never in a single report — measured, replacing its
+        pattern with one that never matches left all 49 tests in this file green.
+
+        Breaking the pattern here is what shows the material earns its place: the
+        file becomes a sound-only material with nothing audible in it, which is a
+        state `Material` forbids, so the verdict flips from "audible" to a
+        refusal. Both halves are asserted, since the first alone would pass for a
+        material that states no silence whatsoever.
+        """
+        facts = probe_material(tools, media["lead_silence"])
+        assert facts.kind is ProbedMaterialKind.AUDIO
+        assert facts.has_audio is True
+        assert facts.audio_loudness_lufs == pytest.approx(
+            LEAD_SILENCE_LUFS, abs=TONE_LUFS_TOLERANCE
+        )
+        monkeypatch.setattr(
+            material_probe, "_SILENCE_END_PATTERN", re.compile(r"^never-matches$", re.MULTILINE)
+        )
+        with pytest.raises(MaterialProbeRejected) as excinfo:
+            probe_material(tools, media["lead_silence"])
+        assert excinfo.value.rejection is MaterialProbeRejection.SILENT_AUDIO
 
     def test_a_tag_stating_silence_does_not_silence_a_real_video(
         self, media: dict[str, Path], tools: PackagedMediaTools
