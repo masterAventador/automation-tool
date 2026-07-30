@@ -606,6 +606,7 @@ const MOTION_AUTHORING_DEADLINE: std::time::Duration = std::time::Duration::from
 pub fn motion_authoring_request(
     work: &std::path::Path,
     catalog_root: &std::path::Path,
+    browser: &std::path::Path,
     request: &motion_video_studio::MotionVideoBriefRequest,
     model_id: &str,
     api_key: &str,
@@ -614,6 +615,11 @@ pub fn motion_authoring_request(
         "schemaVersion": 1,
         "workspace": work,
         "catalogRoot": catalog_root,
+        // PC-14: the overflow probe launches exactly this executable — the one
+        // the embedded-browser authority already verified (EB-07). Omitting it
+        // would not fail anything; the child would simply author unmeasured,
+        // which is the catalogRoot silence all over again.
+        "browserExecutable": browser,
         "brief": request.brief(),
         "aspectRatio": request.aspect_ratio(),
         "durationSeconds": request.duration_seconds(),
@@ -774,6 +780,7 @@ async fn submit_motion_video_brief(
                 &motion_authoring_request(
                     &work,
                     &runtime.catalog,
+                    &runtime.browser,
                     &request,
                     credential.model_id().as_str(),
                     credential.api_key(),

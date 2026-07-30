@@ -250,6 +250,7 @@ fn the_thinking_choice_reaches_the_authoring_request() {
         let document = motion_authoring_request(
             &root.0,
             &root.0.join("catalog"),
+            &root.0.join("chromium/chrome"),
             &request,
             "qwen3.7-max-2026-06-08",
             "sk-not-a-real-key",
@@ -669,7 +670,15 @@ fn the_authoring_request_tells_the_child_where_the_packaged_parts_are() {
     .unwrap();
     let work = Path::new("/tmp/automation-tool-example/work");
     let catalog = Path::new("/tmp/automation-tool-example/resources").join(MOTION_CATALOG_DIRECTORY);
-    let document = motion_authoring_request(work, &catalog, &request, "qwen-example", "sk-example");
+    let browser = Path::new("/tmp/automation-tool-example/resources/chromium/chrome");
+    let document = motion_authoring_request(
+        work,
+        &catalog,
+        browser,
+        &request,
+        "qwen-example",
+        "sk-example",
+    );
 
     assert_eq!(document["catalogRoot"].as_str().unwrap(), catalog.to_str().unwrap());
     assert_eq!(document["workspace"].as_str().unwrap(), work.to_str().unwrap());
@@ -677,6 +686,12 @@ fn the_authoring_request_tells_the_child_where_the_packaged_parts_are() {
     assert_eq!(document["aspectRatio"].as_str().unwrap(), request.aspect_ratio());
     assert_eq!(document["durationSeconds"].as_u64().unwrap(), 6);
     assert_eq!(document["language"].as_str().unwrap(), request.language());
+    // PC-14：溢出探针启动的就是这个字段指的浏览器。catalogRoot 的教训逐字适用——
+    // 协议收下字段再丢掉，两侧各自全绿，产品安静地跳过实测。
+    assert_eq!(
+        document["browserExecutable"].as_str().unwrap(),
+        browser.to_str().unwrap()
+    );
 }
 
 /// The progress the render loop reports must be progress the job will accept.
