@@ -43,7 +43,6 @@ describe("workbench shell navigation", () => {
     expect(
       screen.queryByRole("button", { name: "打开完整制作界面" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText(/不会打开额外窗口/u)).toBeVisible();
   });
 
   /**
@@ -262,6 +261,7 @@ describe("video studio watched from anywhere in the app", () => {
     progressPercent: 40,
     subject: "用蓝色商务风做一段本周销售增长说明",
     styleDisplayName: "一句话自动制作",
+    shotStructure: [],
     artifactId: null,
     artifactSizeBytes: null,
     failureCode: null,
@@ -290,6 +290,8 @@ describe("video studio watched from anywhere in the app", () => {
   ): MaterialVideoStudioGateway {
     return {
       open: vi.fn().mockRejectedValue(new Error("not reached")),
+      updateView: vi.fn().mockRejectedValue(new Error("not reached")),
+      close: vi.fn().mockResolvedValue(undefined),
       jobs: vi.fn().mockResolvedValue([]),
       cancel: vi.fn().mockRejectedValue(new Error("not reached")),
       deleteArtifact: vi.fn().mockRejectedValue(new Error("not reached")),

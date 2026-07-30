@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
 import {
+  openMaterialVideoStudio,
   openWorkbenchSection,
   waitForStartup,
 } from "./navigation";
@@ -17,104 +18,49 @@ describe("IM-05/IM-06 production App material video WebUI acceptance", () => {
     await scriptSettings.$("button=保存配置").click();
     await expect(scriptSettings).toHaveText(expect.stringContaining("已配置"));
 
-    const studio = await browser.$("section[aria-label='视频制作工作区']");
+    const studio = await openMaterialVideoStudio();
     const mainHandle = await browser.getWindowHandle();
+    assert.deepEqual(await browser.tauri.listWindows(), ["main"]);
     await studio.$("button[aria-label='选择智能素材成片']").click();
-    await studio.$("button=打开完整制作界面").click();
-    await expect(studio).toHaveText(expect.stringContaining("完整制作界面已打开。"));
-    assert.doesNotMatch(await browser.$("body").getText(), /127\.0\.0\.1|studio-[A-Za-z0-9_-]{20}/);
-
-    await browser.waitUntil(async () => (await browser.getWindowHandles()).length === 2, {
-      timeout: 45_000,
-      timeoutMsg: "protected material-video WebUI window was not created",
-    });
-    const webUiHandle = (await browser.getWindowHandles()).find((handle) => handle !== mainHandle);
-    assert.ok(webUiHandle, "protected WebUI handle must be distinct from the main App");
-    await browser.switchToWindow(webUiHandle);
-    assert.match(await browser.getUrl(), /^http:\/\/127\.0\.0\.1:/);
-    try {
-      await browser.waitUntil(
-        async () => {
-          const state = await browser.execute(() =>
-            document.documentElement.getAttribute("data-automation-tool-studio-state"),
-          );
-          if (state === "failed") throw new Error("embedded theme guard failed closed");
-          return (await browser.$("body").getText()).includes("视频主题") && state === "ready";
-        },
-        { timeout: 150_000, timeoutMsg: "real material-video form did not become ready" },
+    const started = await browser.tauri.execute(({ core }) =>
+      core.invoke("exercise_material_video_studio_for_acceptance"),
+    );
+    assert.deepEqual(started, { state: "running", failure: null });
+    let embedded: unknown = null;
+    await browser.waitUntil(async () => {
+      embedded = await browser.tauri.execute(({ core }) =>
+        core.invoke("inspect_material_video_studio_exercise_for_acceptance"),
       );
-    } catch (error) {
-      const diagnostics = await browser.execute(() => ({
-        body: document.body?.innerText?.slice(0, 1000) || "",
-        containers: document.querySelectorAll('[data-testid="stAppViewContainer"]').length,
-        generateButtons: Array.from(document.querySelectorAll("button")).filter((button) =>
-          /生成视频|Generate Video/i.test(button.textContent || ""),
-        ).length,
-        subjectInputs: document.querySelectorAll(
-          'input[aria-label*="视频主题"], input[aria-label*="Video Subject" i]',
-        ).length,
-        state: document.documentElement.getAttribute("data-automation-tool-studio-state"),
-        failure: document.documentElement.getAttribute("data-automation-tool-studio-failure"),
-        title: document.title,
-        url: window.location.href,
-      }));
-      const symptom = new Error(
-        `real material-video form did not become ready: ${JSON.stringify(diagnostics)}`,
-      ) as Error & { cause: unknown };
-      symptom.cause = error;
-      throw symptom;
-    }
-    const body = await browser.$("body");
-    assert.equal(await browser.getTitle(), "智能素材成片");
-    await expect(body).toHaveText(expect.stringContaining("视频文案"));
-    await expect(body).toHaveText(expect.stringContaining("生成视频"));
-    await expect(body).toHaveText(expect.stringContaining("智能素材成片"));
-    assert.doesNotMatch(
-      await body.getText(),
-      /money\s*[-_ ]?\s*printer\s*[-_ ]?\s*turbo|hyper\s*[-_ ]?\s*frames/i,
-    );
-    assert.equal(
-      await browser.execute(() =>
-        Array.from(document.querySelectorAll("a[href]")).filter((anchor) => {
-          try {
-            return new URL(anchor.getAttribute("href") || "", window.location.href).origin !== window.location.origin;
-          } catch {
-            return true;
-          }
-        }).length,
-      ),
-      0,
-    );
-    const fontFamily = await browser.execute(() => getComputedStyle(document.body).fontFamily);
-    assert.match(fontFamily, /PingFang SC|Microsoft YaHei|Inter/);
-    const duplicateTaskManager = await browser.$(".st-key-task_manager_entry");
-    if (await duplicateTaskManager.isExisting()) {
-      assert.equal(await duplicateTaskManager.isDisplayed(), false);
-    }
-
-    const settingsButton = await browser.$("button[aria-label='制作服务设置']");
-    await expect(settingsButton).toBeDisplayed();
-    await settingsButton.click();
-    await browser.waitUntil(async () => (await browser.$("body").getText()).includes("Pexels"), {
-      timeout: 15_000,
-      timeoutMsg: "material API settings were not preserved",
+      return (embedded as { readonly state: string }).state !== "running";
+    }, {
+      timeout: 135_000,
+      interval: 500,
+      timeoutMsg: "the real child WebView acceptance probe did not finish",
     });
-    await expect(await browser.$("[role='tab']*=素材 API")).toBeDisplayed();
-    const modelTabs = await browser.$$("[role='tab']*=大模型设置");
-    const modelTabCount = await modelTabs.length;
-    for (let index = 0; index < modelTabCount; index += 1) {
-      assert.equal(await modelTabs[index].isDisplayed(), false);
-    }
-    await browser.keys(["Escape"]);
-
-    const subject = await browser.$("input[aria-label*='视频主题']");
-    await subject.setValue("用三十秒解释为什么雨后空气更清新");
-    assert.equal(await subject.getValue(), "用三十秒解释为什么雨后空气更清新");
-    assert.doesNotMatch(await body.getText(), new RegExp(TEST_KEY));
-
-    await browser.closeWindow();
-    await browser.switchToWindow(mainHandle);
-        await browser.$("div[role='tab']=制作任务").click();
+    assert.deepEqual(
+      embedded,
+      { state: "passed", failure: null },
+      "the real child WebView must mount inside the sole native App window, expose the guarded form, accept subject input, preserve material settings, and close cleanly",
+    );
+    assert.doesNotMatch(await browser.$("body").getText(), /127\.0\.0\.1|studio-[A-Za-z0-9_-]{20}/);
+    assert.deepEqual(await browser.tauri.listWindows(), ["main"]);
+    assert.equal(await browser.getWindowHandle(), mainHandle);
+    await studio.$("button[aria-label='选择品牌动效成片']").click();
+    await browser.waitUntil(async () => {
+      const snapshot = await browser.tauri.execute(({ core }) =>
+        core.invoke("inspect_material_video_studio_cleanup_for_acceptance"),
+      ) as {
+        readonly activeWorkspace: boolean;
+        readonly viewMounted: boolean;
+        readonly workerStopped: boolean;
+      };
+      return !snapshot.viewMounted && snapshot.workerStopped && !snapshot.activeWorkspace;
+    }, {
+      timeout: 30_000,
+      timeoutMsg: "material-video child WebView, Worker, or active workspace survived its embedded surface",
+    });
+    assert.deepEqual(await browser.tauri.listWindows(), ["main"]);
+    await browser.$("div[role='tab']=制作任务").click();
     await expect(await browser.$("body")).toHaveText(expect.stringContaining("还没有真实制作任务"));
     await browser.$("div[role='tab']=成片").click();
     await expect(await browser.$("body")).toHaveText(expect.stringContaining("还没有已导入的成片"));

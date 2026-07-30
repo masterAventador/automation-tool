@@ -403,7 +403,8 @@ fn an_authored_answer_is_rechecked_against_the_brief_before_it_becomes_a_render_
 #[test]
 fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
     use automation_tool_desktop_lib::motion_video_studio::{
-        accept_authored_render_job, MOTION_COMPOSITION_FILE, TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
+        accept_authored_render_job, advance, record_rendered_shot_frames, snapshot,
+        MotionRenderJobStatus, MOTION_COMPOSITION_FILE, TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
         TEMPLATE_CANVAS_HEIGHT, TEMPLATE_CANVAS_WIDTH,
     };
 
@@ -432,6 +433,7 @@ fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
     .unwrap();
 
     let template_segment = serde_json::json!({
+        "part": null,
         "entryHtml": MOTION_COMPOSITION_FILE,
         "allowedAssets": [AUTHORING_RUNTIME_ASSET],
         "canvas": {
@@ -446,6 +448,7 @@ fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
         "sourceEndMillis": 3000,
     });
     let part_segment = serde_json::json!({
+        "part": "lt-bold-block",
         "entryHtml": part_entry,
         "allowedAssets": [part_asset],
         // The part's own stage, at factor 1: it already is the output
@@ -492,6 +495,47 @@ fn an_authored_answer_carries_the_segments_the_film_is_made_of() {
     // line or the part's own motion, so the requested length steers the
     // storyboard rather than truncating the film.
     assert_eq!(prepared.film_frame_count(), 234);
+    let persisted = serde_json::to_value(snapshot(&store, workspace.job_id()).unwrap()).unwrap();
+    assert_eq!(
+        persisted["shotStructure"],
+        serde_json::json!([
+            {
+                "index": 1,
+                "startFrame": 0,
+                "frameCount": 90,
+                "renderedStartFrame": null,
+                "renderedFrameCount": null,
+                "part": null,
+                "narrationSeconds": null,
+            },
+            {
+                "index": 2,
+                "startFrame": 90,
+                "frameCount": 144,
+                "renderedStartFrame": null,
+                "renderedFrameCount": null,
+                "part": "lt-bold-block",
+                "narrationSeconds": null,
+            },
+        ]),
+        "T2.2: the accepted answer's shot table must survive in the RenderJob checkpoint",
+    );
+    advance(
+        &store,
+        workspace.job_id(),
+        MotionRenderJobStatus::Encoding,
+        85,
+        None,
+        None,
+    )
+    .unwrap();
+    record_rendered_shot_frames(&store, workspace.job_id(), &[91, 145])
+        .expect_err("two one-frame length drifts move the second boundary by two frames");
+    let measured = record_rendered_shot_frames(&store, workspace.job_id(), &[90, 145])
+        .expect("every decoded start/end boundary stays within one frame");
+    let measured = serde_json::to_value(measured).unwrap();
+    assert_eq!(measured["shotStructure"][1]["renderedStartFrame"], 90);
+    assert_eq!(measured["shotStructure"][1]["renderedFrameCount"], 145);
 
     for mutation in [
         // 一部影片至少要有一段
@@ -751,6 +795,7 @@ fn a_narrated_segment_is_accepted_and_its_narration_reaches_the_mix() {
     .unwrap();
     let segment = |narration: serde_json::Value| {
         let mut base = serde_json::json!({
+            "part": "lt-bold-block",
             "entryHtml": part_entry,
             "allowedAssets": [],
             "canvas": {"width": 1920, "height": 1080, "deviceScaleFactor": 1},

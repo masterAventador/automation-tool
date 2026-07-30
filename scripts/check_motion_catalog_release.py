@@ -14,6 +14,7 @@ bytes, or an aggregate that differs from
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -31,6 +32,7 @@ TEXT_SUFFIXES = frozenset({".html", ".js", ".css", ".svg"})
 URL_PATTERN = re.compile(r"https?://[^\s\"'`<>)\\]+")
 ALLOWED_DOMAINS = frozenset({"www.w3.org"})
 WRITE_BITS = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
+RUNTIME_DATA_MEDIA_TYPES = frozenset({"application/json", "model/gltf-binary"})
 
 
 class CheckError(SystemExit):
@@ -70,6 +72,136 @@ def aggregate_digest(files: list[dict]) -> str:
         for record in sorted(files, key=lambda record: record["path"])
     )
     return hashlib.sha256(lines.encode("utf-8")).hexdigest()
+
+
+def _release_file(release_root: Path, relative: object, purpose: str) -> Path:
+    if (
+        not isinstance(relative, str)
+        or not relative
+        or relative.startswith("/")
+        or "\\" in relative
+        or any(part in {"", ".", ".."} for part in relative.split("/"))
+    ):
+        raise CheckError(f"{purpose} path is not canonical: {relative!r}")
+    path = release_root.joinpath(*relative.split("/"))
+    if not path.is_file() or is_link_or_reparse(path):
+        raise CheckError(f"{purpose} file is missing or linked: {relative}")
+    return path
+
+
+def verify_content_rewrites(release_root: Path, contract: dict) -> dict[str, int]:
+    """Verify that every reviewed content repair is present in the release.
+
+    The build checks the exact pre-rewrite occurrence count. This independent
+    gate checks the closed postcondition: no source literal remains, every
+    replacement is observable at least as many times as the contract applied
+    it, and the manifest cannot hide or inflate the repair count.
+    """
+    items = contract.get("items")
+    if not isinstance(items, list):
+        raise CheckError("content rewrite items must be a list")
+    documents: set[str] = set()
+    replacements = 0
+    for item in items:
+        if not isinstance(item, dict):
+            raise CheckError("content rewrite item must be an object")
+        name = item.get("name")
+        document_relative = item.get("document")
+        if not isinstance(name, str) or not name:
+            raise CheckError("content rewrite item name is missing")
+        if not isinstance(document_relative, str) or not document_relative.startswith(
+            f"items/{name}/"
+        ):
+            raise CheckError(f"{name} content rewrite document belongs to another item")
+        if document_relative in documents:
+            raise CheckError(f"content rewrite document is declared twice: {document_relative}")
+        documents.add(document_relative)
+        document = _release_file(
+            release_root, document_relative, f"{name} content rewrite document"
+        )
+        text = document.read_text(encoding="utf-8")
+        rules = item.get("replacements")
+        if not isinstance(rules, list) or not rules:
+            raise CheckError(f"{name} has no content rewrite rules")
+        for rule in rules:
+            if not isinstance(rule, dict):
+                raise CheckError(f"{name} content rewrite rule must be an object")
+            literal = rule.get("literal")
+            replacement = rule.get("replacement")
+            occurrences = rule.get("occurrences")
+            if (
+                not isinstance(literal, str)
+                or not literal
+                or not isinstance(replacement, str)
+                or not replacement
+                or literal == replacement
+                or type(occurrences) is not int
+                or occurrences <= 0
+            ):
+                raise CheckError(f"{name} content rewrite rule is invalid")
+            if literal in text:
+                raise CheckError(f"{name} keeps a repaired content literal: {literal!r}")
+            if text.count(replacement) < occurrences:
+                raise CheckError(
+                    f"{name} content rewrite is not observable: "
+                    f"{replacement!r} occurs {text.count(replacement)}, "
+                    f"expected at least {occurrences}"
+                )
+            replacements += occurrences
+    return {"documents": len(documents), "replacements": replacements}
+
+
+def verify_runtime_data_inlining(release_root: Path, contract: dict) -> dict[str, int]:
+    if contract.get("encoding") != "data-url-base64":
+        raise CheckError("runtime data inlining must use data-url-base64")
+    items = contract.get("items")
+    if not isinstance(items, list):
+        raise CheckError("runtime data inlining items must be a list")
+    documents: set[str] = set()
+    references = 0
+    source_bytes = 0
+    for item in items:
+        if not isinstance(item, dict):
+            raise CheckError("runtime data inlining item must be an object")
+        name = item.get("name")
+        document_relative = item.get("document")
+        if not isinstance(name, str) or not name:
+            raise CheckError("runtime data inlining item name is missing")
+        if not isinstance(document_relative, str):
+            raise CheckError(f"{name} runtime data document is missing")
+        if not document_relative.startswith(f"items/{name}/"):
+            raise CheckError(f"{name} runtime data document belongs to another item")
+        if document_relative in documents:
+            raise CheckError(f"runtime data document is declared twice: {document_relative}")
+        documents.add(document_relative)
+        document = _release_file(release_root, document_relative, f"{name} document")
+        text = document.read_text(encoding="utf-8")
+        declared_references = item.get("references")
+        if not isinstance(declared_references, list) or not declared_references:
+            raise CheckError(f"{name} has no runtime data references")
+        for reference in declared_references:
+            if not isinstance(reference, dict):
+                raise CheckError(f"{name} runtime data reference must be an object")
+            literal = reference.get("literal")
+            media_type = reference.get("mediaType")
+            if not isinstance(literal, str) or not literal:
+                raise CheckError(f"{name} runtime data literal is missing")
+            if media_type not in RUNTIME_DATA_MEDIA_TYPES:
+                raise CheckError(f"{name} runtime data media type is not allowed: {media_type}")
+            source = _release_file(
+                release_root, reference.get("source"), f"{name} runtime data source"
+            )
+            data = source.read_bytes()
+            expected = f"data:{media_type};base64," + base64.b64encode(data).decode("ascii")
+            if literal in text or text.count(expected) != 1:
+                raise CheckError(f"{name} runtime data reference is not exactly inlined: {literal}")
+            references += 1
+            source_bytes += len(data)
+    return {
+        "documents": len(documents),
+        "references": references,
+        "sourceBytes": source_bytes,
+    }
 
 
 def verify_input_pins(release_lock: dict) -> None:
@@ -278,6 +410,20 @@ def verify_release(
         raise CheckError(f"remote URLs found in the release tree: {remote_urls[:5]}")
     if indicator_hits:
         raise CheckError(f"trademark indicators remain in item files: {indicator_hits[:5]}")
+    content_rewrites = verify_content_rewrites(release_root, release_lock["contentRewrites"])
+    if manifest.get("contentRewrites") != content_rewrites:
+        raise CheckError(
+            "release content rewrite counts drifted: "
+            f"{manifest.get('contentRewrites')} != {content_rewrites}"
+        )
+    runtime_data_inlining = verify_runtime_data_inlining(
+        release_root, release_lock["runtimeDataInlining"]
+    )
+    if manifest.get("runtimeDataInlining") != runtime_data_inlining:
+        raise CheckError(
+            "release runtime data inlining counts drifted: "
+            f"{manifest.get('runtimeDataInlining')} != {runtime_data_inlining}"
+        )
 
     assets = {asset["id"]: asset for asset in overlay["assets"]}
     overlay_items = {entry["name"]: entry for entry in overlay["items"]}
@@ -339,7 +485,9 @@ def main() -> None:
         f"version {manifest['catalogVersion']}, {manifest['counts']['items']} items, "
         f"{manifest['counts']['files']} files, 0 remote URLs, 0 indicator leftovers, "
         f"{applied} asset replacements verified, "
-        f"{replaced_items} items with trademark replacements"
+        f"{replaced_items} items with trademark replacements, "
+        f"{manifest['contentRewrites']['replacements']} content rewrites verified, "
+        f"{manifest['runtimeDataInlining']['references']} runtime data references inlined"
     )
 
 

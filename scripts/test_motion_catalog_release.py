@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import importlib.util
 import json
@@ -104,6 +105,138 @@ def test_release_lock_contract() -> None:
     generated = lock["generated"]
     assert generated["fileCount"] > 0
     assert SHA256_PATTERN.match(generated["aggregateSha256"])
+    runtime_items = lock["runtimeDataInlining"]["items"]
+    assert {entry["name"] for entry in runtime_items} == {
+        "spain-map",
+        "us-map",
+        "us-map-bubble",
+        "us-map-flow",
+        "vfx-iphone-device",
+        "world-map",
+    }
+    assert sum(len(entry["references"]) for entry in runtime_items) == 7
+    content_rewrites = lock["contentRewrites"]["items"]
+    rewrite_names = {entry["name"] for entry in content_rewrites}
+    assert {
+        "liquid-glass-notification",
+        "liquid-glass-widgets",
+        "texture-mask-text",
+    } <= rewrite_names
+    template_items = {
+        "code-snippet-dark-2026",
+        "code-snippet-dark-modern",
+        "code-snippet-dark-plus",
+        "code-snippet-high-contrast",
+        "code-snippet-high-contrast-light",
+        "code-snippet-light-2026",
+        "code-snippet-light-modern",
+        "code-snippet-light-plus",
+        "code-snippet-monokai",
+        "code-snippet-solarized-light",
+        "code-snippet-visual-studio-dark",
+        "code-snippet-visual-studio-light",
+    }
+    assert template_items <= rewrite_names
+    by_name = {entry["name"]: entry for entry in content_rewrites}
+    for name in template_items:
+        literals = {rule["literal"] for rule in by_name[name]["replacements"]}
+        assert any("<template " in literal for literal in literals), name
+        assert any("</template>" in literal for literal in literals), name
+    vfx_items = {
+        "vfx-liquid-background",
+        "vfx-portal",
+        "vfx-shatter",
+    }
+    assert vfx_items <= rewrite_names
+    for name in vfx_items:
+        rules = by_name[name]["replacements"]
+        assert len(rules) >= 2, f"{name} must close every diagnosed content defect"
+
+
+def test_runtime_data_is_inlined_only_in_the_release_tree() -> None:
+    build = load_module(BUILD)
+    with tempfile.TemporaryDirectory(prefix="automation-tool-pc24-test-") as temporary:
+        root = Path(temporary)
+        document = root / "items/map/map.html"
+        source = root / "offline-deps/data/map.json"
+        document.parent.mkdir(parents=True)
+        source.parent.mkdir(parents=True)
+        document.write_text('fetch("../../offline-deps/data/map.json")', encoding="utf-8")
+        source.write_bytes(b'{"kind":"map"}')
+        rule = {
+            "encoding": "data-url-base64",
+            "items": [
+                {
+                    "name": "map",
+                    "document": "items/map/map.html",
+                    "references": [
+                        {
+                            "literal": "../../offline-deps/data/map.json",
+                            "source": "offline-deps/data/map.json",
+                            "mediaType": "application/json",
+                        }
+                    ],
+                }
+            ],
+        }
+        applied = build.inline_runtime_data(root, rule)
+        expected = "data:application/json;base64," + base64.b64encode(source.read_bytes()).decode(
+            "ascii"
+        )
+        assert document.read_text(encoding="utf-8") == f'fetch("{expected}")'
+        assert applied == {"documents": 1, "references": 1, "sourceBytes": 14}
+
+
+def test_content_rewrites_are_exact_and_closed() -> None:
+    build = load_module(BUILD)
+    check = load_module(CHECK)
+    with tempfile.TemporaryDirectory(prefix="automation-tool-bm13-repair-test-") as temporary:
+        root = Path(temporary)
+        document = root / "items/demo/demo.html"
+        document.parent.mkdir(parents=True)
+        document.write_text("Legacy.Canvas /assets/demo/mask.png", encoding="utf-8")
+        contract = {
+            "items": [
+                {
+                    "name": "demo",
+                    "document": "items/demo/demo.html",
+                    "replacements": [
+                        {
+                            "literal": "Legacy.Canvas",
+                            "replacement": "Neutral.Canvas",
+                            "occurrences": 1,
+                        },
+                        {
+                            "literal": "/assets/demo/",
+                            "replacement": "./",
+                            "occurrences": 1,
+                        },
+                    ],
+                }
+            ]
+        }
+        assert build.apply_content_rewrites(root, contract) == {
+            "documents": 1,
+            "replacements": 2,
+        }
+        assert document.read_text(encoding="utf-8") == "Neutral.Canvas ./mask.png"
+        assert check.verify_content_rewrites(root, contract) == {
+            "documents": 1,
+            "replacements": 2,
+        }
+        try:
+            build.apply_content_rewrites(root, contract)
+        except build.BuildError:
+            pass
+        else:
+            raise AssertionError("an already-rewritten or drifted document must fail closed")
+        document.write_text("Legacy.Canvas ./mask.png", encoding="utf-8", newline="\n")
+        try:
+            check.verify_content_rewrites(root, contract)
+        except check.CheckError:
+            pass
+        else:
+            raise AssertionError("the independent gate must reject a restored source literal")
 
 
 def test_trademark_rules() -> None:
@@ -225,6 +358,15 @@ def _mini_fixture(root: Path) -> tuple[Path, dict, dict, dict, dict]:
                 "trademarkReplacements": 1,
             }
         ],
+        "runtimeDataInlining": {
+            "documents": 0,
+            "references": 0,
+            "sourceBytes": 0,
+        },
+        "contentRewrites": {
+            "documents": 0,
+            "replacements": 0,
+        },
         "files": files,
     }
     manifest_path = release_root / "manifest.json"
@@ -243,6 +385,13 @@ def _mini_fixture(root: Path) -> tuple[Path, dict, dict, dict, dict]:
         "trademarkScan": {
             "forms": {"instagram": ["instagram"]},
             "technicalKeeplist": ["-apple-system"],
+        },
+        "runtimeDataInlining": {
+            "encoding": "data-url-base64",
+            "items": [],
+        },
+        "contentRewrites": {
+            "items": [],
         },
         "generated": {"fileCount": len(files), "aggregateSha256": aggregate},
     }
@@ -489,13 +638,15 @@ def test_real_release_build_is_reproducible() -> None:
 
 def main() -> None:
     test_release_lock_contract()
+    test_runtime_data_is_inlined_only_in_the_release_tree()
+    test_content_rewrites_are_exact_and_closed()
     test_trademark_rules()
     test_composed_asset_path()
     test_release_gate_tamper_matrix()
     test_windows_unicode_and_read_only_path_semantics()
     test_real_release_build_is_reproducible()
     print("motion catalog release tests passed")
-    print("executed checks: 6")
+    print("executed checks: 8")
 
 
 if __name__ == "__main__":

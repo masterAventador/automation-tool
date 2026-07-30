@@ -7,18 +7,40 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 import { MaterialVideoStudioGatewayError } from "../../features/video-studio/material-video-studio-gateway";
 import { TauriMaterialVideoStudioGateway } from "./material-video-studio-gateway";
 
+const VIEW = { x: 40, y: 120, width: 900, height: 640, visible: true } as const;
+
 describe("Tauri material video studio gateway", () => {
   beforeEach(() => invoke.mockReset());
 
-  it("opens the fixed native command and returns only public state", async () => {
+  it("mounts the protected child view using only public logical bounds", async () => {
     invoke.mockResolvedValueOnce({ state: "opened", modelId: "qwen3.7-max-2026-06-08" });
     const gateway = new TauriMaterialVideoStudioGateway();
 
-    await expect(gateway.open()).resolves.toEqual({
+    await expect(gateway.open(VIEW)).resolves.toEqual({
       state: "opened",
       modelId: "qwen3.7-max-2026-06-08",
     });
-    expect(invoke).toHaveBeenCalledWith("open_material_video_studio");
+    expect(invoke).toHaveBeenCalledWith("open_material_video_studio", { view: VIEW });
+  });
+
+  it("updates and closes the native child view without receiving its endpoint", async () => {
+    const gateway = new TauriMaterialVideoStudioGateway() as TauriMaterialVideoStudioGateway & {
+      updateView(view: {
+        readonly x: number;
+        readonly y: number;
+        readonly width: number;
+        readonly height: number;
+        readonly visible: boolean;
+      }): Promise<void>;
+      close(): Promise<void>;
+    };
+    const view = { x: 12, y: -80, width: 960, height: 680, visible: false };
+    invoke.mockResolvedValue(undefined);
+
+    await gateway.updateView(view);
+    expect(invoke).toHaveBeenCalledWith("update_material_video_studio_view", { view });
+    await gateway.close();
+    expect(invoke).toHaveBeenCalledWith("close_material_video_studio");
   });
 
   it("rejects private endpoint fields instead of exposing localhost", async () => {
@@ -27,7 +49,9 @@ describe("Tauri material video studio gateway", () => {
       modelId: "qwen3.7-max-2026-06-08",
       endpoint: "http://127.0.0.1:49152/private",
     });
-    const error = await new TauriMaterialVideoStudioGateway().open().catch((value: unknown) => value);
+    const error = await new TauriMaterialVideoStudioGateway()
+      .open(VIEW)
+      .catch((value: unknown) => value);
 
     expect(error).toBeInstanceOf(MaterialVideoStudioGatewayError);
     expect(error).toMatchObject({ code: "protocol_mismatch", retryable: false });
@@ -37,7 +61,7 @@ describe("Tauri material video studio gateway", () => {
   it("maps only fixed native errors without reflecting unknown details", async () => {
     const gateway = new TauriMaterialVideoStudioGateway();
     invoke.mockRejectedValueOnce({ code: "configuration_required", retryable: false });
-    await expect(gateway.open()).rejects.toMatchObject({
+    await expect(gateway.open(VIEW)).rejects.toMatchObject({
       code: "configuration_required",
       retryable: false,
     });
@@ -47,7 +71,7 @@ describe("Tauri material video studio gateway", () => {
       retryable: true,
       apiKey: "sk-never-reflect",
     });
-    const error = await gateway.open().catch((value: unknown) => value);
+    const error = await gateway.open(VIEW).catch((value: unknown) => value);
     expect(error).toMatchObject({ code: "operation_unavailable", retryable: false });
     expect(String(error)).not.toContain("never-reflect");
   });
@@ -60,7 +84,7 @@ describe("Tauri material video studio gateway", () => {
       message: "native command error: configuration_required",
       retryable: false,
     });
-    await expect(gateway.open()).rejects.toMatchObject({
+    await expect(gateway.open(VIEW)).rejects.toMatchObject({
       code: "configuration_required",
       retryable: false,
     });
@@ -70,7 +94,7 @@ describe("Tauri material video studio gateway", () => {
       message: "apiKey=sk-never-reflect",
       retryable: false,
     });
-    const reworded = await gateway.open().catch((value: unknown) => value);
+    const reworded = await gateway.open(VIEW).catch((value: unknown) => value);
     expect(reworded).toMatchObject({ code: "storage_unavailable" });
     expect(JSON.stringify(reworded)).not.toContain("never-reflect");
   });
@@ -144,6 +168,15 @@ describe("Tauri material video studio gateway", () => {
       artifactId: null,
       artifactSizeBytes: null,
       failureCode: null,
+      shotStructure: [{
+        index: 1,
+        startFrame: 0,
+        frameCount: 360,
+        renderedStartFrame: null,
+        renderedFrameCount: null,
+        part: null,
+        narrationSeconds: null,
+      }],
     });
     await expect(gateway.submitMotionDraft(request)).resolves.toMatchObject({
       status: "queued",
@@ -203,9 +236,21 @@ describe("Tauri material video studio gateway", () => {
       artifactId: null,
       artifactSizeBytes: null,
       failureCode: null,
+      shotStructure: [
+        {
+          index: 1,
+          startFrame: 0,
+          frameCount: 150,
+          renderedStartFrame: null,
+          renderedFrameCount: null,
+          part: "lt-bold-block",
+          narrationSeconds: 4.24,
+        },
+      ],
     });
     await expect(gateway.submitMotionBrief(request)).resolves.toMatchObject({
       status: "queued",
+      shotStructure: [{ part: "lt-bold-block", frameCount: 150 }],
     });
     expect(invoke).toHaveBeenCalledWith("submit_motion_video_brief", { request });
   });
@@ -289,6 +334,15 @@ describe("Tauri material video studio gateway", () => {
         artifactId: null,
         artifactSizeBytes: null,
         failureCode: "static_render",
+        shotStructure: [{
+          index: 1,
+          startFrame: 0,
+          frameCount: 360,
+          renderedStartFrame: null,
+          renderedFrameCount: null,
+          part: null,
+          narrationSeconds: null,
+        }],
       },
     ]);
     await expect(gateway.motionJobs()).resolves.toMatchObject([

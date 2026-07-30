@@ -94,6 +94,8 @@ def require_contract() -> None:
         "capabilityEntropyBytes": 32,
         "endpointTransport": "authenticated_worker_ready_event",
         "endpointOwner": "tauri_only",
+        "presentation": "child_webview_in_main_window",
+        "nativeWindowCount": 1,
         "reactReceivesEndpoint": False,
         "userVisibleLocalhostUrl": False,
         "newWindowsAllowed": False,
@@ -102,6 +104,7 @@ def require_contract() -> None:
         "configurationRoot": "task_private_workspace",
         "storageRoot": "task_private_workspace",
         "upstreamSourceWritable": False,
+        "workerDescendantsStoppedWithEmbeddedSurface": True,
         "workerDescendantsStoppedWithAppWindow": True,
     }
     if value != expected:

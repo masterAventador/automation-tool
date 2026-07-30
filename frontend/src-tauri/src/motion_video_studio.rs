@@ -812,7 +812,19 @@ pub enum MotionRenderFailureCode {
     StaticRender,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MotionRenderShotSnapshot {
+    index: u32,
+    start_frame: u32,
+    frame_count: u32,
+    rendered_start_frame: Option<u32>,
+    rendered_frame_count: Option<u32>,
+    part: Option<String>,
+    narration_seconds: Option<f64>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MotionRenderJobSnapshot {
     render_job_id: Uuid,
@@ -824,6 +836,8 @@ pub struct MotionRenderJobSnapshot {
     artifact_id: Option<Uuid>,
     artifact_size_bytes: Option<u64>,
     failure_code: Option<MotionRenderFailureCode>,
+    #[serde(default)]
+    shot_structure: Vec<MotionRenderShotSnapshot>,
 }
 
 impl MotionRenderJobSnapshot {
@@ -853,10 +867,12 @@ pub struct MotionRenderSegment {
     frame_count: u32,
     source_start_millis: u32,
     source_end_millis: u32,
+    part: Option<String>,
     // PC-26: the workspace-relative narration for this shot, verified real at
     // acceptance. None on a silent shot; the mix skips films where every shot
     // is None, which keeps the pre-narration pipeline byte-identical.
     narration_audio: Option<String>,
+    narration_seconds: Option<f64>,
 }
 
 impl MotionRenderSegment {
@@ -902,9 +918,43 @@ impl MotionRenderSegment {
         self.frame_count
     }
 
+    pub fn part(&self) -> Option<&str> {
+        self.part.as_deref()
+    }
+
     pub fn narration_audio(&self) -> Option<&str> {
         self.narration_audio.as_deref()
     }
+
+    pub const fn narration_seconds(&self) -> Option<f64> {
+        self.narration_seconds
+    }
+}
+
+fn declared_shot_structure(
+    segments: &[MotionRenderSegment],
+) -> Result<Vec<MotionRenderShotSnapshot>, MotionVideoStudioError> {
+    if segments.is_empty() {
+        return Err(job_unavailable());
+    }
+    let mut start_frame = 0_u32;
+    let mut structure = Vec::with_capacity(segments.len());
+    for (offset, segment) in segments.iter().enumerate() {
+        let index = u32::try_from(offset + 1).map_err(|_| job_unavailable())?;
+        structure.push(MotionRenderShotSnapshot {
+            index,
+            start_frame,
+            frame_count: segment.frame_count,
+            rendered_start_frame: None,
+            rendered_frame_count: None,
+            part: segment.part.clone(),
+            narration_seconds: segment.narration_seconds,
+        });
+        start_frame = start_frame
+            .checked_add(segment.frame_count)
+            .ok_or_else(job_unavailable)?;
+    }
+    Ok(structure)
 }
 
 #[derive(Clone, Debug)]
@@ -1122,6 +1172,25 @@ fn prepare_inside_workspace(
         &serde_json::to_vec(&render_job).map_err(|_| storage_unavailable())?,
     )?;
 
+    // One shot, on the template's own stage. Stated rather than left empty so
+    // the render loop and the retained product shot table describe one shape.
+    let segments = vec![MotionRenderSegment {
+        entry_html: MOTION_COMPOSITION_FILE.to_owned(),
+        allowed_assets: allowed_assets.clone(),
+        width: TEMPLATE_CANVAS_WIDTH,
+        height: TEMPLATE_CANVAS_HEIGHT,
+        device_scale_factor: TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
+        frame_count: plan.frame_count(),
+        // The whole composition, because this path captures the whole film in
+        // one pass. The window only has work to do where several shots load
+        // one document.
+        source_start_millis: 0,
+        source_end_millis: plan.beat_count() * plan.seconds_per_beat() * 1000,
+        part: None,
+        // The fixed-template path predates narration and stays silent.
+        narration_audio: None,
+        narration_seconds: None,
+    }];
     let snapshot = MotionRenderJobSnapshot {
         render_job_id: workspace.job_id(),
         revision: 1,
@@ -1132,28 +1201,12 @@ fn prepare_inside_workspace(
         artifact_id: None,
         artifact_size_bytes: None,
         failure_code: None,
+        shot_structure: declared_shot_structure(&segments)?,
     };
     save_snapshot(store, workspace, &snapshot)?;
     Ok(PreparedMotionRenderJob {
         render_job_id: workspace.job_id(),
-        // One shot, on the template's own stage. Stated rather than left empty
-        // so the render loop has a single shape to walk: a film of one segment
-        // and a film of nine differ in length, not in kind.
-        segments: vec![MotionRenderSegment {
-            entry_html: MOTION_COMPOSITION_FILE.to_owned(),
-            allowed_assets: allowed_assets.clone(),
-            width: TEMPLATE_CANVAS_WIDTH,
-            height: TEMPLATE_CANVAS_HEIGHT,
-            device_scale_factor: TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
-            frame_count: plan.frame_count(),
-            // The whole composition, because this path captures the whole film
-            // in one pass. The window only has work to do where several shots
-            // load one document.
-            source_start_millis: 0,
-            source_end_millis: plan.beat_count() * plan.seconds_per_beat() * 1000,
-            // The fixed-template path predates narration and stays silent.
-            narration_audio: None,
-        }],
+        segments,
         // The fixed template draws a 16:9 stage and offers no choice of
         // framing, so its film is delivered on the 16:9 canvas.
         film_canvas: film_canvas(TEMPLATE_ASPECT_RATIO)?,
@@ -1262,6 +1315,10 @@ struct RenderSegmentAnswer {
     frame_count: u32,
     source_start_millis: u32,
     source_end_millis: u32,
+    // T2.2: retained as product metadata only after it agrees with the
+    // catalog working-copy path. A template shot carries null.
+    #[serde(default)]
+    part: Option<String>,
     // PC-26: which narration belongs to this shot and how long it really is.
     // Optional as a pair — a silent film's answer carries neither, and the
     // child only writes them together.
@@ -1552,6 +1609,7 @@ pub fn accept_authored_render_job(
         artifact_id: None,
         artifact_size_bytes: None,
         failure_code: None,
+        shot_structure: declared_shot_structure(&segments)?,
     };
     save_snapshot(store, workspace, &snapshot)?;
     Ok(PreparedMotionRenderJob {
@@ -1585,6 +1643,44 @@ fn workspace_relative_file(work: &Path, relative: &str) -> Result<String, Motion
     Ok(relative.to_owned())
 }
 
+fn accepted_segment_part(
+    entry_html: &str,
+    answered: Option<&str>,
+) -> Result<Option<String>, MotionVideoStudioError> {
+    if entry_html == MOTION_COMPOSITION_FILE {
+        return if answered.is_none() {
+            Ok(None)
+        } else {
+            Err(authoring_answer_invalid())
+        };
+    }
+    let Some(part) = answered else {
+        return Err(authoring_answer_invalid());
+    };
+    if part.is_empty()
+        || part.len() > 80
+        || !part
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        return Err(authoring_answer_invalid());
+    }
+    let Some(relative) = entry_html.strip_prefix("catalog/items/") else {
+        return Err(authoring_answer_invalid());
+    };
+    let Some((directory, document)) = relative.split_once('/') else {
+        return Err(authoring_answer_invalid());
+    };
+    if directory != part
+        || document.is_empty()
+        || document.contains('/')
+        || !document.ends_with(".html")
+    {
+        return Err(authoring_answer_invalid());
+    }
+    Ok(Some(part.to_owned()))
+}
+
 /// Every render this film is made of, or a refusal.
 ///
 /// A segment is checked on exactly the terms the single composition already
@@ -1603,6 +1699,7 @@ fn accepted_segments(
     let mut segments = Vec::with_capacity(answered.len());
     for segment in answered {
         let entry_html = workspace_relative_file(work, &segment.entry_html)?;
+        let part = accepted_segment_part(&entry_html, segment.part.as_deref())?;
         let mut allowed_assets = Vec::with_capacity(segment.allowed_assets.len());
         for asset in &segment.allowed_assets {
             allowed_assets.push(workspace_relative_file(work, asset)?);
@@ -1660,7 +1757,9 @@ fn accepted_segments(
             frame_count: segment.frame_count,
             source_start_millis: segment.source_start_millis,
             source_end_millis: segment.source_end_millis,
+            part,
             narration_audio,
+            narration_seconds: segment.narration_seconds,
         });
     }
     Ok(segments)
@@ -1690,6 +1789,57 @@ pub fn snapshot(
 ) -> Result<MotionRenderJobSnapshot, MotionVideoStudioError> {
     let workspace = store.open(render_job_id).map_err(map_workspace_error)?;
     load_snapshot(store, &workspace)?.ok_or_else(job_unavailable)
+}
+
+/// Retain what ffprobe decoded from each encoded shot before the intermediates
+/// are removed.
+///
+/// This is deliberately separate from the answer's declared table. Copying
+/// `frame_count` into both columns would make T2.2 agree with itself while
+/// measuring nothing. The render loop supplies counts decoded from the actual
+/// segment MP4s, and every cumulative start/end boundary must stay within one
+/// frame of what the accepted answer declared.
+pub fn record_rendered_shot_frames(
+    store: &VideoJobWorkspaceStore,
+    render_job_id: Uuid,
+    rendered_frames: &[u32],
+) -> Result<MotionRenderJobSnapshot, MotionVideoStudioError> {
+    let workspace = store.open(render_job_id).map_err(map_workspace_error)?;
+    let mut current = load_snapshot(store, &workspace)?.ok_or_else(job_unavailable)?;
+    if current.status != MotionRenderJobStatus::Encoding
+        || current.shot_structure.is_empty()
+        || current.shot_structure.len() != rendered_frames.len()
+        || current
+            .shot_structure
+            .iter()
+            .any(|shot| shot.rendered_start_frame.is_some() || shot.rendered_frame_count.is_some())
+    {
+        return Err(job_unavailable());
+    }
+    let mut declared_start = 0_u32;
+    let mut rendered_start = 0_u32;
+    for (shot, rendered) in current.shot_structure.iter_mut().zip(rendered_frames) {
+        if *rendered == 0 || declared_start.abs_diff(rendered_start) > 1 {
+            return Err(job_unavailable());
+        }
+        shot.rendered_start_frame = Some(rendered_start);
+        shot.rendered_frame_count = Some(*rendered);
+        declared_start = declared_start
+            .checked_add(shot.frame_count)
+            .ok_or_else(job_unavailable)?;
+        rendered_start = rendered_start
+            .checked_add(*rendered)
+            .ok_or_else(job_unavailable)?;
+        if declared_start.abs_diff(rendered_start) > 1 {
+            return Err(job_unavailable());
+        }
+    }
+    current.revision = current
+        .revision
+        .checked_add(1)
+        .ok_or_else(job_unavailable)?;
+    save_snapshot(store, &workspace, &current)?;
+    Ok(current)
 }
 
 pub fn advance(
@@ -2105,21 +2255,38 @@ pub fn join_motion_film(
     canvas: &MotionFilmCanvas,
     ffmpeg: &Path,
     ffprobe: &Path,
-    expected_frames: u32,
-) -> Result<(), MotionVideoStudioError> {
-    if segments.is_empty() || expected_frames == 0 {
+    expected_segment_frames: &[u32],
+) -> Result<Vec<u32>, MotionVideoStudioError> {
+    if segments.is_empty()
+        || segments.len() != expected_segment_frames.len()
+        || expected_segment_frames.contains(&0)
+    {
         return Err(render_unavailable());
     }
-    for segment in segments {
-        let shot = probe_film(ffprobe, segment, FrameCount::Skip)?;
+    let mut rendered_frames = Vec::with_capacity(segments.len());
+    for (segment, expected_frames) in segments.iter().zip(expected_segment_frames) {
+        // Decode each intermediate before it is deleted. Reading only the
+        // stream shape cannot tell a short shot from the answer it was meant
+        // to realize, and copying the declared count into metadata is not a
+        // measurement.
+        let shot = probe_film(ffprobe, segment)?;
+        let Some(frames) = shot.frames else {
+            return Err(render_unavailable());
+        };
         if shot.width != canvas.width
             || shot.height != canvas.height
             || shot.frames_per_second != canvas.frames_per_second
             || shot.pixel_format != FILM_PIXEL_FORMAT
+            || frames.abs_diff(*expected_frames) > 1
         {
             return Err(render_unavailable());
         }
+        rendered_frames.push(frames);
     }
+    let expected_frames = rendered_frames
+        .iter()
+        .try_fold(0_u32, |total, frames| total.checked_add(*frames))
+        .ok_or_else(render_unavailable)?;
     let listing = output.with_extension("concat.txt");
     write_private_file(&listing, concat_listing(segments).as_bytes())?;
     let joined = std::process::Command::new(ffmpeg)
@@ -2150,7 +2317,7 @@ pub fn join_motion_film(
     if !joined.map(|status| status.success()).unwrap_or(false) {
         return Err(refuse(output));
     }
-    let film = probe_film(ffprobe, output, FrameCount::Decode).map_err(|_| refuse(output))?;
+    let film = probe_film(ffprobe, output).map_err(|_| refuse(output))?;
     if film.frames != Some(expected_frames)
         || film.width != canvas.width
         || film.height != canvas.height
@@ -2159,7 +2326,7 @@ pub fn join_motion_film(
     {
         return Err(refuse(output));
     }
-    Ok(())
+    Ok(rendered_frames)
 }
 
 /// The ffmpeg argument list that lays each shot's narration onto the joined
@@ -2278,7 +2445,7 @@ pub fn mix_narration_into_film(
     if !mixed.map(|status| status.success()).unwrap_or(false) {
         return Err(refuse(&voiced));
     }
-    let probed = probe_film(ffprobe, &voiced, FrameCount::Decode).map_err(|_| refuse(&voiced))?;
+    let probed = probe_film(ffprobe, &voiced).map_err(|_| refuse(&voiced))?;
     if probed.frames != Some(expected_frames)
         || probed.width != canvas.width
         || probed.height != canvas.height
@@ -2311,32 +2478,14 @@ struct ProbedFilm {
     frames: Option<u32>,
 }
 
-/// Whether a probe should decode the stream to count its frames.
-///
-/// Counting means decoding every frame, which is the cost of the answer being a
-/// fact rather than a claim. Worth paying once for the finished film; not worth
-/// paying per segment, where the question is only what shape the stream is.
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum FrameCount {
-    Decode,
-    Skip,
-}
-
 /// What this file actually is, asked of the same toolchain that made it.
 ///
 /// `-count_frames` rather than the container's frame count: the container is a
 /// claim and the decoded stream is the fact, and the incident this join is
 /// guarded against is the two disagreeing without saying so.
-fn probe_film(
-    ffprobe: &Path,
-    path: &Path,
-    counting: FrameCount,
-) -> Result<ProbedFilm, MotionVideoStudioError> {
+fn probe_film(ffprobe: &Path, path: &Path) -> Result<ProbedFilm, MotionVideoStudioError> {
     let mut command = std::process::Command::new(ffprobe);
-    command.args(["-v", "error"]);
-    if counting == FrameCount::Decode {
-        command.arg("-count_frames");
-    }
+    command.args(["-v", "error", "-count_frames"]);
     let output = command
         .args([
             "-select_streams",
@@ -2376,15 +2525,12 @@ fn probe_film(
             .as_str()
             .ok_or_else(render_unavailable)?
             .to_owned(),
-        frames: match counting {
-            FrameCount::Skip => None,
-            FrameCount::Decode => Some(
-                stream["nb_read_frames"]
-                    .as_str()
-                    .and_then(|value| value.parse().ok())
-                    .ok_or_else(render_unavailable)?,
-            ),
-        },
+        frames: Some(
+            stream["nb_read_frames"]
+                .as_str()
+                .and_then(|value| value.parse().ok())
+                .ok_or_else(render_unavailable)?,
+        ),
     })
 }
 
@@ -2524,6 +2670,13 @@ fn validate_snapshot(
         | MotionRenderJobStatus::Failed
         | MotionRenderJobStatus::Cancelled => snapshot.progress_percent < 100,
     };
+    let valid_shots = valid_shot_structure(&snapshot.shot_structure)
+        && (snapshot.status != MotionRenderJobStatus::Succeeded
+            || snapshot.shot_structure.is_empty()
+            || snapshot
+                .shot_structure
+                .iter()
+                .all(|shot| shot.rendered_frame_count.is_some()));
     if snapshot.render_job_id != workspace_id
         || snapshot.render_job_id.get_version_num() != 4
         || snapshot.revision == 0
@@ -2533,10 +2686,67 @@ fn validate_snapshot(
         || !valid_failure
         || !valid_artifact
         || !valid_progress
+        || !valid_shots
     {
         return Err(job_unavailable());
     }
     Ok(())
+}
+
+fn valid_shot_structure(shots: &[MotionRenderShotSnapshot]) -> bool {
+    // Checkpoints written before T2.2 deserialize to an empty table. They stay
+    // readable; every newly prepared job writes a non-empty table.
+    if shots.is_empty() {
+        return true;
+    }
+    let rendered = shots[0].rendered_frame_count.is_some();
+    let mut declared_start = 0_u32;
+    let mut rendered_start = 0_u32;
+    for (offset, shot) in shots.iter().enumerate() {
+        let Ok(index) = u32::try_from(offset + 1) else {
+            return false;
+        };
+        if shot.index != index
+            || shot.start_frame != declared_start
+            || shot.frame_count == 0
+            || shot.part.as_ref().is_some_and(|part| {
+                part.is_empty()
+                    || part.len() > 80
+                    || !part.bytes().all(|byte| {
+                        byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'
+                    })
+            })
+            || shot.narration_seconds.is_some_and(|seconds| {
+                !seconds.is_finite()
+                    || seconds <= 0.0
+                    || seconds
+                        > f64::from(shot.frame_count) / f64::from(MOTION_FRAMES_PER_SECOND) + 0.5
+            })
+        {
+            return false;
+        }
+        declared_start = match declared_start.checked_add(shot.frame_count) {
+            Some(value) => value,
+            None => return false,
+        };
+        match (shot.rendered_start_frame, shot.rendered_frame_count) {
+            (Some(start), Some(frames)) if rendered && frames > 0 => {
+                if start != rendered_start || start.abs_diff(shot.start_frame) > 1 {
+                    return false;
+                }
+                rendered_start = match rendered_start.checked_add(frames) {
+                    Some(value) => value,
+                    None => return false,
+                };
+                if rendered_start.abs_diff(declared_start) > 1 {
+                    return false;
+                }
+            }
+            (None, None) if !rendered => {}
+            _ => return false,
+        }
+    }
+    true
 }
 
 fn locked_style(id: &str) -> Result<LockedStyle, MotionVideoStudioError> {

@@ -77,8 +77,12 @@ def main() -> int:
         "every --disable-gpu launch needs --enable-unsafe-swiftshader beside "
         f"it: {disables} vs {allows}"
     )
+    assert "--allow-file-access-from-files" not in source, (
+        "runtime data must be inlined into the composed release; the render "
+        "sandbox may not widen file-origin access"
+    )
     print("BM-02 Node Worker rejection tests passed")
-    print("executed checks: 4")
+    print("executed checks: 5")
     return 0
 
 

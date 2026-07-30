@@ -83,6 +83,10 @@ export class TestHarnessVideoStudio implements MaterialVideoStudioGateway {
     return { state: "opened", modelId: "qwen3.7-max-2026-06-08" };
   }
 
+  async updateView(): Promise<void> {}
+
+  async close(): Promise<void> {}
+
   async jobs(): Promise<readonly MaterialRenderJobSnapshot[]> {
     return [];
   }
@@ -160,6 +164,7 @@ export class TestHarnessVideoStudio implements MaterialVideoStudioGateway {
       progressPercent: 20,
       subject,
       styleDisplayName,
+      shotStructure: [],
       artifactId: null,
       artifactSizeBytes: null,
       failureCode: null,

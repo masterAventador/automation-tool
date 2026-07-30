@@ -107,8 +107,10 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
 
     const apiKey = process.env.AUTOMATION_TOOL_T36_MODEL_KEY;
     const evidenceVideo = process.env.AUTOMATION_TOOL_T36_EVIDENCE_VIDEO;
+    const evidenceShots = process.env.AUTOMATION_TOOL_T36_EVIDENCE_SHOTS;
     assert.ok(apiKey, "T36 acceptance needs a real video-creation model key");
     assert.ok(evidenceVideo, "T36 acceptance needs an evidence output path");
+    assert.ok(evidenceShots, "T36 acceptance needs a shot-structure evidence output path");
 
     // Three outcomes need three different fixes and look alike from a bare wait
     // on the workbench heading: mounted, blocked by the startup gate, or still
@@ -287,6 +289,22 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
       percentsSeen.length >= 2 && percentsSeen[percentsSeen.length - 1] === 100,
       `progress never advanced through distinct values to 100: ${JSON.stringify(percentsSeen)}`,
     );
+
+    // T2.2: read the product checkpoint after the user path settles. These are
+    // not the answer bytes echoed back by the child: the native RenderJob owns
+    // the declared table, and fills renderedFrameCount only after ffprobe has
+    // decoded each encoded segment immediately before cleanup.
+    const jobs: unknown = await browser.tauri.execute(({ core }) =>
+      core.invoke("get_motion_render_jobs"),
+    );
+    assert.ok(Array.isArray(jobs) && jobs.length === 1, "T36 must settle exactly one RenderJob");
+    const settled = jobs[0] as Record<string, unknown>;
+    assert.equal(settled.status, "succeeded", "the retained RenderJob must be terminal success");
+    assert.ok(
+      Array.isArray(settled.shotStructure) && settled.shotStructure.length > 0,
+      "the retained RenderJob carries no product shot table",
+    );
+    writeFileSync(evidenceShots, JSON.stringify(settled.shotStructure), { flag: "wx" });
 
     step("film finished, opening the artifact");
     // --- Preview, in the App, through the existing player -------------------

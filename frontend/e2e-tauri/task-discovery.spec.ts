@@ -100,5 +100,9 @@ describe("Task discovery production-path acceptance", () => {
     }
     const text = await body.getText();
     assert.doesNotMatch(text, /acceptance-author-|产品登录|注册账号|账号登录/);
+
+    // The acceptance subject includes App-owned sidecar lifecycle: let the App
+    // close the signed Executor before WebdriverIO tears down its session.
+    await browser.tauri.execute(({ core }) => core.invoke("exit_app_for_acceptance"));
   });
 });

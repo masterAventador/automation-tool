@@ -51,6 +51,10 @@ from build_motion_catalog_release import (  # noqa: E402
 from prepare_video_runtime import install as install_resources  # noqa: E402
 from prepare_video_runtime import prepare as prepare_video_runtime  # noqa: E402
 from release_assembly import MOTION_CATALOG_RESOURCES  # noqa: E402
+from motion_shot_structure import (  # noqa: E402
+    describe_shots,
+    require_declared_shot_boundaries,
+)
 from run_e4_14_acceptance import require_port_available, start_control_plane  # noqa: E402
 from run_i2_13_acceptance import BACKEND_ROOT, REPOSITORY_ROOT, compose_command  # noqa: E402
 from run_vf_06_acceptance import (  # noqa: E402
@@ -299,7 +303,10 @@ def prepare_resources() -> None:
 
 
 def run_desktop_acceptance(
-    api_key: str, evidence_video: Path, base_environment: dict[str, str]
+    api_key: str,
+    evidence_video: Path,
+    evidence_shots: Path,
+    base_environment: dict[str, str],
 ) -> None:
     configuration = json.loads(TAURI_CONFIG.read_text(encoding="utf-8"))
     windows = configuration.get("app", {}).get("windows", [])
@@ -309,7 +316,6 @@ def run_desktop_acceptance(
         or windows[0].get("visible") is not False
     ):
         raise RuntimeError("T36 acceptance must use its hidden isolated App")
-    private_app_data = app_data_directory()
     port = unused_loopback_port()
     environment = {
         key: value for key, value in base_environment.items() if key != "TAURI_WEBDRIVER_PORT"
@@ -319,6 +325,7 @@ def run_desktop_acceptance(
             "TAURI_WEBDRIVER_PORT": str(port),
             "AUTOMATION_TOOL_T36_MODEL_KEY": api_key,
             "AUTOMATION_TOOL_T36_EVIDENCE_VIDEO": str(evidence_video),
+            "AUTOMATION_TOOL_T36_EVIDENCE_SHOTS": str(evidence_shots),
         }
     )
     try:
@@ -358,7 +365,7 @@ def run_desktop_acceptance(
             raise RuntimeError("T36 failed to restore production Vite assets")
 
 
-def inspect_film(video: Path) -> None:
+def inspect_film(video: Path, evidence_shots: Path | None = None) -> None:
     """The evidence must be a real film, not a well-formed still picture.
 
     A composition that fails to animate encodes into an MP4 of the right length
@@ -378,6 +385,11 @@ def inspect_film(video: Path) -> None:
     print(f"T36 evidence film: {json.dumps(stream, ensure_ascii=False)}")
     if int(stream["nb_read_frames"]) < 2:
         raise RuntimeError("the App produced a single-frame film")
+    if evidence_shots is not None:
+        inspect_shot_structure(
+            evidence_shots,
+            final_frame_count=int(stream["nb_read_frames"]),
+        )
     # PC-18: a film is now joined from shots captured on different stages —
     # 1920x1080 for most of the catalog, 1080x1920 for three, 640x360 at factor
     # 2 for the built-in template. A delivered file is one size throughout, and
@@ -408,6 +420,68 @@ def inspect_film(video: Path) -> None:
         raise RuntimeError("the film carries no narration audio track (PC-26)")
     print(f"T36 evidence narration: {json.dumps(audio_streams[0], ensure_ascii=False)}")
     require_no_repeated_stretch(video, float(stream["duration"]))
+
+
+def inspect_shot_structure(path: Path, *, final_frame_count: int) -> None:
+    """Compare the accepted table to counts decoded from real segment MP4s."""
+    try:
+        structure = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("T36 shot-structure evidence is unreadable") from error
+    if not isinstance(structure, list) or not structure:
+        raise RuntimeError("T36 RenderJob carries no shot structure")
+    declared: list[int] = []
+    rendered: list[int] = []
+    expected_start = 0
+    for expected_index, shot in enumerate(structure, start=1):
+        if not isinstance(shot, dict):
+            raise RuntimeError("T36 shot structure contains a non-object")
+        declared_frames = shot.get("frameCount")
+        rendered_frames = shot.get("renderedFrameCount")
+        if (
+            shot.get("index") != expected_index
+            or shot.get("startFrame") != expected_start
+            or type(declared_frames) is not int
+            or type(rendered_frames) is not int
+        ):
+            raise RuntimeError("T36 shot structure has an invalid declared/measured row")
+        declared.append(declared_frames)
+        rendered.append(rendered_frames)
+        expected_start += declared_frames
+    frames_per_second = json.loads(
+        (ROOT / "contracts/video/motion-storyboard-duration.v1.json").read_text(
+            encoding="utf-8"
+        )
+    )["framesPerSecond"]
+    measured_shots = require_declared_shot_boundaries(
+        declared_frames=declared,
+        rendered_frames=rendered,
+        frames_per_second=frames_per_second,
+        tolerance_frames=1,
+    )
+    if sum(rendered) != final_frame_count:
+        raise RuntimeError(
+            f"T36 decoded shots total {sum(rendered)} frames but the delivered "
+            f"artifact decodes {final_frame_count}"
+        )
+    print("T36 evidence declared-vs-rendered shot structure (±1 frame):")
+    print(describe_shots(measured_shots))
+    print(
+        "T36 evidence shot metadata:",
+        json.dumps(
+            [
+                {
+                    "index": shot["index"],
+                    "part": shot.get("part"),
+                    "narrationSeconds": shot.get("narrationSeconds"),
+                    "declaredFrames": shot["frameCount"],
+                    "renderedFrames": shot["renderedFrameCount"],
+                }
+                for shot in structure
+            ],
+            ensure_ascii=False,
+        ),
+    )
 
 
 def require_no_repeated_stretch(video: Path, duration_seconds: float) -> None:
@@ -488,6 +562,7 @@ def main() -> int:
         shutil.rmtree(EVIDENCE)
     EVIDENCE.mkdir(parents=True)
     evidence_video = EVIDENCE / "t36-one-sentence.mp4"
+    evidence_shots = EVIDENCE / "t36-shot-structure.json"
 
     private_app_data = app_data_directory()
     if private_app_data.exists():
@@ -529,8 +604,8 @@ def main() -> int:
         )
         print(f"[T36] Starting Control Plane on isolated port {control_plane_port}")
         server = start_control_plane(port=control_plane_port, environment=environment)
-        run_desktop_acceptance(api_key, evidence_video, environment)
-        inspect_film(evidence_video)
+        run_desktop_acceptance(api_key, evidence_video, evidence_shots, environment)
+        inspect_film(evidence_video, evidence_shots)
         run_failed = False
     finally:
         if server is not None:

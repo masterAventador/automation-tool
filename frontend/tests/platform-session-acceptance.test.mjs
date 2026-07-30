@@ -23,6 +23,7 @@ test("B5-13 drives platform health and handling through one hidden real App", as
   assert.match(config, /"visible": false/u);
   assert.match(spec, /openWorkbenchSection\("账号与平台"\)/u);
   assert.match(spec, /toHaveText\("账号与平台"\)/u);
+  assert.doesNotMatch(spec, /li=平台状态/u);
   assert.match(spec, /button=打开登录处理/u);
   assert.match(spec, /button=我已处理，重新检查/u);
   assert.match(spec, /exit_app_for_acceptance/u);

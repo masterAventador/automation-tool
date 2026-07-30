@@ -38,6 +38,12 @@ P9-03 将 release Executor 包根从可写 AppData 分离到只读 `.app/Content
 
 P9-04 复用同一个 release `resource_dir()/local-executor/package` 组合根，不新增 IPC、Capability 或安装器实现。`tauri.windows-candidate.conf.json` 只选择 `currentUser` NSIS，继承生产 identity、可见窗口、`withGlobalTauri=false`、唯一空权限 `main` Capability、CSP 和 updater passive 模式，也不写 `certificateThumbprint`/`signCommand`。`pnpm test:p9-04-windows-package` 在原生 Windows x86_64 从 P9-02 构建临时 Executor、一次性 Manifest 和无测试 Feature release；安装验收才使用独立 product/identifier 防止触碰正式安装，并要求非提权用户、预期 `NotSigned`、二进制版本/哈希、HKCU-only 注册表、Resources 逐文件一致、专属卸载和零残留。Windows 实机执行前这些保持工程契约，正式发布还必须补 Authenticode。
 
+PC-16 的 Windows 实机入口是 `pnpm test:pc16-windows-package`：仅在原生
+Windows x86_64、非提权用户下构建隔离的 `currentUser` NSIS，资源仍复用生产 release
+装配链。安装后会逐文件复算 `motion-catalog` 的 bytes/SHA-256，核对 134 个 HTML
+零件与 Noto Sans SC 全字符集字体，再从已安装 App 走 T36 一句话出片并执行卸载与残留
+清理。该入口在 Windows 真机全绿前只算 fail-closed 的验收准备，不算跨平台完成。
+
 P9-05 的 `scripts/audit-release-bundle.mjs` 递归审计最终 `.app` 或 Windows 安装根，而不只看主二进制和 Vite `dist`。平台布局固定到 release Resources 的 signed Executor；全树拒绝链接/特殊文件、测试 Harness/WDIO、1420 调试 origin、安装探针、开发验证公钥、测试 Session/private key，以及浏览器 Profile/Cookie、SQLite、日志、诊断、上传下载和用户素材。P9-03 现在同时扫描构建 `.app` 与 DMG 只读挂载副本，真实 macOS 两份均为 304 个文件/204,479,153 bytes；P9-04 在安装后、卸载前调用同一 Windows 规则。`pnpm test:p9-05-package-audit` 自动选择当前平台候选，Windows 实机未执行前不声称双平台完成。
 
 P9-06 的 `pnpm test:p9-06-macos-clean-install --dmg <绝对路径> --evidence <绝对路径>` 是唯一会显示正式 App/外部浏览器并等待人工扫码的 macOS 设备入口，因此不接入自动 CI。它只接受 Developer ID、stapled notarization 与 Gatekeeper 全部通过的现成 DMG，在不存在既有 App/AppData 的非 root 交互会话中安装到专属用户级 App 名称；App 启动环境没有 Python、虚拟环境、仓库配置或开发变量。操作者使用自有或授权测试账号完成无写入副作用的 browse 旅程时，runner 核对 App 后代中的 signed Executor、唯一 Chrome/Edge、App 私有 Profile 与零 Python，再经正常退出/二次启动记录登录态、任务快照和不重复动作。证据 JSON 权限固定 `0600` 且不保存 PID、命令行、路径、Cookie、页面正文或账号标识；本轮 App 与 AppData 最终移入废纸篓。当前普通 ad-hoc 包、缺少授权账号或 P9 本地服务/设备注册条件都会固定失败，不能冒充设备通过。

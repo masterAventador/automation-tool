@@ -260,11 +260,61 @@ async fn open_material_video_studio(
     orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
     settings: tauri::State<'_, model_service_settings::ProductionModelServiceSettings>,
     workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+    view: material_video_studio::MaterialVideoStudioView,
 ) -> Result<
     material_video_studio::MaterialVideoStudioSnapshot,
     material_video_studio::MaterialVideoStudioError,
 > {
-    material_video_studio::open(&app, &orchestrator, &settings, &workspaces)
+    material_video_studio::open(&app, &orchestrator, &settings, &workspaces, view)
+}
+
+#[tauri::command]
+fn update_material_video_studio_view(
+    app: tauri::AppHandle,
+    view: material_video_studio::MaterialVideoStudioView,
+) -> Result<(), material_video_studio::MaterialVideoStudioError> {
+    material_video_studio::update_embedded_view(&app, view)
+}
+
+#[tauri::command]
+fn close_material_video_studio(
+    app: tauri::AppHandle,
+    orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+) -> Result<(), material_video_studio::MaterialVideoStudioError> {
+    material_video_studio::close_embedded_view(&app, &orchestrator, &workspaces)
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+fn exercise_material_video_studio_for_acceptance(
+    app: tauri::AppHandle,
+) -> Result<
+    material_video_studio::MaterialVideoStudioAcceptanceSnapshot,
+    material_video_studio::MaterialVideoStudioError,
+> {
+    material_video_studio::exercise_embedded_view_for_acceptance(app)
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+fn inspect_material_video_studio_exercise_for_acceptance() -> Result<
+    material_video_studio::MaterialVideoStudioAcceptanceSnapshot,
+    material_video_studio::MaterialVideoStudioError,
+> {
+    material_video_studio::inspect_embedded_view_exercise_for_acceptance()
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+fn inspect_material_video_studio_cleanup_for_acceptance(
+    app: tauri::AppHandle,
+    orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
+) -> Result<
+    material_video_studio::MaterialVideoStudioCleanupSnapshot,
+    material_video_studio::MaterialVideoStudioError,
+> {
+    material_video_studio::cleanup_snapshot_for_acceptance(&app, &orchestrator)
 }
 
 #[tauri::command]
@@ -805,7 +855,6 @@ fn run_motion_render_job(
         // person watching the progress bar sees the film being made in the
         // order they will watch it.
         let mut encoded = Vec::with_capacity(segments.len());
-        let mut total_frames: u32 = 0;
         for (index, segment) in segments.iter().enumerate() {
             if motion_video_studio::cancellation_requested(&workspaces, render_job_id)
                 .map_err(|_| MotionRenderStageFailure::Render)?
@@ -911,9 +960,6 @@ fn run_motion_render_job(
                 &film_canvas,
                 segment.frame_count(),
             )?;
-            total_frames = total_frames
-                .checked_add(segment.frame_count())
-                .ok_or(MotionRenderStageFailure::Encoding)?;
             encoded.push(encoded_segment);
         }
         motion_video_studio::advance(
@@ -925,15 +971,29 @@ fn run_motion_render_job(
             None,
         )
         .map_err(|_| MotionRenderStageFailure::Encoding)?;
-        motion_video_studio::join_motion_film(
+        let expected_segment_frames = segments
+            .iter()
+            .map(motion_video_studio::MotionRenderSegment::frame_count)
+            .collect::<Vec<_>>();
+        let rendered_frames = motion_video_studio::join_motion_film(
             &encoded,
             &film,
             &film_canvas,
             &ffmpeg,
             &ffprobe,
-            total_frames,
+            &expected_segment_frames,
         )
         .map_err(|_| MotionRenderStageFailure::Encoding)?;
+        motion_video_studio::record_rendered_shot_frames(
+            &workspaces,
+            render_job_id,
+            &rendered_frames,
+        )
+        .map_err(|_| MotionRenderStageFailure::Encoding)?;
+        let total_frames = rendered_frames
+            .iter()
+            .try_fold(0_u32, |total, frames| total.checked_add(*frames))
+            .ok_or(MotionRenderStageFailure::Encoding)?;
         // PC-26: lay each shot's narration onto the joined film. A silent film
         // returns immediately, so the pre-narration pipeline is byte-identical.
         motion_video_studio::mix_narration_into_film(
@@ -4574,6 +4634,8 @@ pub fn run() {
         clear_model_service,
         test_model_service_connection,
         open_material_video_studio,
+        update_material_video_studio_view,
+        close_material_video_studio,
         get_material_render_jobs,
         cancel_material_render_job,
         read_material_video_artifact,
@@ -4637,6 +4699,8 @@ pub fn run() {
         clear_model_service,
         test_model_service_connection,
         open_material_video_studio,
+        update_material_video_studio_view,
+        close_material_video_studio,
         get_material_render_jobs,
         cancel_material_render_job,
         read_material_video_artifact,
@@ -4731,6 +4795,11 @@ pub fn run() {
         clear_model_service,
         test_model_service_connection,
         open_material_video_studio,
+        update_material_video_studio_view,
+        close_material_video_studio,
+        exercise_material_video_studio_for_acceptance,
+        inspect_material_video_studio_exercise_for_acceptance,
+        inspect_material_video_studio_cleanup_for_acceptance,
         get_material_render_jobs,
         cancel_material_render_job,
         read_material_video_artifact,
@@ -4755,6 +4824,16 @@ pub fn run() {
             tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
         ) {
             app_logging::record(app_logging::DesktopLogEvent::AppShutdownStarted);
+            if let (Some(orchestrator), Some(workspaces)) = (
+                app_handle.try_state::<local_video_orchestrator::LocalVideoOrchestrator>(),
+                app_handle.try_state::<video_job_workspace::VideoJobWorkspaceStore>(),
+            ) {
+                let _ = material_video_studio::close_embedded_view(
+                    app_handle,
+                    &orchestrator,
+                    &workspaces,
+                );
+            }
             if let Some(platform) =
                 app_handle.try_state::<executor_platform::ExecutorPlatformService>()
             {

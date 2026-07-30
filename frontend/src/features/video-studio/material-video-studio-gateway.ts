@@ -3,6 +3,15 @@ export interface MaterialVideoStudioSnapshot {
   readonly modelId: "deepseek-v4-pro" | "glm-5.2" | "qwen3.7-max-2026-06-08";
 }
 
+/** Logical child-WebView geometry; it contains no private service address. */
+export interface MaterialVideoStudioView {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly visible: boolean;
+}
+
 export type MaterialRenderJobStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 export interface MaterialRenderJobSnapshot {
@@ -75,6 +84,16 @@ export type MotionRenderJobStatus =
   | "failed"
   | "cancelled";
 
+export interface MotionRenderShotSnapshot {
+  readonly index: number;
+  readonly startFrame: number;
+  readonly frameCount: number;
+  readonly renderedStartFrame: number | null;
+  readonly renderedFrameCount: number | null;
+  readonly part: string | null;
+  readonly narrationSeconds: number | null;
+}
+
 export interface MotionRenderJobSnapshot {
   readonly renderJobId: string;
   readonly revision: number;
@@ -82,6 +101,8 @@ export interface MotionRenderJobSnapshot {
   readonly progressPercent: number;
   readonly subject: string;
   readonly styleDisplayName: string;
+  /** The authored table plus counts decoded from each encoded shot. */
+  readonly shotStructure: readonly MotionRenderShotSnapshot[];
   readonly artifactId: string | null;
   readonly artifactSizeBytes: number | null;
   readonly failureCode:
@@ -144,7 +165,9 @@ export class MaterialVideoStudioGatewayError extends Error {
 }
 
 export interface MaterialVideoStudioGateway {
-  open(): Promise<MaterialVideoStudioSnapshot>;
+  open(view: MaterialVideoStudioView): Promise<MaterialVideoStudioSnapshot>;
+  updateView(view: MaterialVideoStudioView): Promise<void>;
+  close(): Promise<void>;
   jobs(): Promise<readonly MaterialRenderJobSnapshot[]>;
   cancel(renderJobId: string): Promise<void>;
   deleteArtifact(artifactId: string): Promise<void>;

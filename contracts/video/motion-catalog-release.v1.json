@@ -22,7 +22,7 @@
     },
     "motionAssetOverlay": {
       "path": "contracts/quality/motion-asset-overlay.v1.json",
-      "sha256": "f2686293f9ea54f2e4441f0c93f2c716466958c5364e8b316e5472cc549a94bb"
+      "sha256": "cdea8048a2fee99410c152249654c5a6918fc9779d409d07ade921ce085b63c8"
     }
   },
   "trademarkScan": {
@@ -88,8 +88,396 @@
       "__hyperframes"
     ]
   },
+  "contentRewrites": {
+    "items": [
+      {
+        "name": "code-snippet-dark-2026",
+        "document": "items/code-snippet-dark-2026/code-snippet-dark-2026.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-dark-2026-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-dark-modern",
+        "document": "items/code-snippet-dark-modern/code-snippet-dark-modern.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-dark-modern-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-dark-plus",
+        "document": "items/code-snippet-dark-plus/code-snippet-dark-plus.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-dark-plus-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-high-contrast",
+        "document": "items/code-snippet-high-contrast/code-snippet-high-contrast.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-high-contrast-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-high-contrast-light",
+        "document": "items/code-snippet-high-contrast-light/code-snippet-high-contrast-light.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-high-contrast-light-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-light-2026",
+        "document": "items/code-snippet-light-2026/code-snippet-light-2026.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-light-2026-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-light-modern",
+        "document": "items/code-snippet-light-modern/code-snippet-light-modern.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-light-modern-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-light-plus",
+        "document": "items/code-snippet-light-plus/code-snippet-light-plus.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-light-plus-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-monokai",
+        "document": "items/code-snippet-monokai/code-snippet-monokai.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-monokai-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-solarized-light",
+        "document": "items/code-snippet-solarized-light/code-snippet-solarized-light.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-solarized-light-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-visual-studio-dark",
+        "document": "items/code-snippet-visual-studio-dark/code-snippet-visual-studio-dark.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-visual-studio-dark-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-visual-studio-light",
+        "document": "items/code-snippet-visual-studio-light/code-snippet-visual-studio-light.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-visual-studio-light-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "liquid-glass-notification",
+        "document": "items/liquid-glass-notification/liquid-glass-notification.html",
+        "replacements": [
+          {
+            "literal": "LiquidGlass.LiquidGlassCanvas",
+            "replacement": "NeutralGlass.Canvas",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "liquid-glass-widgets",
+        "document": "items/liquid-glass-widgets/liquid-glass-widgets.html",
+        "replacements": [
+          {
+            "literal": "LiquidGlass.LiquidGlassCanvas",
+            "replacement": "NeutralGlass.Canvas",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "texture-mask-text",
+        "document": "items/texture-mask-text/texture-mask-text.html",
+        "replacements": [
+          {
+            "literal": "/assets/texture-mask-text/masks/",
+            "replacement": "masks/",
+            "occurrences": 132
+          }
+        ]
+      },
+      {
+        "name": "vfx-liquid-background",
+        "document": "items/vfx-liquid-background/vfx-liquid-background.html",
+        "replacements": [
+          {
+            "literal": "      data-height=\"1080\"\n    >",
+            "replacement": "      data-height=\"1080\"\n      style=\"position:relative;width:1920px;height:1080px;overflow:hidden\"\n    >",
+            "occurrences": 1
+          },
+          {
+            "literal": "        setTimeout(function () {",
+            "replacement": "        (function () {",
+            "occurrences": 1
+          },
+          {
+            "literal": "        }, 0);",
+            "replacement": "        })();",
+            "occurrences": 1
+          },
+          {
+            "literal": "      <!-- ═══════════════ STYLES ═══════════════ -->",
+            "replacement": "      <!-- App release deterministic liquid fallback -->\n      <div id=\"app-liquid-fallback\" style=\"position:absolute;left:-420px;top:90px;width:900px;height:900px;border-radius:50%;background:radial-gradient(circle at 35% 35%,rgba(125,211,252,.82),rgba(99,102,241,.46) 42%,rgba(15,23,42,0) 72%);filter:blur(40px);opacity:.24;z-index:20;pointer-events:none\"></div>\n      <!-- ═══════════════ RELEASE STYLES ═══════════════ -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "      <script src=\"../../offline-deps/js/gsap-3.14.2/gsap.min.js\"></script>",
+            "replacement": "      <script type=\"text/javascript\" src=\"../../offline-deps/js/gsap-3.14.2/gsap.min.js\"></script>\n      <script>\n        window.__timelines = window.__timelines || {};\n        var appLiquidFallbackTimeline = gsap.timeline({ paused: true });\n        appLiquidFallbackTimeline.fromTo(\n          \"#app-liquid-fallback\",\n          { x: 0, scale: 0.75, opacity: 0.24 },\n          { x: 1900, scale: 1.3, opacity: 0.68, duration: 12, ease: \"sine.inOut\" },\n          0,\n        );\n        window.__timelines[\"app-liquid-fallback\"] = appLiquidFallbackTimeline;\n      </script>",
+            "occurrences": 1
+          },
+          {
+            "literal": "          var tl = gsap.timeline({ paused: true });",
+            "replacement": "          var releaseTimeline = gsap.timeline({ paused: true });\n          var tl = releaseTimeline;\n          tl.fromTo(\n            canvas,\n            { rotation: -1.5, scale: 1.03, filter: \"hue-rotate(0deg)\" },\n            {\n              rotation: 1.5,\n              scale: 1.1,\n              filter: \"hue-rotate(24deg)\",\n              duration: 12,\n              ease: \"sine.inOut\",\n            },\n            0,\n          );\n          tl.fromTo(\n            \"#app-liquid-fallback\",\n            { x: 0, scale: 0.75, opacity: 0.24 },\n            { x: 1900, scale: 1.3, opacity: 0.68, duration: 12, ease: \"sine.inOut\" },\n            0,\n          );",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "vfx-portal",
+        "document": "items/vfx-portal/vfx-portal.html",
+        "replacements": [
+          {
+            "literal": "document.getElementById(\"error-overlay\").classList.add(\"visible\");",
+            "replacement": "document.getElementById(\"error-overlay\").remove();",
+            "occurrences": 1
+          },
+          {
+            "literal": "ctxLight.drawElementImage(panelLight, 0, 0, W, H);",
+            "replacement": "ctxLight.fillStyle = \"#f7f9fc\"; ctxLight.fillRect(0, 0, W, H); var lightGradient = ctxLight.createLinearGradient(0, 0, W, H); lightGradient.addColorStop(0, \"#dbeafe\"); lightGradient.addColorStop(1, \"#f8fafc\"); ctxLight.fillStyle = lightGradient; ctxLight.fillRect(80, 80, W - 160, H - 160);",
+            "occurrences": 1
+          },
+          {
+            "literal": "ctxDark.drawElementImage(panelDark, 0, 0, W, H);",
+            "replacement": "ctxDark.fillStyle = \"#050816\"; ctxDark.fillRect(0, 0, W, H); var darkGradient = ctxDark.createLinearGradient(0, 0, W, H); darkGradient.addColorStop(0, \"#172554\"); darkGradient.addColorStop(1, \"#020617\"); ctxDark.fillStyle = darkGradient; ctxDark.fillRect(80, 80, W - 160, H - 160);",
+            "occurrences": 1
+          },
+          {
+            "literal": "if (isSupported()) {",
+            "replacement": "if (typeof capturePanels === \"function\") {",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "vfx-shatter",
+        "document": "items/vfx-shatter/vfx-shatter.html",
+        "replacements": [
+          {
+            "literal": "document.getElementById(\"error-overlay\").classList.add(\"visible\");",
+            "replacement": "document.getElementById(\"error-overlay\").remove();",
+            "occurrences": 1
+          },
+          {
+            "literal": "ctxA.drawElementImage(panelA, 0, 0, W, H);",
+            "replacement": "ctxA.fillStyle = \"#08111f\"; ctxA.fillRect(0, 0, W, H); var gradientA = ctxA.createLinearGradient(0, 0, W, H); gradientA.addColorStop(0, \"#0f766e\"); gradientA.addColorStop(1, \"#0f172a\"); ctxA.fillStyle = gradientA; ctxA.fillRect(96, 96, W - 192, H - 192);",
+            "occurrences": 1
+          },
+          {
+            "literal": "ctxB.drawElementImage(panelB, 0, 0, W, H);",
+            "replacement": "ctxB.fillStyle = \"#160b2d\"; ctxB.fillRect(0, 0, W, H); var gradientB = ctxB.createLinearGradient(0, H, W, 0); gradientB.addColorStop(0, \"#7c3aed\"); gradientB.addColorStop(1, \"#0f172a\"); ctxB.fillStyle = gradientB; ctxB.fillRect(96, 96, W - 192, H - 192);",
+            "occurrences": 1
+          }
+        ]
+      }
+    ]
+  },
+  "runtimeDataInlining": {
+    "encoding": "data-url-base64",
+    "items": [
+      {
+        "name": "spain-map",
+        "document": "items/spain-map/spain-map.html",
+        "references": [
+          {
+            "literal": "../../offline-deps/data/es-atlas-0.6.0/es/autonomous_regions.json",
+            "source": "offline-deps/data/es-atlas-0.6.0/es/autonomous_regions.json",
+            "mediaType": "application/json"
+          }
+        ]
+      },
+      {
+        "name": "us-map",
+        "document": "items/us-map/us-map.html",
+        "references": [
+          {
+            "literal": "../../offline-deps/data/us-atlas-3.0.1/states-10m.json",
+            "source": "offline-deps/data/us-atlas-3.0.1/states-10m.json",
+            "mediaType": "application/json"
+          }
+        ]
+      },
+      {
+        "name": "us-map-bubble",
+        "document": "items/us-map-bubble/us-map-bubble.html",
+        "references": [
+          {
+            "literal": "../../offline-deps/data/us-atlas-3.0.1/states-10m.json",
+            "source": "offline-deps/data/us-atlas-3.0.1/states-10m.json",
+            "mediaType": "application/json"
+          }
+        ]
+      },
+      {
+        "name": "us-map-flow",
+        "document": "items/us-map-flow/us-map-flow.html",
+        "references": [
+          {
+            "literal": "../../offline-deps/data/us-atlas-3.0.1/states-10m.json",
+            "source": "offline-deps/data/us-atlas-3.0.1/states-10m.json",
+            "mediaType": "application/json"
+          }
+        ]
+      },
+      {
+        "name": "world-map",
+        "document": "items/world-map/world-map.html",
+        "references": [
+          {
+            "literal": "../../offline-deps/data/world-atlas-2.0.2/countries-110m.json",
+            "source": "offline-deps/data/world-atlas-2.0.2/countries-110m.json",
+            "mediaType": "application/json"
+          }
+        ]
+      },
+      {
+        "name": "vfx-iphone-device",
+        "document": "items/vfx-iphone-device/vfx-iphone-device.html",
+        "references": [
+          {
+            "literal": "models/portable-device.glb",
+            "source": "items/vfx-iphone-device/models/portable-device.glb",
+            "mediaType": "model/gltf-binary"
+          },
+          {
+            "literal": "models/portable-display.glb",
+            "source": "items/vfx-iphone-device/models/portable-display.glb",
+            "mediaType": "model/gltf-binary"
+          }
+        ]
+      }
+    ]
+  },
   "generated": {
     "fileCount": 337,
-    "aggregateSha256": "c88975a1fa19c4c4d16d5abe89acf7ece5b812517150079d22506fabb09bc9e4"
+    "aggregateSha256": "fc0330a7f3bc1a81fdc2b4704a52588f2931221053629bed3c1fe637f70d962c"
   }
 }

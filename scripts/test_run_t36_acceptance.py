@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import tempfile
 import types
@@ -124,6 +125,72 @@ class AuthoringExecutorCacheTests(unittest.TestCase):
             remove_tree.call_args_list[0],
             call(ensured_cache_path, ignore_errors=True),
         )
+
+
+class ShotStructureEvidenceTests(unittest.TestCase):
+    def test_t36_accepts_real_decoded_counts_with_one_frame_boundary_tolerance(
+        self,
+    ) -> None:
+        run_t36_acceptance = _load_run_t36_acceptance()
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / "shots.json"
+            evidence.write_text(
+                json.dumps(
+                    [
+                        {
+                            "index": 1,
+                            "startFrame": 0,
+                            "frameCount": 90,
+                            "renderedStartFrame": 0,
+                            "renderedFrameCount": 90,
+                            "part": None,
+                            "narrationSeconds": 2.5,
+                        },
+                        {
+                            "index": 2,
+                            "startFrame": 90,
+                            "frameCount": 144,
+                            "renderedStartFrame": 90,
+                            "renderedFrameCount": 145,
+                            "part": "lt-bold-block",
+                            "narrationSeconds": 4.24,
+                        },
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            run_t36_acceptance.inspect_shot_structure(
+                evidence,
+                final_frame_count=235,
+            )
+
+    def test_t36_rejects_a_final_film_that_does_not_equal_its_decoded_shots(
+        self,
+    ) -> None:
+        run_t36_acceptance = _load_run_t36_acceptance()
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / "shots.json"
+            evidence.write_text(
+                json.dumps(
+                    [
+                        {
+                            "index": 1,
+                            "startFrame": 0,
+                            "frameCount": 90,
+                            "renderedStartFrame": 0,
+                            "renderedFrameCount": 90,
+                            "part": None,
+                            "narrationSeconds": None,
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "delivered artifact"):
+                run_t36_acceptance.inspect_shot_structure(
+                    evidence,
+                    final_frame_count=89,
+                )
 
 
 if __name__ == "__main__":

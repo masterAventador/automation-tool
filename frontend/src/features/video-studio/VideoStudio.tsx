@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   Alert,
@@ -23,6 +23,7 @@ import {
   type MaterialRenderJobSnapshot,
   type MaterialVideoStudioErrorCode,
   type MaterialVideoStudioGateway,
+  type MaterialVideoStudioView,
   type MotionRenderJobSnapshot,
   type MotionRenderJobStatus,
   type MotionVideoBeatDraft,
@@ -412,7 +413,7 @@ const AUTHORING_ERRORS = {
     "自动编排要用的程序文件没有通过完整性校验，视频没有开始制作。这不是描述的问题，也不是重试能解决的：请重新安装 App；重装之后仍然这样的话，请反馈给我们。",
 } as const satisfies Partial<Record<MaterialVideoStudioErrorCode, string>>;
 
-const OPEN_ERRORS: Record<MaterialVideoStudioErrorCode, string> = {
+const MATERIAL_STUDIO_ERRORS: Record<MaterialVideoStudioErrorCode, string> = {
   configuration_required: "请先到“设置与诊断”配置并测试文案模型服务。",
   ...AUTHORING_ERRORS,
   process_unavailable: "本机视频制作服务暂时无法启动，请稍后重试。",
@@ -447,8 +448,115 @@ const BRIEF_ERRORS: Partial<Record<MaterialVideoStudioErrorCode, string>> = {
 
 const BRIEF_SUBMIT_FALLBACK = "一句话自动制作暂时无法提交，请稍后重试。";
 
-/** Ties the 打开完整制作界面 button to the note saying why it is greyed out. */
-const OPEN_STUDIO_HINT_ID = "video-studio-open-full-hint";
+function materialStudioView(node: HTMLElement): MaterialVideoStudioView {
+  const bounds = node.getBoundingClientRect();
+  return {
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    visible:
+      bounds.bottom > 0 &&
+      bounds.right > 0 &&
+      bounds.top < window.innerHeight &&
+      bounds.left < window.innerWidth,
+  };
+}
+
+function EmbeddedMaterialStudio({
+  gateway,
+  onOpened,
+}: {
+  readonly gateway: MaterialVideoStudioGateway;
+  readonly onOpened: () => void;
+}) {
+  const host = useRef<HTMLDivElement | null>(null);
+  const [state, setState] = useState<"starting" | "ready" | "failed">("starting");
+  const [failure, setFailure] = useState<string | null>(null);
+
+  useEffect(() => {
+    const node = host.current;
+    if (node === null) return;
+    let cancelled = false;
+    let opened = false;
+    let animationFrame: number | null = null;
+
+    node.scrollIntoView?.({ block: "start" });
+    const synchronize = () => {
+      animationFrame = null;
+      if (!opened || cancelled) return;
+      void gateway.updateView(materialStudioView(node)).catch(() => {
+        if (!cancelled) {
+          setFailure(MATERIAL_STUDIO_ERRORS.view_unavailable);
+          setState("failed");
+        }
+      });
+    };
+    const scheduleSynchronization = () => {
+      if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(synchronize);
+    };
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(scheduleSynchronization);
+    observer?.observe(node);
+    window.addEventListener("resize", scheduleSynchronization);
+    window.addEventListener("scroll", scheduleSynchronization, true);
+
+    void gateway
+      .open(materialStudioView(node))
+      .then(() => {
+        opened = true;
+        if (cancelled) {
+          void gateway.close();
+          return;
+        }
+        setState("ready");
+        onOpened();
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const code =
+          error instanceof MaterialVideoStudioGatewayError
+            ? error.code
+            : "operation_unavailable";
+        setFailure(MATERIAL_STUDIO_ERRORS[code]);
+        setState("failed");
+      });
+
+    return () => {
+      cancelled = true;
+      observer?.disconnect();
+      window.removeEventListener("resize", scheduleSynchronization);
+      window.removeEventListener("scroll", scheduleSynchronization, true);
+      if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
+      void gateway.close();
+    };
+  }, [gateway, onOpened]);
+
+  return (
+    <div
+      ref={host}
+      className="material-video-studio-embedded"
+      role="region"
+      aria-label="智能素材成片完整制作界面"
+      aria-busy={state === "starting"}
+    >
+      {state === "failed" ? (
+        <Alert
+          type="error"
+          showIcon
+          title={failure ?? MATERIAL_STUDIO_ERRORS.operation_unavailable}
+        />
+      ) : (
+        <Typography.Text type="secondary">
+          {state === "starting" ? "正在启动本机素材制作服务…" : "素材制作界面已嵌入当前 App。"}
+        </Typography.Text>
+      )}
+    </div>
+  );
+}
 
 function NewVideoPage({
   gateway,
@@ -466,7 +574,6 @@ function NewVideoPage({
   briefBusy,
   onSubmitBrief,
   briefProblem,
-  embedded,
 }: {
   readonly gateway: MaterialVideoStudioGateway;
   readonly onOpened: () => void;
@@ -482,7 +589,6 @@ function NewVideoPage({
   readonly onBriefThinkingChange: (thinking: boolean) => void;
   readonly briefBusy: boolean;
   readonly onSubmitBrief: () => void;
-  readonly embedded: boolean;
   /**
    * What is wrong with the sentence as typed, or null.
    *
@@ -493,10 +599,6 @@ function NewVideoPage({
    */
   readonly briefProblem: string | null;
 }) {
-  const [opening, setOpening] = useState(false);
-  const [openMessage, setOpenMessage] = useState<{ type: "success" | "error"; text: string } | null>(
-    null,
-  );
   const selectedName = VIDEO_CREATION_METHODS.find(
     (method) => method.id === selectedMethod,
   )?.name;
@@ -759,66 +861,18 @@ function NewVideoPage({
             );
           })}
         </div>
-        {embedded ? (
-          <Alert
-            type="info"
-            showIcon
-            title="完整制作流程将直接嵌入当前 App，不会打开额外窗口。当前真实内嵌服务尚未接入。"
-          />
-        ) : openMessage === null ? (
-          <Alert
-            type="info"
-            showIcon
-            title="“智能素材成片”在独立完整界面制作；“品牌动效成片”在当前 App 内编辑和预览。"
-          />
+        {selectedMethod === "material_montage_v1" ? (
+          <EmbeddedMaterialStudio gateway={gateway} onOpened={onOpened} />
         ) : (
-          <Alert type={openMessage.type} showIcon title={openMessage.text} />
-        )}
-        {/*
-         * A greyed button that never says why.
-         *
-         * Note it cannot be fixed with `title`: browsers do not fire the native
-         * tooltip on a `disabled` button, so the attribute would be there and
-         * the user would still see nothing. A visible note carrying an id the
-         * button points at is the pattern this product already got right on
-         * 提交本机渲染 in the preview tab, and it works for a screen reader too.
-         */}
-        {embedded ? null : (
-          <Space orientation="vertical" size={4}>
-            <Button
-              type="primary"
-              loading={opening}
-              disabled={selectedMethod !== "material_montage_v1" || opening}
-              {...(selectedMethod === "material_montage_v1"
-                ? {}
-                : { "aria-describedby": OPEN_STUDIO_HINT_ID })}
-              onClick={() => {
-                setOpening(true);
-                setOpenMessage(null);
-                void gateway
-                  .open()
-                  .then(() => {
-                    onOpened();
-                    setOpenMessage({ type: "success", text: "完整制作界面已打开。" });
-                  })
-                  .catch((error: unknown) => {
-                    const code =
-                      error instanceof MaterialVideoStudioGatewayError
-                        ? error.code
-                        : "operation_unavailable";
-                    setOpenMessage({ type: "error", text: OPEN_ERRORS[code] });
-                  })
-                  .finally(() => setOpening(false));
-              }}
-            >
-              打开完整制作界面
-            </Button>
-            {selectedMethod === "material_montage_v1" ? null : (
-              <Typography.Text id={OPEN_STUDIO_HINT_ID} type="secondary">
-                这个界面只用于「智能素材成片」，先在上面选中它才能打开。
-              </Typography.Text>
-            )}
-          </Space>
+          <Alert
+            type="info"
+            showIcon
+            title={
+              selectedMethod === "motion_composition_v1"
+                ? "“品牌动效成片”在当前 App 内编辑和预览。"
+                : "选择一种制作方式后，当前 App 会显示对应的制作工具。"
+            }
+          />
         )}
       </Space>
     </Card>
@@ -1337,10 +1391,8 @@ function ArtifactPage({
 export function VideoStudio({
   gateway,
   onPublishArtifact,
-  embedded = false,
 }: {
   readonly gateway: MaterialVideoStudioGateway;
-  readonly embedded?: boolean | undefined;
   /**
    * Send a finished video on to the publishing page.
    *
@@ -1622,7 +1674,6 @@ export function VideoStudio({
                 briefBusy={busy || pending !== null}
                 onSubmitBrief={submitBrief}
                 briefProblem={briefProblem}
-                embedded={embedded}
               />
             ),
           },

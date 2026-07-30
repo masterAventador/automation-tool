@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -33,6 +33,8 @@ function gateway(): MaterialVideoStudioGateway {
       state: "opened",
       modelId: "qwen3.7-max-2026-06-08",
     }),
+    updateView: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
     jobs: vi.fn().mockResolvedValue([]),
     cancel: vi.fn().mockResolvedValue(undefined),
     deleteArtifact: vi.fn().mockResolvedValue(undefined),
@@ -43,6 +45,7 @@ function gateway(): MaterialVideoStudioGateway {
       progressPercent: 5,
       subject: "新品发布",
       styleDisplayName: "商务蓝",
+      shotStructure: [],
       artifactId: null,
       artifactSizeBytes: null,
       failureCode: null,
@@ -62,6 +65,7 @@ function gateway(): MaterialVideoStudioGateway {
       progressPercent: 5,
       subject: "用蓝色商务风做一段本周销售增长说明",
       styleDisplayName: "一句话自动制作",
+      shotStructure: [],
       artifactId: null,
       artifactSizeBytes: null,
       failureCode: null,
@@ -92,10 +96,10 @@ describe("video studio shell", () => {
     expect(screen.getByRole("tab", { name: "预览" })).toBeVisible();
     expect(screen.getByRole("tab", { name: "制作任务" })).toBeVisible();
     expect(screen.getByRole("tab", { name: "成片" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "打开完整制作界面" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "打开完整制作界面" })).toBeNull();
     expect(
       screen.getByText(
-        "“智能素材成片”在独立完整界面制作；“品牌动效成片”在当前 App 内编辑和预览。",
+        "选择一种制作方式后，当前 App 会显示对应的制作工具。",
       ),
     ).toBeVisible();
 
@@ -117,8 +121,30 @@ describe("video studio shell", () => {
 
   it("helps ordinary users compare and select exactly two creation methods", async () => {
     const user = userEvent.setup();
-    const studioGateway = gateway();
-    render(<VideoStudio gateway={studioGateway} />);
+    const studioGateway = gateway() as MaterialVideoStudioGateway & {
+      close(): Promise<void>;
+      updateView(view: {
+        readonly x: number;
+        readonly y: number;
+        readonly width: number;
+        readonly height: number;
+        readonly visible: boolean;
+      }): Promise<void>;
+    };
+    studioGateway.close = vi.fn().mockResolvedValue(undefined);
+    studioGateway.updateView = vi.fn().mockResolvedValue(undefined);
+    const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      bottom: 760,
+      height: 640,
+      left: 40,
+      right: 940,
+      top: 120,
+      width: 900,
+      x: 40,
+      y: 120,
+      toJSON: () => ({}),
+    });
+    const view = render(<VideoStudio gateway={studioGateway} />);
 
     const materialMethod = screen.getByRole("button", { name: /选择智能素材成片/u });
     const motionMethod = screen.getByRole("button", { name: /选择品牌动效成片/u });
@@ -149,19 +175,29 @@ describe("video studio shell", () => {
     expect(materialMethod).toHaveAttribute("aria-pressed", "true");
     expect(motionMethod).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByText("已选择：智能素材成片")).toBeVisible();
-    const openButton = screen.getByRole("button", { name: "打开完整制作界面" });
-    expect(openButton).toBeEnabled();
-    await user.click(openButton);
-    expect(studioGateway.open).toHaveBeenCalledOnce();
-    expect(await screen.findByText("完整制作界面已打开。")).toBeVisible();
+    expect(
+      screen.getByRole("region", { name: "智能素材成片完整制作界面" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "打开完整制作界面" })).toBeNull();
+    await waitFor(() =>
+      expect(studioGateway.open).toHaveBeenCalledWith({
+        x: 40,
+        y: 120,
+        width: 900,
+        height: 640,
+        visible: true,
+      }),
+    );
 
     await user.click(motionMethod);
     expect(materialMethod).toHaveAttribute("aria-pressed", "false");
     expect(motionMethod).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("已选择：品牌动效成片")).toBeVisible();
-    expect(openButton).toBeDisabled();
+    await waitFor(() => expect(studioGateway.close).toHaveBeenCalledOnce());
 
     expect(document.body).not.toHaveTextContent(/真人生成|网址转视频/iu);
+    view.unmount();
+    bounds.mockRestore();
   });
 
   it("keeps the settings page gated until the brand motion method is selected", async () => {
@@ -351,6 +387,7 @@ describe("video studio shell", () => {
         progressPercent: 55,
         subject: "静止的片子",
         styleDisplayName: "专业蓝",
+        shotStructure: [],
         artifactId: null,
         artifactSizeBytes: null,
         failureCode: "static_render",
@@ -487,6 +524,7 @@ describe("video studio shell", () => {
         progressPercent: 55,
         subject: "新品发布",
         styleDisplayName: "商务蓝",
+        shotStructure: [],
         artifactId: null,
         artifactSizeBytes: null,
         failureCode: null,
@@ -498,6 +536,7 @@ describe("video studio shell", () => {
         progressPercent: 100,
         subject: "季度增长",
         styleDisplayName: "商务蓝",
+        shotStructure: [],
         artifactId: "2c29395b-1015-43ae-84a7-6f1901caac09",
         artifactSizeBytes: 4096,
         failureCode: null,
@@ -543,6 +582,7 @@ describe("video studio shell", () => {
         progressPercent: 85,
         subject: "新品发布",
         styleDisplayName: "商务蓝",
+        shotStructure: [],
         artifactId: null,
         artifactSizeBytes: null,
         failureCode: null,
@@ -578,6 +618,7 @@ describe("video studio shell", () => {
         progressPercent: 100,
         subject: "季度增长",
         styleDisplayName: "商务蓝",
+        shotStructure: [],
         artifactId: "2c29395b-1015-43ae-84a7-6f1901caac09",
         artifactSizeBytes: 4096,
         failureCode: null,
@@ -807,6 +848,7 @@ describe("video studio shell", () => {
         progressPercent: 55,
         subject: "用蓝色商务风做一段说明",
         styleDisplayName: "专业蓝",
+        shotStructure: [],
         artifactId: null,
         artifactSizeBytes: null,
         failureCode: null,
@@ -1092,6 +1134,7 @@ describe("video studio shell", () => {
         progressPercent: 100,
         subject: "季度增长",
         styleDisplayName: "商务蓝",
+        shotStructure: [],
         artifactId: "2c29395b-1015-43ae-84a7-6f1901caac09",
         artifactSizeBytes: 4096,
         failureCode: null,
@@ -1338,6 +1381,7 @@ describe("video studio shell", () => {
           progressPercent: 55,
           subject: "新品发布",
           styleDisplayName: "专业蓝",
+          shotStructure: [],
           artifactId: null,
           artifactSizeBytes: null,
           failureCode: null,
@@ -1414,6 +1458,7 @@ describe("video studio shell", () => {
         progressPercent: 100,
         subject: "用蓝色商务风做一段本周销售增长说明",
         styleDisplayName: "一句话自动制作",
+        shotStructure: [],
         artifactId: "2c29395b-1015-43ae-84a7-6f1901caac09",
         artifactSizeBytes: 4096,
         failureCode: null,

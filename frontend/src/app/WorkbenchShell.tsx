@@ -404,6 +404,10 @@ const shellMaterialVideoStudioGateway: MaterialVideoStudioGateway = {
   async open() {
     throw new Error("Material video studio is unavailable");
   },
+  async updateView() {
+    throw new Error("Material video studio is unavailable");
+  },
+  async close() {},
   async jobs() {
     return [];
   },

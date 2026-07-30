@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """独立渲染豁免清单的卫生门禁。
 
-BM-16 的逐项 sweep 允许一张带原因的豁免清单（25 个目录项渲染不出来的根因
-全部在内容/上游侧，PC-21 §18.6 逐类定性）。豁免机制的通病是腐烂成万能
+BM-16 的逐项 sweep 允许一张带原因的豁免清单（现在只剩 1 个按设计静止的
+叠加项，PC-21 §18.6 逐类定性）。豁免机制的通病是腐烂成万能
 通行证——往里加个名字就能绕过（§9.1 的教训）。这里守三条：
 
 1. 清单里的每一项必须真实存在于目录清单——死条目会让清单越攒越松；
@@ -27,7 +27,6 @@ KNOWN_CLASSES = frozenset(
         "template-host-instantiated",
         "replacement-stub-api",
         "static-by-design-overlay",
-        "runtime-fetch-blocked",
         "absolute-path-reference",
         "experimental-api-dependency",
         "frozen-render-pipeline",
@@ -54,6 +53,47 @@ class RenderExclusionTests(unittest.TestCase):
 
     def test_the_exclusion_count_matches_the_declared_total(self) -> None:
         self.assertEqual(len(self.exclusions["items"]), self.exclusions["total"])
+
+    def test_resolved_runtime_fetch_items_cannot_return_to_the_exclusion_list(self) -> None:
+        runtime_fetch = sorted(
+            name
+            for name, entry in self.exclusions["items"].items()
+            if entry["class"] == "runtime-fetch-blocked"
+        )
+        self.assertEqual(runtime_fetch, [])
+
+    def test_repaired_bm13_items_cannot_stay_excluded(self) -> None:
+        repaired = {
+            "liquid-glass-notification",
+            "liquid-glass-widgets",
+            "texture-mask-text",
+        }
+        self.assertEqual(sorted(repaired & self.exclusions["items"].keys()), [])
+
+    def test_materialized_template_items_cannot_stay_excluded(self) -> None:
+        materialized = {
+            "code-snippet-dark-2026",
+            "code-snippet-dark-modern",
+            "code-snippet-dark-plus",
+            "code-snippet-high-contrast",
+            "code-snippet-high-contrast-light",
+            "code-snippet-light-2026",
+            "code-snippet-light-modern",
+            "code-snippet-light-plus",
+            "code-snippet-monokai",
+            "code-snippet-solarized-light",
+            "code-snippet-visual-studio-dark",
+            "code-snippet-visual-studio-light",
+        }
+        self.assertEqual(sorted(materialized & self.exclusions["items"].keys()), [])
+
+    def test_repaired_vfx_items_cannot_stay_excluded(self) -> None:
+        repaired = {
+            "vfx-liquid-background",
+            "vfx-portal",
+            "vfx-shatter",
+        }
+        self.assertEqual(sorted(repaired & self.exclusions["items"].keys()), [])
 
 
 if __name__ == "__main__":

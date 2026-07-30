@@ -49,7 +49,7 @@ async function openVideoStudio(page: Page): Promise<void> {
  * operator is already looking at, so a screen carrying nothing but the tab bar
  * is exactly the screen this file was written about: it looks interactive and
  * offers no way to start the job. Disabled buttons are excluded for the same
- * reason — 打开完整制作界面 renders greyed out until a method is chosen, and a
+ * reason — the selected method's editor remains inside the current App, and a
  * button that cannot be pressed is not a way in.
  */
 function actionsInFirstScreen(page: Page): Promise<{ label: string; y: number }[]> {

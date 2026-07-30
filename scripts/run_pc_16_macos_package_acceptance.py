@@ -239,6 +239,7 @@ def run_desktop_acceptance(
     application: Path,
     api_key: str,
     evidence_video: Path,
+    evidence_shots: Path,
     base_environment: dict[str, str],
 ) -> None:
     configuration = json.loads(TAURI_CONFIG.read_text(encoding="utf-8"))
@@ -256,6 +257,7 @@ def run_desktop_acceptance(
             "PC16_MAC_APP_BINARY": os.fspath(bundle_binary(application)),
             "AUTOMATION_TOOL_T36_MODEL_KEY": api_key,
             "AUTOMATION_TOOL_T36_EVIDENCE_VIDEO": str(evidence_video),
+            "AUTOMATION_TOOL_T36_EVIDENCE_SHOTS": str(evidence_shots),
         }
     )
     require_port_closed(port)
@@ -291,6 +293,7 @@ def main() -> int:
         shutil.rmtree(EVIDENCE)
     EVIDENCE.mkdir(parents=True)
     evidence_video = EVIDENCE / "pc16-package-one-sentence.mp4"
+    evidence_shots = EVIDENCE / "pc16-package-shot-structure.json"
 
     private_app_data = app_data_directory()
     if private_app_data.exists():
@@ -339,8 +342,14 @@ def main() -> int:
         )
         print(f"[PC-16] Starting Control Plane on isolated port {control_plane_port}")
         server = start_control_plane(port=control_plane_port, environment=environment)
-        run_desktop_acceptance(application, api_key, evidence_video, environment)
-        inspect_film(evidence_video)
+        run_desktop_acceptance(
+            application,
+            api_key,
+            evidence_video,
+            evidence_shots,
+            environment,
+        )
+        inspect_film(evidence_video, evidence_shots)
         run_failed = False
     finally:
         if server is not None:

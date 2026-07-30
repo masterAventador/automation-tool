@@ -6,6 +6,7 @@ import {
   type MaterialVideoStudioErrorCode,
   type MaterialVideoStudioGateway,
   type MaterialVideoStudioSnapshot,
+  type MaterialVideoStudioView,
   type MaterialRenderJobSnapshot,
   type MotionRenderJobSnapshot,
   type RenderedVideoArtifactPayload,
@@ -71,6 +72,24 @@ function parseSnapshot(value: unknown): MaterialVideoStudioSnapshot {
   };
 }
 
+function validateView(view: MaterialVideoStudioView): void {
+  if (
+    !Number.isFinite(view.x) ||
+    !Number.isFinite(view.y) ||
+    !Number.isFinite(view.width) ||
+    !Number.isFinite(view.height) ||
+    Math.abs(view.x) > 8_192 ||
+    Math.abs(view.y) > 8_192 ||
+    view.width < 320 ||
+    view.width > 8_192 ||
+    view.height < 240 ||
+    view.height > 8_192 ||
+    typeof view.visible !== "boolean"
+  ) {
+    throw new MaterialVideoStudioGatewayError("protocol_mismatch", false);
+  }
+}
+
 function parseJob(value: unknown): MaterialRenderJobSnapshot {
   if (
     !exactRecord(value, [
@@ -108,7 +127,7 @@ function parseMotionJob(value: unknown): MotionRenderJobSnapshot {
   if (
     !exactRecord(value, [
       "artifactId", "artifactSizeBytes", "failureCode", "progressPercent", "renderJobId",
-      "revision", "status", "styleDisplayName", "subject",
+      "revision", "shotStructure", "status", "styleDisplayName", "subject",
     ]) ||
     typeof value.renderJobId !== "string" || !UUID_V4.test(value.renderJobId) ||
     typeof value.revision !== "number" || !Number.isSafeInteger(value.revision) || value.revision < 1 ||
@@ -121,6 +140,7 @@ function parseMotionJob(value: unknown): MotionRenderJobSnapshot {
     (value.artifactId !== null && (typeof value.artifactId !== "string" || !UUID_V4.test(value.artifactId))) ||
     (value.artifactSizeBytes !== null && (typeof value.artifactSizeBytes !== "number" ||
       !Number.isSafeInteger(value.artifactSizeBytes) || value.artifactSizeBytes <= 0)) ||
+    !validMotionShotStructure(value.shotStructure, value.status) ||
     (value.failureCode !== null && (typeof value.failureCode !== "string" ||
       !MOTION_FAILURES.has(value.failureCode))) ||
     ((value.artifactId === null) !== (value.artifactSizeBytes === null)) ||
@@ -132,6 +152,72 @@ function parseMotionJob(value: unknown): MotionRenderJobSnapshot {
     throw new MaterialVideoStudioGatewayError("protocol_mismatch", false);
   }
   return value as unknown as MotionRenderJobSnapshot;
+}
+
+const MOTION_PART_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+
+function validMotionShotStructure(value: unknown, status: unknown): boolean {
+  if (!Array.isArray(value) || value.length > 100) return false;
+  // Checkpoints created before T2.2 deserialize to an empty table. New native
+  // jobs always carry at least one shot, while old jobs remain readable.
+  if (value.length === 0) return true;
+  let declaredStart = 0;
+  let renderedStart = 0;
+  const measured =
+    exactRecord(value[0], [
+      "frameCount", "index", "narrationSeconds", "part",
+      "renderedFrameCount", "renderedStartFrame", "startFrame",
+    ]) && value[0].renderedFrameCount !== null;
+  for (const [offset, shot] of value.entries()) {
+    if (
+      !exactRecord(shot, [
+        "frameCount", "index", "narrationSeconds", "part",
+        "renderedFrameCount", "renderedStartFrame", "startFrame",
+      ]) ||
+      shot.index !== offset + 1 ||
+      shot.startFrame !== declaredStart ||
+      typeof shot.frameCount !== "number" ||
+      !Number.isSafeInteger(shot.frameCount) ||
+      shot.frameCount <= 0 ||
+      (shot.part !== null &&
+        (typeof shot.part !== "string" || !MOTION_PART_ID.test(shot.part))) ||
+      (shot.narrationSeconds !== null &&
+        (typeof shot.narrationSeconds !== "number" ||
+          !Number.isFinite(shot.narrationSeconds) ||
+          shot.narrationSeconds <= 0 ||
+          shot.narrationSeconds > shot.frameCount / 30 + 0.5))
+    ) {
+      return false;
+    }
+    declaredStart += shot.frameCount;
+    if (!Number.isSafeInteger(declaredStart)) return false;
+    if (measured) {
+      if (
+        typeof shot.renderedStartFrame !== "number" ||
+        !Number.isSafeInteger(shot.renderedStartFrame) ||
+        shot.renderedStartFrame !== renderedStart ||
+        Math.abs(shot.renderedStartFrame - shot.startFrame) > 1 ||
+        typeof shot.renderedFrameCount !== "number" ||
+        !Number.isSafeInteger(shot.renderedFrameCount) ||
+        shot.renderedFrameCount <= 0
+      ) {
+        return false;
+      }
+      renderedStart += shot.renderedFrameCount;
+      if (
+        !Number.isSafeInteger(renderedStart) ||
+        Math.abs(renderedStart - declaredStart) > 1
+      ) {
+        return false;
+      }
+    } else if (
+      shot.renderedStartFrame !== null ||
+      shot.renderedFrameCount !== null
+    ) {
+      return false;
+    }
+  }
+  return status !== "succeeded" || measured;
 }
 
 function parseMotionJobs(value: unknown): readonly MotionRenderJobSnapshot[] {
@@ -189,13 +275,33 @@ function mapError(error: unknown): MaterialVideoStudioGatewayError {
 }
 
 export class TauriMaterialVideoStudioGateway implements MaterialVideoStudioGateway {
-  async open(): Promise<MaterialVideoStudioSnapshot> {
+  async open(view: MaterialVideoStudioView): Promise<MaterialVideoStudioSnapshot> {
+    validateView(view);
     try {
-      return parseSnapshot(await invoke("open_material_video_studio"));
+      return parseSnapshot(await invoke("open_material_video_studio", { view }));
     } catch (error) {
       if (error instanceof MaterialVideoStudioGatewayError) {
         throw error;
       }
+      throw mapError(error);
+    }
+  }
+
+  async updateView(view: MaterialVideoStudioView): Promise<void> {
+    validateView(view);
+    try {
+      await invoke("update_material_video_studio_view", { view });
+    } catch (error) {
+      if (error instanceof MaterialVideoStudioGatewayError) throw error;
+      throw mapError(error);
+    }
+  }
+
+  async close(): Promise<void> {
+    try {
+      await invoke("close_material_video_studio");
+    } catch (error) {
+      if (error instanceof MaterialVideoStudioGatewayError) throw error;
       throw mapError(error);
     }
   }

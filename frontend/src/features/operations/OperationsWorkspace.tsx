@@ -595,7 +595,6 @@ export function CreationHub({
           <VideoStudio
             gateway={gateway}
             onPublishArtifact={onPublishArtifact}
-            embedded
           />
         </div>
       ) : (

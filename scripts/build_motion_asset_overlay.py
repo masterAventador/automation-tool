@@ -495,12 +495,44 @@ def build_script_asset() -> None:
     write_fixed(
         "scripts/neutral-glass.iife.js",
         (
-            b'(() => {"use strict";const api=Object.freeze({'
-            b"style:(opacity=0.72,blur=18)=>Object.freeze({"
+            b'(() => {"use strict";'
+            b"const number=(value,fallback)=>{const parsed=Number.parseFloat(value);"
+            b"return Number.isFinite(parsed)?parsed:fallback};"
+            b"const style=(opacity=0.72,blur=18)=>Object.freeze({"
             b"background:`rgba(255,255,255,${Math.max(0,Math.min(1,opacity))})`,"
             b"backdropFilter:`blur(${Math.max(0,Math.min(48,blur))}px)`,"
             b'border:"1px solid rgba(255,255,255,.28)",'
-            b'boxShadow:"0 18px 48px rgba(15,23,42,.18)"})});'
+            b'boxShadow:"0 18px 48px rgba(15,23,42,.18)"});'
+            b"class Canvas{constructor(canvas){"
+            b'if(!canvas||typeof canvas.getContext!=="function")'
+            b'throw new TypeError("canvas required");'
+            b"this.canvas=canvas;this.isReady=true}"
+            b"waitForInit(){return Promise.resolve(this.isReady)}"
+            b"renderGlassElements(){if(!this.isReady)return;"
+            b'const context=this.canvas.getContext("2d");if(!context)return;'
+            b"const canvasRect=this.canvas.getBoundingClientRect();"
+            b'for(const element of this.canvas.querySelectorAll(".liquid-glass")){'
+            b"const computed=getComputedStyle(element);const rect=element.getBoundingClientRect();"
+            b"const width=rect.width||number(computed.width,0);"
+            b"const height=rect.height||number(computed.height,0);"
+            b"if(width<=0||height<=0)continue;"
+            b"const left=rect.width?rect.left-canvasRect.left:number(computed.left,0);"
+            b"const top=rect.height?rect.top-canvasRect.top:number(computed.top,0);"
+            b"const radius=Math.max(0,number(computed.borderRadius,24));"
+            b"context.save();context.globalAlpha=Math.max(0,Math.min(1,number(computed.opacity,1)));"
+            b"context.beginPath();"
+            b"if(typeof context.roundRect==='function')"
+            b"context.roundRect(left,top,width,height,radius);"
+            b"else context.rect(left,top,width,height);"
+            b"const fill=context.createLinearGradient(left,top,left+width,top+height);"
+            b'fill.addColorStop(0,"rgba(255,255,255,.34)");'
+            b'fill.addColorStop(1,"rgba(174,216,255,.12)");'
+            b"context.fillStyle=fill;context.shadowColor='rgba(15,23,42,.24)';"
+            b"context.shadowBlur=24;context.shadowOffsetY=12;context.fill();"
+            b"context.shadowColor='transparent';context.lineWidth=1.5;"
+            b"context.strokeStyle='rgba(255,255,255,.55)';context.stroke();context.restore()}}"
+            b"destroy(){this.isReady=false}}"
+            b"const api=Object.freeze({Canvas,style});"
             b'Object.defineProperty(globalThis,"NeutralGlass",{value:api,writable:false});})();\n'
         ),
     )

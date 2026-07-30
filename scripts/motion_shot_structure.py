@@ -97,6 +97,58 @@ def plan_shots(segment_seconds: Sequence[float]) -> list[Shot]:
     return shots
 
 
+def require_declared_shot_boundaries(
+    *,
+    declared_frames: Sequence[int],
+    rendered_frames: Sequence[int],
+    frames_per_second: int,
+    tolerance_frames: int = 1,
+) -> list[Shot]:
+    """Compare the authored shot table with decoded segment boundaries.
+
+    Checking each length alone is insufficient: two consecutive shots that are
+    each one frame long put the third boundary two frames away from the answer.
+    Starts and ends are therefore compared cumulatively. The returned table is
+    built from the decoded counts, which is what the delivered film contains.
+    """
+    if (
+        not declared_frames
+        or len(declared_frames) != len(rendered_frames)
+        or type(frames_per_second) is not int
+        or frames_per_second <= 0
+        or type(tolerance_frames) is not int
+        or tolerance_frames < 0
+        or any(type(value) is not int or value <= 0 for value in declared_frames)
+        or any(type(value) is not int or value <= 0 for value in rendered_frames)
+    ):
+        raise ShotStructureRejected(
+            "declared and rendered shot tables must have the same non-zero "
+            "positive-integer shape"
+        )
+    declared_start = 0
+    rendered_start = 0
+    for index, (declared, rendered) in enumerate(
+        zip(declared_frames, rendered_frames), start=1
+    ):
+        start_drift = abs(declared_start - rendered_start)
+        if start_drift > tolerance_frames:
+            raise ShotStructureRejected(
+                f"shot {index} starts {start_drift} frames away from its "
+                f"declared boundary; tolerance is {tolerance_frames}"
+            )
+        declared_start += declared
+        rendered_start += rendered
+        end_drift = abs(declared_start - rendered_start)
+        if end_drift > tolerance_frames:
+            raise ShotStructureRejected(
+                f"shot {index} ends {end_drift} frames away from its "
+                f"declared boundary; tolerance is {tolerance_frames}"
+            )
+    return plan_shots(
+        [frames / frames_per_second for frames in rendered_frames]
+    )
+
+
 def refuse_duplicate_shots(shots: Sequence[Shot], digests: Sequence[str]) -> None:
     """No two shots may be showing the same picture at their midpoints.
 
@@ -193,6 +245,7 @@ __all__ = [
     "describe_shots",
     "plan_shots",
     "read_segment_seconds",
+    "require_declared_shot_boundaries",
     "refuse_duplicate_shots",
     "require_distinct_shots",
 ]
