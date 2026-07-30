@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """独立渲染豁免清单的卫生门禁。
 
-BM-16 的逐项 sweep 允许一张带原因的豁免清单（19 个目录项渲染不出来的根因
+BM-16 的逐项 sweep 允许一张带原因的豁免清单（16 个目录项渲染不出来的根因
 全部在内容/上游侧，PC-21 §18.6 逐类定性）。豁免机制的通病是腐烂成万能
 通行证——往里加个名字就能绕过（§9.1 的教训）。这里守三条：
 
@@ -61,6 +61,14 @@ class RenderExclusionTests(unittest.TestCase):
             if entry["class"] == "runtime-fetch-blocked"
         )
         self.assertEqual(runtime_fetch, [])
+
+    def test_repaired_bm13_items_cannot_stay_excluded(self) -> None:
+        repaired = {
+            "liquid-glass-notification",
+            "liquid-glass-widgets",
+            "texture-mask-text",
+        }
+        self.assertEqual(sorted(repaired & self.exclusions["items"].keys()), [])
 
 
 if __name__ == "__main__":

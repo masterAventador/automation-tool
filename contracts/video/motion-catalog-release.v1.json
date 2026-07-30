@@ -22,7 +22,7 @@
     },
     "motionAssetOverlay": {
       "path": "contracts/quality/motion-asset-overlay.v1.json",
-      "sha256": "f2686293f9ea54f2e4441f0c93f2c716466958c5364e8b316e5472cc549a94bb"
+      "sha256": "cdea8048a2fee99410c152249654c5a6918fc9779d409d07ade921ce085b63c8"
     }
   },
   "trademarkScan": {
@@ -86,6 +86,43 @@
       "-apple-system",
       "Apple Color Emoji",
       "__hyperframes"
+    ]
+  },
+  "contentRewrites": {
+    "items": [
+      {
+        "name": "liquid-glass-notification",
+        "document": "items/liquid-glass-notification/liquid-glass-notification.html",
+        "replacements": [
+          {
+            "literal": "LiquidGlass.LiquidGlassCanvas",
+            "replacement": "NeutralGlass.Canvas",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "liquid-glass-widgets",
+        "document": "items/liquid-glass-widgets/liquid-glass-widgets.html",
+        "replacements": [
+          {
+            "literal": "LiquidGlass.LiquidGlassCanvas",
+            "replacement": "NeutralGlass.Canvas",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "texture-mask-text",
+        "document": "items/texture-mask-text/texture-mask-text.html",
+        "replacements": [
+          {
+            "literal": "/assets/texture-mask-text/masks/",
+            "replacement": "masks/",
+            "occurrences": 132
+          }
+        ]
+      }
     ]
   },
   "runtimeDataInlining": {
@@ -166,6 +203,6 @@
   },
   "generated": {
     "fileCount": 337,
-    "aggregateSha256": "cf2d812441236767aa52e756ad77e60e1c385096c79f477d6f2b86ad25efd517"
+    "aggregateSha256": "010c53a8e026ea1fc43e42be182b6a1539bb21254ff31b58fd087fcdab8831ed"
   }
 }

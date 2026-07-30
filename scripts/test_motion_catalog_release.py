@@ -115,6 +115,12 @@ def test_release_lock_contract() -> None:
         "world-map",
     }
     assert sum(len(entry["references"]) for entry in runtime_items) == 7
+    content_rewrites = lock["contentRewrites"]["items"]
+    assert {entry["name"] for entry in content_rewrites} == {
+        "liquid-glass-notification",
+        "liquid-glass-widgets",
+        "texture-mask-text",
+    }
 
 
 def test_runtime_data_is_inlined_only_in_the_release_tree() -> None:
@@ -141,14 +147,66 @@ def test_runtime_data_is_inlined_only_in_the_release_tree() -> None:
                         }
                     ],
                 }
-            ]
+            ],
         }
         applied = build.inline_runtime_data(root, rule)
-        expected = "data:application/json;base64," + base64.b64encode(
-            source.read_bytes()
-        ).decode("ascii")
+        expected = "data:application/json;base64," + base64.b64encode(source.read_bytes()).decode(
+            "ascii"
+        )
         assert document.read_text(encoding="utf-8") == f'fetch("{expected}")'
         assert applied == {"documents": 1, "references": 1, "sourceBytes": 14}
+
+
+def test_content_rewrites_are_exact_and_closed() -> None:
+    build = load_module(BUILD)
+    check = load_module(CHECK)
+    with tempfile.TemporaryDirectory(prefix="automation-tool-bm13-repair-test-") as temporary:
+        root = Path(temporary)
+        document = root / "items/demo/demo.html"
+        document.parent.mkdir(parents=True)
+        document.write_text("Legacy.Canvas /assets/demo/mask.png", encoding="utf-8")
+        contract = {
+            "items": [
+                {
+                    "name": "demo",
+                    "document": "items/demo/demo.html",
+                    "replacements": [
+                        {
+                            "literal": "Legacy.Canvas",
+                            "replacement": "Neutral.Canvas",
+                            "occurrences": 1,
+                        },
+                        {
+                            "literal": "/assets/demo/",
+                            "replacement": "./",
+                            "occurrences": 1,
+                        },
+                    ],
+                }
+            ]
+        }
+        assert build.apply_content_rewrites(root, contract) == {
+            "documents": 1,
+            "replacements": 2,
+        }
+        assert document.read_text(encoding="utf-8") == "Neutral.Canvas ./mask.png"
+        assert check.verify_content_rewrites(root, contract) == {
+            "documents": 1,
+            "replacements": 2,
+        }
+        try:
+            build.apply_content_rewrites(root, contract)
+        except build.BuildError:
+            pass
+        else:
+            raise AssertionError("an already-rewritten or drifted document must fail closed")
+        document.write_text("Legacy.Canvas ./mask.png", encoding="utf-8", newline="\n")
+        try:
+            check.verify_content_rewrites(root, contract)
+        except check.CheckError:
+            pass
+        else:
+            raise AssertionError("the independent gate must reject a restored source literal")
 
 
 def test_trademark_rules() -> None:
@@ -275,6 +333,10 @@ def _mini_fixture(root: Path) -> tuple[Path, dict, dict, dict, dict]:
             "references": 0,
             "sourceBytes": 0,
         },
+        "contentRewrites": {
+            "documents": 0,
+            "replacements": 0,
+        },
         "files": files,
     }
     manifest_path = release_root / "manifest.json"
@@ -296,6 +358,9 @@ def _mini_fixture(root: Path) -> tuple[Path, dict, dict, dict, dict]:
         },
         "runtimeDataInlining": {
             "encoding": "data-url-base64",
+            "items": [],
+        },
+        "contentRewrites": {
             "items": [],
         },
         "generated": {"fileCount": len(files), "aggregateSha256": aggregate},
@@ -544,13 +609,14 @@ def test_real_release_build_is_reproducible() -> None:
 def main() -> None:
     test_release_lock_contract()
     test_runtime_data_is_inlined_only_in_the_release_tree()
+    test_content_rewrites_are_exact_and_closed()
     test_trademark_rules()
     test_composed_asset_path()
     test_release_gate_tamper_matrix()
     test_windows_unicode_and_read_only_path_semantics()
     test_real_release_build_is_reproducible()
     print("motion catalog release tests passed")
-    print("executed checks: 7")
+    print("executed checks: 8")
 
 
 if __name__ == "__main__":

@@ -266,9 +266,7 @@ def inline_runtime_data(release_root: Path, contract: dict) -> dict[str, int]:
             if media_type not in RUNTIME_DATA_MEDIA_TYPES:
                 raise BuildError(f"{name} runtime data media type is not allowed: {media_type}")
             if text.count(literal) != 1:
-                raise BuildError(
-                    f"{name} runtime data literal must occur exactly once: {literal}"
-                )
+                raise BuildError(f"{name} runtime data literal must occur exactly once: {literal}")
             source = _release_file(
                 release_root, reference.get("source"), f"{name} runtime data source"
             )
@@ -283,6 +281,67 @@ def inline_runtime_data(release_root: Path, contract: dict) -> dict[str, int]:
         "references": references,
         "sourceBytes": source_bytes,
     }
+
+
+def apply_content_rewrites(release_root: Path, contract: dict) -> dict[str, int]:
+    """Apply the small, reviewed BM-13 repairs to composed item documents.
+
+    The source submodule and BM-12 tree remain immutable. Every source literal
+    has an exact expected occurrence count so an upstream edit cannot turn this
+    into a broad best-effort replacement that silently repairs the wrong text.
+    """
+    items = contract.get("items")
+    if not isinstance(items, list):
+        raise BuildError("content rewrite items must be a list")
+    documents: set[str] = set()
+    replacements = 0
+    for item in items:
+        if not isinstance(item, dict):
+            raise BuildError("content rewrite item must be an object")
+        name = item.get("name")
+        document_relative = item.get("document")
+        if not isinstance(name, str) or not name:
+            raise BuildError("content rewrite item name is missing")
+        if not isinstance(document_relative, str) or not document_relative.startswith(
+            f"items/{name}/"
+        ):
+            raise BuildError(f"{name} content rewrite document belongs to another item")
+        if document_relative in documents:
+            raise BuildError(f"content rewrite document is declared twice: {document_relative}")
+        documents.add(document_relative)
+        document = _release_file(
+            release_root, document_relative, f"{name} content rewrite document"
+        )
+        text = document.read_text(encoding="utf-8")
+        rules = item.get("replacements")
+        if not isinstance(rules, list) or not rules:
+            raise BuildError(f"{name} has no content rewrite rules")
+        for rule in rules:
+            if not isinstance(rule, dict):
+                raise BuildError(f"{name} content rewrite rule must be an object")
+            literal = rule.get("literal")
+            replacement = rule.get("replacement")
+            occurrences = rule.get("occurrences")
+            if (
+                not isinstance(literal, str)
+                or not literal
+                or not isinstance(replacement, str)
+                or not replacement
+                or literal == replacement
+                or type(occurrences) is not int
+                or occurrences <= 0
+            ):
+                raise BuildError(f"{name} content rewrite rule is invalid")
+            actual = text.count(literal)
+            if actual != occurrences:
+                raise BuildError(
+                    f"{name} content rewrite literal count drifted: "
+                    f"{literal!r} has {actual}, expected {occurrences}"
+                )
+            text = text.replace(literal, replacement)
+            replacements += occurrences
+        document.write_text(text, encoding="utf-8", newline="\n")
+    return {"documents": len(documents), "replacements": replacements}
 
 
 def _compose_item(
@@ -446,9 +505,8 @@ def build_release(
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, destination)
 
-    runtime_data_inlining = inline_runtime_data(
-        release_root, release_lock["runtimeDataInlining"]
-    )
+    content_rewrites = apply_content_rewrites(release_root, release_lock["contentRewrites"])
+    runtime_data_inlining = inline_runtime_data(release_root, release_lock["runtimeDataInlining"])
 
     files = []
     casefold_paths: dict[str, str] = {}
@@ -472,6 +530,7 @@ def build_release(
         "inputs": release_lock["inputs"],
         "counts": {"items": len(manifest_items), "files": len(files)},
         "items": manifest_items,
+        "contentRewrites": content_rewrites,
         "runtimeDataInlining": runtime_data_inlining,
         "files": files,
     }
@@ -509,9 +568,7 @@ def stage_for_release(*, staging: Path, release_root: Path | None = None) -> Pat
     """
     source = release_root or default_release_root()
     if not source.is_dir():
-        raise BuildError(
-            f"the release tree is not built at {source}; run this script first"
-        )
+        raise BuildError(f"the release tree is not built at {source}; run this script first")
     verify = load_gate(REPOSITORY_ROOT / "scripts/check_motion_catalog_release.py")
     verify.verify_release(
         source,
@@ -586,6 +643,7 @@ def main() -> None:
         f"version {manifest['catalogVersion']}, {manifest['counts']['items']} items, "
         f"{manifest['counts']['files']} files, {applied} asset replacements, "
         f"{replaced_items} items with trademark replacements, "
+        f"{manifest['contentRewrites']['replacements']} content rewrites, "
         f"{manifest['runtimeDataInlining']['references']} runtime data references inlined"
     )
 

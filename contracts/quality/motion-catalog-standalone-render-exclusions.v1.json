@@ -1,8 +1,8 @@
 {
   "version": "motion-catalog-standalone-render-exclusions.v1",
   "decidedAt": "2026-07-30",
-  "evidence": "docs/development/PC-21.md §18.6; docs/development/PC-24.md",
-  "total": 19,
+  "evidence": "docs/development/PC-21.md §18.6; docs/development/PC-24.md; docs/development/BM-13.md",
+  "total": 16,
   "items": {
     "code-snippet-dark-2026": {
       "class": "template-host-instantiated",
@@ -52,21 +52,9 @@
       "class": "template-host-instantiated",
       "reason": "同 code-snippet-dark-2026"
     },
-    "liquid-glass-notification": {
-      "class": "replacement-stub-api",
-      "reason": "商标替换把上游 liquid-glass.iife.js 换成只有 style() 的存根，调用方仍在 new LiquidGlass.LiquidGlassCanvas；BM-13 素材替换族收尾，按安排留待 codex"
-    },
-    "liquid-glass-widgets": {
-      "class": "replacement-stub-api",
-      "reason": "同 liquid-glass-notification"
-    },
     "lower-third-bild": {
       "class": "static-by-design-overlay",
       "reason": "字幕条叠加层，时间轴唯一事件是终点隐藏自己，[0,8s) 全程静止即正确形态；产品里作为叠加轨道与运动内容合成"
-    },
-    "texture-mask-text": {
-      "class": "absolute-path-reference",
-      "reason": "引用 /assets/texture-mask-text/masks/lava.png 绝对路径离开目录树，收集期即拒；内容修正与 BM-13 同批处理"
     },
     "vfx-shatter": {
       "class": "experimental-api-dependency",

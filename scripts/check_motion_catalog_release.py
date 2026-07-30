@@ -89,6 +89,68 @@ def _release_file(release_root: Path, relative: object, purpose: str) -> Path:
     return path
 
 
+def verify_content_rewrites(release_root: Path, contract: dict) -> dict[str, int]:
+    """Verify that every reviewed content repair is present in the release.
+
+    The build checks the exact pre-rewrite occurrence count. This independent
+    gate checks the closed postcondition: no source literal remains, every
+    replacement is observable at least as many times as the contract applied
+    it, and the manifest cannot hide or inflate the repair count.
+    """
+    items = contract.get("items")
+    if not isinstance(items, list):
+        raise CheckError("content rewrite items must be a list")
+    documents: set[str] = set()
+    replacements = 0
+    for item in items:
+        if not isinstance(item, dict):
+            raise CheckError("content rewrite item must be an object")
+        name = item.get("name")
+        document_relative = item.get("document")
+        if not isinstance(name, str) or not name:
+            raise CheckError("content rewrite item name is missing")
+        if not isinstance(document_relative, str) or not document_relative.startswith(
+            f"items/{name}/"
+        ):
+            raise CheckError(f"{name} content rewrite document belongs to another item")
+        if document_relative in documents:
+            raise CheckError(f"content rewrite document is declared twice: {document_relative}")
+        documents.add(document_relative)
+        document = _release_file(
+            release_root, document_relative, f"{name} content rewrite document"
+        )
+        text = document.read_text(encoding="utf-8")
+        rules = item.get("replacements")
+        if not isinstance(rules, list) or not rules:
+            raise CheckError(f"{name} has no content rewrite rules")
+        for rule in rules:
+            if not isinstance(rule, dict):
+                raise CheckError(f"{name} content rewrite rule must be an object")
+            literal = rule.get("literal")
+            replacement = rule.get("replacement")
+            occurrences = rule.get("occurrences")
+            if (
+                not isinstance(literal, str)
+                or not literal
+                or not isinstance(replacement, str)
+                or not replacement
+                or literal == replacement
+                or type(occurrences) is not int
+                or occurrences <= 0
+            ):
+                raise CheckError(f"{name} content rewrite rule is invalid")
+            if literal in text:
+                raise CheckError(f"{name} keeps a repaired content literal: {literal!r}")
+            if text.count(replacement) < occurrences:
+                raise CheckError(
+                    f"{name} content rewrite is not observable: "
+                    f"{replacement!r} occurs {text.count(replacement)}, "
+                    f"expected at least {occurrences}"
+                )
+            replacements += occurrences
+    return {"documents": len(documents), "replacements": replacements}
+
+
 def verify_runtime_data_inlining(release_root: Path, contract: dict) -> dict[str, int]:
     if contract.get("encoding") != "data-url-base64":
         raise CheckError("runtime data inlining must use data-url-base64")
@@ -130,14 +192,9 @@ def verify_runtime_data_inlining(release_root: Path, contract: dict) -> dict[str
                 release_root, reference.get("source"), f"{name} runtime data source"
             )
             data = source.read_bytes()
-            expected = (
-                f"data:{media_type};base64,"
-                + base64.b64encode(data).decode("ascii")
-            )
+            expected = f"data:{media_type};base64," + base64.b64encode(data).decode("ascii")
             if literal in text or text.count(expected) != 1:
-                raise CheckError(
-                    f"{name} runtime data reference is not exactly inlined: {literal}"
-                )
+                raise CheckError(f"{name} runtime data reference is not exactly inlined: {literal}")
             references += 1
             source_bytes += len(data)
     return {
@@ -353,6 +410,12 @@ def verify_release(
         raise CheckError(f"remote URLs found in the release tree: {remote_urls[:5]}")
     if indicator_hits:
         raise CheckError(f"trademark indicators remain in item files: {indicator_hits[:5]}")
+    content_rewrites = verify_content_rewrites(release_root, release_lock["contentRewrites"])
+    if manifest.get("contentRewrites") != content_rewrites:
+        raise CheckError(
+            "release content rewrite counts drifted: "
+            f"{manifest.get('contentRewrites')} != {content_rewrites}"
+        )
     runtime_data_inlining = verify_runtime_data_inlining(
         release_root, release_lock["runtimeDataInlining"]
     )
@@ -423,6 +486,7 @@ def main() -> None:
         f"{manifest['counts']['files']} files, 0 remote URLs, 0 indicator leftovers, "
         f"{applied} asset replacements verified, "
         f"{replaced_items} items with trademark replacements, "
+        f"{manifest['contentRewrites']['replacements']} content rewrites verified, "
         f"{manifest['runtimeDataInlining']['references']} runtime data references inlined"
     )
 
