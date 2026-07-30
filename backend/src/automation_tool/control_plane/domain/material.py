@@ -92,6 +92,52 @@ class Material:
     description_source: DescriptionSource
     described_at: datetime | None
 
+    @classmethod
+    def register(
+        cls,
+        *,
+        material_id: MaterialId,
+        kind: MaterialKind,
+        duration_ms: int | None,
+        width: int | None,
+        height: int | None,
+        content_digest: str,
+        has_audio: bool,
+        audio_loudness_lufs: float | None,
+        has_speech: bool,
+        speech_segments_ms: tuple[tuple[int, int], ...],
+        speech_transcript: str | None,
+        shot_boundaries_ms: tuple[int, ...],
+        ai_description: str | None,
+        ai_tags: tuple[str, ...],
+        description_source: DescriptionSource,
+        described_at: datetime | None,
+    ) -> Material:
+        """Build the first snapshot accepted at the registration boundary.
+
+        Later description changes must use the two guarded instance methods.
+        Keeping initial construction here lets API adapters register probe facts
+        without opening a second field-by-field constructor elsewhere.
+        """
+        return cls(
+            material_id=material_id,
+            kind=kind,
+            duration_ms=duration_ms,
+            width=width,
+            height=height,
+            content_digest=content_digest,
+            has_audio=has_audio,
+            audio_loudness_lufs=audio_loudness_lufs,
+            has_speech=has_speech,
+            speech_segments_ms=speech_segments_ms,
+            speech_transcript=speech_transcript,
+            shot_boundaries_ms=shot_boundaries_ms,
+            ai_description=ai_description,
+            ai_tags=ai_tags,
+            description_source=description_source,
+            described_at=described_at,
+        )
+
     def __post_init__(self) -> None:
         if (
             not isinstance(self.material_id, MaterialId)

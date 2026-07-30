@@ -31,6 +31,7 @@ from automation_tool.control_plane.application.materials import (
 )
 from automation_tool.control_plane.domain import (
     DescriptionSource,
+    InstallationId,
     InvalidMaterialModel,
     Material,
     MaterialId,
@@ -219,6 +220,33 @@ async def test_repository_refuses_foreign_argument_types() -> None:
             await repository.find_by_digest(cast(str, 12345))
         with pytest.raises(MaterialDataRejected):
             await repository.find_by_digest(cast(str, None))
+        installation_id = InstallationId.new()
+        material = make_material()
+        with pytest.raises(MaterialDataRejected):
+            await repository.save_for_installation(
+                cast(Material, object()),
+                installation_id,
+            )
+        with pytest.raises(MaterialDataRejected):
+            await repository.save_for_installation(
+                material,
+                cast(InstallationId, object()),
+            )
+        with pytest.raises(MaterialDataRejected):
+            await repository.get_for_installation(
+                material.material_id,
+                cast(InstallationId, object()),
+            )
+        with pytest.raises(MaterialDataRejected):
+            await repository.find_by_digest_for_installation(
+                DIGEST,
+                cast(InstallationId, object()),
+            )
+        with pytest.raises(MaterialDataRejected):
+            await repository.update_description_for_installation(
+                material,
+                cast(InstallationId, object()),
+            )
     finally:
         await database.close()
 
@@ -244,7 +272,9 @@ async def test_an_unreachable_database_is_refused_without_leaking_the_connection
             await repository.find_by_digest(DIGEST)
         with pytest.raises(MaterialPersistenceUnavailable) as updated:
             await repository.update_description(material)
-        for captured in (loaded, saved, found, updated):
+        with pytest.raises(MaterialPersistenceUnavailable) as scoped_saved:
+            await repository.save_for_installation(material, InstallationId.new())
+        for captured in (loaded, saved, found, updated, scoped_saved):
             rendered = "".join(traceback.format_exception(captured.value))
             for token in LEAKED_TOKENS:
                 assert token not in rendered
@@ -288,7 +318,9 @@ async def test_a_database_error_is_refused_without_leaking_its_message() -> None
             await repository.find_by_digest(DIGEST)
         with pytest.raises(MaterialPersistenceUnavailable) as updated:
             await repository.update_description(material)
-        for captured in (loaded, saved, found, updated):
+        with pytest.raises(MaterialPersistenceUnavailable) as scoped_saved:
+            await repository.save_for_installation(material, InstallationId.new())
+        for captured in (loaded, saved, found, updated, scoped_saved):
             assert "le05_leaked_database_failure" not in "".join(
                 traceback.format_exception(captured.value)
             )
@@ -335,7 +367,9 @@ async def test_an_authentication_failure_is_refused_without_leaking_the_role() -
             await repository.find_by_digest(DIGEST)
         with pytest.raises(MaterialPersistenceUnavailable) as updated:
             await repository.update_description(material)
-        for captured in (loaded, saved, found, updated):
+        with pytest.raises(MaterialPersistenceUnavailable) as scoped_saved:
+            await repository.save_for_installation(material, InstallationId.new())
+        for captured in (loaded, saved, found, updated, scoped_saved):
             rendered = "".join(traceback.format_exception(captured.value))
             assert "le05_leaked_user" not in rendered
             assert captured.value.__cause__ is None
@@ -370,6 +404,43 @@ async def test_a_conflicting_insert_is_already_registered_and_says_no_more() -> 
             await repository.save(make_material())
         rendered = "".join(traceback.format_exception(captured.value))
         assert "le05-private-detail" not in rendered
+        assert captured.value.__cause__ is None
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_a_scoped_insert_only_calls_known_unique_constraints_a_duplicate() -> None:
+    """A missing owner is bad server data, not a duplicate material.
+
+    PostgreSQL reports primary-key and unique-index failures with the same
+    IntegrityError wrapper as a foreign-key failure. Only the two names whose
+    meaning is actually "already registered" may become the public 409.
+    """
+    database = unreachable_database()
+    try:
+        repository = repository_module.SqlAlchemyMaterialRepository(database)
+        object.__setattr__(
+            database,
+            "_sessions",
+            FailingSessions(
+                IntegrityError(
+                    "insert into materials",
+                    None,
+                    Exception("private unknown integrity failure"),
+                )
+            ),
+        )
+
+        with pytest.raises(MaterialDataRejected) as captured:
+            await repository.save_for_installation(
+                make_material(),
+                InstallationId.new(),
+            )
+
+        assert "private unknown integrity failure" not in "".join(
+            traceback.format_exception(captured.value)
+        )
         assert captured.value.__cause__ is None
     finally:
         await database.close()

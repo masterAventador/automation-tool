@@ -181,6 +181,43 @@
         "title": "ActionResultEvidence",
         "type": "string"
       },
+      "AiMaterialDescriptionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "describedAt": {
+            "format": "date-time",
+            "title": "Describedat",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "source": {
+            "const": "ai",
+            "title": "Source",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source",
+          "description",
+          "tags",
+          "describedAt"
+        ],
+        "title": "AiMaterialDescriptionRequest",
+        "type": "object"
+      },
       "BindingChallengeRequest": {
         "additionalProperties": false,
         "properties": {
@@ -280,6 +317,15 @@
         ],
         "title": "BindingResponse",
         "type": "object"
+      },
+      "DescriptionSource": {
+        "description": "Who wrote the description currently held by a material.\n\nThe distinction exists to keep a later AI pass from overwriting what a\nuser typed: `USER` is a terminal state for the description field.",
+        "enum": [
+          "ai",
+          "user"
+        ],
+        "title": "DescriptionSource",
+        "type": "string"
       },
       "DeviceSessionCapability": {
         "enum": [
@@ -393,6 +439,326 @@
           "lineSpacing"
         ],
         "title": "EditingCaptionStyle",
+        "type": "object"
+      },
+      "EditingMaterialCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "aiDescription": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aidescription"
+          },
+          "aiTags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Aitags",
+            "type": "array"
+          },
+          "audioLoudnessLufs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audioloudnesslufs"
+          },
+          "contentDigest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Contentdigest",
+            "type": "string"
+          },
+          "describedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Describedat"
+          },
+          "descriptionSource": {
+            "$ref": "#/components/schemas/DescriptionSource"
+          },
+          "durationMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Durationms"
+          },
+          "hasAudio": {
+            "title": "Hasaudio",
+            "type": "boolean"
+          },
+          "hasSpeech": {
+            "title": "Hasspeech",
+            "type": "boolean"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MaterialKind"
+          },
+          "materialId": {
+            "title": "Materialid",
+            "type": "string"
+          },
+          "shotBoundariesMs": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 4096,
+            "title": "Shotboundariesms",
+            "type": "array"
+          },
+          "speechSegmentsMs": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "maxItems": 4096,
+            "title": "Speechsegmentsms",
+            "type": "array"
+          },
+          "speechTranscript": {
+            "anyOf": [
+              {
+                "maxLength": 100000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speechtranscript"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "materialId",
+          "kind",
+          "durationMs",
+          "width",
+          "height",
+          "contentDigest",
+          "hasAudio",
+          "audioLoudnessLufs",
+          "hasSpeech",
+          "speechSegmentsMs",
+          "speechTranscript",
+          "shotBoundariesMs",
+          "aiDescription",
+          "aiTags",
+          "descriptionSource",
+          "describedAt"
+        ],
+        "title": "EditingMaterialCreateRequest",
+        "type": "object"
+      },
+      "EditingMaterialResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "aiDescription": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aidescription"
+          },
+          "aiTags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aitags",
+            "type": "array"
+          },
+          "audioLoudnessLufs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audioloudnesslufs"
+          },
+          "contentDigest": {
+            "title": "Contentdigest",
+            "type": "string"
+          },
+          "describedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Describedat"
+          },
+          "descriptionSource": {
+            "$ref": "#/components/schemas/DescriptionSource"
+          },
+          "durationMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Durationms"
+          },
+          "hasAudio": {
+            "title": "Hasaudio",
+            "type": "boolean"
+          },
+          "hasSpeech": {
+            "title": "Hasspeech",
+            "type": "boolean"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MaterialKind"
+          },
+          "materialId": {
+            "title": "Materialid",
+            "type": "string"
+          },
+          "shotBoundariesMs": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Shotboundariesms",
+            "type": "array"
+          },
+          "speechSegmentsMs": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Speechsegmentsms",
+            "type": "array"
+          },
+          "speechTranscript": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speechtranscript"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "materialId",
+          "kind",
+          "durationMs",
+          "width",
+          "height",
+          "contentDigest",
+          "hasAudio",
+          "audioLoudnessLufs",
+          "hasSpeech",
+          "speechSegmentsMs",
+          "speechTranscript",
+          "shotBoundariesMs",
+          "aiDescription",
+          "aiTags",
+          "descriptionSource",
+          "describedAt"
+        ],
+        "title": "EditingMaterialResponse",
         "type": "object"
       },
       "EditingOutputSpec": {
@@ -682,6 +1048,15 @@
         ],
         "title": "IssuedDeviceCredentialResponse",
         "type": "object"
+      },
+      "MaterialKind": {
+        "enum": [
+          "video",
+          "image",
+          "audio"
+        ],
+        "title": "MaterialKind",
+        "type": "string"
       },
       "PasswordChangeRequest": {
         "additionalProperties": false,
@@ -1544,6 +1919,28 @@
         "title": "TaskTargetResultStatus",
         "type": "string"
       },
+      "UserMaterialDescriptionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "source": {
+            "const": "user",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "description"
+        ],
+        "title": "UserMaterialDescriptionRequest",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -2254,6 +2651,219 @@
         "summary": "Exchange Device Session",
         "tags": [
           "device-sessions"
+        ]
+      }
+    },
+    "/api/v1/editing-materials": {
+      "get": {
+        "operationId": "findEditingMaterialByDigest",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "contentDigest",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Contentdigest",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingMaterialResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Find Editing Material By Digest",
+        "tags": [
+          "editing-materials"
+        ]
+      },
+      "post": {
+        "operationId": "registerEditingMaterial",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditingMaterialCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingMaterialResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Register Editing Material",
+        "tags": [
+          "editing-materials"
+        ]
+      }
+    },
+    "/api/v1/editing-materials/{material_id}": {
+      "get": {
+        "operationId": "getEditingMaterial",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "material_id",
+            "required": true,
+            "schema": {
+              "title": "Material Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingMaterialResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Get Editing Material",
+        "tags": [
+          "editing-materials"
+        ]
+      }
+    },
+    "/api/v1/editing-materials/{material_id}/description": {
+      "put": {
+        "operationId": "updateEditingMaterialDescription",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "material_id",
+            "required": true,
+            "schema": {
+              "title": "Material Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "discriminator": {
+                  "mapping": {
+                    "ai": "#/components/schemas/AiMaterialDescriptionRequest",
+                    "user": "#/components/schemas/UserMaterialDescriptionRequest"
+                  },
+                  "propertyName": "source"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/UserMaterialDescriptionRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AiMaterialDescriptionRequest"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingMaterialResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Update Editing Material Description",
+        "tags": [
+          "editing-materials"
         ]
       }
     },

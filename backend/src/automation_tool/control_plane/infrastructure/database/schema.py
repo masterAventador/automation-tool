@@ -2392,6 +2392,9 @@ materials = Table(
     "materials",
     metadata,
     Column("material_id", UUID(as_uuid=True), nullable=False),
+    # NULL is the pre-REST/internal namespace retained for LE-05 callers.
+    # App-session routes always write an owner and only query their own scope.
+    Column("installation_id", UUID(as_uuid=True), nullable=True),
     Column("kind", String(length=16), nullable=False),
     # Nullable because the domain says so, not because the value is optional
     # paperwork: an image has no duration and audio has no frame size, and both
@@ -2423,11 +2426,33 @@ materials = Table(
     # yet, and one whose description a person wrote, both leave this NULL.
     Column("described_at", DateTime(timezone=True), nullable=True),
     PrimaryKeyConstraint("material_id", name="pk_materials"),
-    # "The same file must not be imported twice" is the half of the rule the
-    # domain cannot hold: `Material` only knows a digest's format, never what
-    # else is stored. Two callers hashing the same file concurrently both find
-    # nothing and both proceed, so the refusal has to be here.
-    UniqueConstraint("content_digest", name="uq_materials_content_digest"),
+    ForeignKeyConstraint(
+        ["installation_id"],
+        ["installations.id"],
+        name="fk_materials_installation",
+        ondelete="RESTRICT",
+    ),
+)
+
+Index(
+    "uq_materials_unscoped_content_digest",
+    materials.c.content_digest,
+    unique=True,
+    postgresql_where=materials.c.installation_id.is_(None),
+)
+
+Index(
+    "uq_materials_installation_content_digest",
+    materials.c.installation_id,
+    materials.c.content_digest,
+    unique=True,
+    postgresql_where=materials.c.installation_id.is_not(None),
+)
+
+Index(
+    "ix_materials_installation_material",
+    materials.c.installation_id,
+    materials.c.material_id,
 )
 
 timelines = Table(

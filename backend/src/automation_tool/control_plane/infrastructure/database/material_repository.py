@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import ColumnElement, CursorResult, insert, select, update
+from sqlalchemy import ColumnElement, CursorResult, and_, insert, select, update
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -18,6 +18,7 @@ from automation_tool.control_plane.application.materials import (
 )
 from automation_tool.control_plane.domain import (
     DescriptionSource,
+    InstallationId,
     InvalidMaterialModel,
     Material,
     MaterialId,
@@ -198,10 +199,62 @@ class SqlAlchemyMaterialRepository:
             # reach the caller verbatim. The same tail guards every method here.
             raise MaterialPersistenceUnavailable from None
 
+    async def save_for_installation(
+        self,
+        material: Material,
+        installation_id: InstallationId,
+    ) -> None:
+        """Insert a material into one Installation's independent digest scope."""
+        if not isinstance(material, Material) or not isinstance(installation_id, InstallationId):
+            raise MaterialDataRejected
+        try:
+            async with self._database.session() as session:
+                await session.execute(
+                    insert(materials).values(
+                        **_column_values(material),
+                        installation_id=installation_id.uuid,
+                    )
+                )
+        except IntegrityError as error:
+            constraint = getattr(
+                getattr(error.orig, "__cause__", None),
+                "constraint_name",
+                None,
+            )
+            if constraint in {
+                "pk_materials",
+                "uq_materials_installation_content_digest",
+            }:
+                raise MaterialAlreadyRegistered from None
+            raise MaterialDataRejected from None
+        except _CONNECTION_FAILURES:
+            raise MaterialPersistenceUnavailable from None
+        except Exception:
+            raise MaterialPersistenceUnavailable from None
+
     async def get(self, material_id: MaterialId) -> Material:
         if not isinstance(material_id, MaterialId):
             raise MaterialDataRejected
         row = await self._row(materials.c.material_id == material_id.uuid)
+        if row is None:
+            raise MaterialNotFound
+        return _hydrate(row)
+
+    async def get_for_installation(
+        self,
+        material_id: MaterialId,
+        installation_id: InstallationId,
+    ) -> Material:
+        if not isinstance(material_id, MaterialId) or not isinstance(
+            installation_id, InstallationId
+        ):
+            raise MaterialDataRejected
+        row = await self._row(
+            and_(
+                materials.c.material_id == material_id.uuid,
+                materials.c.installation_id == installation_id.uuid,
+            )
+        )
         if row is None:
             raise MaterialNotFound
         return _hydrate(row)
@@ -218,7 +271,27 @@ class SqlAlchemyMaterialRepository:
         """
         if not isinstance(content_digest, str):
             raise MaterialDataRejected
-        row = await self._row(materials.c.content_digest == content_digest)
+        row = await self._row(
+            and_(
+                materials.c.content_digest == content_digest,
+                materials.c.installation_id.is_(None),
+            )
+        )
+        return None if row is None else _hydrate(row)
+
+    async def find_by_digest_for_installation(
+        self,
+        content_digest: str,
+        installation_id: InstallationId,
+    ) -> Material | None:
+        if not isinstance(content_digest, str) or not isinstance(installation_id, InstallationId):
+            raise MaterialDataRejected
+        row = await self._row(
+            and_(
+                materials.c.content_digest == content_digest,
+                materials.c.installation_id == installation_id.uuid,
+            )
+        )
         return None if row is None else _hydrate(row)
 
     async def update_description(self, material: Material) -> None:
@@ -268,13 +341,41 @@ class SqlAlchemyMaterialRepository:
         columns carries a constraint that an UPDATE could violate.
         `SQLAlchemyError` would catch one anyway if that ever stopped being true.
         """
+        await self._update_description(
+            material,
+            installation_id=None,
+            enforce_installation=False,
+        )
+
+    async def update_description_for_installation(
+        self,
+        material: Material,
+        installation_id: InstallationId,
+    ) -> None:
+        if not isinstance(installation_id, InstallationId):
+            raise MaterialDataRejected
+        await self._update_description(
+            material,
+            installation_id=installation_id,
+            enforce_installation=True,
+        )
+
+    async def _update_description(
+        self,
+        material: Material,
+        *,
+        installation_id: InstallationId | None,
+        enforce_installation: bool,
+    ) -> None:
         if not isinstance(material, Material):
             raise MaterialDataRejected
-        statement = (
-            update(materials)
-            .where(materials.c.material_id == material.material_id.uuid)
-            .values(**_description_values(material))
-        )
+        condition: ColumnElement[bool] = materials.c.material_id == material.material_id.uuid
+        if enforce_installation:
+            condition = and_(
+                condition,
+                materials.c.installation_id == cast(InstallationId, installation_id).uuid,
+            )
+        statement = update(materials).where(condition).values(**_description_values(material))
         if material.description_source is DescriptionSource.AI:
             statement = statement.where(
                 materials.c.description_source != DescriptionSource.USER.value
@@ -290,13 +391,7 @@ class SqlAlchemyMaterialRepository:
                 stored = (
                     None
                     if matched
-                    else (
-                        await session.execute(
-                            select(materials).where(
-                                materials.c.material_id == material.material_id.uuid
-                            )
-                        )
-                    )
+                    else (await session.execute(select(materials).where(condition)))
                     .mappings()
                     .one_or_none()
                 )

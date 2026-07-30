@@ -208,6 +208,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/editing-materials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Find Editing Material By Digest */
+        get: operations["findEditingMaterialByDigest"];
+        put?: never;
+        /** Register Editing Material */
+        post: operations["registerEditingMaterial"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/editing-materials/{material_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Editing Material */
+        get: operations["getEditingMaterial"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/editing-materials/{material_id}/description": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Editing Material Description */
+        put: operations["updateEditingMaterialDescription"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/editing-projects": {
         parameters: {
             query?: never;
@@ -676,6 +728,23 @@ export interface components {
          * @enum {string}
          */
         ActionResultEvidence: "awaiting_execution" | "action_pending" | "action_in_progress" | "profile_visible" | "comment_confirmed" | "message_confirmed" | "executor_reported_success" | "user_excluded" | "duplicate_in_task" | "duplicate_in_history" | "blacklisted" | "action_cancelled" | "admission_rejected" | "local_safety_limit" | "login_required" | "dialog_blocked" | "messaging_not_allowed" | "follow_required" | "timed_out" | "page_version_unknown" | "conflicting_anchors" | "page_unavailable" | "verification_unavailable" | "executor_reported_failure" | "dispatch_timed_out" | "dispatch_unavailable" | "final_state_unconfirmed" | "recovery_unconfirmed";
+        /** AiMaterialDescriptionRequest */
+        AiMaterialDescriptionRequest: {
+            /**
+             * Describedat
+             * Format: date-time
+             */
+            describedAt: string;
+            /** Description */
+            description: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            source: "ai";
+            /** Tags */
+            tags: string[];
+        };
         /** BindingChallengeRequest */
         BindingChallengeRequest: {
             /** Devicepublickey */
@@ -721,6 +790,15 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * DescriptionSource
+         * @description Who wrote the description currently held by a material.
+         *
+         *     The distinction exists to keep a later AI pass from overwriting what a
+         *     user typed: `USER` is a terminal state for the description field.
+         * @enum {string}
+         */
+        DescriptionSource: "ai" | "user";
         /**
          * DeviceSessionCapability
          * @enum {string}
@@ -771,6 +849,78 @@ export interface components {
             lineSpacing: number;
             /** Strokepx */
             strokePx: number;
+        };
+        /** EditingMaterialCreateRequest */
+        EditingMaterialCreateRequest: {
+            /** Aidescription */
+            aiDescription: string | null;
+            /** Aitags */
+            aiTags: string[];
+            /** Audioloudnesslufs */
+            audioLoudnessLufs: number | null;
+            /** Contentdigest */
+            contentDigest: string;
+            /** Describedat */
+            describedAt: string | null;
+            descriptionSource: components["schemas"]["DescriptionSource"];
+            /** Durationms */
+            durationMs: number | null;
+            /** Hasaudio */
+            hasAudio: boolean;
+            /** Hasspeech */
+            hasSpeech: boolean;
+            /** Height */
+            height: number | null;
+            kind: components["schemas"]["MaterialKind"];
+            /** Materialid */
+            materialId: string;
+            /** Shotboundariesms */
+            shotBoundariesMs: number[];
+            /** Speechsegmentsms */
+            speechSegmentsMs: [
+                number,
+                number
+            ][];
+            /** Speechtranscript */
+            speechTranscript: string | null;
+            /** Width */
+            width: number | null;
+        };
+        /** EditingMaterialResponse */
+        EditingMaterialResponse: {
+            /** Aidescription */
+            aiDescription: string | null;
+            /** Aitags */
+            aiTags: string[];
+            /** Audioloudnesslufs */
+            audioLoudnessLufs: number | null;
+            /** Contentdigest */
+            contentDigest: string;
+            /** Describedat */
+            describedAt: string | null;
+            descriptionSource: components["schemas"]["DescriptionSource"];
+            /** Durationms */
+            durationMs: number | null;
+            /** Hasaudio */
+            hasAudio: boolean;
+            /** Hasspeech */
+            hasSpeech: boolean;
+            /** Height */
+            height: number | null;
+            kind: components["schemas"]["MaterialKind"];
+            /** Materialid */
+            materialId: string;
+            /** Shotboundariesms */
+            shotBoundariesMs: number[];
+            /** Speechsegmentsms */
+            speechSegmentsMs: [
+                number,
+                number
+            ][];
+            /** Speechtranscript */
+            speechTranscript: string | null;
+            /** Width */
+            width: number | null;
         };
         /** EditingOutputSpec */
         EditingOutputSpec: {
@@ -886,6 +1036,11 @@ export interface components {
             /** Version */
             version: number;
         };
+        /**
+         * MaterialKind
+         * @enum {string}
+         */
+        MaterialKind: "video" | "image" | "audio";
         /** PasswordChangeRequest */
         PasswordChangeRequest: {
             /**
@@ -1200,6 +1355,16 @@ export interface components {
          * @enum {string}
          */
         TaskTargetResultStatus: "pending" | "running" | "succeeded" | "skipped" | "failed" | "outcome_uncertain";
+        /** UserMaterialDescriptionRequest */
+        UserMaterialDescriptionRequest: {
+            /** Description */
+            description: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            source: "user";
+        };
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -1608,6 +1773,136 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeviceSessionExchangeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    findEditingMaterialByDigest: {
+        parameters: {
+            query: {
+                contentDigest: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditingMaterialResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    registerEditingMaterial: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditingMaterialCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditingMaterialResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getEditingMaterial: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                material_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditingMaterialResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateEditingMaterialDescription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                material_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserMaterialDescriptionRequest"] | components["schemas"]["AiMaterialDescriptionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditingMaterialResponse"];
                 };
             };
             /** @description Validation Error */

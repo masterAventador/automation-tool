@@ -9,6 +9,7 @@ for them is a measured fact here rather than an assumption.
 
 from __future__ import annotations
 
+import secrets
 import traceback
 from datetime import UTC, datetime
 from typing import cast
@@ -33,12 +34,17 @@ from automation_tool.control_plane.domain import (
     MAX_TAGS,
     MAX_TRANSCRIPT_CHARACTERS,
     DescriptionSource,
+    InstallationId,
     InvalidMaterialModel,
     Material,
     MaterialId,
     MaterialKind,
 )
-from automation_tool.control_plane.infrastructure.database import Database, materials
+from automation_tool.control_plane.infrastructure.database import (
+    Database,
+    installations,
+    materials,
+)
 from automation_tool.control_plane.infrastructure.database.material_repository import (
     SqlAlchemyMaterialRepository,
 )
@@ -68,6 +74,7 @@ PREVIOUS_REVISION = "20260729_0036"
 # all, since NULL there is an ordinary value and not a broken row.
 EXPECTED_COLUMNS = {
     "material_id": ("uuid", "NO", None),
+    "installation_id": ("uuid", "YES", None),
     "kind": ("character varying", "NO", 16),
     "duration_ms": ("integer", "YES", None),
     "width": ("integer", "YES", None),
@@ -84,7 +91,12 @@ EXPECTED_COLUMNS = {
     "description_source": ("character varying", "NO", 16),
     "described_at": ("timestamp with time zone", "YES", None),
 }
-EXPECTED_CONSTRAINTS = {"pk_materials", "uq_materials_content_digest"}
+EXPECTED_CONSTRAINTS = {"pk_materials", "fk_materials_installation"}
+EXPECTED_INDEXES = {
+    "uq_materials_unscoped_content_digest",
+    "uq_materials_installation_content_digest",
+    "ix_materials_installation_material",
+}
 
 # The SQLAlchemy type each column is declared with in `schema.py`. T1 compared
 # only names and widths and registered the rest as a known gap: pasting
@@ -93,6 +105,7 @@ EXPECTED_CONSTRAINTS = {"pk_materials", "uq_materials_content_digest"}
 # live risk here rather than a theoretical one.
 EXPECTED_TABLE_TYPES = {
     "material_id": "UUID",
+    "installation_id": "UUID",
     "kind": "String",
     "duration_ms": "Integer",
     "width": "Integer",
@@ -162,6 +175,7 @@ def row_values(material_id: UUID, **overrides: object) -> dict[str, object]:
     """
     values: dict[str, object] = {
         "material_id": material_id,
+        "installation_id": None,
         "kind": "video",
         "duration_ms": 185_000,
         "width": 1920,
@@ -185,6 +199,18 @@ def row_values(material_id: UUID, **overrides: object) -> dict[str, object]:
 async def reset_data(database: Database) -> None:
     async with database.session() as session:
         await session.execute(delete(materials))
+
+
+async def seed_installation(database: Database) -> InstallationId:
+    installation_id = InstallationId.new()
+    async with database.session() as session:
+        await session.execute(
+            insert(installations).values(
+                id=installation_id.uuid,
+                device_public_key=secrets.token_bytes(32),
+            )
+        )
+    return installation_id
 
 
 async def stored_row(database: Database, material_id: UUID) -> dict[str, object]:
@@ -354,6 +380,98 @@ async def test_a_second_material_with_the_same_digest_is_refused_without_leaking
 
 
 @pytest.mark.asyncio
+async def test_scoped_materials_are_owned_isolated_and_unique_per_installation(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    """The REST repository namespace is structural in PostgreSQL.
+
+    The same local file can be imported on two devices, but those rows cannot
+    expose or overwrite each other's user-owned descriptions. Legacy unscoped
+    rows remain a separate namespace rather than becoming visible to either
+    Installation.
+    """
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyMaterialRepository(database)
+    owner_ids: tuple[InstallationId, ...] = ()
+    try:
+        await reset_data(database)
+        owner = await seed_installation(database)
+        other = await seed_installation(database)
+        owner_ids = (owner, other)
+        owned = make_material(MaterialId.new())
+        foreign = make_material(MaterialId.new())
+        legacy = make_material(MaterialId.new(), content_digest=DIGEST_TWO)
+
+        await repository.save_for_installation(owned, owner)
+        await repository.save_for_installation(foreign, other)
+        await repository.save(legacy)
+
+        assert await repository.get_for_installation(owned.material_id, owner) == owned
+        with pytest.raises(MaterialNotFound):
+            await repository.get_for_installation(foreign.material_id, owner)
+        assert await repository.find_by_digest_for_installation(DIGEST_ONE, owner) == owned
+        assert await repository.find_by_digest_for_installation(DIGEST_ONE, other) == foreign
+        assert await repository.find_by_digest_for_installation(DIGEST_TWO, owner) is None
+        assert await repository.find_by_digest(DIGEST_TWO) == legacy
+        assert await repository.find_by_digest(DIGEST_ONE) is None
+
+        protected = owned.with_user_description("用户自己的描述")
+        await repository.update_description_for_installation(protected, owner)
+        with pytest.raises(MaterialDescriptionProtected):
+            await repository.update_description_for_installation(
+                owned.with_ai_description("模型不能覆盖", ("拒绝",), LATER),
+                owner,
+            )
+        with pytest.raises(MaterialNotFound):
+            await repository.update_description_for_installation(
+                foreign.with_user_description("越权修改"),
+                owner,
+            )
+        assert (
+            await repository.get_for_installation(owned.material_id, owner)
+        ).ai_description == "用户自己的描述"
+
+        with pytest.raises(MaterialAlreadyRegistered):
+            await repository.save_for_installation(
+                make_material(MaterialId.new()),
+                owner,
+            )
+
+        async with database.session() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(
+                            materials.c.material_id,
+                            materials.c.installation_id,
+                        ).order_by(materials.c.material_id)
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        assert {(row["material_id"], row["installation_id"]) for row in rows} == {
+            (owned.material_id.uuid, owner.uuid),
+            (foreign.material_id.uuid, other.uuid),
+            (legacy.material_id.uuid, None),
+        }
+    finally:
+        await reset_data(database)
+        if owner_ids:
+            async with database.session() as session:
+                await session.execute(
+                    delete(installations).where(
+                        installations.c.id.in_(
+                            [installation_id.uuid for installation_id in owner_ids]
+                        )
+                    )
+                )
+        await database.close()
+
+
+@pytest.mark.asyncio
 async def test_both_unique_constraints_are_enforced_by_postgresql_itself(
     postgresql_url: str,
     alembic_runner: AlembicRunner,
@@ -365,11 +483,11 @@ async def test_both_unique_constraints_are_enforced_by_postgresql_itself(
     inserts never touch the repository, so what they prove is that the database
     -- not a Python branch -- refuses.
 
-    Each conflicting row moves exactly one of the two dimensions, so the pair
-    tells the constraints apart: dropping the primary key leaves the second case
-    red and the first green, and dropping the unique index does the reverse. The
-    third row moves both and must be accepted, which is what stops a
-    too-broad constraint from passing the first two by refusing everything.
+        Each conflicting row moves exactly one of the two dimensions, so the pair
+        tells the primary key and the unscoped partial unique index apart: dropping
+        the primary key leaves the second case red and the first green, and dropping
+        the unique index does the reverse. The third row moves both and must be
+        accepted, which stops a too-broad rule passing by refusing everything.
     """
     alembic_runner(postgresql_url, "upgrade", "head")
     database = Database.from_url(postgresql_url)
@@ -390,7 +508,7 @@ async def test_both_unique_constraints_are_enforced_by_postgresql_itself(
         assert getattr(repeated_id.value.orig, "sqlstate", None) == "23505"
         assert "pk_materials" in str(repeated_id.value.orig)
         assert getattr(repeated_digest.value.orig, "sqlstate", None) == "23505"
-        assert "uq_materials_content_digest" in str(repeated_digest.value.orig)
+        assert "uq_materials_unscoped_content_digest" in str(repeated_digest.value.orig)
 
         await insert_row(database, second_id.uuid, content_digest=DIGEST_TWO)
         assert await stored_material_ids(database) == {first_id.uuid, second_id.uuid}
@@ -961,9 +1079,18 @@ async def test_migration_creates_the_declared_shape_and_drops_it(
                     )
                 )
             )
+            indexes = set(
+                await session.scalars(
+                    text(
+                        "select indexname from pg_indexes "
+                        "where schemaname = 'public' and tablename = 'materials'"
+                    )
+                )
+            )
         assert revision == HEAD_REVISION
         assert columns == EXPECTED_COLUMNS
         assert constraints >= EXPECTED_CONSTRAINTS
+        assert indexes >= EXPECTED_INDEXES
         # `schema.py` and the migration each declare these separately, and
         # nothing else compares them: every other test here reads either the
         # migrated database or this file's own constants, so narrowing the Table

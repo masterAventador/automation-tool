@@ -67,7 +67,9 @@ def test_customer_demo_has_no_anonymous_business_write_operation() -> None:
         "emergencyStopTask",
         "pauseTask",
         "prepareDouyinPlatformSessionLogout",
+        "registerEditingMaterial",
         "replaceTaskTargetExclusions",
         "resumeTask",
         "startTaskDiscovery",
+        "updateEditingMaterialDescription",
     }
