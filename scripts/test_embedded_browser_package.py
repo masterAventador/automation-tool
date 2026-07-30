@@ -51,9 +51,7 @@ PRODUCTION_PACKAGE_AUDIT = ROOT / "frontend/scripts/audit-production-package.mjs
 TARGET_ID = "macos-arm64"
 PLATFORM = "macos"
 ROOT_ENTRY = "chrome-mac-arm64"
-EXECUTABLE = (
-    "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
-)
+EXECUTABLE = "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
 MUTABLE_FILE = "chrome-mac-arm64/Google Chrome for Testing.app/Contents/Info.plist"
 
 TINY_BOUNDS = PackageSizeBounds(
@@ -175,7 +173,9 @@ class EmbeddedBrowserPackageTests(unittest.TestCase):
             1125 * 1024 * 1024,
         )
         self.assertGreaterEqual(RELEASE_SIZE_BOUNDS.max_package_bytes, payload)
-        self.assertLessEqual(RELEASE_SIZE_BOUNDS.max_package_bytes, payload + payload // 10)
+        self.assertLessEqual(
+            RELEASE_SIZE_BOUNDS.max_package_bytes, payload + payload // 10
+        )
 
     def test_declared_production_payload_lists_every_shipped_part(self) -> None:
         self.assertEqual(
@@ -359,7 +359,11 @@ class DistributionInstallationTests(unittest.TestCase):
         digest = _write_zip(
             archive,
             _synthetic_entries(),
-            {"chrome-mac-arm64/Google Chrome for Testing.app/Contents/Current": ("Info.plist")},
+            {
+                "chrome-mac-arm64/Google Chrome for Testing.app/Contents/Current": (
+                    "Info.plist"
+                )
+            },
         )
         build_staging(
             contract=load_staging_contract(STAGING_CONTRACT_PATH),
@@ -574,7 +578,9 @@ class ProductionPackageAuditTests(unittest.TestCase):
         (self.distribution / "index.html").write_text("<html></html>", encoding="utf-8")
         (self.distribution / "assets" / RELEASE_ASSET_NAME).write_text(
             "globalThis.desktop = true;"
-            + "".join(f"invoke({marker!r});" for marker in required_distribution_markers()),
+            + "".join(
+                f"invoke({marker!r});" for marker in required_distribution_markers()
+            ),
             encoding="utf-8",
         )
         self.cargo_manifest = self.base / "Cargo.toml"
@@ -645,7 +651,9 @@ class ProductionPackageAuditTests(unittest.TestCase):
 
     def test_webdriver_binary_marker_is_rejected(self) -> None:
         binary = self.base / "webdriver-binary"
-        binary.write_bytes(b"tauri-driver --port 4444ZGVtby1lYjE2LXJlbGVhc2Uta2V5LWJ5dGVzLTMyISE")
+        binary.write_bytes(
+            b"tauri-driver --port 4444ZGVtby1lYjE2LXJlbGVhc2Uta2V5LWJ5dGVzLTMyISE"
+        )
         result = self._audit(binary)
         self.assertNotEqual(result.returncode, 0)
 

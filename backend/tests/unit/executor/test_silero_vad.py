@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import numpy as np
 import onnxruntime  # type: ignore[import-untyped]
 import pytest
+
 from automation_tool.executor import silero_vad as silero_vad_module
 from automation_tool.executor.silero_vad import (
     SileroVad,
