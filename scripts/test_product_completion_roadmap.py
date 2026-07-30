@@ -74,11 +74,12 @@ def set_status(text: str, task_id: str, status: str) -> str:
 
 
 def an_unfinished_task(text: str) -> str:
-    """A task whose evidence file does not claim completion.
+    """A task whose evidence cannot support a completed ledger row.
 
     Used to build the "ledger says done, evidence says otherwise" tamper. The
-    gate compares the two, so the tamper only bites on a task that has not
-    finished yet — and which task that is changes as the work proceeds.
+    gate compares the two, so an unfinished task works whether its evidence is
+    still in progress or does not exist yet — and which task that is changes as
+    the work proceeds.
     """
     for line in text.splitlines():
         if not line.startswith("| PC-"):
@@ -87,12 +88,9 @@ def an_unfinished_task(text: str) -> str:
         task_id, status = fields[0], fields[4]
         if status == "✅ 已完成":
             continue
-        evidence = EVIDENCE_ROOT / f"{task_id}.md"
-        if evidence.is_file() and "> 状态：**已完成**" not in evidence.read_text(encoding="utf-8"):
-            return task_id
+        return task_id
     raise AssertionError(
-        "every task is finished, so this tamper can no longer be built; "
-        "replace it with one that does not depend on unfinished work"
+        "every task is finished, so this tamper can no longer be built"
     )
 
 
