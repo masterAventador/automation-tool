@@ -500,9 +500,15 @@ class BailianMaterialUnderstandingAdapter:
                 _reject()
             document = json.loads(raw_response.decode("utf-8"))
             choice = document["choices"][0]
+            message = choice["message"]
+            if not isinstance(message, dict):
+                _reject()
+            refusal = message.get("refusal")
+            if refusal is not None and refusal != "":
+                _reject()
             return MaterialUnderstandingReply(
                 request_id=document["id"],
-                content=choice["message"]["content"],
+                content=message["content"],
                 finish_reason=choice["finish_reason"],
             )
         except (

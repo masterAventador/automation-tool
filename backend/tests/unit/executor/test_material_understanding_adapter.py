@@ -222,6 +222,147 @@ def test_transport_failure_is_fixed_and_redacted(
     assert captured.value.__context__ is None
 
 
+def test_transport_timeout_is_fixed_redacted_and_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def time_out(
+        _request: urllib.request.Request,
+        *,
+        timeout: float,
+    ) -> _Response:
+        nonlocal calls
+        calls += 1
+        raise TimeoutError(
+            f"private timeout {API_KEY} after {timeout} "
+            "/Users/operator/Private Videos/source clip.mp4"
+        )
+
+    monkeypatch.setattr(material_understanding_module, "_open_request", time_out)
+
+    with pytest.raises(
+        MaterialUnderstandingRejected,
+        match="material understanding request rejected",
+    ) as captured:
+        _adapter().understand(
+            (
+                MaterialUnderstandingFrame(
+                    timestamp_ms=0,
+                    is_scene_cut=True,
+                    jpeg_bytes=b"\xff\xd8\xff\xd9",
+                ),
+            ),
+            options=MaterialUnderstandingOptions(),
+        )
+
+    assert calls == 1
+    formatted = "".join(
+        traceback.format_exception(
+            type(captured.value),
+            captured.value,
+            captured.value.__traceback__,
+        )
+    )
+    assert API_KEY not in formatted
+    assert "/Users/operator/Private Videos/source clip.mp4" not in formatted
+    assert captured.value.__context__ is None
+
+
+def test_explicit_model_refusal_cannot_be_hidden_by_valid_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = _Response(
+        {
+            "id": "req-refused-private",
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": (
+                            '{"description":"看似有效","tags":[],"shots":'
+                            '[{"startMs":0,"endMs":1000,"description":"全片"}]}'
+                        ),
+                        "refusal": "private upstream refusal details",
+                    },
+                }
+            ],
+        }
+    )
+
+    def open_request(
+        _request: urllib.request.Request,
+        *,
+        timeout: float,
+    ) -> _Response:
+        assert timeout == 12.5
+        return response
+
+    monkeypatch.setattr(material_understanding_module, "_open_request", open_request)
+
+    with pytest.raises(
+        MaterialUnderstandingRejected,
+        match="material understanding request rejected",
+    ) as captured:
+        _adapter().understand(
+            (
+                MaterialUnderstandingFrame(
+                    timestamp_ms=0,
+                    is_scene_cut=True,
+                    jpeg_bytes=b"\xff\xd8\xff\xd9",
+                ),
+            ),
+            options=MaterialUnderstandingOptions(),
+        )
+
+    assert "private upstream refusal details" not in str(captured.value)
+    assert "req-refused-private" not in str(captured.value)
+    assert captured.value.__context__ is None
+
+
+def test_invalid_model_message_shape_is_a_fixed_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = _Response(
+        {
+            "id": "req-invalid-message",
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": ["private", "unexpected", "shape"],
+                }
+            ],
+        }
+    )
+
+    def open_request(
+        _request: urllib.request.Request,
+        *,
+        timeout: float,
+    ) -> _Response:
+        assert timeout == 12.5
+        return response
+
+    monkeypatch.setattr(material_understanding_module, "_open_request", open_request)
+
+    with pytest.raises(
+        MaterialUnderstandingRejected,
+        match="material understanding request rejected",
+    ) as captured:
+        _adapter().understand(
+            (
+                MaterialUnderstandingFrame(
+                    timestamp_ms=0,
+                    is_scene_cut=True,
+                    jpeg_bytes=b"\xff\xd8\xff\xd9",
+                ),
+            ),
+            options=MaterialUnderstandingOptions(),
+        )
+
+    assert captured.value.__context__ is None
+
+
 def test_direct_config_cannot_bypass_the_locked_endpoint() -> None:
     with pytest.raises(MaterialUnderstandingRejected):
         BailianMaterialUnderstandingConfig(
