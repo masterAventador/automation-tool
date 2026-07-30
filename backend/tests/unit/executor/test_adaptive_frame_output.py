@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import os
 import stat
 import subprocess
@@ -491,6 +492,78 @@ def test_registered_frame_is_unlinked_only_once_during_rollback(
             output,
             duration_ms=1,
         )
+
+    assert unlink_calls == 1
+    assert (output / "frame-000001.jpg").read_bytes() == b"concurrent writer"
+
+
+def test_interruption_after_registration_does_not_repeat_the_rollback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tools = _fake_tools(tmp_path)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"media")
+    source, approved = approve_source(source)
+    output = tmp_path / "output"
+    output.mkdir(mode=0o700)
+    monkeypatch.setattr(
+        adaptive_frame_extraction,
+        "extract_adaptive_frame_candidates",
+        lambda *_args, **_kwargs: (
+            ExtractedFrame(timestamp_ms=0, is_scene_cut=True, jpeg_bytes=b"first"),
+        ),
+    )
+    real_unlink = adaptive_frame_extraction._OutputWorkspace.unlink
+    unlink_calls = 0
+
+    def replace_after_first_unlink(
+        workspace: adaptive_frame_extraction._OutputWorkspace,
+        filename: str,
+    ) -> None:
+        nonlocal unlink_calls
+        real_unlink(workspace, filename)
+        unlink_calls += 1
+        if unlink_calls == 1:
+            (output / filename).write_bytes(b"concurrent writer")
+
+    monkeypatch.setattr(
+        adaptive_frame_extraction._OutputWorkspace,
+        "unlink",
+        replace_after_first_unlink,
+    )
+    lines, first_line = inspect.getsourcelines(adaptive_frame_extraction._write_exclusive_frame)
+    append_offset = next(
+        offset for offset, line in enumerate(lines) if line.strip() == "created.append(filename)"
+    )
+    interruption_line = first_line + append_offset + 1
+
+    def interrupt_after_append(
+        frame: Any,
+        event: str,
+        _argument: Any,
+    ) -> Any:
+        if (
+            event == "line"
+            and frame.f_code is adaptive_frame_extraction._write_exclusive_frame.__code__
+            and frame.f_lineno == interruption_line
+        ):
+            sys.settrace(None)
+            raise KeyboardInterrupt("injected cancellation")
+        return interrupt_after_append
+
+    try:
+        sys.settrace(interrupt_after_append)
+        with pytest.raises(KeyboardInterrupt, match="injected cancellation"):
+            extract_adaptive_frames(
+                tools,
+                source,
+                approved,
+                output,
+                duration_ms=1,
+            )
+    finally:
+        sys.settrace(None)
 
     assert unlink_calls == 1
     assert (output / "frame-000001.jpg").read_bytes() == b"concurrent writer"
