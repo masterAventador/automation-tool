@@ -106,6 +106,12 @@ def test_frame_seek_times_cover_the_whole_part() -> None:
     assert probe.frame_seek_times(duration_seconds=1.0, fps=2) == [0.0, 0.5]
 
 
+def test_windows_render_has_a_native_cdp_transport() -> None:
+    """PC-13 must run on Windows, where POSIX fd 3/4 wiring does not exist."""
+    probe = load_module(PROBE)
+    assert hasattr(probe, "measure_document_windows")
+
+
 def main() -> int:
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
     for test in tests:
