@@ -1,31 +1,22 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  openSettings,
+  waitForStartup,
+  workbenchIsMounted,
+} from "./navigation";
 
 const TEST_KEY = "sk-vf05-invalid-desktop-key-1234567890";
 
-async function openSettings(): Promise<void> {
-  const workbenchHeading = await browser.$("h2=RPA 运营工作台");
-  if (await workbenchHeading.isExisting()) {
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='设置与诊断']]")
-      .click();
-    await expect(await browser.$("h2")).toHaveText("设置与诊断");
-  } else {
-    await expect(await browser.$("button=打开本地修复工具")).toBeDisplayed();
-    await browser.$("button=打开本地修复工具").click();
-  }
-  await expect(await browser.$(".model-service-settings-card")).toBeDisplayed();
-}
-
 describe("VF-05 hidden App model service acceptance", () => {
   it("persists, reloads, reuses and tests a credential without reflecting it", async () => {
-    await browser.waitUntil(
-      async () =>
-        (await browser.$("h2=RPA 运营工作台").isExisting()) ||
-        (await browser.$("button=打开本地修复工具").isExisting()),
-      { timeoutMsg: "production App did not reach workbench or startup repair path" },
-    );
+    // 这个 spec 接受两种开机结局：直接进工作台，或停在启动修复关口。
+    // 停在修复关口时要先点进去，否则侧边栏根本不存在——这一段原本在本文件
+    // 自己的 openSettings 里，抽到共享模块时不能连带丢掉。
+    if (await waitForStartup({ allowRepair: true }) === "repair") {
+      await browser.$("button=打开本地修复工具").click();
+    }
     await openSettings();
 
     const script = await browser.$(".model-service-purpose--script");
@@ -42,7 +33,7 @@ describe("VF-05 hidden App model service acceptance", () => {
     await browser.refresh();
     await browser.waitUntil(
       async () =>
-        (await browser.$("h2=RPA 运营工作台").isExisting()) ||
+        (await workbenchIsMounted()) ||
         (await browser.$("button=打开本地修复工具").isExisting()),
       { timeoutMsg: "production App did not recover after refresh" },
     );

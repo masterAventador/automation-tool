@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  openWorkbenchSection,
+  waitForStartup,
+} from "./navigation";
 
 interface ExecutorLifecyclePreparation {
   readonly installationId: string;
@@ -32,10 +36,8 @@ async function waitForText(...expected: string[]): Promise<string> {
 }
 
 async function openDiagnostics(): Promise<void> {
-  await browser
-    .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='设置与诊断']]")
-    .click();
-  await expect(await browser.$("h2")).toHaveText("设置与诊断");
+  await openWorkbenchSection("设置");
+  await expect(await browser.$("h2")).toHaveText("设置");
 }
 
 async function refreshUntil(...expected: string[]): Promise<void> {
@@ -55,7 +57,7 @@ async function refreshUntil(...expected: string[]): Promise<void> {
 
 describe("E4-14 hidden App Executor lifecycle acceptance", () => {
   it("starts, observes, recovers, times out a hang, stops, and leaves cleanup to App exit", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_executor_lifecycle_for_acceptance"),
     )) as ExecutorLifecyclePreparation;

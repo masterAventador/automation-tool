@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-import { browser, expect } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import {
+  waitForStartup,
+} from "./navigation";
 
 interface TaskEventStreamSummary {
   readonly installationId: string;
@@ -13,8 +16,7 @@ interface TaskEventStreamSummary {
 
 describe("Task event stream production-path acceptance", () => {
   it("disconnects, resumes, and reaches terminal through the hidden real App", async () => {
-    const heading = await browser.$("h2");
-    await expect(heading).toHaveText("RPA 运营工作台");
+    await waitForStartup();
 
     const summary = (await browser.tauri.execute(({ core }) =>
       core.invoke("stream_task_events_for_acceptance"),

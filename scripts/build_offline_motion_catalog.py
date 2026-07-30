@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import posixpath
 import re
@@ -127,9 +128,21 @@ def fetch(url: str) -> bytes:
     raise BuildError(f"download loop ended without a result: {url}")
 
 
+def download_records(lock: dict) -> list[dict]:
+    """Everything that has to arrive from the network before the build can run.
+
+    The Chinese face is not shipped by anyone as a single file -- Google Fonts
+    serves it as 101 `unicode-range` subsets, which the render sandbox's
+    128-asset ceiling cannot take. So its *source* is the locked upstream
+    variable TTF and the woff2 is built here; the TTF is downloaded and
+    digest-checked exactly like every other artifact.
+    """
+    return list(lock["artifacts"]) + [font["source"] for font in lock.get("builtFonts", [])]
+
+
 def verify_downloads(lock: dict, download_root: Path, offline: bool) -> None:
     expected: dict[str, dict] = {}
-    for artifact in lock["artifacts"]:
+    for artifact in download_records(lock):
         expected[strip_dependency_root(lock, artifact["localPath"])] = artifact
     for relative, artifact in sorted(expected.items()):
         target = download_root / relative
@@ -227,6 +240,38 @@ def stylesheet_css(sheet: dict) -> str:
     return "\n".join(blocks)
 
 
+def build_woff2(source: Path, font: dict) -> bytes:
+    """Compress one locked upstream font into the woff2 the renderer links.
+
+    Both `recalc` flags are off and that is the whole point. `TTFont`'s default
+    rewrites `head.modified` with the build clock, so the same input produces a
+    different file on every run -- measured 2026-07-27, two consecutive builds
+    of this font differed in digest *and* in length. A locked digest over a
+    build like that is red the moment anyone rebuilds, which is indistinguishable
+    from the font having been tampered with. With both flags off, three runs
+    produced the identical 7,782,072-byte file.
+    """
+    try:
+        from fontTools.ttLib import TTFont
+    except ImportError as error:  # pragma: no cover - reported, never swallowed
+        raise BuildError(
+            "building the Chinese face needs the `catalog-build` dependency group "
+            f"(fontTools + brotli): {error}"
+        ) from error
+    buffer = io.BytesIO()
+    with TTFont(source, recalcTimestamp=False, recalcBBoxes=False) as opened:
+        opened.flavor = "woff2"
+        opened.save(buffer)
+    data = buffer.getvalue()
+    digest = sha256_bytes(data)
+    if digest != font["sha256"] or len(data) != font["bytes"]:
+        raise BuildError(
+            f"built font drifted from the lock: {font['localPath']} "
+            f"{digest}/{len(data)} != {font['sha256']}/{font['bytes']}"
+        )
+    return data
+
+
 def generate_catalog(
     lock: dict,
     catalog_contract: dict,
@@ -286,6 +331,11 @@ def generate_catalog(
         destination = catalog_root / sheet["localPath"]
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(stylesheet_css(sheet), encoding="utf-8", newline="\n")
+    for font in lock.get("builtFonts", []):
+        source = download_root / strip_dependency_root(lock, font["source"]["localPath"])
+        destination = catalog_root / font["localPath"]
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(build_woff2(source, font))
 
     files = []
     for path in sorted(catalog_root.rglob("*")):

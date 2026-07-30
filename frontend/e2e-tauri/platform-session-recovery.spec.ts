@@ -3,6 +3,10 @@ import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  openWorkbenchSection,
+  waitForStartup,
+} from "./navigation";
 
 interface Preparation {
   readonly installationId: string;
@@ -40,8 +44,8 @@ async function signal(path: string, value: unknown): Promise<void> {
 }
 
 async function openPlatformPage(): Promise<void> {
-  await browser.$("li=平台状态").click();
-  await expect(await browser.$("h2")).toHaveText("平台状态");
+  await openWorkbenchSection("账号与平台");
+  await expect(await browser.$("h2")).toHaveText("账号与平台");
 }
 
 /**
@@ -109,7 +113,7 @@ function assertRecoveryGuidance(label: string, text: string): void {
 
 describe("T114 abandoned operations-profile lease recovery", () => {
   it("blocks both buttons after a killed App and recovers through safe logout", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
 
     if (phase === "abandon") {
       const preparation = (await browser.tauri.execute(({ core }) =>

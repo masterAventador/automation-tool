@@ -3,6 +3,11 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  openMaterialVideoStudio,
+  openWorkbenchSection,
+  waitForStartup,
+} from "./navigation";
 
 interface MotionStylePresetContract {
   readonly presets: ReadonlyArray<{
@@ -23,16 +28,9 @@ describe("BM-06/BM-07 production App motion style catalog acceptance", () => {
     // The embedded service reuses the App across spec workers. Reloading keeps
     // this scenario's "no method selected" gate independent of earlier tests.
     await browser.refresh();
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='工作台']]")
-      .click();
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='视频制作']]")
-      .click();
+    await waitForStartup();
 
-    const studio = await browser.$("section[aria-label='视频制作工作区']");
-    await expect(studio).toBeDisplayed();
+    const studio = await openMaterialVideoStudio();
 
     await studio.$("div[role='tab']=制作设置").click();
     await expect(studio).toHaveText(expect.stringContaining("尚未选择制作方式"));
@@ -142,10 +140,8 @@ describe("BM-06/BM-07 production App motion style catalog acceptance", () => {
       /biennale|blockframe|blue-professional|bold-poster|broadside|capsule|cartesian|cobalt-grid|coral|creative-mode|daisy-days|editorial-forest|code-editorial/i,
     );
 
-    // 回到工作台首页，避免把页面状态遗留给后续验收用例。
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='工作台']]")
-      .click();
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    // 回到助理页，避免把页面状态遗留给后续验收用例——常驻 App 在多个 spec
+    // 之间是共享的。`waitForStartup` 只等不导航，用它做这件事等于没做。
+    await openWorkbenchSection("AI 助理");
   });
 });

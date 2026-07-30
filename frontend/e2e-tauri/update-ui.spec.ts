@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 
-import { browser, expect } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import {
+  openSettings,
+  waitForStartup,
+} from "./navigation";
 
 interface UpdateState {
   readonly state: string;
@@ -36,7 +40,7 @@ async function waitForText(text: string): Promise<void> {
 
 describe("H8-21/H8-22 hidden original-App update decision and UI acceptance", () => {
   it("drives optional and forced update presentation through visible App controls", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
     // Every decision below stays inside the one window the user opened: nothing
     // in this flow may hand the install off to a second Tauri window.
     assert.deepEqual(await browser.tauri.listWindows(), ["main"]);
@@ -50,7 +54,7 @@ describe("H8-21/H8-22 hidden original-App update decision and UI acceptance", ()
       await browser.$("button=稍后提醒").click();
       await waitForState("ready", "deferred");
 
-      await browser.$("li=设置与诊断").click();
+      await openSettings();
       await waitForText("已暂缓，将在下次检查时重新提示");
       await browser.$("button=检查更新").click();
       await waitForText("发现新版本 0.2.0");

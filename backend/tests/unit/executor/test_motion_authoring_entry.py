@@ -126,6 +126,115 @@ def test_a_request_that_is_not_the_declared_shape_is_refused(workspace: Path) ->
     assert model.calls == 0
 
 
+def test_a_relative_browser_executable_is_refused_before_the_model(
+    workspace: Path,
+) -> None:
+    """The probe launches whatever this path names, so a path the App did not
+    resolve absolutely is a caller error — never something to search for."""
+    model = _NeverCalledModel()
+    with pytest.raises(MotionAuthoringEntryRejected) as caught:
+        run_motion_authoring_entry(
+            _request(workspace, browserExecutable="relative/chromium"),
+            model_call=model,
+        )
+    assert caught.value.rejection_reason == "browser_executable_not_absolute"
+    assert model.calls == 0
+
+
+def test_an_empty_browser_executable_is_refused_before_the_model(
+    workspace: Path,
+) -> None:
+    model = _NeverCalledModel()
+    with pytest.raises(MotionAuthoringEntryRejected) as caught:
+        run_motion_authoring_entry(
+            _request(workspace, browserExecutable=""), model_call=model
+        )
+    assert caught.value.rejection_reason == "browser_executable_missing"
+    assert model.calls == 0
+
+
+def test_the_authorized_browser_reaches_the_agent_as_a_probe(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the field the agent gets a real probe; without it, none.
+
+    `None` must keep meaning "no measurement" — an older App that never sends
+    the field keeps today's behaviour instead of a crash or a fake pass.
+    """
+    seen: list[object] = []
+
+    class _RecordingAgent:
+        def __init__(self, **keywords: object) -> None:
+            seen.append(keywords.get("slot_probe"))
+
+        def author(self, _brief: object) -> None:
+            raise AssertionError("the recording agent never authors")
+
+    monkeypatch.setattr(motion_authoring_entry, "MotionAuthoringAgent", _RecordingAgent)
+    for request in (
+        _request(workspace, browserExecutable=str(workspace / "chromium")),
+        _request(workspace),
+    ):
+        with pytest.raises(Exception):
+            run_motion_authoring_entry(request, model_call=_NeverCalledModel())
+    with_field, without_field = seen
+    assert callable(with_field)
+    assert without_field is None
+
+
+def test_a_relative_ffprobe_executable_is_refused_before_the_model(
+    workspace: Path,
+) -> None:
+    """Narration length is measured by whatever this path names (PC-26), so a
+    path the App did not resolve absolutely is a caller error."""
+    model = _NeverCalledModel()
+    with pytest.raises(MotionAuthoringEntryRejected) as caught:
+        run_motion_authoring_entry(
+            _request(workspace, ffprobeExecutable="relative/ffprobe"),
+            model_call=model,
+        )
+    assert caught.value.rejection_reason == "ffprobe_executable_not_absolute"
+    assert model.calls == 0
+
+
+def test_an_empty_ffprobe_executable_is_refused_before_the_model(
+    workspace: Path,
+) -> None:
+    model = _NeverCalledModel()
+    with pytest.raises(MotionAuthoringEntryRejected) as caught:
+        run_motion_authoring_entry(
+            _request(workspace, ffprobeExecutable=""), model_call=model
+        )
+    assert caught.value.rejection_reason == "ffprobe_executable_missing"
+    assert model.calls == 0
+
+
+def test_the_ffprobe_path_reaches_the_agent_as_a_narrator(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the field the agent gets a narrator; without it, a silent film —
+    an older App keeps today's behaviour instead of a crash or a fake voice."""
+    seen: list[object] = []
+
+    class _RecordingAgent:
+        def __init__(self, **keywords: object) -> None:
+            seen.append(keywords.get("narrator"))
+
+        def author(self, _brief: object) -> None:
+            raise AssertionError("the recording agent never authors")
+
+    monkeypatch.setattr(motion_authoring_entry, "MotionAuthoringAgent", _RecordingAgent)
+    for request in (
+        _request(workspace, ffprobeExecutable=str(workspace / "ffprobe")),
+        _request(workspace),
+    ):
+        with pytest.raises(Exception):
+            run_motion_authoring_entry(request, model_call=_NeverCalledModel())
+    with_field, without_field = seen
+    assert callable(with_field)
+    assert without_field is None
+
+
 def test_a_workspace_outside_the_request_is_refused(tmp_path: Path) -> None:
     """A relative or non-existent workspace is a caller error, not a directory to create.
 
@@ -588,7 +697,13 @@ def test_the_shared_contract_declares_which_findings_are_not_refusals() -> None:
     # Vacuous membership is the failure mode this guards: a class that exists
     # but classifies nothing would let every one of these findings keep telling
     # the user to rewrite a sentence nothing read.
-    assert outcomes["model_transport_failed"] == {"video_creation_model_transport_failed"}
+    # PC-26 widened this class: a TTS round that fails is transport to a model
+    # service failing, and answering it as a refusal would send the user to
+    # rewrite a sentence the narrator never read.
+    assert outcomes["model_transport_failed"] == {
+        "agent_voiceover_synthesis_failed",
+        "video_creation_model_transport_failed",
+    }
     assert outcomes["model_timed_out"] == {"video_creation_model_timed_out"}
     assert "video_creation_model_unavailable" in outcomes["model_configuration_required"]
     assert (

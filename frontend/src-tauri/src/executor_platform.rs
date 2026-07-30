@@ -758,9 +758,15 @@ impl ExecutorPlatformService {
         if command != LocalPlatformCommand::CompleteDouyinLogout {
             return Err(configuration_invalid());
         }
-        self.manager
+        let result = self
+            .manager
             .execute_session_command(command)
-            .map_err(map_manager_error)
+            .map_err(map_manager_error);
+        // PC-25：注销完成即结算 App 持有的 Profile 租约。此前只有紧急停止会
+        // 顺带清租约，于是「不杀执行器的安全注销」删 Profile 时撞上自己的锁
+        //（b5_13 实测 profile_in_use ×7）。语义与 under_profile_lease 一致：
+        // logged_out 是完成态，错误路径上执行器也已尽力关闭浏览器——都放。
+        self.settle_lease(result, |state| state == "logged_out")
     }
 
     #[cfg(feature = "control-plane-e2e")]

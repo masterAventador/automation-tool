@@ -1,17 +1,15 @@
 import assert from "node:assert/strict";
 
-import { browser, expect } from "@wdio/globals";
+import { expect } from "@wdio/globals";
+import {
+  openVideoStudio,
+  waitForStartup,
+} from "./navigation";
 
 async function openMotionStudio() {
-  await browser
-    .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='工作台']]")
-    .click();
-  await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
-  await browser
-    .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='视频制作']]")
-    .click();
-  const studio = await browser.$("section[aria-label='视频制作工作区']");
-  await expect(studio).toBeDisplayed();
+  await waitForStartup();
+  // `waitForStartup` 只等不导航；改版后进工作区要走 创作 → 分段 → 打开完整制作面板。
+  const studio = await openVideoStudio();
   await studio.$("button[aria-label='选择品牌动效成片']").click();
   return studio;
 }

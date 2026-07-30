@@ -585,6 +585,26 @@ export function WorkbenchShell({
 
   return (
     <Layout className="desktop-shell">
+      {/*
+       * The update prompt has to exist wherever the user is standing.
+       *
+       * `AppUpdateCenter` renders its prompt Modal unconditionally and adds the
+       * management card only when `showSettings`. So mounting it *only* inside
+       * the settings page — which is what this shell did until 2026-07-29 —
+       * makes the prompt's visibility depend on the user happening to be on
+       * that page. Bad for an optional update and wrong for a forced one, whose
+       * whole meaning is "you cannot keep using this until you update".
+       *
+       * Exactly one instance is mounted at a time: this one while the user is
+       * anywhere else, the settings one (which also draws the card) while they
+       * are there. Two would mean two subscriptions and two modals.
+       *
+       * Found by H8-21's desktop acceptance, which waits for 发现新版本 right
+       * after startup and sat there for 25 seconds.
+       */}
+      {showingSettings ? null : (
+        <AppUpdateCenter gateway={appUpdateGateway} showSettings={false} />
+      )}
       <Layout.Sider className="desktop-sidebar" width={184} theme="dark">
         <div className="desktop-brand">
           <div className="brand-mark brand-mark--small" aria-hidden="true">
@@ -761,7 +781,21 @@ export function WorkbenchShell({
                   discoveryGateway={taskDiscoveryGateway}
                   taskTargetPreviewSource={taskTargetPreviewSource}
                   taskTargetResultSource={taskTargetResultSource}
-                  onBack={() => setActivePage("automation")}
+                  /*
+                   * 离开一条任务时把选中一起清掉。
+                   *
+                   * `selectedTaskId` 此前只有 `openTask` 一处写入、从不清空，而这一页
+                   * 的渲染是「有选中就显示详情、否则显示列表」——于是用户只要点开过
+                   * 任何一条任务，「查看运行记录」在本次会话里就永远停在那一条上，
+                   * 列表再也回不去，唯一的出路是重启 App。
+                   *
+                   * 由 T3-18 的桌面验收发现：它取消完第一条任务、返回、再进运行记录
+                   * 要打开第二条，而页面还停在第一条的详情上。
+                   */
+                  onBack={() => {
+                    setSelectedTaskId(null);
+                    setActivePage("automation");
+                  }}
                   onOpenPlatformSession={() => openPlatformPage(false)}
                   onPlatformLoginRequired={() => openPlatformPage(true)}
                 />

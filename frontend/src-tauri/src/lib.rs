@@ -363,8 +363,17 @@ fn delete_material_video_artifact(
 const MOTION_VIDEO_WORKER_DIRECTORY: &str = "motion-video-worker";
 const PACKAGED_WORKER_SUBDIRECTORY: &str = "package";
 
+/// Where the installer puts the 134 packaged motion parts.
+///
+/// Declared in `release-package-resources.v1.json` as the `catalog` resource
+/// and asserted against it by the runtime tests, because this string is the
+/// only thing connecting a tree the release audit requires to a child process
+/// that cannot use parts it is never pointed at.
+pub const MOTION_CATALOG_DIRECTORY: &str = "motion-catalog";
+
 struct MotionRuntimePaths {
     worker_package: std::path::PathBuf,
+    catalog: std::path::PathBuf,
     browser: std::path::PathBuf,
     chromium_major: u32,
     toolchain: video_media_toolchain::VideoMediaToolchain,
@@ -403,6 +412,7 @@ fn motion_runtime_paths(
         worker_package: resource_directory
             .join(MOTION_VIDEO_WORKER_DIRECTORY)
             .join(PACKAGED_WORKER_SUBDIRECTORY),
+        catalog: resource_directory.join(MOTION_CATALOG_DIRECTORY),
         browser,
         chromium_major,
         toolchain,
@@ -522,7 +532,6 @@ fn start_motion_render(
 ) -> Result<motion_video_studio::MotionRenderJobSnapshot, motion_video_studio::MotionVideoStudioError>
 {
     let render_job_id = prepared.render_job_id();
-    let allowed_assets = prepared.allowed_assets().to_vec();
     let (asset_root, _, _) =
         motion_video_studio::workspace_render_paths(workspaces, render_job_id)?;
     let discard = || {
@@ -556,18 +565,12 @@ fn start_motion_render(
         return Err(motion_video_studio::render_unavailable());
     }
     let initial = motion_video_studio::snapshot(workspaces, render_job_id)?;
-    let frame_count = prepared.frame_count();
-    let frames_per_second = prepared.frames_per_second();
+    let segments = prepared.segments().to_vec();
+    let film_canvas = prepared.film_canvas();
     let ffmpeg = runtime.toolchain.ffmpeg_path().to_path_buf();
+    let ffprobe = runtime.toolchain.ffprobe_path().to_path_buf();
     std::thread::spawn(move || {
-        run_motion_render_job(
-            app,
-            render_job_id,
-            allowed_assets,
-            frame_count,
-            frames_per_second,
-            ffmpeg,
-        );
+        run_motion_render_job(app, render_job_id, segments, film_canvas, ffmpeg, ffprobe);
     });
     Ok(initial)
 }
@@ -593,6 +596,49 @@ const MOTION_AUTHORING_DEADLINE: std::time::Duration = std::time::Duration::from
 /// Everything reported here is known on this side: an exit status, a budget we
 /// set, and whether the bytes handed back were readable. None of it repeats
 /// anything the model produced.
+/// The one authoring request, built in one place.
+///
+/// Separated from the command that sends it so the fields can be checked
+/// without a running App. What made that worth doing is `catalogRoot`: it was
+/// the field whose absence let the agent build an empty catalog, refuse every
+/// beat that chose a part, and fall back to the single built-in composition —
+/// PC-04's silence surviving one layer further along than anyone looked.
+pub fn motion_authoring_request(
+    work: &std::path::Path,
+    catalog_root: &std::path::Path,
+    browser: &std::path::Path,
+    ffprobe: &std::path::Path,
+    request: &motion_video_studio::MotionVideoBriefRequest,
+    model_id: &str,
+    api_key: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion": 1,
+        "workspace": work,
+        "catalogRoot": catalog_root,
+        // PC-14: the overflow probe launches exactly this executable — the one
+        // the embedded-browser authority already verified (EB-07). Omitting it
+        // would not fail anything; the child would simply author unmeasured,
+        // which is the catalogRoot silence all over again.
+        "browserExecutable": browser,
+        // PC-26: narration length is measured with the packaged toolchain's
+        // ffprobe — the same binary the render loop already trusts. Omitting
+        // it would not fail anything either; the film would simply be silent.
+        "ffprobeExecutable": ffprobe,
+        "brief": request.brief(),
+        "aspectRatio": request.aspect_ratio(),
+        "durationSeconds": request.duration_seconds(),
+        "language": request.language(),
+        "modelThinking": request.model_thinking(),
+        "brandAssets": [],
+        "model": {
+            "baseUrl": model_service_settings::PRODUCTION_BASE_URL,
+            "modelId": model_id,
+            "apiKey": api_key,
+        },
+    })
+}
+
 pub fn run_motion_authoring(
     entrypoint: &std::path::Path,
     request: &serde_json::Value,
@@ -736,20 +782,15 @@ async fn submit_motion_video_brief(
                 .map_err(|_| motion_video_studio::storage_unavailable())?;
             let answer = run_motion_authoring(
                 &entrypoint,
-                &serde_json::json!({
-                    "schemaVersion": 1,
-                    "workspace": work,
-                    "brief": request.brief(),
-                    "aspectRatio": request.aspect_ratio(),
-                    "durationSeconds": request.duration_seconds(),
-                    "language": request.language(),
-                    "brandAssets": [],
-                    "model": {
-                        "baseUrl": model_service_settings::PRODUCTION_BASE_URL,
-                        "modelId": credential.model_id().as_str(),
-                        "apiKey": credential.api_key(),
-                    },
-                }),
+                &motion_authoring_request(
+                    &work,
+                    &runtime.catalog,
+                    &runtime.browser,
+                    runtime.toolchain.ffprobe_path(),
+                    &request,
+                    credential.model_id().as_str(),
+                    credential.api_key(),
+                ),
                 MOTION_AUTHORING_DEADLINE,
             )?;
             motion_video_studio::accept_authored_render_job(
@@ -789,83 +830,145 @@ enum MotionRenderStageFailure {
     StaticFilm,
 }
 
+/// Where the shots of a film wait between being encoded and being joined.
+///
+/// Under the workspace's output directory rather than its worker asset root:
+/// these are finished video files, and the asset root is what the render
+/// sandbox is pointed at. Removed once the film exists, on every path.
+const MOTION_SEGMENT_DIRECTORY: &str = "segments";
+
 fn run_motion_render_job(
     app: tauri::AppHandle,
     render_job_id: uuid::Uuid,
-    allowed_assets: Vec<String>,
-    frame_count: u32,
-    frames_per_second: u32,
+    segments: Vec<motion_video_studio::MotionRenderSegment>,
+    film_canvas: motion_video_studio::MotionFilmCanvas,
     ffmpeg: std::path::PathBuf,
+    ffprobe: std::path::PathBuf,
 ) {
     let workspaces = app.state::<video_job_workspace::VideoJobWorkspaceStore>();
     let orchestrator = app.state::<local_video_orchestrator::LocalVideoOrchestrator>();
     let outcome = (|| -> Result<(), MotionRenderStageFailure> {
-        if motion_video_studio::cancellation_requested(&workspaces, render_job_id)
-            .map_err(|_| MotionRenderStageFailure::Render)?
-        {
-            return Err(MotionRenderStageFailure::Cancelled);
-        }
-        motion_video_studio::advance(
-            &workspaces,
-            render_job_id,
-            motion_video_studio::MotionRenderJobStatus::Rendering,
-            55,
-            None,
-            None,
-        )
-        .map_err(|_| MotionRenderStageFailure::Render)?;
-        let (work, _, _) = motion_video_studio::workspace_render_paths(&workspaces, render_job_id)
-            .map_err(|_| MotionRenderStageFailure::Render)?;
-        // Wall clock and CPU seconds both follow the configured film length; a
-        // fixed budget would kill every film longer than the retired template.
-        let budget = motion_video_studio::render_sandbox_budget(frame_count)
-            .map_err(|_| MotionRenderStageFailure::Render)?;
-        let request = local_video_orchestrator::VideoWorkerRenderSandboxRequest::new(
-            work.clone(),
-            motion_video_studio::MOTION_COMPOSITION_FILE.to_owned(),
-            // Resolved before the Worker is asked to render anything: a render
-            // that starts without a cancellation marker it recognises is one the
-            // user's cancel button cannot reach.
-            motion_video_studio::cancel_marker_file_name()
+        let (work, outputs, film) =
+            motion_video_studio::workspace_render_paths(&workspaces, render_job_id)
+                .map_err(|_| MotionRenderStageFailure::Render)?;
+        let frames = work.join("frames");
+        let segment_directory = outputs.join(MOTION_SEGMENT_DIRECTORY);
+        std::fs::create_dir_all(&segment_directory)
+            .map_err(|_| MotionRenderStageFailure::Encoding)?;
+        // One render per shot, and the shots are captured in order so the
+        // person watching the progress bar sees the film being made in the
+        // order they will watch it.
+        let mut encoded = Vec::with_capacity(segments.len());
+        let mut total_frames: u32 = 0;
+        for (index, segment) in segments.iter().enumerate() {
+            if motion_video_studio::cancellation_requested(&workspaces, render_job_id)
                 .map_err(|_| MotionRenderStageFailure::Render)?
-                .to_owned(),
-            allowed_assets,
-            frame_count,
-            budget.wall_seconds(),
-            budget.cpu_seconds(),
-            2048,
-            256 * 1024 * 1024,
-        )
-        .map_err(|_| MotionRenderStageFailure::Render)?;
-        orchestrator
-            .render_sandbox(
-                local_video_orchestrator::VideoWorkerKind::Node,
+            {
+                return Err(MotionRenderStageFailure::Cancelled);
+            }
+            motion_video_studio::advance(
+                &workspaces,
                 render_job_id,
-                &request,
+                motion_video_studio::MotionRenderJobStatus::Rendering,
+                // Asked of the module that also judges it. This used to be a
+                // formula written here, and the judgement still required the
+                // single number a one-render film had — so every render failed
+                // on its first shot.
+                motion_video_studio::rendering_progress_percent(index, segments.len()),
+                None,
+                None,
             )
-            .map_err(|_| {
-                if motion_video_studio::cancellation_requested(&workspaces, render_job_id)
-                    .unwrap_or(false)
-                {
-                    MotionRenderStageFailure::Cancelled
-                } else {
-                    MotionRenderStageFailure::Render
-                }
-            })?;
-        if motion_video_studio::cancellation_requested(&workspaces, render_job_id)
-            .map_err(|_| MotionRenderStageFailure::Render)?
-        {
-            return Err(MotionRenderStageFailure::Cancelled);
-        }
-        // Between "the worker captured N frames" and "here is your video"
-        // this is the only check that can tell a film from a still image. A
-        // composition sized to the wrong stage, or one whose clips never take
-        // turns, reaches exactly this point with a full set of identical
-        // frames and every other signal green.
-        if motion_video_studio::rendered_film_is_static(&work.join("frames"), frame_count)
-            .map_err(|_| MotionRenderStageFailure::Render)?
-        {
-            return Err(MotionRenderStageFailure::StaticFilm);
+            .map_err(|_| MotionRenderStageFailure::Render)?;
+            // A shot left over from the previous one would be read by the
+            // still-frame gate and by the encoder's numbered-file pattern
+            // alike, so the capture directory starts empty every time.
+            let _ = std::fs::remove_dir_all(&frames);
+            // Wall clock and CPU seconds both follow this shot's length; a
+            // fixed budget would kill every shot longer than the retired
+            // template's three seconds.
+            let budget = motion_video_studio::render_sandbox_budget(segment.frame_count())
+                .map_err(|_| MotionRenderStageFailure::Render)?;
+            let request = local_video_orchestrator::VideoWorkerRenderSandboxRequest::new(
+                work.clone(),
+                segment.entry_html().to_owned(),
+                // Resolved before the Worker is asked to render anything: a render
+                // that starts without a cancellation marker it recognises is one the
+                // user's cancel button cannot reach.
+                motion_video_studio::cancel_marker_file_name()
+                    .map_err(|_| MotionRenderStageFailure::Render)?
+                    .to_owned(),
+                // The stage this shot declares. A catalog part is an
+                // independent composition drawn for its own stage, and
+                // capturing it on the template's would capture the top-left
+                // corner of it.
+                local_video_orchestrator::VideoWorkerRenderCanvas::new(
+                    segment.width(),
+                    segment.height(),
+                    segment.device_scale_factor(),
+                )
+                .map_err(|_| MotionRenderStageFailure::Render)?,
+                // Which stretch of the loaded document this shot is. Template
+                // shots all load the one composition, so without this they all
+                // rendered the whole film — see `VideoWorkerSourceWindow`.
+                local_video_orchestrator::VideoWorkerSourceWindow::new(
+                    segment.source_start_millis(),
+                    segment.source_end_millis(),
+                )
+                .map_err(|_| MotionRenderStageFailure::Render)?,
+                segment.allowed_assets().to_vec(),
+                segment.frame_count(),
+                budget.wall_seconds(),
+                budget.cpu_seconds(),
+                2048,
+                256 * 1024 * 1024,
+            )
+            .map_err(|_| MotionRenderStageFailure::Render)?;
+            orchestrator
+                .render_sandbox(
+                    local_video_orchestrator::VideoWorkerKind::Node,
+                    render_job_id,
+                    &request,
+                )
+                .map_err(|_| {
+                    if motion_video_studio::cancellation_requested(&workspaces, render_job_id)
+                        .unwrap_or(false)
+                    {
+                        MotionRenderStageFailure::Cancelled
+                    } else {
+                        MotionRenderStageFailure::Render
+                    }
+                })?;
+            if motion_video_studio::cancellation_requested(&workspaces, render_job_id)
+                .map_err(|_| MotionRenderStageFailure::Render)?
+            {
+                return Err(MotionRenderStageFailure::Cancelled);
+            }
+            // Between "the worker captured N frames" and "here is your video"
+            // this is the only check that can tell a film from a still image. A
+            // composition sized to the wrong stage, or one whose clips never take
+            // turns, reaches exactly this point with a full set of identical
+            // frames and every other signal green. Asked per shot, because a
+            // film assembled from nine shots of which one never moved is nine
+            // times as easy to produce and reads exactly the same at the end.
+            if motion_video_studio::rendered_film_is_static(&frames, segment.frame_count())
+                .map_err(|_| MotionRenderStageFailure::Render)?
+            {
+                return Err(MotionRenderStageFailure::StaticFilm);
+            }
+            let encoded_segment = segment_directory.join(format!("segment-{index:03}.mp4"));
+            encode_motion_segment(
+                &workspaces,
+                render_job_id,
+                &ffmpeg,
+                &frames,
+                &encoded_segment,
+                &film_canvas,
+                segment.frame_count(),
+            )?;
+            total_frames = total_frames
+                .checked_add(segment.frame_count())
+                .ok_or(MotionRenderStageFailure::Encoding)?;
+            encoded.push(encoded_segment);
         }
         motion_video_studio::advance(
             &workspaces,
@@ -876,13 +979,27 @@ fn run_motion_render_job(
             None,
         )
         .map_err(|_| MotionRenderStageFailure::Encoding)?;
-        encode_motion_video(
-            &workspaces,
-            render_job_id,
+        motion_video_studio::join_motion_film(
+            &encoded,
+            &film,
+            &film_canvas,
             &ffmpeg,
-            frame_count,
-            frames_per_second,
-        )?;
+            &ffprobe,
+            total_frames,
+        )
+        .map_err(|_| MotionRenderStageFailure::Encoding)?;
+        // PC-26: lay each shot's narration onto the joined film. A silent film
+        // returns immediately, so the pre-narration pipeline is byte-identical.
+        motion_video_studio::mix_narration_into_film(
+            &film,
+            &work,
+            &segments,
+            &film_canvas,
+            &ffmpeg,
+            &ffprobe,
+            total_frames,
+        )
+        .map_err(|_| MotionRenderStageFailure::Encoding)?;
         let artifact = motion_video_studio::import_rendered_output(&workspaces, render_job_id)
             .map_err(|_| MotionRenderStageFailure::Encoding)?;
         motion_video_studio::advance(
@@ -952,10 +1069,13 @@ fn run_motion_render_job(
             );
         }
     }
-    if let Ok((work, _, _)) =
+    if let Ok((work, outputs, _)) =
         motion_video_studio::workspace_render_paths(&workspaces, render_job_id)
     {
         let _ = std::fs::remove_dir_all(work.join("frames"));
+        // The shots are an intermediate the film no longer needs, and a
+        // cancelled or failed run leaves as many of them as it got through.
+        let _ = std::fs::remove_dir_all(outputs.join(MOTION_SEGMENT_DIRECTORY));
     }
     if let Ok(workspace) = workspaces.open(render_job_id) {
         let _ = workspaces.finish(
@@ -965,48 +1085,31 @@ fn run_motion_render_job(
     }
 }
 
-fn encode_motion_video(
+/// Encode one captured shot onto the film's canvas, and wait for it here.
+///
+/// The waiting is why this stays in the render job rather than beside the
+/// arguments it runs: this is the loop that notices the user pressed stop, and
+/// kills FFmpeg and removes the half-written file before returning. A shot that
+/// outlives its deadline is treated the same way, because a file that FFmpeg was
+/// still writing is not a shot the join may pick up.
+fn encode_motion_segment(
     workspaces: &video_job_workspace::VideoJobWorkspaceStore,
     render_job_id: uuid::Uuid,
     ffmpeg: &std::path::Path,
+    frames_directory: &std::path::Path,
+    output: &std::path::Path,
+    canvas: &motion_video_studio::MotionFilmCanvas,
     frame_count: u32,
-    frames_per_second: u32,
 ) -> Result<(), MotionRenderStageFailure> {
-    let (work, _, output) = motion_video_studio::workspace_render_paths(workspaces, render_job_id)
-        .map_err(|_| MotionRenderStageFailure::Encoding)?;
-    let input = work.join("frames").join("frame-%05d.png");
-    let frames_per_second = frames_per_second.to_string();
-    let frame_count_argument = frame_count.to_string();
-    let mut child = std::process::Command::new(ffmpeg)
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-nostdin",
-            "-y",
-            "-framerate",
-            &frames_per_second,
-            "-start_number",
-            "1",
-            "-i",
-        ])
-        .arg(&input)
-        .args([
-            "-frames:v",
-            &frame_count_argument,
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            "-movflags",
-            "+faststart",
-        ])
-        .arg(&output)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|_| MotionRenderStageFailure::Encoding)?;
+    let mut child = motion_video_studio::motion_segment_encode_command(
+        ffmpeg,
+        frames_directory,
+        output,
+        canvas,
+        frame_count,
+    )
+    .spawn()
+    .map_err(|_| MotionRenderStageFailure::Encoding)?;
     // Encoding six times the frames cannot share a fixed deadline either. The
     // derived render budget is the per-frame yardstick; the floor keeps the
     // shortest films on the deadline they already shipped with.
@@ -1180,11 +1283,20 @@ fn map_browser_profile_logout_error(
         browser_profiles::BrowserProfileErrorCode::RecoveryRequired => {
             ("profile_recovery_required", false)
         }
-        browser_profiles::BrowserProfileErrorCode::InvalidProfileId
-        | browser_profiles::BrowserProfileErrorCode::ProfileNotFound
-        | browser_profiles::BrowserProfileErrorCode::UnsafeDirectory
-        | browser_profiles::BrowserProfileErrorCode::IdentityChanged
-        | browser_profiles::BrowserProfileErrorCode::StorageUnavailable => {
+        // PC-25：这五种此前一起塌成 `storage_unavailable`，于是界面对每一种
+        // 都说「这是本产品自身的问题，重新操作不会有效」，而 b5_13 查了四轮
+        // 也没能从那个字符串里读出是哪一步失败的。各自成码。
+        browser_profiles::BrowserProfileErrorCode::IdentityChanged => {
+            ("profile_identity_changed", false)
+        }
+        browser_profiles::BrowserProfileErrorCode::ProfileNotFound => ("profile_missing", false),
+        browser_profiles::BrowserProfileErrorCode::UnsafeDirectory => {
+            ("profile_directory_unsafe", false)
+        }
+        browser_profiles::BrowserProfileErrorCode::InvalidProfileId => {
+            ("profile_marker_invalid", false)
+        }
+        browser_profiles::BrowserProfileErrorCode::StorageUnavailable => {
             ("storage_unavailable", false)
         }
     };
@@ -1521,48 +1633,100 @@ async fn logout_douyin_session(
         .await
         .map_err(map_executor_connection_error)?;
 
-    let service = platform.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || service.emergency_stop())
+    // PC-25：删除 Profile 之前，先让浏览器的主人送走浏览器。此前的顺序是
+    // 「紧停 → 删 → 重启 → 由新执行器补记注销」，而登录浏览器由旧执行器经
+    // Playwright 拉起、不在紧停所杀的进程组里——删除刚完成 6 毫秒，垂死的
+    // Chromium 就把目录重建了回来（b5_13 实测时间线），终检于是正确拒绝。
+    // 现在：执行器还在跑就让它优雅关闭登录会话（Playwright 会等浏览器真正
+    // 退出）并记录注销；关不掉就把可重试错误原样抛出去，Profile 一根汗毛
+    // 不动（fail-closed）。执行器本就停着的情况下没有它拉起的浏览器可关，
+    // 跳过即可；更早被紧停遗留的孤儿浏览器仍由删除终检兜底报错。
+    let running = {
+        let service = platform.inner().clone();
+        matches!(
+            service.status().map_err(map_executor_platform_error)?.state(),
+            executor_manager::ExecutorManagerState::Running
+        )
+    };
+    if running {
+        let service = platform.inner().clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            service.execute_session_command(
+                executor_bootstrap::LocalPlatformCommand::CompleteDouyinLogout,
+            )
+        })
         .await
         .map_err(|_| ExecutorPlatformCommandError {
             code: "process_unavailable",
             retryable: true,
         })?
         .map_err(map_executor_platform_error)?;
+        if result.state() != "logged_out" {
+            return Err(ExecutorPlatformCommandError {
+                code: "authentication_rejected",
+                retryable: false,
+            });
+        }
+    }
+
+    // 执行器在跑的路径不再紧停：浏览器已被上面那条命令优雅关闭（Playwright
+    // 等它真正退出），而执行器进程自己并不持有 Profile 目录——停它只会连带
+    // 杀掉刚入队、尚未送达的注销信封，让权威投影停在旧版本上（b5_13 的
+    // 「闸版本 2、健康版本 1」正是这个）。留着它跑，信封照常送达。
+    // 执行器本来停着的那条路径仍需紧停+重启：那种情况下可能有更早遗留的
+    // 孤儿浏览器，且需要一个活着的执行器来补记注销信封。
+    if !running {
+        let service = platform.inner().clone();
+        app_logging::record(app_logging::DesktopLogEvent::ExecutorEmergencyStopRequested);
+        tauri::async_runtime::spawn_blocking(move || service.emergency_stop())
+            .await
+            .map_err(|_| ExecutorPlatformCommandError {
+                code: "process_unavailable",
+                retryable: true,
+            })?
+            .map_err(map_executor_platform_error)?;
+    }
 
     profiles
         .remove_current_douyin_profile()
         .map_err(map_browser_profile_logout_error)?;
 
-    let connection = client
-        .issue_executor_connection(&vault)
-        .await
-        .map_err(map_executor_connection_error)?;
-    let service = platform.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || service.restart(connection))
+    if !running {
+        let connection = client
+            .issue_executor_connection(&vault)
+            .await
+            .map_err(map_executor_connection_error)?;
+        let service = platform.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || service.restart(connection))
+            .await
+            .map_err(|_| ExecutorPlatformCommandError {
+                code: "process_unavailable",
+                retryable: true,
+            })?
+            .map_err(map_executor_platform_error)?;
+    }
+
+    if !running {
+        // 执行器本来停着：上面没有任何人发注销信封，投影永远到不了
+        // missing——由重启后的执行器补记（它没有可关的浏览器，只做记录）。
+        let service = platform.inner().clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            service.execute_session_command(
+                executor_bootstrap::LocalPlatformCommand::CompleteDouyinLogout,
+            )
+        })
         .await
         .map_err(|_| ExecutorPlatformCommandError {
             code: "process_unavailable",
             retryable: true,
         })?
         .map_err(map_executor_platform_error)?;
-
-    let service = platform.inner().clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        service
-            .execute_session_command(executor_bootstrap::LocalPlatformCommand::CompleteDouyinLogout)
-    })
-    .await
-    .map_err(|_| ExecutorPlatformCommandError {
-        code: "process_unavailable",
-        retryable: true,
-    })?
-    .map_err(map_executor_platform_error)?;
-    if result.state() != "logged_out" {
-        return Err(ExecutorPlatformCommandError {
-            code: "authentication_rejected",
-            retryable: false,
-        });
+        if result.state() != "logged_out" {
+            return Err(ExecutorPlatformCommandError {
+                code: "authentication_rejected",
+                retryable: false,
+            });
+        }
     }
 
     match tokio::time::timeout(DOUYIN_LOGOUT_PROJECTION_TIMEOUT, async {
@@ -4701,6 +4865,61 @@ mod tests {
                 "retryable": false,
             }),
             "the structured fields must survive unchanged and `message` must name the code"
+        );
+    }
+
+    /// PC-25：安全注销失败时，界面能说出的话取决于这个映射区分了几种失败。
+    ///
+    /// 五个互不相同的 Profile 失败此前一起塌成 `storage_unavailable`——那句
+    /// 文案是「这是本产品自身的问题，重新操作不会有效」。b5_13 的四轮插桩
+    /// 之所以只查到「删 Profile 一步失败了」而定位不到是哪一步，就是因为
+    /// 到达用户和日志的那个字符串已经把五种原因抹平。每一种都要有自己的码。
+    #[test]
+    fn every_profile_removal_failure_reaches_the_operator_as_its_own_code() {
+        use browser_profiles::BrowserProfileErrorCode as Code;
+
+        let mapped = |code: Code| {
+            let error = map_browser_profile_logout_error(
+                browser_profiles::BrowserProfileError::for_tests(code),
+            );
+            (error.code, error.retryable)
+        };
+
+        assert_eq!(mapped(Code::ProfileInUse), ("profile_in_use", true));
+        assert_eq!(
+            mapped(Code::RecoveryRequired),
+            ("profile_recovery_required", false)
+        );
+        assert_eq!(
+            mapped(Code::IdentityChanged),
+            ("profile_identity_changed", false)
+        );
+        assert_eq!(mapped(Code::ProfileNotFound), ("profile_missing", false));
+        assert_eq!(
+            mapped(Code::UnsafeDirectory),
+            ("profile_directory_unsafe", false)
+        );
+        assert_eq!(
+            mapped(Code::InvalidProfileId),
+            ("profile_marker_invalid", false)
+        );
+        assert_eq!(mapped(Code::StorageUnavailable), ("storage_unavailable", false));
+
+        let codes = [
+            Code::ProfileInUse,
+            Code::RecoveryRequired,
+            Code::IdentityChanged,
+            Code::ProfileNotFound,
+            Code::UnsafeDirectory,
+            Code::InvalidProfileId,
+            Code::StorageUnavailable,
+        ]
+        .map(|code| mapped(code).0);
+        let distinct: std::collections::BTreeSet<&str> = codes.iter().copied().collect();
+        assert_eq!(
+            distinct.len(),
+            codes.len(),
+            "两种失败共用一个码，用户和日志就分不出该关浏览器还是该报障"
         );
     }
 

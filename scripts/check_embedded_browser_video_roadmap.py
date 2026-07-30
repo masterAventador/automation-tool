@@ -1,18 +1,45 @@
 #!/usr/bin/env python3
-"""Validate the specialized roadmap and one-file-per-task evidence contract."""
+"""Validate the specialized roadmap and one-file-per-task evidence contract.
+
+The judgements this shares with `docs/product-completion-roadmap.md` — an id
+appears once, a dependency names a task that exists, at most one task is
+active, an active or finished task has exactly one evidence file, the roadmap
+carries no completion records — live in `roadmap_ledger.py` and are imported.
+What stays here is what is genuinely specific to this ledger: a closed 87-task
+inventory, the declared status summary, this line's evidence headings, and the
+rule that its rows must not be copied into the legacy roadmap.
+"""
 
 from __future__ import annotations
 
 import argparse
 import re
 import shutil
+import sys
 import tempfile
 from collections import Counter
-from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
+
+from roadmap_ledger import (  # noqa: E402
+    EVIDENCE_STATUSES,
+    STATUSES,
+    LedgerError,
+    TaskRow,
+    expect_failure,
+    fail,
+    read_text,
+    require_no_completion_records,
+    require_single_active_task,
+)
+from roadmap_ledger import parse_task_rows as parse_ledger_rows  # noqa: E402
+
+# Kept as a local alias so this gate's callers and self-test keep naming the
+# error after the thing they validate.
+RoadmapError = LedgerError
+
 DEFAULT_ROADMAP = REPOSITORY_ROOT / "docs/embedded-browser-video-studio-roadmap.md"
 DEFAULT_EVIDENCE_ROOT = REPOSITORY_ROOT / "docs/development"
 DEFAULT_LEGACY_ROADMAP = REPOSITORY_ROOT / "docs/development-roadmap.md"
@@ -33,75 +60,34 @@ EXPECTED_IDS = {
     for prefix, count in GROUP_COUNTS.items()
     for number in range(1, count + 1)
 }
-STATUSES = (
-    "⬜ 未开始",
-    "🧪 RED",
-    "🚧 实现中",
-    "🔍 待验收",
-    "✅ 已完成",
-    "⏸ 后置",
-)
-ACTIVE_STATUSES = {"🧪 RED", "🚧 实现中"}
-EVIDENCE_STATUSES = ACTIVE_STATUSES | {"🔍 待验收", "✅ 已完成"}
+# Derived, never typed a second time. The inventory grows when a workstream
+# turns out to need a task nobody planned for, and the two places below that
+# used to spell the total out are the shape this repository has already been
+# bitten by: one gets updated, the other keeps asserting the old number and
+# the gate then rejects the very ledger it was meant to protect.
+TOTAL_TASKS = len(EXPECTED_IDS)
 TASK_ID_PATTERN = re.compile(r"\b(?:AV|EB|BU|VF|IM|BM|VE|PB|SA|CQ)-\d{2}\b")
 TASK_ROW_PATTERN = re.compile(r"^\| ((?:AV|EB|BU|VF|IM|BM|VE|PB|SA|CQ)-\d{2}) \|")
 DATE_PATTERN = re.compile(r"^> 日期：\d{4}-\d{2}-\d{2}$", re.MULTILINE)
 
 
-class RoadmapError(ValueError):
-    """Raised when the specialized roadmap contract is invalid."""
-
-
-@dataclass(frozen=True)
-class TaskRow:
-    task_id: str
-    dependencies: str
-    status: str
-
-
-def fail(message: str) -> None:
-    raise RoadmapError(message)
-
-
-def read_text(path: Path) -> str:
-    if not path.is_file() or path.is_symlink():
-        fail(f"required regular file is missing: {path}")
-    try:
-        return path.read_text(encoding="utf-8")
-    except UnicodeDecodeError as error:
-        fail(f"file is not UTF-8: {path}: {error}")
-
-
 def parse_task_rows(roadmap: str) -> dict[str, TaskRow]:
-    rows: dict[str, TaskRow] = {}
-    for line in roadmap.splitlines():
-        match = TASK_ROW_PATTERN.match(line)
-        if match is None:
-            continue
-        fields = [field.strip() for field in line.strip().split("|")[1:-1]]
-        if len(fields) != 5:
-            fail(f"task row must have five fields: {line}")
-        task_id = match.group(1)
-        if task_id in rows:
-            fail(f"duplicate task row: {task_id}")
-        status = fields[4]
-        if status not in STATUSES:
-            fail(f"{task_id} has unsupported status: {status}")
-        dependencies = fields[3]
-        dependency_ids = set(TASK_ID_PATTERN.findall(dependencies))
-        unknown = dependency_ids - EXPECTED_IDS
-        if unknown:
-            fail(f"{task_id} has unknown dependencies: {sorted(unknown)}")
-        if task_id in dependency_ids:
-            fail(f"{task_id} depends on itself")
-        rows[task_id] = TaskRow(
-            task_id=task_id,
-            dependencies=dependencies,
-            status=status,
-        )
+    """The shared row parser, plus the closed inventory only this ledger has.
+
+    The 87 tasks were scoped up front, so an id appearing or vanishing is drift
+    rather than growth — the opposite of the product-completion line, where new
+    gaps legitimately add rows. That difference is the reason the inventory
+    check stays here instead of moving into `roadmap_ledger.py`.
+    """
+    rows = parse_ledger_rows(
+        roadmap,
+        row_pattern=TASK_ROW_PATTERN,
+        id_pattern=TASK_ID_PATTERN,
+        known_ids=frozenset(EXPECTED_IDS),
+    )
     missing = EXPECTED_IDS - set(rows)
     extra = set(rows) - EXPECTED_IDS
-    if missing or extra or len(rows) != 87:
+    if missing or extra or len(rows) != TOTAL_TASKS:
         fail(
             "task inventory drifted: "
             f"count={len(rows)}, missing={sorted(missing)}, extra={sorted(extra)}"
@@ -130,27 +116,18 @@ def validate_summary(roadmap: str, rows: dict[str, TaskRow]) -> None:
                 f"status summary drifted for {status}: "
                 f"declared={declared[status]}, actual={actual[status]}"
             )
-    if sum(declared.values()) != 87:
-        fail("status summary total must be 87")
+    if sum(declared.values()) != TOTAL_TASKS:
+        fail(f"status summary total must be {TOTAL_TASKS}")
 
 
 def validate_roadmap_text(roadmap: str) -> dict[str, TaskRow]:
     if len(roadmap.encode("utf-8")) > 131_072 or len(roadmap.splitlines()) > 900:
         fail("specialized roadmap exceeded its lightweight size budget")
-    forbidden_completion_markers = (
-        re.compile(r"^##+ .*完成记录", re.MULTILINE),
-        re.compile(r"^##+ .*完成证据", re.MULTILINE),
-        re.compile(r"^## (?:RED|GREEN)$", re.MULTILINE),
-        re.compile(r"^> 提交：", re.MULTILINE),
-    )
-    if any(pattern.search(roadmap) for pattern in forbidden_completion_markers):
-        fail("completion evidence must not be appended to the specialized roadmap")
+    require_no_completion_records(roadmap)
     if "docs/development/<任务ID>.md" not in roadmap:
         fail("specialized roadmap must point to the per-task evidence convention")
     rows = parse_task_rows(roadmap)
-    active = [row.task_id for row in rows.values() if row.status in ACTIVE_STATUSES]
-    if len(active) > 1:
-        fail(f"only one task may be RED/in progress: {active}")
+    require_single_active_task(rows)
     validate_summary(roadmap, rows)
     return rows
 
@@ -204,14 +181,6 @@ def validate_legacy_roadmap(legacy: str) -> None:
     duplicated = [line for line in legacy.splitlines() if TASK_ROW_PATTERN.match(line)]
     if duplicated:
         fail("specialized task rows must not be copied into docs/development-roadmap.md")
-
-
-def expect_failure(name: str, action: Callable[[], object]) -> None:
-    try:
-        action()
-    except RoadmapError:
-        return
-    fail(f"self-test expected failure but passed: {name}")
 
 
 def replace_task_status(roadmap: str, task_id: str, status: str) -> str:

@@ -39,6 +39,9 @@
     "active": true,
     "targets": ["app", "dmg"],
     "createUpdaterArtifacts": true,
+    "resources": {
+      "tauri.update-macos-package-e2e.conf.json": "h822-acceptance-marker.json"
+    },
     "macOS": {
       "signingIdentity": "-"
     }

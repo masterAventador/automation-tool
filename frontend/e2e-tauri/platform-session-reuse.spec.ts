@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  openWorkbenchSection,
+  waitForStartup,
+} from "./navigation";
 
 type AcceptancePhase = "first" | "restart" | "expired" | "risk";
 
@@ -30,8 +34,8 @@ function acceptancePhase(): AcceptancePhase {
 }
 
 async function openPlatformPage(expectedSnapshot: string): Promise<void> {
-  await browser.$("li=平台状态").click();
-  await expect(await browser.$("h2")).toHaveText("平台状态");
+  await openWorkbenchSection("账号与平台");
+  await expect(await browser.$("h2")).toHaveText("账号与平台");
   await browser.waitUntil(
     async () => (await browser.$("body").getText()).includes(expectedSnapshot),
     { timeout: 60_000, timeoutMsg: "authoritative platform snapshot did not converge" },
@@ -67,7 +71,7 @@ async function waitForAuthoritativeState(expectedState: string): Promise<void> {
 describe("B5-15 platform Session restart acceptance", () => {
   it("reuses one Profile across App/Executor/browser restarts and enters handoff", async () => {
     const phase = acceptancePhase();
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
 
     if (phase === "first") {
       const preparation = (await browser.tauri.execute(({ core }) =>

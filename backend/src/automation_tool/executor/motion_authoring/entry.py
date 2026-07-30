@@ -29,6 +29,16 @@ from automation_tool.executor.motion_authoring.agent import (
     VideoCreationModelConfig,
     call_video_creation_model,
     load_locked_authoring_workflow,
+    load_thinking_default,
+)
+from automation_tool.executor.motion_authoring.slot_probe_browser import (
+    SLOT_PROBE_PROFILE_DIRECTORY,
+    PackagedSlotProbe,
+)
+from automation_tool.executor.motion_authoring.voiceover import (
+    measure_audio_seconds,
+    synthesize_voiceover,
+    voiceover_config_from_catalog,
 )
 
 SCHEMA_VERSION: Final = 1
@@ -43,6 +53,29 @@ _REQUEST_FIELDS: Final = frozenset(
         "language",
         "brandAssets",
         "model",
+    }
+)
+# Optional rather than required: an installation with no parts catalog is a real
+# state, not a malformed request, and the dangerous half of it — a storyboard
+# that names a part while none is available — is refused by the agent with a
+# reason that says so. Making it required would have meant every existing caller
+# becoming shape-invalid to express a condition the agent already reports.
+_OPTIONAL_REQUEST_FIELDS: Final = frozenset(
+    {
+        # Optional on the same terms as the catalog: absent means this caller
+        # has no authorized browser to measure with, and the agent then runs
+        # without the overflow probe — today's behaviour, never a fake pass.
+        "browserExecutable",
+        "catalogRoot",
+        # PC-26: narration length is measured with the App's own toolchain
+        # ffprobe. Absent means an App too old to send it — the film then stays
+        # silent, which is what every film was before narration existed.
+        "ffprobeExecutable",
+        # Optional so an older caller keeps today's behaviour: reasoning stays
+        # on unless somebody asked for it to be off. Measured 2026-07-28, that
+        # phase is 31 of the 42 seconds authoring takes — worth offering, not
+        # worth changing under anyone silently.
+        "modelThinking",
     }
 )
 _MODEL_FIELDS: Final = frozenset({"baseUrl", "modelId", "apiKey"})
@@ -157,12 +190,23 @@ _ENTRY_REASON_TOKENS: Final = {
     "workspace is missing": "workspace_missing",
     "workspace must be an absolute path the App already created": "workspace_not_absolute",
     "workspace is not a usable render workspace": "workspace_unusable",
+    "catalog root is missing": "catalog_root_missing",
+    "catalog root must be an absolute path the App resolved": "catalog_root_not_absolute",
+    "browser executable is missing": "browser_executable_missing",
+    "browser executable must be an absolute path the App authorized": (
+        "browser_executable_not_absolute"
+    ),
+    "ffprobe executable is missing": "ffprobe_executable_missing",
+    "ffprobe executable must be an absolute path the App resolved": (
+        "ffprobe_executable_not_absolute"
+    ),
     "brand assets are not the declared shape": "brand_assets_shape_invalid",
     "duration must be a whole number of seconds": "duration_not_whole_seconds",
     "request is not the declared shape": "request_shape_invalid",
     "unsupported request schema version": "request_schema_unsupported",
     "video creation model is unavailable": "video_creation_model_unavailable",
     "request is too large": "request_too_large",
+    "model thinking choice must be true or false": "model_thinking_choice_invalid",
 }
 
 _BRIEF_REASON_TOKENS: Final = {
@@ -196,15 +240,20 @@ _AGENT_FIXED_REJECTION_BODIES: Final = frozenset(
         "beat timing must be numeric",
         "beat_id is malformed",
         "beats count is out of range",
+        "repair response must carry the storyboard alone",
+        "repair round altered more than copy",
         "body is out of range",
         "brief must be a MotionBrief",
         "brief text is out of range",
         "catalog purposes missing",
-        "catalog_parts must be locked catalog ids",
+        "the storyboard names catalog parts but this installation carries no parts catalog",
+        "catalog_parts must be selectable catalog ids",
         "composition html must be a non-empty string",
         "composition not seekable",
+        "motion part slot table is unreadable",
         "config must be a VideoCreationModelConfig",
         "config shape invalid",
+        "copy overflows its slot after the repair round",
         "declared asset must exist",
         "design has an unexpected key set",
         "design must be an object",
@@ -223,11 +272,16 @@ _AGENT_FIXED_REJECTION_BODIES: Final = frozenset(
         "items are out of range",
         "locked motion catalog drifted",
         "locked motion catalog is unreadable",
+        "motion part usability contract drifted",
+        "motion part usability contract is unreadable",
+        "narrator must be callable or absent",
+        "no motion part is selectable",
         "model call contract drifted",
         "model call contract is unreadable",
         "model catalog or secret is unreadable",
         "model id required",
         "model output must be a JSON object",
+        "workspace bytes must be a bytes payload",
         "model output was not JSON",
         "model reply must be a string",
         "model returned empty content",
@@ -253,9 +307,12 @@ _AGENT_FIXED_REJECTION_BODIES: Final = frozenset(
         "refusing to write through a symlink",
         "render canvas contract drifted",
         "render canvas contract is unreadable",
+        "script beats must match storyboard beats one to one",
         "script has an unexpected key set",
         "script must be an object",
         "secondary_color must be a #rrggbb color",
+        "slot overflow probe failed to measure",
+        "slot probe must be callable or absent",
         "storyboard beat has an unexpected key set",
         "storyboard beat must be an object",
         "storyboard beats count is out of range",
@@ -272,6 +329,7 @@ _AGENT_FIXED_REJECTION_BODIES: Final = frozenset(
         "unsupported aspect ratio",
         "unsupported language",
         "video model id missing",
+        "voiceover synthesis failed",
         "video_creative purpose missing",
         "workflow contract is malformed",
         "workflow contract is unreadable",
@@ -422,6 +480,106 @@ def _workspace(payload: object) -> AuthoringWorkspace:
         raise _reject("workspace is not a usable render workspace") from error
 
 
+def _catalog_root(document: dict[str, Any]) -> Path | None:
+    """Where the App says the packaged parts are, or nothing.
+
+    Absent means an installation that carries no catalog, which the agent
+    refuses to paper over: a beat that chose a part is reported rather than
+    quietly drawn from the built-in template.
+
+    Checked here rather than trusted, on the same terms as the workspace. This
+    path is handed to the working-copy writer, which globs and reads under it,
+    so a relative path would resolve against whatever the Executor's working
+    directory happens to be.
+    """
+    payload = document.get("catalogRoot")
+    if payload is None:
+        return None
+    if not isinstance(payload, str) or not payload:
+        raise _reject("catalog root is missing")
+    root = Path(payload)
+    if not root.is_absolute():
+        raise _reject("catalog root must be an absolute path the App resolved")
+    return root
+
+
+def _browser_executable(document: dict[str, Any]) -> Path | None:
+    """The packaged browser the App authorized for measuring, or nothing.
+
+    Absent means an App too old to send it — the agent then authors without
+    the overflow probe, which is exactly what it did before the probe existed.
+    Present, it is checked on the workspace's terms: this path is handed to a
+    launcher, so a relative one would resolve against whatever the Executor's
+    working directory happens to be.
+    """
+    payload = document.get("browserExecutable")
+    if payload is None:
+        return None
+    if not isinstance(payload, str) or not payload:
+        raise _reject("browser executable is missing")
+    path = Path(payload)
+    if not path.is_absolute():
+        raise _reject("browser executable must be an absolute path the App authorized")
+    return path
+
+
+def _ffprobe_executable(document: dict[str, Any]) -> Path | None:
+    """The toolchain ffprobe narration is measured with, or nothing.
+
+    Absent means an App too old to send it — the agent then authors a silent
+    film, exactly as every film was before narration existed. Present, it is
+    checked on the browser executable's terms: this path is executed, so a
+    relative one would resolve against whatever the working directory is.
+    """
+    payload = document.get("ffprobeExecutable")
+    if payload is None:
+        return None
+    if not isinstance(payload, str) or not payload:
+        raise _reject("ffprobe executable is missing")
+    path = Path(payload)
+    if not path.is_absolute():
+        raise _reject("ffprobe executable must be an absolute path the App resolved")
+    return path
+
+
+# Where each beat's narration lands inside the RenderJob workspace, and the
+# contract every beat file follows: one WAV per beat id.
+NARRATION_DIRECTORY: Final = "narration"
+
+
+def _narrator_for(
+    workspace: AuthoringWorkspace, api_key: str, ffprobe: Path
+) -> Callable[[str, str], tuple[str, float]]:
+    """One narrator: synthesize a beat's line, land it, measure it for real.
+
+    Built per request because everything it closes over is per request: the
+    workspace the audio must land in, the key that arrived on stdin, and the
+    toolchain ffprobe the App resolved. The voice model id comes from the
+    packaged catalog contract — the same declaration `load_voiceover_config`
+    reads on the App side.
+    """
+    config = voiceover_config_from_catalog(
+        catalog_path=AUTHORING_WORKFLOW_CONTRACT.with_name(
+            "bailian-model-catalog.v1.json"
+        ),
+        api_key=api_key,
+    )
+
+    def narrate(beat_id: str, text: str) -> tuple[str, float]:
+        synthesized = synthesize_voiceover(
+            config,
+            text,
+            workspace=workspace,
+            relative_path=f"{NARRATION_DIRECTORY}/{beat_id}.wav",
+        )
+        seconds = measure_audio_seconds(
+            workspace.resolve(synthesized.relative_path), ffprobe=ffprobe
+        )
+        return (synthesized.relative_path, seconds)
+
+    return narrate
+
+
 def _brief(document: dict[str, Any]) -> MotionBrief:
     assets = document["brandAssets"]
     if not isinstance(assets, list) or not all(type(a) is str for a in assets):
@@ -452,14 +610,21 @@ def run_motion_authoring_entry(
     workspace paths beyond the entry name it already knows, no model reply, no
     credential.
     """
-    if not isinstance(document, dict) or set(document) != _REQUEST_FIELDS:
+    if not isinstance(document, dict) or not (
+        _REQUEST_FIELDS <= set(document) <= _REQUEST_FIELDS | _OPTIONAL_REQUEST_FIELDS
+    ):
         raise _reject("request is not the declared shape")
     if document["schemaVersion"] != SCHEMA_VERSION:
         raise _reject("unsupported request schema version")
     workspace = _workspace(document["workspace"])
     brief = _brief(document)
     model = _model(document["model"])
+    browser = _browser_executable(document)
+    ffprobe = _ffprobe_executable(document)
     try:
+        thinking = document.get("modelThinking", load_thinking_default())
+        if type(thinking) is not bool:
+            raise _reject("model thinking choice must be true or false")
         agent = MotionAuthoringAgent(
             workspace=workspace,
             tools=MotionAuthoringTools(workspace),
@@ -469,6 +634,21 @@ def run_motion_authoring_entry(
             ),
             model_config=model,
             model_call=model_call,
+            model_thinking=thinking,
+            catalog_root=_catalog_root(document),
+            slot_probe=(
+                None
+                if browser is None
+                else PackagedSlotProbe(
+                    browser_executable=browser,
+                    profile_directory=workspace.root / SLOT_PROBE_PROFILE_DIRECTORY,
+                )
+            ),
+            narrator=(
+                None
+                if ffprobe is None
+                else _narrator_for(workspace, model.api_key, ffprobe)
+            ),
         )
         result = agent.author(brief)
     except MotionAuthoringUnavailable as error:
@@ -487,6 +667,10 @@ def run_motion_authoring_entry(
         "framesPerSecond": submission.fps,
         "durationSeconds": submission.duration_seconds,
         "aspectRatio": submission.aspect_ratio,
+        # One render per shot. The first four fields describe the template
+        # segment and stay for the film that is only that; `segments` is what a
+        # film assembled from catalog parts actually needs rendered.
+        "segments": [segment.to_payload() for segment in submission.segments],
     }
 
 

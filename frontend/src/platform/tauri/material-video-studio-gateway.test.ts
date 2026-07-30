@@ -191,6 +191,7 @@ describe("Tauri material video studio gateway", () => {
       aspectRatio: "16:9" as const,
       durationSeconds: 12,
       language: "zh" as const,
+      modelThinking: true,
     };
     invoke.mockResolvedValueOnce({
       renderJobId: "f89d8f18-6b4e-4f5a-8325-8da45f71d7e2",
@@ -224,6 +225,7 @@ describe("Tauri material video studio gateway", () => {
       aspectRatio: "16:9" as const,
       durationSeconds: 12,
       language: "zh" as const,
+      modelThinking: true,
     };
 
     for (const code of [
@@ -256,6 +258,7 @@ describe("Tauri material video studio gateway", () => {
         aspectRatio: "16:9",
         durationSeconds: 12,
         language: "zh",
+        modelThinking: true,
       }),
     ).rejects.toMatchObject({ code: "protocol_mismatch" });
     expect(invoke).not.toHaveBeenCalled();

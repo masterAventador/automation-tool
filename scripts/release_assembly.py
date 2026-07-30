@@ -172,15 +172,39 @@ def load_release_resources() -> tuple[dict[str, object], ...]:
 
 RELEASE_PACKAGE_RESOURCES: tuple[dict[str, object], ...] = load_release_resources()
 
-VIDEO_RUNTIME_RESOURCES: tuple[_VideoResource, ...] = tuple(
-    _VideoResource(
-        staging_name=str(resource["name"]),
-        installed_parts=tuple(resource["installedParts"]),
-        required_files=tuple(resource["requiredFiles"]),
-        windows_executables=tuple(resource["windowsExecutables"]),
+def resources_in_category(category: str) -> tuple[_VideoResource, ...]:
+    """Every declared resource of one category, in contract order.
+
+    The shape of a staged resource does not vary by category — a name, where the
+    production resolver looks, and the files that prove the tree arrived. Only
+    who builds it does. So the record is shared and the category is a filter,
+    which is what keeps a new category from needing a second copy of the
+    installer that has already been debugged once.
+    """
+    return tuple(
+        _VideoResource(
+            staging_name=str(resource["name"]),
+            installed_parts=tuple(resource["installedParts"]),
+            required_files=tuple(resource["requiredFiles"]),
+            windows_executables=tuple(resource["windowsExecutables"]),
+        )
+        for resource in RELEASE_PACKAGE_RESOURCES
+        if resource["category"] == category
     )
-    for resource in RELEASE_PACKAGE_RESOURCES
-    if resource["category"] == "video"
+
+
+VIDEO_RUNTIME_RESOURCES: tuple[_VideoResource, ...] = resources_in_category("video")
+
+# The frozen catalog of animation parts. Not a video runtime: those three are
+# built by `prepare_video_runtime.py` into a per-machine cache, while this tree
+# comes out of `build_motion_catalog_release.py` with an aggregate digest locked
+# in `motion-catalog-release.v1.json`.
+MOTION_CATALOG_RESOURCES: tuple[_VideoResource, ...] = resources_in_category("catalog")
+
+# Everything the macOS assembler owns, minus the browser, which needs its own
+# installer for its symlinked framework.
+ASSEMBLER_INSTALLED_RESOURCES: tuple[_VideoResource, ...] = (
+    VIDEO_RUNTIME_RESOURCES + MOTION_CATALOG_RESOURCES
 )
 
 
@@ -205,9 +229,35 @@ def require_packaged_video_runtime(
     to a `video-studio-e2e` build through environment variables, while the
     production build reads this directory and nothing ever wrote to it.
     """
+    return require_packaged_resources(
+        application=application, platform=platform, resources=VIDEO_RUNTIME_RESOURCES
+    )
+
+
+def require_packaged_motion_catalog(
+    *, application: Path, platform: str
+) -> dict[str, Path]:
+    """Fail closed unless the bundle carries the frozen catalog of parts.
+
+    PC-16: measured on a signed, notarised package, `Contents/Resources` held
+    the browser, the Executor and the three video runtime trees and not one of
+    the 134 parts. Nothing reported it because nothing read them yet — the
+    renderer still drew every film from four built-in layouts. The moment a
+    part is used, its absence is a film that cannot be made on a customer's
+    machine and can be made on every developer's.
+    """
+    return require_packaged_resources(
+        application=application, platform=platform, resources=MOTION_CATALOG_RESOURCES
+    )
+
+
+def require_packaged_resources(
+    *, application: Path, platform: str, resources: tuple[_VideoResource, ...]
+) -> dict[str, Path]:
+    """Fail closed unless every named tree arrived, whole, where it is read."""
     root = resource_directory(application, platform)
     installed: dict[str, Path] = {}
-    for resource in VIDEO_RUNTIME_RESOURCES:
+    for resource in resources:
         location = root.joinpath(*resource.installed_parts)
         if not location.is_dir():
             _reject(
@@ -229,7 +279,35 @@ def require_packaged_video_runtime(
 def install_video_runtime(
     *, application: Path, staging: Path, platform: str
 ) -> dict[str, Path]:
-    """Install the three video runtime resources, then verify them as a set.
+    """Install the three video runtime resources, then verify them as a set."""
+    return install_packaged_resources(
+        application=application,
+        staging=staging,
+        platform=platform,
+        resources=VIDEO_RUNTIME_RESOURCES,
+    )
+
+
+def install_motion_catalog(
+    *, application: Path, staging: Path, platform: str
+) -> dict[str, Path]:
+    """Install the frozen catalog of parts, then verify it arrived whole."""
+    return install_packaged_resources(
+        application=application,
+        staging=staging,
+        platform=platform,
+        resources=MOTION_CATALOG_RESOURCES,
+    )
+
+
+def install_packaged_resources(
+    *,
+    application: Path,
+    staging: Path,
+    platform: str,
+    resources: tuple[_VideoResource, ...],
+) -> dict[str, Path]:
+    """Install each named tree, then verify them as a set.
 
     On any rejection every tree installed by this call is removed, so a failed
     assembly cannot leave a partially populated bundle for a later step to
@@ -238,7 +316,7 @@ def install_video_runtime(
     root = resource_directory(application, platform)
     written: list[Path] = []
     try:
-        for resource in VIDEO_RUNTIME_RESOURCES:
+        for resource in resources:
             source = staging / resource.staging_name
             if not source.is_dir():
                 _reject(
@@ -251,13 +329,13 @@ def install_video_runtime(
                     f"{destination}"
                 )
             destination.parent.mkdir(parents=True, exist_ok=True)
-            # The video resources contain no symlinked frameworks, so a plain
-            # copy is correct here; the browser needs its own installer because
-            # its framework links must survive.
+            # These trees contain no symlinked frameworks, so a plain copy is
+            # correct here; the browser needs its own installer because its
+            # framework links must survive.
             shutil.copytree(source, destination, symlinks=True)
             written.append(root / resource.installed_parts[0])
-        return require_packaged_video_runtime(
-            application=application, platform=platform
+        return require_packaged_resources(
+            application=application, platform=platform, resources=resources
         )
     except BaseException:
         for path in written:
@@ -626,9 +704,16 @@ __all__ = [
     "NOTARIZED_SOURCE",
     "QUARANTINE_ATTRIBUTE",
     "QUARANTINE_DOWNLOADED",
+    "MOTION_CATALOG_RESOURCES",
     "RELEASE_PACKAGE_RESOURCES",
     "RELEASE_RESOURCE_CONTRACT",
     "REPOSITORY_ROOT",
+    "install_motion_catalog",
+    "require_packaged_motion_catalog",
+    "install_packaged_resources",
+    "require_packaged_resources",
+    "resources_in_category",
+    "ASSEMBLER_INSTALLED_RESOURCES",
     "VIDEO_RUNTIME_RESOURCES",
     "ReleaseAssemblyRejected",
     "SigningIdentity",

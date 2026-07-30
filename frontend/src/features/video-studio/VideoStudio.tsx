@@ -11,6 +11,7 @@ import {
   Popconfirm,
   Progress,
   Space,
+  Switch,
   Tabs,
   Tag,
   Typography,
@@ -37,11 +38,13 @@ import {
   motionStoryboardSummary,
   resizeMotionBeats,
 } from "./motion-duration";
-import { MOTION_AUTHORING_IDLE_WAIT } from "./motion-model-call";
+import { MOTION_AUTHORING_IDLE_WAIT, motionThinkingNotice } from "./motion-model-call";
 import {
+  DURATION_SECONDS_MINIMUM,
+  MOTION_AUTHORING_MEASURED,
   MOTION_BRIEF_LIMITS,
-  MOTION_BRIEF_FILM_SECONDS,
   motionBriefProblem,
+  motionBriefWaitEstimate,
 } from "./motion-one-sentence";
 import {
   dismissMotionRunMessage,
@@ -49,7 +52,9 @@ import {
   forgetMotionJob,
   setMotionActiveTab,
   setMotionBrief,
+  setMotionFilmSeconds,
   setMotionMethod,
+  setMotionThinking,
   settleMotionRun,
   startMotionRun,
   useMotionRun,
@@ -86,22 +91,6 @@ const DEFAULT_MOTION_BEATS = resizeMotionBeats(
   createMotionBeat,
 );
 
-/**
- * How long the authoring pass really takes, measured rather than predicted.
- *
- * Seven consecutive successful one-sentence runs on 2026-07-26: median 124
- * seconds from pressing the button to a finished film, longest 178. These are
- * the only honest numbers available — the native side's own 600 second budget
- * is a stall guard, not an expectation, and printing it would invent a ten
- * minute wait out of a two minute one.
- *
- * Spoken to the minute on purpose. "通常 2 分 4 秒" is a precision the median of
- * seven runs does not have, and a false precision is its own kind of lie.
- */
-const MOTION_AUTHORING_MEASURED = {
-  typicalSeconds: 124,
-  longestSeconds: 178,
-} as const;
 
 function spokenMinutes(seconds: number): string {
   return `${Math.round(seconds / 60)} 分钟`;
@@ -167,7 +156,16 @@ function motionPendingLabel(pending: MotionRunPending, now: number): string {
 function motionJobTiming(own: OwnMotionJob | undefined, now: number): string | null {
   if (own === undefined) return null;
   const elapsed = Math.max(0, Math.floor((now - own.startedAt) / 1000));
-  const ceiling = motionRenderCeilingSeconds(own.filmSeconds);
+  // A one-sentence film is many renders, so its bound is the one the length
+  // control already showed before the run started — the same number, so the
+  // page cannot contradict what the operator was told he was buying.
+  // The render's own bound, not the whole run's: this clock starts when the
+  // render does, and a ceiling that still carried the authoring pass would call
+  // a stalled render healthy for three minutes longer than it is.
+  const ceiling =
+    own.kind === "one_sentence"
+      ? motionBriefWaitEstimate(own.filmSeconds).renderCeilingSeconds
+      : motionRenderCeilingSeconds(own.filmSeconds);
   return `已用 ${motionSpokenDuration(elapsed)} · 渲染超过 ${motionSpokenDuration(
     ceiling,
   )} 会自动停下`;
@@ -461,6 +459,10 @@ function NewVideoPage({
   onMotionSubjectChange,
   brief,
   onBriefChange,
+  briefFilmSeconds,
+  onBriefFilmSecondsChange,
+  briefThinking,
+  onBriefThinkingChange,
   briefBusy,
   onSubmitBrief,
   briefProblem,
@@ -474,6 +476,10 @@ function NewVideoPage({
   readonly onMotionSubjectChange: (subject: string) => void;
   readonly brief: string;
   readonly onBriefChange: (brief: string) => void;
+  readonly briefFilmSeconds: number;
+  readonly onBriefFilmSecondsChange: (filmSeconds: number) => void;
+  readonly briefThinking: boolean;
+  readonly onBriefThinkingChange: (thinking: boolean) => void;
   readonly briefBusy: boolean;
   readonly onSubmitBrief: () => void;
   readonly embedded: boolean;
@@ -512,6 +518,7 @@ function NewVideoPage({
   const revealOneSentenceCard = useCallback((node: HTMLDivElement | null) => {
     node?.scrollIntoView?.({ block: "start" });
   }, []);
+  const briefWait = motionBriefWaitEstimate(briefFilmSeconds);
 
   return (
     /*
@@ -552,8 +559,43 @@ function NewVideoPage({
                   onChange={(event) => onBriefChange(event.target.value)}
                   placeholder="例如：用蓝色商务风做一段本周销售增长说明"
                 />
+                <span className="motion-brief-control">
+                  <label htmlFor="motion-brief-seconds">成片时长（秒）</label>
+                  <InputNumber
+                    id="motion-brief-seconds"
+                    min={DURATION_SECONDS_MINIMUM}
+                    max={MOTION_BRIEF_LIMITS.durationSecondsMaximum}
+                    precision={0}
+                    value={briefFilmSeconds}
+                    onChange={(value) => {
+                      if (typeof value === "number") onBriefFilmSecondsChange(value);
+                    }}
+                  />
+                </span>
                 <Typography.Text type="secondary">
-                  {`描述一句就够了。会生成一段 ${MOTION_BRIEF_FILM_SECONDS} 秒的视频，文案、分镜和画面由视频创作模型自动生成，渲染仍在本机完成。这个入口暂时不能改片长；需要别的长度请用下面的固定模板手工制作。`}
+                  {`描述一句就够了。按 ${briefFilmSeconds} 秒来安排内容，实际片长以成片为准、通常会更长一些——每个镜头会等它的话说完、动效播完，不会中途切断。文案、分镜和画面由视频创作模型自动生成，渲染仍在本机完成。`}
+                </Typography.Text>
+                <span className="motion-brief-control">
+                  <Switch
+                    id="motion-brief-thinking"
+                    aria-label="让模型先想一遍再落笔"
+                    checked={briefThinking}
+                    onChange={onBriefThinkingChange}
+                  />
+                  <label htmlFor="motion-brief-thinking">让模型先想一遍再落笔</label>
+                </span>
+                <Typography.Text type="secondary">
+                  {motionThinkingNotice(briefThinking)}
+                </Typography.Text>
+                {/*
+                  * 时间代价必须在拉之前看得见。
+                  *
+                  * 路线 A 是一个镜头渲染一次，每次都要重新起浏览器（契约记作 30 秒），
+                  * 所以等待随镜头数涨、涨得比片长快。只给控件不给这句话，
+                  * 就是请人顺手拉到 180 秒，然后对着不动的屏幕等将近一小时。
+                  */}
+                <Typography.Text type="secondary">
+                  {`本机是一个镜头渲染一次：${briefFilmSeconds} 秒大约 ${briefWait.shots} 个镜头，编排加渲染最长约 ${motionSpokenDuration(briefWait.ceilingSeconds)}。片子越长镜头越多，等待时间涨得比片长快。`}
                 </Typography.Text>
                 <Button
                   type="primary"
@@ -1331,6 +1373,8 @@ export function VideoStudio({
     message,
     ownJobs: ownMotionJobs,
     brief,
+    filmSeconds: briefFilmSeconds,
+    modelThinking: briefThinking,
     selectedMethod,
     activeTab,
   } = useMotionRun();
@@ -1392,7 +1436,7 @@ export function VideoStudio({
    * the typing, not the request.
    */
   const submitBrief = () => {
-    const problem = motionBriefProblem(brief, MOTION_BRIEF_FILM_SECONDS);
+    const problem = motionBriefProblem(brief, briefFilmSeconds);
     if (problem !== null) {
       setBriefProblem(problem);
       return;
@@ -1402,8 +1446,9 @@ export function VideoStudio({
       creationMode: "one_sentence_v1",
       brief: brief.trim(),
       aspectRatio: MOTION_BRIEF_LIMITS.aspectRatios[0]!,
-      durationSeconds: MOTION_BRIEF_FILM_SECONDS,
+      durationSeconds: briefFilmSeconds,
       language: MOTION_BRIEF_LIMITS.languages[0]!,
+      modelThinking: briefThinking,
     };
     setBusy(true);
     /*
@@ -1427,7 +1472,7 @@ export function VideoStudio({
     void gateway
       .submitMotionBrief(request)
       .then((snapshot) => {
-        settleMotionRun(snapshot.renderJobId, MOTION_BRIEF_FILM_SECONDS, {
+        settleMotionRun(snapshot.renderJobId, briefFilmSeconds, "one_sentence", {
           tone: "info",
           text: "已提交一句话自动制作，编排完成，本机渲染开始了。",
         });
@@ -1480,6 +1525,7 @@ export function VideoStudio({
         settleMotionRun(
           snapshot.renderJobId,
           motionDraft.beats.length * motionDraft.secondsPerBeat,
+          "manual_template",
           { tone: "info", text: "已提交真实本机渲染任务，已经转到「制作任务」。" },
         );
         refresh();
@@ -1569,6 +1615,10 @@ export function VideoStudio({
                 }
                 brief={brief}
                 onBriefChange={setMotionBrief}
+                briefFilmSeconds={briefFilmSeconds}
+                onBriefFilmSecondsChange={setMotionFilmSeconds}
+                briefThinking={briefThinking}
+                onBriefThinkingChange={setMotionThinking}
                 briefBusy={busy || pending !== null}
                 onSubmitBrief={submitBrief}
                 briefProblem={briefProblem}

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  openWorkbenchSection,
+  waitForStartup,
+} from "./navigation";
 
 interface Preparation {
   readonly installationId: string;
@@ -31,14 +35,14 @@ async function waitForOneFact(): Promise<void> {
 
 describe("B5-13/B5-14 platform Session production-path acceptance", () => {
   it("queries status, drives the headless Executor, and safely logs out from the hidden App UI", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_platform_session_for_acceptance"),
     )) as Preparation;
     assert.match(preparation.installationId, UUID_V4);
 
-    await browser.$("li=平台状态").click();
-    await expect(await browser.$("h2")).toHaveText("平台状态");
+    await openWorkbenchSection("账号与平台");
+    await expect(await browser.$("h2")).toHaveText("账号与平台");
     await browser.waitUntil(
       async () => (await browser.$("body").getText()).includes("尚未确认"),
       { timeout: 60_000, timeoutMsg: "real Control Plane Session query did not render" },
@@ -52,6 +56,7 @@ describe("B5-13/B5-14 platform Session production-path acceptance", () => {
       timeoutMsg: "open handling did not settle",
     });
 
+    console.log(`[b514-clock] before-recheck ${new Date().toISOString()}`);
     const recheck = await browser.$("button=我已处理，重新检查");
     await recheck.click();
     await waitForOneFact();
@@ -59,9 +64,11 @@ describe("B5-13/B5-14 platform Session production-path acceptance", () => {
       timeout: 120_000,
       timeoutMsg: "platform recheck did not settle",
     });
+    console.log(`[b514-clock] before-logout-lookup ${new Date().toISOString()}`);
     const logout = await browser.$("button=安全注销");
     assert.equal(await logout.isEnabled(), true);
     await logout.click();
+    console.log(`[b514-clock] logout-confirm-click ${new Date().toISOString()}`);
     await browser.$("button=确认注销").click();
     try {
       await browser.waitUntil(
@@ -80,8 +87,13 @@ describe("B5-13/B5-14 platform Session production-path acceptance", () => {
       const session = await browser.tauri.execute(({ core }) =>
         core.invoke("get_douyin_platform_session"),
       );
+      // 登出命令有多个错误路径（紧停失败、重启失败、CompleteDouyinLogout 状态
+      // 不符、投影轮询超时），页面上只留一条警告——没有它的原文，五个布尔量
+      // 分不清是哪条路（2026-07-29 已经为此白跑一轮）。
+      const alerts = await browser.$$(".ant-alert").map((alert) => alert.getText());
       throw new Error(
         `safe logout did not render authoritative missing state: ${JSON.stringify({
+          failureAlerts: alerts,
           authoritativeSession: session,
           logoutStillPending: !(await logout.isEnabled()),
           rendersMissing: text.includes("需要登录"),
@@ -92,6 +104,19 @@ describe("B5-13/B5-14 platform Session production-path acceptance", () => {
       );
     }
 
+    console.log(`[b514-clock] logout-rendered-missing ${new Date().toISOString()}`);
+    // 这条等待可以空转通过：fixture 从未真正登录，登出**之前**页面就可能已写着
+    // 「需要登录」。命令失败时页面留一条警告、文字照样匹配，spec 照绿——
+    // 2026-07-29 实测正是这样漏掉了「登出命令 254ms 快速失败、Profile 原样留下」。
+    // 所以登出的成立必须同时断言：没有失败警告。
+    const postLogoutAlerts = await browser
+      .$$(".ant-alert-error, .ant-alert-warning")
+      .map((alert) => alert.getText());
+    assert.deepEqual(
+      postLogoutAlerts,
+      [],
+      `safe logout left a failure alert on screen: ${JSON.stringify(postLogoutAlerts)}`,
+    );
     const blocked = (await browser.tauri.execute(async ({ core }) => {
       try {
         await core.invoke("create_douyin_search_exposure_task", {

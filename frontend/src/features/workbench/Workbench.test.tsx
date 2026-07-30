@@ -171,6 +171,36 @@ describe("RPA workbench", () => {
     expect(list).not.toHaveTextContent(COMPLETED_TASK_ID);
   });
 
+  it("still lets a machine address a row it no longer names", async () => {
+    /**
+     * 把 UUID 换成时间戳是对的——36 个字符说不出这条任务是什么。
+     * 但**连机器可寻址性一起丢掉是副作用、不是本意**：换完之后这个列表里的
+     * 任务对自动化、诊断和排障都无法指认，而显示名是秒级的，同一秒创建的两条
+     * 任务连人也分不开。
+     *
+     * 由 T3-19 的桌面验收发现：它刷新之后要点开某一条具体任务，而列表里既没有
+     * 文本也没有属性能指向它。
+     *
+     * 属性而不是可访问名：`aria-label` 会**替换**读屏用户听到的那个可读名字，
+     * 那是把一个问题换成另一个问题。`data-task-id` 是惰性的，两边都不牺牲。
+     */
+    renderWorkbench();
+
+    await screen.findByText("本机执行器在线");
+    const rows = Array.from(
+      document.querySelectorAll<HTMLElement>(".recent-task-list button"),
+    );
+
+    expect(rows.map((row) => row.dataset["taskId"])).toEqual([
+      RUNNING_TASK_ID,
+      COMPLETED_TASK_ID,
+    ]);
+    // 可读名字没有因此受影响。
+    for (const row of rows) {
+      expect(row.textContent).toMatch(/^\d{2}-\d{2} \d{2}:\d{2}:\d{2} 的任务$/);
+    }
+  });
+
   it("keeps the protocol counters out of the current Task body", async () => {
     // Revision and 事件水位 are the internal consistency counters of the
     // snapshot/event protocol. They belong to a diagnosis, not to the largest

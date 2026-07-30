@@ -18,8 +18,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn } from "node:child_process";
-import { createHmac } from "node:crypto";
-import { copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash, createHmac } from "node:crypto";
+import { copyFile, mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -167,7 +167,7 @@ function locateAnimationRuntime() {
   return null;
 }
 
-async function renderPage(html, executable, major, assets = []) {
+async function renderPage(html, executable, major, assets = [], window = null) {
   const base = await mkdtemp(join(tmpdir(), "t86-static-"));
   const workspace = join(base, "workspace");
   await mkdir(workspace, { recursive: true });
@@ -179,11 +179,20 @@ async function renderPage(html, executable, major, assets = []) {
   }
   const sandbox = {
     allowedAssets: assets.map((asset) => asset.relative),
+    // The stage travels with the request now: these fixtures are template-shaped
+    // compositions, so they ask for the template's own canvas. A catalog part
+    // asks for the stage it declares — see
+    // `contracts/video/motion-render-canvas.v1.json`.
+    canvas: { deviceScaleFactor: 2, height: 360, width: 640 },
     // The Worker holds no cancellation name of its own; the caller supplies the
     // declared one. See `contracts/video/motion-render-cancel-marker.v1.json`.
     cancelMarker: CANCEL_MARKER,
     entryHtml: "entry.html",
     frameCount: FRAME_COUNT,
+    // Which stretch of the entry's own timeline this render covers. Default is
+    // the whole of it, which is what a film captured in one pass asks for.
+    sourceStartMillis: Math.round((window?.start ?? 0) * 1000),
+    sourceEndMillis: Math.round((window?.end ?? TEMPLATE_DURATION) * 1000),
     maxCpuSeconds: 120,
     maxDurationSeconds: 60,
     // A real Chromium process group idles well above a gigabyte; the budget
@@ -217,7 +226,26 @@ async function renderPage(html, executable, major, assets = []) {
     // The ready line carries the health port; the render command follows it.
     await new Promise((resolve) => setTimeout(resolve, 250));
     child.stdin.write(`${sandboxCommandLine(sandbox)}\n`);
-    return await settled;
+    const event = await settled;
+    // The frames themselves, hashed before the workspace goes away. Without
+    // them a render can only be judged by its event, and the defect this file
+    // exists to catch is precisely one that reports a perfect event.
+    // A failed render leaves no frames directory, and that has to stay
+    // distinguishable from a successful render of zero frames: swallowing the
+    // error into an empty list is how `assert.notDeepEqual([], [])` would pass
+    // over two renders that never happened. `null` cannot be compared by
+    // accident.
+    let frames = null;
+    try {
+      const names = (await readdir(join(workspace, "frames"))).sort();
+      frames = [];
+      for (const name of names) {
+        frames.push(createHash("sha256").update(await readFile(join(workspace, "frames", name))).digest("hex"));
+      }
+    } catch {
+      frames = null;
+    }
+    return { ...event, frameDigests: frames };
   } finally {
     child.kill("SIGKILL");
     await rm(base, { recursive: true, force: true });
@@ -312,4 +340,61 @@ test("the local composition template renders a film that actually moves", async 
   );
   assert.equal(event.framesCaptured, FRAME_COUNT);
   assert.equal(event.blockedRequests, 0, "the template must not ask the offline sandbox for anything");
+});
+
+/**
+ * 窗口越过文档时间轴时拒绝，而不是悄悄收窄。
+ *
+ * 完全越界还好办——所有帧落在同一点，静帧门禁会响。**部分越界才是阴的**：
+ * [5s, 9s] 对一份 6 秒的文档，前四分之一的帧在动、后四分之三全停在 6 秒处；
+ * `sawMovement` 被前面那几帧置上，帧数对，渲染报 complete，
+ * 而这个镜头四分之三是静止画面，下游每一道门禁都是绿的。
+ *
+ * 收窄是「下游给个合理默认值」——这条线这周被这个模式咬了六次。
+ * Worker 是唯一知道 `seekableDuration` 的一层，所以只能它说不。
+ */
+test("a window the document cannot satisfy is refused, not narrowed", async (t) => {
+  const executable = locateRenderBrowser();
+  if (executable === null) {
+    t.skip("no staged embedded Chromium on this machine");
+    return;
+  }
+  const major = await chromiumMajor(executable);
+  // 文档声明 3 秒，窗口要到 5 秒。
+  const event = await renderPage(MOVING_PAGE, executable, major, [], { start: 2, end: 5 });
+
+  assert.equal(event.event, "worker.render.failed", JSON.stringify(event));
+  assert.equal(event.reasonCode, "render_window_outside_timeline", JSON.stringify(event));
+});
+
+/**
+ * 两个镜头共用一份文档时，各自只渲染自己那一截。
+ *
+ * 这是 2026-07-28 那条留档成片的成因，也是这个文件唯一抓不到的一类失败：
+ * 段只带「哪个页面、多少帧」的时候，Worker 只剩一条规则可用——把页面整条时间轴
+ * 摊到这些帧上。对一次拍完的片子是对的，对镜头共用一份文档的片子就是错的：
+ * 每个模板镜头都把整部片子重渲了一遍。那条 12 秒成片是两段一模一样的 6 秒，
+ * 各自倍速；编码、画布、帧数、时长、静帧门禁**全绿**。
+ *
+ * 所以这条比对的是帧本身。事件说不出这件事。
+ */
+test("two shots of one document render different stretches of it", async (t) => {
+  const executable = locateRenderBrowser();
+  if (executable === null) {
+    t.skip("no staged embedded Chromium on this machine");
+    return;
+  }
+  const major = await chromiumMajor(executable);
+  const first = await renderPage(MOVING_PAGE, executable, major, [], { start: 0, end: 1.5 });
+  const second = await renderPage(MOVING_PAGE, executable, major, [], { start: 1.5, end: 3 });
+
+  assert.equal(first.event, "worker.render.sandboxed", JSON.stringify(first));
+  assert.equal(second.event, "worker.render.sandboxed", JSON.stringify(second));
+  assert.equal(first.frameDigests?.length, FRAME_COUNT, "第一段必须真的截出帧来");
+  assert.equal(second.frameDigests?.length, FRAME_COUNT, "第二段必须真的截出帧来");
+  assert.notDeepEqual(
+    first.frameDigests,
+    second.frameDigests,
+    "两段各自渲染同一份文档的不同时间段，画面不可能逐帧相同——相同就说明窗口没生效",
+  );
 });

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 
-import { browser, expect } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import {
+  openSettings,
+  waitForStartup,
+} from "./navigation";
 
 interface UpdateRelease {
   readonly version: string;
@@ -51,8 +55,8 @@ async function waitForText(text: string): Promise<void> {
 
 describe("H8-20 hidden App update download acceptance", () => {
   it("recovers the interrupted startup download from the visible 设置与诊断 controls", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
-    await browser.$("li=设置与诊断").click();
+    await waitForStartup();
+    await openSettings();
 
     // The startup check is what fails here: the feed cuts the artifact stream
     // halfway. The user is told it is retryable, not that the App is broken.

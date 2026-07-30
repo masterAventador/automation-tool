@@ -28,7 +28,26 @@
       "label": "视频创作模型服务",
       "description": "用于生成和修正视频画面代码，可读取明确提交的预览图，但不会获得运营浏览器或发布平台权限。",
       "default_model_id": "qwen3.7-max-2026-06-08",
-      "allowed_model_ids": ["qwen3.7-max-2026-06-08"]
+      "allowed_model_ids": [
+        "qwen3.7-max-2026-06-08"
+      ]
+    },
+    {
+      "id": "voiceover",
+      "label": "旁白语音服务",
+      "description": "把每段分镜的旁白合成为音频文件，供本机测量时长并混入成片；不会获得浏览器、发布平台或视频文件权限。",
+      "api_mode": "dashscope_native",
+      "base_url": "https://dashscope.aliyuncs.com/api/v1",
+      "default_model_id": "qwen3-tts-instruct-flash-2026-01-26",
+      "allowed_model_ids": [
+        "qwen3-tts-flash-2025-11-27",
+        "qwen3-tts-instruct-flash-2026-01-26"
+      ],
+      "default_voice": "Cherry",
+      "audio_host_suffixes": [
+        ".aliyuncs.com"
+      ],
+      "notes": "TTS 不在 OpenAI 兼容端点上（实测 /audio/speech 返回 404），所以本用途自带 base_url 与 api_mode；服务返回的是有签名会过期的对象存储链接且 scheme 是 http，取用前必须升级为 https 并校验 host 落在 audio_host_suffixes 内。"
     }
   ],
   "models": [
@@ -55,6 +74,22 @@
       "text": true,
       "image_input": true,
       "recommended_for": "脚本、分镜和视频预览修正"
+    },
+    {
+      "id": "qwen3-tts-instruct-flash-2026-01-26",
+      "label": "通义千问 3 语音合成 Flash（instruct 指令版，2026-01-26 快照）",
+      "stability": "dated_snapshot",
+      "text": false,
+      "image_input": false,
+      "recommended_for": "分镜旁白语音合成"
+    },
+    {
+      "id": "qwen3-tts-flash-2025-11-27",
+      "label": "通义千问 3 语音合成 Flash（2025-11-27 快照）",
+      "stability": "dated_snapshot",
+      "text": false,
+      "image_input": false,
+      "recommended_for": "分镜旁白语音合成"
     }
   ],
   "connection_test": {

@@ -83,3 +83,23 @@ describe("AI-first desktop redesign", () => {
     expect(screen.getByText("普通评论和私信默认由 AI 自动回复")).toBeVisible();
   });
 });
+
+it("tells the operator that video editing stands apart from video production", async () => {
+  // `user-facing-terminology.v1.json` requires this distinction to be stated in
+  // the product, not just held as an idea: 视频剪辑 organises material that
+  // already exists, while 视频制作 generates it. The redesign dropped the page
+  // subtitle that used to carry it, and the branding gate caught the loss —
+  // after the redesign had already shipped in a signed package, because the
+  // merge ran the frontend gates and not this one.
+  const user = userEvent.setup();
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <WorkbenchShell />
+    </QueryClientProvider>,
+  );
+
+  await user.click(screen.getByRole("menuitem", { name: "创作" }));
+  await user.click(screen.getByRole("radio", { name: "轻量剪辑" }).closest("label")!);
+
+  expect(screen.getByText(/独立于视频制作/)).toBeVisible();
+});

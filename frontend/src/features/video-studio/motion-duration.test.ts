@@ -23,11 +23,20 @@ describe("motion storyboard duration limits", () => {
       secondsPerBeatMaximum: contract.secondsPerBeatMaximum,
       secondsPerBeatDefault: contract.secondsPerBeatDefault,
       totalSecondsMaximum: contract.totalSecondsMaximum,
+      briefSecondsMaximum: contract.briefSecondsMaximum,
+      briefBeatCountMaximum: contract.briefBeatCountMaximum,
+      briefSecondsPerBeatMinimum: contract.briefSecondsPerBeatMinimum,
       renderWallSecondsBase: contract.renderWallSecondsBase,
       renderWallMillisPerFrame: contract.renderWallMillisPerFrame,
     });
     expect(MOTION_DURATION_LIMITS.beatCountDefault * MOTION_DURATION_LIMITS.secondsPerBeatDefault)
       .toBeLessThanOrEqual(MOTION_DURATION_LIMITS.totalSecondsMaximum);
+    // 界面允许选的最长片子，必须能被切成编排收得下的镜头数，且每一镜都塞得进
+    // 一次渲染。少了这条，表单就可能给出一个任何分镜都表达不出来的长度，
+    // 而拒绝要等编排跑完才出现。
+    expect(MOTION_DURATION_LIMITS.briefSecondsMaximum).toBeLessThanOrEqual(
+      MOTION_DURATION_LIMITS.briefBeatCountMaximum * MOTION_DURATION_LIMITS.totalSecondsMaximum,
+    );
   });
 
   it("accepts a five beat, four second storyboard and reports its real length", () => {

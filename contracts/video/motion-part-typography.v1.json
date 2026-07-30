@@ -1,0 +1,239 @@
+{
+  "schemaVersion": 1,
+  "id": "motion-part-typography.v1",
+  "source": {
+    "motionCatalog": {
+      "path": "contracts/quality/motion-catalog.v1.json",
+      "sha256": "5d09399aaa9d776d79eeca9cf6fadaac4c2d2589ee434d572b23cbcfc3da08a8"
+    },
+    "offlineDependenciesLock": {
+      "path": "contracts/video/offline-motion-dependencies.v1.json"
+    }
+  },
+  "chineseFace": {
+    "sourceFamily": "Noto Sans SC",
+    "artifactPath": "offline-deps/fonts/woff2/noto-sans-sc/noto-sans-sc-variable-full.woff2",
+    "coverage": "full",
+    "decidedBy": "product owner 2026-07-27",
+    "decisionNote": "取全字符集而不是 GBK/GB2312：省下的 1.84 MB 换来的是用户名字里有个「璟」就显示豆腐块，而且渲染成功、门禁全绿、无任何报错。"
+  },
+  "families": [
+    {
+      "family": "Anton",
+      "policy": "packaged"
+    },
+    {
+      "family": "Bebas Neue",
+      "policy": "packaged"
+    },
+    {
+      "family": "Big Shoulders Display",
+      "policy": "packaged"
+    },
+    {
+      "family": "DM Sans",
+      "policy": "packaged"
+    },
+    {
+      "family": "Figtree",
+      "policy": "packaged"
+    },
+    {
+      "family": "Gabarito",
+      "policy": "packaged"
+    },
+    {
+      "family": "Instrument Serif",
+      "policy": "packaged"
+    },
+    {
+      "family": "Inter",
+      "policy": "packaged"
+    },
+    {
+      "family": "JetBrains Mono",
+      "policy": "packaged"
+    },
+    {
+      "family": "Lato",
+      "policy": "packaged"
+    },
+    {
+      "family": "Libre Baskerville",
+      "policy": "packaged"
+    },
+    {
+      "family": "Libre Franklin",
+      "policy": "packaged"
+    },
+    {
+      "family": "Montserrat",
+      "policy": "packaged"
+    },
+    {
+      "family": "Outfit",
+      "policy": "packaged"
+    },
+    {
+      "family": "Playfair Display",
+      "policy": "packaged"
+    },
+    {
+      "family": "Poppins",
+      "policy": "packaged"
+    },
+    {
+      "family": "Space Grotesk",
+      "policy": "packaged"
+    },
+    {
+      "family": "Space Mono",
+      "policy": "packaged"
+    },
+    {
+      "family": "Archivo Black",
+      "policy": "packaged"
+    },
+    {
+      "family": "Barlow Condensed",
+      "policy": "packaged"
+    },
+    {
+      "family": "League Gothic",
+      "policy": "packaged"
+    },
+    {
+      "family": "Oswald",
+      "policy": "packaged"
+    },
+    {
+      "family": "Menlo",
+      "policy": "substituted",
+      "replacement": "JetBrains Mono",
+      "reason": "上游把它当代码/终端等宽字体用。Apple 与 Microsoft 的系统等宽字体均不可再分发。",
+      "visualDifference": "JetBrains Mono 字面更大、字腔更开、小写 l 带尾钩，整体比 SF Mono/Menlo 略宽；同样字号下每行能放的字符数略少。"
+    },
+    {
+      "family": "Monaco",
+      "policy": "substituted",
+      "replacement": "JetBrains Mono",
+      "reason": "上游把它当代码/终端等宽字体用。Apple 与 Microsoft 的系统等宽字体均不可再分发。",
+      "visualDifference": "JetBrains Mono 字面更大、字腔更开、小写 l 带尾钩，整体比 SF Mono/Menlo 略宽；同样字号下每行能放的字符数略少。"
+    },
+    {
+      "family": "SF Mono",
+      "policy": "substituted",
+      "replacement": "JetBrains Mono",
+      "reason": "上游把它当代码/终端等宽字体用。Apple 与 Microsoft 的系统等宽字体均不可再分发。",
+      "visualDifference": "JetBrains Mono 字面更大、字腔更开、小写 l 带尾钩，整体比 SF Mono/Menlo 略宽；同样字号下每行能放的字符数略少。"
+    },
+    {
+      "family": "Consolas",
+      "policy": "substituted",
+      "replacement": "JetBrains Mono",
+      "reason": "上游把它当代码/终端等宽字体用。Apple 与 Microsoft 的系统等宽字体均不可再分发。",
+      "visualDifference": "JetBrains Mono 字面更大、字腔更开、小写 l 带尾钩，整体比 SF Mono/Menlo 略宽；同样字号下每行能放的字符数略少。"
+    },
+    {
+      "family": "Courier New",
+      "policy": "substituted",
+      "replacement": "JetBrains Mono",
+      "reason": "上游把它当代码/终端等宽字体用。Apple 与 Microsoft 的系统等宽字体均不可再分发。",
+      "visualDifference": "JetBrains Mono 字面更大、字腔更开、小写 l 带尾钩，整体比 SF Mono/Menlo 略宽；同样字号下每行能放的字符数略少。"
+    },
+    {
+      "family": "Arial",
+      "policy": "substituted",
+      "replacement": "Inter",
+      "reason": "上游把它当界面无衬线字体用。Arial/Helvetica/Segoe UI/SF Pro 分别属于 Monotype、Linotype、Microsoft、Apple，均不可再分发。",
+      "visualDifference": "Inter 的 x-height 更大、字腔更开放、末端更平直；Helvetica 系字腔更闭合。同字号下 Inter 视觉更大、行宽略宽。"
+    },
+    {
+      "family": "Helvetica",
+      "policy": "substituted",
+      "replacement": "Inter",
+      "reason": "上游把它当界面无衬线字体用。Arial/Helvetica/Segoe UI/SF Pro 分别属于 Monotype、Linotype、Microsoft、Apple，均不可再分发。",
+      "visualDifference": "Inter 的 x-height 更大、字腔更开放、末端更平直；Helvetica 系字腔更闭合。同字号下 Inter 视觉更大、行宽略宽。"
+    },
+    {
+      "family": "Helvetica Neue",
+      "policy": "substituted",
+      "replacement": "Inter",
+      "reason": "上游把它当界面无衬线字体用。Arial/Helvetica/Segoe UI/SF Pro 分别属于 Monotype、Linotype、Microsoft、Apple，均不可再分发。",
+      "visualDifference": "Inter 的 x-height 更大、字腔更开放、末端更平直；Helvetica 系字腔更闭合。同字号下 Inter 视觉更大、行宽略宽。"
+    },
+    {
+      "family": "Segoe UI",
+      "policy": "substituted",
+      "replacement": "Inter",
+      "reason": "上游把它当界面无衬线字体用。Arial/Helvetica/Segoe UI/SF Pro 分别属于 Monotype、Linotype、Microsoft、Apple，均不可再分发。",
+      "visualDifference": "Inter 的 x-height 更大、字腔更开放、末端更平直；Helvetica 系字腔更闭合。同字号下 Inter 视觉更大、行宽略宽。"
+    },
+    {
+      "family": "SF Pro Text",
+      "policy": "substituted",
+      "replacement": "Inter",
+      "reason": "上游把它当界面无衬线字体用。Arial/Helvetica/Segoe UI/SF Pro 分别属于 Monotype、Linotype、Microsoft、Apple，均不可再分发。",
+      "visualDifference": "Inter 的 x-height 更大、字腔更开放、末端更平直；Helvetica 系字腔更闭合。同字号下 Inter 视觉更大、行宽略宽。"
+    },
+    {
+      "family": "SF Pro Display",
+      "policy": "substituted",
+      "replacement": "Inter",
+      "reason": "上游把它当界面无衬线字体用。Arial/Helvetica/Segoe UI/SF Pro 分别属于 Monotype、Linotype、Microsoft、Apple，均不可再分发。",
+      "visualDifference": "Inter 的 x-height 更大、字腔更开放、末端更平直；Helvetica 系字腔更闭合。同字号下 Inter 视觉更大、行宽略宽。"
+    },
+    {
+      "family": "Georgia",
+      "policy": "substituted",
+      "replacement": "Libre Baskerville",
+      "reason": "Georgia 属 Microsoft，不可再分发；它在零件里承担的是「屏幕正文衬线」这个角色。",
+      "visualDifference": "Libre Baskerville 笔画对比更强、衬线更尖细，Georgia 更圆钝厚重；同字号下 Libre Baskerville 略窄。"
+    },
+    {
+      "family": "Times New Roman",
+      "policy": "substituted",
+      "replacement": "Libre Baskerville",
+      "reason": "Times New Roman 属 Monotype，不可再分发。包内没有与它等宽的 OFL 替代（Tinos/Liberation Serif 需新增家族），只用于 1 个零件，不值得为它多带一份字体。",
+      "visualDifference": "Libre Baskerville 明显更宽、x-height 更大，Times 窄而紧；同一段文字在 Libre Baskerville 下会占更多横向空间，属于本次替换里视觉差异最大的一条。"
+    },
+    {
+      "family": "Impact",
+      "policy": "substituted",
+      "replacement": "Big Shoulders Display",
+      "reason": "Impact 属 Monotype，不可再分发；零件要的是 900 字重的压缩体标题字。包内 Anton 只有 400，Big Shoulders Display 有 800/900。",
+      "visualDifference": "Big Shoulders Display 比 Impact 更窄、字形更几何、字重可选；Impact 更厚重、字腔几乎闭合。"
+    },
+    {
+      "family": "Arial Black",
+      "policy": "substituted",
+      "replacement": "Montserrat",
+      "reason": "Arial Black 属 Monotype，不可再分发；零件同时要 400 与 900，包内只有 Montserrat 两个字重都覆盖得上（900 已有，400 本任务补齐）。",
+      "visualDifference": "Montserrat 是几何无衬线、字形更圆更宽，Arial Black 是新怪诞体、更方更紧；900 字重下 Montserrat 视觉略轻。"
+    },
+    {
+      "family": "Apple Color Emoji",
+      "policy": "host",
+      "reason": "彩色 emoji。macOS/Windows 均自带完整 emoji 字体，落到系统字体渲染出来是正确的表情而不是豆腐块——这一点与汉字缺字完全不同。打包 Noto Color Emoji 实测 2,058,000 字节（1.96 MB），只服务 caption-emoji-pop 一个零件，不划算。",
+      "visualDifference": "Apple 与 Google/Microsoft 的 emoji 画风不同（立体 vs 扁平），同一个零件在两台机器上表情长相不同。这是本次已知的、唯一未消除的跨平台差异。"
+    },
+    {
+      "family": "Segoe UI Emoji",
+      "policy": "host",
+      "reason": "同 Apple Color Emoji，属 Windows 自带 emoji 字体。",
+      "visualDifference": "同上。"
+    },
+    {
+      "family": "Noto Color Emoji",
+      "policy": "host",
+      "reason": "同 Apple Color Emoji。它本身是 OFL 可再分发，但 1.96 MB 只为一个零件的表情画风不值得；留作后续如需 emoji 确定性时的现成选项。",
+      "visualDifference": "同上。"
+    }
+  ],
+  "generated": {
+    "parts": 134,
+    "families": 40,
+    "pairs": 71,
+    "scanSha256": "a6d304ec68b58005964b57a9509535c630c4a8e6f3f57d1506b6a4b5a31bb90a"
+  }
+}

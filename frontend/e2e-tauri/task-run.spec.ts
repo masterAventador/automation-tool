@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 
-import { browser, expect } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import {
+  openAutomationRuns,
+  waitForStartup,
+  waitForTaskRow,
+} from "./navigation";
 
 interface TaskRunPreparation {
   readonly installationId: string;
@@ -54,7 +59,8 @@ async function waitForRenderedText(...expected: string[]): Promise<void> {
 }
 
 async function openTask(taskId: string): Promise<void> {
-  await browser.$(`button=${taskId}`).click();
+  await waitForTaskRow(taskId);
+  await browser.$(`button[data-task-id="${taskId}"]`).click();
   await waitForRenderedText("任务运行详情", taskId, "任务开始", "步骤开始");
 }
 
@@ -69,8 +75,7 @@ async function clickTwoCharacterButton(
 
 describe("Task run production-path acceptance", () => {
   it("renders persisted history and controls two Tasks from the hidden App UI", async () => {
-    const heading = await browser.$("h2");
-    await expect(heading).toHaveText("RPA 运营工作台");
+    await waitForStartup();
 
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_task_run_for_acceptance"),
@@ -79,14 +84,16 @@ describe("Task run production-path acceptance", () => {
     assert.match(preparation.controlledTaskId, UUID_V4);
     assert.match(preparation.emergencyTaskId, UUID_V4);
 
+    // 改版之后开机落在 AI 助理页，`Workbench` 只在运行记录页渲染。
+    await openAutomationRuns();
+
     const retry = await browser.$("button=重新加载工作台");
     await browser.waitUntil(
       async () => {
-        const bodyText = await browser.$("body").getText();
         return (
           (await retry.isExisting()) ||
-          (bodyText.includes(preparation.controlledTaskId) &&
-            bodyText.includes(preparation.emergencyTaskId))
+          ((await browser.$(`button[data-task-id="${preparation.controlledTaskId}"]`).isExisting())
+            && (await browser.$(`button[data-task-id="${preparation.emergencyTaskId}"]`).isExisting()))
         );
       },
       { timeout: 90_000, timeoutMsg: "workbench did not expose Task run fixtures" },
@@ -116,7 +123,10 @@ describe("Task run production-path acceptance", () => {
         requiredSignalPath("AUTOMATION_TOOL_H803_DOWN_SIGNAL"),
         "Control Plane shutdown",
       );
-      await browser.$("button=紧急停止").click();
+      // 改版给外壳的顶栏也加了一个「紧急停止」（全局那个），于是
+      // `button=紧急停止` 有两个匹配，而 `$` 取文档里第一个——顶栏在内容区之前，
+      // 点到的是全局那个，任务自己的 Popconfirm 因此从不出现。限定到任务区域。
+      await browser.$(".task-run-content").$("button=紧急停止").click();
       await browser.$("button=确认紧停").click();
       await waitForRenderedText("命令结果暂时无法确认，请查看权威状态后重试");
       await writeSignal(
@@ -130,12 +140,9 @@ describe("Task run production-path acceptance", () => {
       return;
     }
 
-    await waitForRenderedText(
-      preparation.controlledTaskId,
-      preparation.emergencyTaskId,
-      "本机执行器在线",
-      "运行中",
-    );
+    await waitForTaskRow(preparation.controlledTaskId);
+    await waitForTaskRow(preparation.emergencyTaskId);
+    await waitForRenderedText("本机执行器在线", "运行中");
 
     await openTask(preparation.controlledTaskId);
     await waitForRenderedText(
@@ -162,9 +169,11 @@ describe("Task run production-path acceptance", () => {
     await waitForRenderedText("取消命令已提交", "已取消", "任务已取消");
 
     await browser.$("button=返回工作台").click();
-    await waitForRenderedText("RPA 运营工作台", preparation.emergencyTaskId);
+    await openAutomationRuns();
     await openTask(preparation.emergencyTaskId);
-    await browser.$("button=紧急停止").click();
+    // 同第 129 行：顶栏也有一个全局「紧急停止」，必须限定到任务区域。
+    // 修那处时只看了那一条分支，没搜整个文件——这里是同一对的第二处。
+    await browser.$(".task-run-content").$("button=紧急停止").click();
     await browser.$("button=确认紧停").click();
     await waitForRenderedText("紧停命令已提交", "结果待确认");
   });

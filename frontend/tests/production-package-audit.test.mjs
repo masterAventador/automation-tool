@@ -399,6 +399,8 @@ const MACOS_PACKAGE_RESOURCES = {
   "motion-video-worker/package/runtime/node": "node",
   "motion-video-worker/package/app/worker.mjs": "export {};",
   "material-video-worker/package/automation-tool-material-video-worker": "worker",
+  "motion-catalog/manifest.json": "{}",
+  "motion-catalog/items/lt-bold-block/lt-bold-block.html": "<html></html>",
 };
 
 async function createPackagedFixture({ omit = [], declare = ["local-executor/package/"] } = {}) {
@@ -457,7 +459,12 @@ test("P9-05 refuses a production config that declares no bundler resource at all
 });
 
 test("P9-05 refuses a package whose video runtime never reached the resource directory", async () => {
-  for (const resource of ["media-toolchain", "motion-video-worker", "material-video-worker"]) {
+  for (const resource of [
+    "media-toolchain",
+    "motion-video-worker",
+    "material-video-worker",
+    "motion-catalog",
+  ]) {
     const fixture = await createPackagedFixture({ omit: [resource] });
     try {
       await assert.rejects(

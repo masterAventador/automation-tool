@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 
-import { browser, expect } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import {
+  openAutomationRuns,
+  waitForStartup,
+} from "./navigation";
 
 interface WorkbenchMetricsPreparation {
   readonly installationId: string;
@@ -23,19 +27,28 @@ async function metricValue(title: string): Promise<string | null> {
 
 describe("H8-14 workbench metrics production-path acceptance", () => {
   it("renders Installation-scoped PostgreSQL facts through the hidden App", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_workbench_metrics_for_acceptance"),
     )) as WorkbenchMetricsPreparation;
     assert.match(preparation.installationId, UUID_V4);
     assert.match(preparation.taskId, UUID_V4);
 
+    // 改版之后开机落在 AI 助理页，`Workbench` 只在运行记录页渲染。
+    await openAutomationRuns();
+
+    // 等的东西换成这条用例真正要量的那个：统计卡。
+    // 原来等的是 `preparation.taskId` 出现在正文里，而完整标识收在「诊断信息」
+    // 折叠面板中、不进 `getText()`——那个条件在这条用例里既等不到、也不是它关心的。
     await browser.waitUntil(
       async () => {
         const retry = await browser.$("button=重新加载工作台");
-        return (await retry.isExisting()) || (await browser.$("body").getText()).includes(preparation.taskId);
+        return (
+          (await retry.isExisting())
+          || (await browser.$("//*[contains(@class,'ant-statistic')][.//*[normalize-space()='累计任务']]").isExisting())
+        );
       },
-      { timeout: 30_000, timeoutMsg: "workbench did not expose a reload or refreshed task" },
+      { timeout: 30_000, timeoutMsg: "workbench did not expose a reload or its metrics" },
     );
     const retry = await browser.$("button=重新加载工作台");
     if (await retry.isExisting()) {

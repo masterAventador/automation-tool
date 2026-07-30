@@ -45,7 +45,11 @@ from test_motion_video_render_sandbox import (
 ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE = ROOT / ".local/embedded-browser-video-studio/bm-16-evidence"
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
-SWEEP_FRAMES = 2
+# 2 帧（0 与 D/2）会被周期性动画混叠：transitions-radial 在 t=0 与 t=10 逐字节
+# 同帧（实拍对照：0/5/10/15 四点三个不同摘要），两点采样正好踩在同相位上被静帧
+# 门禁误拒。4 帧落在 0、D/4、D/2、3D/4，同一零件三个不同摘要能过；采样永远证明
+# 不了「所有帧都动」，只把碰撞概率压到目录现有零件实测不再触发。
+SWEEP_FRAMES = 4
 STYLE_FRAMES = 3
 DETERMINISM_FRAMES = 30
 # Every render now pays a one-off warm-up (seek to zero, bounded image decode,
@@ -69,6 +73,7 @@ def _run(
 
 def run_deterministic_gates() -> None:
     _run([sys.executable, "scripts/test_bm_16_acceptance_contract.py"])
+    _run([sys.executable, "scripts/test_motion_catalog_render_exclusions.py"])
     _run([sys.executable, "scripts/check_third_party_sources.py"])
     _run([sys.executable, "scripts/check_motion_catalog.py"])
     _run([sys.executable, "scripts/check_motion_catalog_ui_projection.py"])
@@ -139,6 +144,7 @@ def _render_once(
     allowed_assets: list[str],
     frame_count: int,
     budget_seconds: int = SHORT_RENDER_BUDGET_SECONDS,
+    spec_overrides: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """One real sandboxed render; returns the success event and frame digests."""
     frames = workspace / "frames"
@@ -168,6 +174,7 @@ def _render_once(
             maxDurationSeconds=budget_seconds,
             maxMemoryMegabytes=2048,
             maxOutputBytes=256 * 1024 * 1024,
+            **(spec_overrides or {}),
         )
         session.send_line(sandbox_command_line(job_id, specification))
         event = session.read_event()
@@ -204,39 +211,106 @@ def run_item_render_sweep(
 ) -> dict[str, object]:
     manifest = json.loads((release / "manifest.json").read_text(encoding="utf-8"))
     workspace = _writable_release_copy(release, run_root / "item-sweep")
-    shared = sorted(
-        # The sandbox contract is POSIX-relative and rejects backslashes, so a
-        # native `str()` here makes every Windows sweep fail closed with
-        # `render_sandbox_invalid` before a single item renders.
-        path.relative_to(workspace).as_posix()
-        for path in (workspace / "offline-deps").rglob("*")
-        if path.is_file()
+    # 白名单按引用收集，与产品的工作区写入器同一份遍历（PC-05 的决定）。
+    # PC-13 把共享依赖加了字体之后，「零件文件 + 全部共享依赖」的老算法在
+    # caption-texture 上超过了沙箱的 128 上限——产品早就不整树拷贝了，sweep 跟上。
+    from automation_tool.executor.motion_authoring.part_workspace import (
+        referenced_assets,
     )
+
     results: dict[str, object] = {}
+    # PC-19 之后段必须自带时间窗，而本 sweep 一直用夹具默认的 [0, 3000ms] 渲每一个
+    # 零件。零件的动作不必发生在前三秒——apple-money-count 声明 5 秒，数钱、闪绿、
+    # 撒钱币都在后半段，于是三秒窗里它是静止的，被静帧门禁正确地拒了（2026-07-29
+    # 实测，PC-19 之前这条 sweep 是 134/134 全过的）。窗口按目录声明的时长开；
+    # 25 个 component 不声明时长（PC-01：duration 只在 109 个 block 上），回退 3 秒。
+    catalog_items = json.loads(
+        (ROOT / "contracts/quality/motion-catalog.v1.json").read_text(encoding="utf-8")
+    )["items"]
+    catalog_durations = {entry["name"]: entry.get("duration") for entry in catalog_items}
+    # 画布同理（PC-05：渲染画布随请求走，零件在自己声明的舞台上渲）。控制实验
+    # 2026-07-29：apple-money-count 在 1920×1080 下五个 seek 点五个画面，在模板的
+    # 640×360 下前三秒是同一张——模板画布看到的是它舞台的静止角落，静帧门禁拒得对。
+    # 25 个 component 不声明尺寸，保持模板画布。
+    catalog_dimensions = {
+        entry["name"]: entry.get("dimensions") for entry in catalog_items
+    }
+    # 25 个渲染不出来的项根因全部在内容/上游侧（PC-21 §18.6 逐类定性），按
+    # 带原因的豁免清单跳过——清单卫生由 test_motion_catalog_render_exclusions
+    # 守着（真实存在、类别封闭、理由非空），不是无声截断：跳过逐项打印，
+    # 收尾核对「渲染 + 豁免 = 134」。内容修好一项就从清单划掉一项。
+    exclusions: dict[str, dict[str, str]] = json.loads(
+        (
+            ROOT / "contracts/quality/motion-catalog-standalone-render-exclusions.v1.json"
+        ).read_text(encoding="utf-8")
+    )["items"]
+    excluded_count = 0
     for index, item in enumerate(manifest["items"], start=1):
         name = item["name"]
+        if name in exclusions:
+            excluded_count += 1
+            print(
+                f"[bm-16] item {index}/134 excluded"
+                f" ({exclusions[name]['class']}): {name}",
+                flush=True,
+            )
+            continue
         files = list(item["files"])
         entries = [candidate for candidate in files if candidate.endswith(".html")]
         if not entries:
             raise RuntimeError(f"{name}: release item has no HTML entry")
-        allowed = sorted(set(files + shared) - {entries[0]})
+        entry_path = workspace / entries[0]
+        referenced = referenced_assets(
+            entry_path.read_text(encoding="utf-8"),
+            catalog_root=workspace,
+            origin=entry_path.parent,
+            # 发布树里存在死引用（实测 video.mp4），渲染时沙箱拦截并计数——
+            # sweep 沿用这个语义；工作区写入器保持拒绝（封闭树是产品的保证）。
+            on_missing="skip",
+        )
+        allowed = sorted((set(files) | set(referenced)) - {entries[0]})
         if len(allowed) > 128:
             raise RuntimeError(f"{name}: allowlist exceeds the sandbox maximum")
+        declared_seconds = catalog_durations.get(name)
+        declared_dimensions = catalog_dimensions.get(name)
+        overrides: dict[str, object] = {
+            "sourceStartMillis": 0,
+            "sourceEndMillis": int(declared_seconds * 1000) if declared_seconds else 3000,
+        }
+        # component 是贴进宿主的片段，自己没有时间轴（PC-01：duration/dimensions 只在
+        # 109 个 block 上）。单独渲它，静止就是真实状态——「必须动」对它构造性地
+        # 不成立，所以渲一帧：一帧就是它的全部真相，worker 的静帧判定也只在
+        # 帧数达到比较下限时才生效。block 仍渲 SWEEP_FRAMES 帧并要求动起来。
+        frame_count = SWEEP_FRAMES if declared_seconds else 1
+        if declared_dimensions:
+            overrides["canvas"] = {
+                # Factor 1：零件的舞台就是输出分辨率（PC-05 的装配同一条规则）。
+                "deviceScaleFactor": 1,
+                "height": declared_dimensions["height"],
+                "width": declared_dimensions["width"],
+            }
         rendered = _render_once(
             browser,
             chromium_major,
             workspace,
             entries[0],
             allowed,
-            SWEEP_FRAMES,
+            frame_count,
+            spec_overrides=overrides,
         )
         results[name] = {
             "frames": rendered["frames"],
             "blockedRequests": rendered["event"]["blockedRequests"],
         }
         print(f"[bm-16] item {index}/134 rendered: {name}", flush=True)
-    if len(results) != 134:
+    if len(results) + excluded_count != 134:
         raise RuntimeError("BM-16 sweep must cover exactly 134 items")
+    if excluded_count != len(exclusions):
+        raise RuntimeError("BM-16 exclusion list names items the manifest lacks")
+    print(
+        f"[bm-16] item sweep: {len(results)} rendered, {excluded_count} excluded",
+        flush=True,
+    )
     distinct = {digest for entry in results.values() for digest in entry["frames"]}
     if len(distinct) < 40:
         raise RuntimeError(

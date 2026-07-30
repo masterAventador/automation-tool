@@ -63,8 +63,22 @@ def main() -> int:
         assert rejected.returncode == 65
         assert "must-not-leak" not in rejected.stderr
         assert directory not in rejected.stderr
+    # A headless Chromium with the GPU disabled has no WebGL at all unless the
+    # software rasterizer is explicitly allowed: Chromium 149 refuses the
+    # SwiftShader fallback without `--enable-unsafe-swiftshader`, every shader
+    # catalog item then takes its no-GL branch and renders one static page, and
+    # the worker's own static-frame gate refuses the job (BM-16, first seen on
+    # `chromatic-radial-split`). So the two flags may only travel together.
+    source = WORKER.read_text(encoding="utf-8")
+    disables = source.count('"--disable-gpu"')
+    allows = source.count('"--enable-unsafe-swiftshader"')
+    assert disables >= 1
+    assert disables == allows, (
+        "every --disable-gpu launch needs --enable-unsafe-swiftshader beside "
+        f"it: {disables} vs {allows}"
+    )
     print("BM-02 Node Worker rejection tests passed")
-    print("executed checks: 3")
+    print("executed checks: 4")
     return 0
 
 

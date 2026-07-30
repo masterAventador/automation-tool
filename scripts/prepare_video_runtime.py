@@ -41,7 +41,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from release_assembly import VIDEO_RUNTIME_RESOURCES  # noqa: E402
+from release_assembly import (  # noqa: E402
+    MOTION_CATALOG_RESOURCES,
+    VIDEO_RUNTIME_RESOURCES,
+    _VideoResource,
+)
 from subtitle_font_assets import ensure_subtitle_fonts  # noqa: E402
 from process_diagnostics import builder_diagnostic  # noqa: E402
 from video_runtime_cache import cache_root, ensure_cached  # noqa: E402
@@ -111,9 +115,22 @@ MEDIA_TOOLCHAIN_TARGETS = {
 }
 
 # The resource names, taken from the release resource contract rather than
-# spelled out again here. `--only` accepts exactly these.
+# spelled out again here. These three are the ones this module *builds*.
 RESOURCE_NAMES: tuple[str, ...] = tuple(
     resource.staging_name for resource in VIDEO_RUNTIME_RESOURCES
+)
+
+# Everything that can be *installed* into a resource root, which is a larger set
+# than what is built here. The frozen catalog of animation parts is produced by
+# `build_motion_catalog_release.py` with its own locked digest rather than
+# cached per machine — but landing it where the resolver reads it is the same
+# operation as landing a Worker, and a second copy of that operation is a second
+# place for the layout to drift from the contract.
+INSTALLABLE_RESOURCES: tuple[_VideoResource, ...] = (
+    VIDEO_RUNTIME_RESOURCES + MOTION_CATALOG_RESOURCES
+)
+INSTALLABLE_NAMES: tuple[str, ...] = tuple(
+    resource.staging_name for resource in INSTALLABLE_RESOURCES
 )
 
 
@@ -163,23 +180,32 @@ def _build_material_worker(destination: Path) -> None:
     build_candidate(destination)
 
 
-def selected_resources(only: Sequence[str] | None = None) -> tuple[str, ...]:
+def selected_resources(
+    only: Sequence[str] | None = None,
+    *,
+    names: tuple[str, ...] = RESOURCE_NAMES,
+) -> tuple[str, ...]:
     """Which resources this invocation covers, defaulting to all of them.
 
     A misspelt name is refused rather than quietly selecting nothing: a run that
     installs zero resources and exits 0 is the same failure shape as the remedy
     that sent the reader here in the first place.
+
+    `names` is what the caller can act on — the three this module builds, or the
+    four that can be installed. A name is validated against every declared
+    resource either way, so asking to build the catalog selects nothing to build
+    rather than being reported as a typo it is not.
     """
     if only is None:
-        return RESOURCE_NAMES
+        return names
     requested = tuple(only)
-    unknown = [name for name in requested if name not in RESOURCE_NAMES]
+    unknown = [name for name in requested if name not in INSTALLABLE_NAMES]
     if unknown:
         raise VideoRuntimeUnavailable(
             f"unknown video runtime resource(s): {', '.join(unknown)}; "
-            f"declared: {', '.join(RESOURCE_NAMES)}"
+            f"declared: {', '.join(INSTALLABLE_NAMES)}"
         )
-    return tuple(name for name in RESOURCE_NAMES if name in set(requested))
+    return tuple(name for name in names if name in set(requested))
 
 
 def prepare(
@@ -198,7 +224,10 @@ def prepare(
     resolved = platform or host_platform()
     if resolved not in MEDIA_TOOLCHAIN_TARGETS:
         raise VideoRuntimeUnavailable(f"unsupported platform: {resolved}")
-    wanted = set(selected_resources(only))
+    # Only the three this module builds. Naming the catalog here selects nothing
+    # to build, which is right: it is produced by
+    # `build_motion_catalog_release.py` and merely installed from here.
+    wanted = set(selected_resources(only, names=RESOURCE_NAMES))
     staging = cache_root() if root is None else Path(root)
     if "media-toolchain" in wanted:
         ensure_cached(
@@ -255,14 +284,14 @@ def install(
     status alone is not accepted as evidence here either.
     """
     resolved = platform or host_platform()
-    wanted = set(selected_resources(only))
+    wanted = set(selected_resources(only, names=INSTALLABLE_NAMES))
     installed: dict[str, Path] = {}
     resource_root = Path(resource_root)
     if resource_root.is_symlink():
         raise VideoRuntimeUnavailable(
             f"the resource root itself may not be a symlink: {resource_root}"
         )
-    for resource in VIDEO_RUNTIME_RESOURCES:
+    for resource in INSTALLABLE_RESOURCES:
         if resource.staging_name not in wanted:
             continue
         source = Path(staging) / resource.staging_name
@@ -301,7 +330,7 @@ def main() -> int:
         "--only",
         action="append",
         metavar="RESOURCE",
-        help=("restrict to one resource; repeatable. One of: " + ", ".join(RESOURCE_NAMES)),
+        help=("restrict to one resource; repeatable. One of: " + ", ".join(INSTALLABLE_NAMES)),
     )
     parser.add_argument(
         "--install-into",

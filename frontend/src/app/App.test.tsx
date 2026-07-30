@@ -182,7 +182,16 @@ describe("desktop startup", () => {
     expect(screen.getByRole("heading", { name: "App 更新" })).toBeVisible();
     expect(screen.getByText("当前已是最新版本")).toBeVisible();
     expect(platformAdapter.getExecutorStatus).toHaveBeenCalledTimes(1);
-    expect(appUpdateGateway.getState).toHaveBeenCalledTimes(1);
+    // Twice, and both are wanted. The shell mounts its own `AppUpdateCenter`
+    // while the user is anywhere but 设置, because the update prompt has to
+    // exist wherever they are standing — a forced update the user only learns
+    // about by opening settings is one they can decline forever by not going
+    // there. That instance asks once at startup; the settings page's own
+    // instance asks again when it mounts, which is also what it did before.
+    //
+    // What this assertion guards is unchanged: neither instance polls or
+    // re-asks while it is on screen.
+    expect(appUpdateGateway.getState).toHaveBeenCalledTimes(2);
   });
 
   /**
@@ -287,5 +296,60 @@ describe("desktop startup", () => {
     expect(screen.getByText("本机安装记录与业务服务不一致")).toBeVisible();
     expect(screen.queryByRole("button", { name: "打开本地修复工具" })).toBeNull();
     expect(document.body).not.toHaveTextContent(/\/Users\/|atb1\.|token=/iu);
+  });
+});
+
+describe("update reachability from the startup repair screen", () => {
+  // 更新器替换的是整个 .app（含资源）——它本身就是损坏安装的标准自愈通道。
+  // 启动被挡在修复页时，更新提示与手动检查都必须仍然可达，否则坏掉的安装
+  // 永远收不到能修好它的那个版本。
+  const blockedStartup = (): StartupCheck => ({
+    check: vi.fn().mockResolvedValue({
+      status: "blocked" as const,
+      diagnostics: ["browser_component_damaged" as const],
+    }),
+  });
+
+  function promptingGateway(): AppUpdateGateway {
+    const release = {
+      version: "0.2.0",
+      channel: "stable",
+      policy: "optional",
+      notes: "",
+      publishedAt: "2026-07-29T00:00:00Z",
+      artifact: {
+        target: "darwin",
+        arch: "aarch64",
+        sha256: "b".repeat(64),
+        sizeBytes: 2048,
+      },
+    } as const;
+    return {
+      getState: vi.fn().mockResolvedValue({ state: "ready", release, action: "prompt" }),
+      checkNow: vi.fn().mockResolvedValue({ state: "ready", release, action: "prompt" }),
+      decide: vi.fn().mockResolvedValue({ state: "installation_launched", release }),
+    };
+  }
+
+  it("shows the update prompt on the repair screen without opening anything", async () => {
+    render(<App startupCheck={blockedStartup()} appUpdateGateway={promptingGateway()} />);
+
+    expect(
+      await screen.findByRole("heading", { name: "桌面运行环境需要处理" }),
+    ).toBeVisible();
+    // App 自带 ConfigProvider，测试注不进 motion:false，antd Modal 在 jsdom 里
+    // 停在动画态导致 toBeVisible 不稳定；断言落在提示的决策按钮可用上。
+    await screen.findByRole("heading", { name: "发现新版本 0.2.0" });
+    expect(await screen.findByRole("button", { name: "稍后提醒" })).toBeEnabled();
+  });
+
+  it("offers 检查更新 inside the repair tools", async () => {
+    const user = userEvent.setup();
+    render(<App startupCheck={blockedStartup()} appUpdateGateway={promptingGateway()} />);
+
+    await screen.findByRole("heading", { name: "桌面运行环境需要处理" });
+    await user.click(screen.getByRole("button", { name: "打开本地修复工具" }));
+
+    expect(await screen.findByRole("button", { name: "检查更新" })).toBeVisible();
   });
 });

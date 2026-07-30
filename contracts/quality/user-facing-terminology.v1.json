@@ -46,19 +46,28 @@
       "id": "motion_style_catalog",
       "displayName": "12 套整体画面风格",
       "sourceFile": "frontend/src/features/video-studio/MotionStyleCatalog.tsx",
-      "requiredCopy": ["整体画面风格", "查看全部 12 套风格"]
+      "requiredCopy": [
+        "整体画面风格",
+        "查看全部 12 套风格"
+      ]
     },
     {
       "id": "motion_parts_catalog",
       "displayName": "134 个动效零件",
       "sourceFile": "frontend/src/features/video-studio/MotionPartsCatalog.tsx",
-      "requiredCopy": ["动效零件目录", "动效零件与 12 套整体风格不同"]
+      "requiredCopy": [
+        "动效零件目录",
+        "动效零件与 12 套整体风格不同"
+      ]
     },
     {
       "id": "video_editing_module",
       "displayName": "独立视频剪辑模块",
-      "sourceFile": "frontend/src/app/WorkbenchShell.tsx",
-      "requiredCopy": ["视频剪辑", "独立于视频制作"]
+      "sourceFile": "frontend/src/features/operations/OperationsWorkspace.tsx",
+      "requiredCopy": [
+        "视频剪辑",
+        "独立于视频制作"
+      ]
     }
   ],
   "partsCatalogProjection": "contracts/video/motion-catalog-ui.v1.json",
@@ -111,46 +120,166 @@
     "RPA": "自动替你操作网页"
   },
   "unexplainedIndustryTerms": [
-    { "term": "Control Plane", "explanationScope": "segment" },
-    { "term": "Executor", "explanationScope": "segment" },
-    { "term": "Installation", "explanationScope": "segment" },
-    { "term": "Profile", "explanationScope": "segment" },
-    { "term": "Token", "explanationScope": "segment" },
-    { "term": "MVP", "explanationScope": "segment" },
-    { "term": "Demo", "explanationScope": "segment" },
-    { "term": "Provider", "explanationScope": "segment" },
-    { "term": "Worker", "explanationScope": "segment" },
-    { "term": "Artifact", "explanationScope": "segment" },
-    { "term": "Timeline", "explanationScope": "segment" },
-    { "term": "Storyboard", "explanationScope": "segment" },
-    { "term": "Render", "explanationScope": "segment" },
-    { "term": "Pipeline", "explanationScope": "segment" },
-    { "term": "Workflow", "explanationScope": "segment" },
-    { "term": "Asset", "explanationScope": "segment" },
-    { "term": "Preset", "explanationScope": "segment" },
-    { "term": "Template", "explanationScope": "segment" },
-    { "term": "Prompt", "explanationScope": "segment" },
-    { "term": "Schema", "explanationScope": "segment" },
-    { "term": "Payload", "explanationScope": "segment" },
-    { "term": "Endpoint", "explanationScope": "segment" },
-    { "term": "Sidecar", "explanationScope": "segment" },
-    { "term": "Webhook", "explanationScope": "segment" },
-    { "term": "Runtime", "explanationScope": "segment" },
-    { "term": "Session", "explanationScope": "segment" },
-    { "term": "Snapshot", "explanationScope": "segment" },
-    { "term": "Mock", "explanationScope": "segment" },
-    { "term": "Fixture", "explanationScope": "segment" },
-    { "term": "Dashboard", "explanationScope": "segment" },
-    { "term": "Chromium", "explanationScope": "segment" },
-    { "term": "Browser Use", "explanationScope": "segment" },
-    { "term": "WebView", "explanationScope": "segment" },
-    { "term": "SBOM", "explanationScope": "segment" },
-    { "term": "SDK", "explanationScope": "segment" },
-    { "term": "OCR", "explanationScope": "segment" },
-    { "term": "URL", "explanationScope": "segment" },
-    { "term": "LLM", "explanationScope": "segment" },
-    { "term": "Rust", "explanationScope": "segment" },
-    { "term": "stable", "explanationScope": "segment" },
+    {
+      "term": "Control Plane",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Executor",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Installation",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Profile",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Token",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "MVP",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Demo",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Provider",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Worker",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Artifact",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Timeline",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Storyboard",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Render",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Pipeline",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Workflow",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Asset",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Preset",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Template",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Prompt",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Schema",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Payload",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Endpoint",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Sidecar",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Webhook",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Runtime",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Session",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Snapshot",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Mock",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Fixture",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Dashboard",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Chromium",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Browser Use",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "WebView",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "SBOM",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "SDK",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "OCR",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "URL",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "LLM",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "Rust",
+      "explanationScope": "segment"
+    },
+    {
+      "term": "stable",
+      "explanationScope": "segment"
+    },
     {
       "term": "API Key",
       "explanationScope": "file",
@@ -228,9 +357,15 @@
     "maximumFileBytes": 1048576
   },
   "embeddedWebUiScan": {
-    "roots": ["vendor/moneyprinterturbo/webui"],
+    "roots": [
+      "vendor/moneyprinterturbo/webui"
+    ],
     "excludedGlobs": [],
-    "textExtensions": [".css", ".json", ".py"],
+    "textExtensions": [
+      ".css",
+      ".json",
+      ".py"
+    ],
     "maximumFileBytes": 1048576,
     "exposureCount": 10,
     "exposureSha256": "bb4168583c4ec780306888ec7102a9d108ff67162947b369bcae7dfaa15eed94",
@@ -245,11 +380,20 @@
     ]
   },
   "nativeScan": {
-    "roots": ["frontend/src-tauri/src", "backend/src"],
-    "excludedGlobs": ["**/__pycache__/**", "backend/src/automation_tool/executor/motion_authoring/agent.py"],
+    "roots": [
+      "frontend/src-tauri/src",
+      "backend/src"
+    ],
+    "excludedGlobs": [
+      "**/__pycache__/**",
+      "backend/src/automation_tool/executor/motion_authoring/agent.py"
+    ],
     "excludedGlobsReason": "motion_authoring/agent.py 里的中文全部是发给视频创作模型的提示词，不是给用户看的文案：它必须逐字写出 window.__timelines、GSAP 时间轴、autoAlpha 这些代码标识，模型照着它写合成代码，改成通俗说法会直接把生成链路写坏。该模块不向用户输出任何文案——它的异常是英文内部串，执行器入口有意不转发原因，用户看到的文案由 Rust 侧映射产生。",
     "excludedGlobsCostAndTrigger": "这条排除是按位置表达一个按种类的例外，代价是整个文件对门禁全盲：以后谁往这里加一句会被转发给用户的中文消息，门禁会静默放行。上面那句「该模块不向用户输出任何文案」目前只是人工核实过的结论，不是被检查的事实。触发条件：再出现第二个提示词模块时，不要追加第二行 glob。改成按种类声明——promptText 记录「模块 + 提示词符号名」，扫描器只跳过这些符号里的字面量，文件其余部分继续扫，那条不变量也就随之变成被检查的。更彻底的做法是把提示词从 backend/src 挪进数据文件：它本来就不是源码文案而是喂给模型的输入，挪出去还能独立 review 和 diff；但那是 1518 行模块的真实重构且会动生成链路，放到 AI 员工与工作流阶段一起做，不要在演示前碰。",
-    "textExtensions": [".py", ".rs"],
+    "textExtensions": [
+      ".py",
+      ".rs"
+    ],
     "artifactFileExtensions": [
       ".csv",
       ".mov",

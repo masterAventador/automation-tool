@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 
-import { browser, expect } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import {
+  openAutomationRuns,
+  waitForStartup,
+} from "./navigation";
 
 interface WorkbenchPreparation {
   readonly installationId: string;
@@ -31,8 +35,7 @@ async function waitForRenderedText(...expected: string[]): Promise<void> {
 
 describe("Workbench production-path acceptance", () => {
   it("loads real projections and emergency-stops from the hidden App UI", async () => {
-    const heading = await browser.$("h2");
-    await expect(heading).toHaveText("RPA 运营工作台");
+    await waitForStartup();
 
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_workbench_for_acceptance"),
@@ -40,18 +43,26 @@ describe("Workbench production-path acceptance", () => {
     assert.match(preparation.installationId, UUID_V4);
     assert.match(preparation.taskId, UUID_V4);
 
+    // 改版之后开机落在 AI 助理页，`Workbench` 只在运行记录页渲染——所以这里
+    // 要先按用户会走的路导航过去。这条 spec 要证的是工作台加载真实投影并能
+    // 紧急停止，不是「开机就停在工作台」。
+    await openAutomationRuns();
+
     const retry = await browser.$("button=重新加载工作台");
+    const diagnostics = await browser.$("div[role='button']=诊断信息");
     await browser.waitUntil(
-      async () => {
-        const bodyText = await browser.$("body").getText();
-        return (await retry.isExisting()) || bodyText.includes(preparation.taskId);
-      },
+      async () =>
+        (await retry.isExisting()) || (await diagnostics.isExisting()),
       { timeout: 60_000, timeoutMsg: "workbench did not expose a reload or Task state" },
     );
     if (await retry.isExisting()) {
       await retry.click();
     }
 
+    // 完整的 Task ID 收在「诊断信息」折叠面板里（`Workbench.tsx` 就在那段注释里
+    // 写明了理由：它是把任务与日志行对应起来的东西，但这是首屏最大的一张卡）。
+    // 收起的内容不进 `getText()`，所以要读它就得先展开——标识没丢，是读法要跟上。
+    await diagnostics.click();
     await waitForRenderedText(
       preparation.taskId,
       "控制服务已连接",

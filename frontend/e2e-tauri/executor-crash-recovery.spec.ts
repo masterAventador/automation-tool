@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 
-import { browser, expect } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import {
+  openAutomationRuns,
+  waitForTaskRow,
+  openTaskCreate,
+  openWorkbenchSection,
+  waitForStartup,
+} from "./navigation";
 
 interface Preparation {
   readonly installationId: string;
@@ -55,15 +62,13 @@ async function waitForText(...expected: string[]): Promise<string> {
 
 describe("H8-05 hidden App Executor crash recovery acceptance", () => {
   it("restarts once, aligns the ledger, and never redispatches the uncertain effect", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_executor_crash_recovery_for_acceptance"),
     )) as Preparation;
     assert.match(preparation.installationId, UUID_V4);
 
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='新建任务']]")
-      .click();
+    await openTaskCreate();
     await browser.$("#searchKeyword").setValue("H8-05 Executor 崩溃恢复");
     const actionInput = await browser.$("#action");
     await browser.execute(() => {
@@ -92,9 +97,7 @@ describe("H8-05 hidden App Executor crash recovery acceptance", () => {
     assert.equal(started.state, "running");
     assert.equal(started.restartCount, 0);
 
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='设置与诊断']]")
-      .click();
+    await openWorkbenchSection("设置");
     await waitForText("本地执行器运行中");
     await browser.tauri.execute(({ core }) => core.invoke("inject_executor_crash_for_acceptance"));
     await browser.waitUntil(
@@ -106,11 +109,12 @@ describe("H8-05 hidden App Executor crash recovery acceptance", () => {
       { timeout: 120_000, interval: 1_000, timeoutMsg: "H8-05 supervisor did not recover once" },
     );
 
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='工作台']]")
-      .click();
-    await waitForText(taskId ?? "", "结果待确认", "本机执行器在线");
-    await browser.$(`button=${taskId ?? ""}`).click();
+    // 改版后任务列表在「自动化 → 查看运行记录」，不再是侧边栏「工作台」。
+    await openAutomationRuns();
+    // 列表行名改版后是创建时刻、不印 UUID；标识在 data-task-id 上。
+    await waitForTaskRow(taskId ?? "");
+    await waitForText("结果待确认", "本机执行器在线");
+    await browser.$(`button[data-task-id="${taskId ?? ""}"]`).click();
     await waitForText("任务运行详情", taskId ?? "", "结果待确认", "结果待确认");
     await signal(requiredEnvironment("AUTOMATION_TOOL_H805_RECOVERED_SIGNAL"), {
       installationId: preparation.installationId,

@@ -1,5 +1,8 @@
-use automation_tool_desktop_lib::local_video_orchestrator::VideoWorkerRenderSandboxRequest;
+use automation_tool_desktop_lib::local_video_orchestrator::{
+    VideoWorkerRenderCanvas, VideoWorkerRenderSandboxRequest, VideoWorkerSourceWindow,
+};
 use automation_tool_desktop_lib::motion_video_studio::{
+    TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR, TEMPLATE_CANVAS_HEIGHT, TEMPLATE_CANVAS_WIDTH,
     advance, cancel, cancel_marker_file_name, cancellation_requested, delete_artifact,
     duration_limits, import_rendered_output, prepare_manual_render_job, render_sandbox_budget,
     rendered_film_is_static, snapshot, MotionRenderFailureCode, MotionRenderJobStatus,
@@ -226,6 +229,13 @@ fn the_render_sandbox_budget_follows_the_frame_count_instead_of_a_fixed_number()
             root.0.clone(),
             "composition.html".to_owned(),
             cancel_marker_file_name().unwrap().to_owned(),
+            VideoWorkerRenderCanvas::new(
+                TEMPLATE_CANVAS_WIDTH,
+                TEMPLATE_CANVAS_HEIGHT,
+                TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
+            )
+            .expect("the template canvas is inside the declared bounds"),
+        VideoWorkerSourceWindow::new(0, 6_000).expect("a window inside the declared bounds"),
             Vec::new(),
             frames,
             budget.wall_seconds(),
@@ -559,6 +569,13 @@ fn a_cancellation_marker_that_escapes_the_workspace_is_not_a_render_request() {
                 root.0.clone(),
                 "composition.html".to_owned(),
                 escaping.to_owned(),
+                VideoWorkerRenderCanvas::new(
+                    TEMPLATE_CANVAS_WIDTH,
+                    TEMPLATE_CANVAS_HEIGHT,
+                    TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
+                )
+                .expect("the template canvas is inside the declared bounds"),
+        VideoWorkerSourceWindow::new(0, 6_000).expect("a window inside the declared bounds"),
                 Vec::new(),
                 90,
                 20,

@@ -14,6 +14,13 @@ ROOT = Path(__file__).resolve().parents[1]
 CHECK = ROOT / "scripts/check_motion_catalog.py"
 CATALOG = ROOT / "contracts/quality/motion-catalog.v1.json"
 RIGHTS = ROOT / "contracts/quality/motion-catalog-rights.v1.json"
+SUBMODULE_ROOT = ROOT / "vendor/hyperframes"
+# Upstream splits the registry by shape, and the split decides which of these
+# fields exist: a block is a standalone sub-composition and declares its own
+# canvas and timeline; a component is a snippet pasted into a host and has
+# neither. Measured across all 134 items, `duration` and `dimensions` are
+# present on exactly the 109 blocks.
+AUTHORING_FIELDS = ("description", "tags", "duration", "dimensions")
 LOCKED_COMMIT = "71d84ff27f1c2b2828f4fdf9015c3da4157140ee"
 CATEGORIES = {
     "转场",
@@ -76,6 +83,52 @@ def expect_check_failure(name: str, catalog: dict, rights: dict) -> None:
         assert "motion catalog check failed" in result.stderr, f"{name}: {result.stderr}"
 
 
+def assert_authoring_fields(items: list[dict]) -> None:
+    """Every item must carry, verbatim, the upstream facts an orchestrator needs.
+
+    The catalog was frozen for a rights audit, so it kept only what that audit
+    judged — name, title, category, digests. An orchestrating model gets the
+    same list and has to answer a different question: which part fits this beat,
+    and how long will it run? Measured 2026-07-27, both models given only title
+    and category picked legal parts and then overshot the 20s sandbox budget by
+    more than 70%, because nothing in the list said `data-chart` is 15 seconds
+    and `lt-bold-block` is 4.8.
+
+    Copying rather than deriving is the point: these are upstream's own words
+    about its own parts, and a paraphrase here would be a second source that
+    drifts on the next submodule bump with nothing to notice.
+    """
+    with_duration = 0
+    for item in items:
+        upstream = json.loads(
+            (SUBMODULE_ROOT / item["path"] / "registry-item.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        for field in AUTHORING_FIELDS:
+            assert field in item, f"{item['name']} is missing {field}"
+        assert item["description"] == upstream["description"], (
+            f"{item['name']} description drifted from upstream"
+        )
+        assert item["tags"] == upstream["tags"], (
+            f"{item['name']} tags drifted from upstream"
+        )
+        if item["type"] == "block":
+            assert item["duration"] == upstream["duration"], (
+                f"{item['name']} duration drifted from upstream"
+            )
+            assert item["dimensions"] == upstream["dimensions"], (
+                f"{item['name']} dimensions drifted from upstream"
+            )
+            with_duration += 1
+        else:
+            # Not "missing data": a snippet genuinely has no canvas of its own,
+            # and null is what lets the orchestrator tell the two shapes apart.
+            assert item["duration"] is None, f"{item['name']} is a component with a duration"
+            assert item["dimensions"] is None, f"{item['name']} is a component with dimensions"
+    assert with_duration == 109, f"blocks carrying a duration drifted: {with_duration}"
+
+
 def expected_conclusion(entry: dict) -> str:
     needs_localization = bool(
         set(entry["remoteDependencies"]["categories"]) & LOCALIZATION_CATEGORIES
@@ -136,6 +189,8 @@ def main() -> int:
     assert set(catalog["categories"]) == CATEGORIES
     assert catalog["categoryCounts"] == category_counter
     assert sum(category_counter.values()) == 134
+
+    assert_authoring_fields(items)
 
     assert rights["schemaVersion"] == 1
     assert rights["source"]["commit"] == LOCKED_COMMIT
@@ -208,8 +263,28 @@ def main() -> int:
     tampered_rights["stats"]["itemsWithRuntimeRemoteDependencies"] += 1
     expect_check_failure("stats drift", tampered_catalog, tampered_rights)
 
+    # The authoring fields are copies of upstream's own words, so the only way
+    # they stay true across a submodule bump is for the gate to recompute them.
+    # A contract that merely *has* the keys would satisfy the shape assertions
+    # above while describing the previous release.
+    tampered_catalog, tampered_rights = clone()
+    tampered_catalog["items"][0]["description"] = "an accurate-sounding paraphrase"
+    expect_check_failure("description drift", tampered_catalog, tampered_rights)
+
+    tampered_catalog, tampered_rights = clone()
+    block = next(item for item in tampered_catalog["items"] if item["type"] == "block")
+    block["duration"] = 999
+    expect_check_failure("duration drift", tampered_catalog, tampered_rights)
+
+    tampered_catalog, tampered_rights = clone()
+    component = next(
+        item for item in tampered_catalog["items"] if item["type"] == "component"
+    )
+    component["duration"] = 5
+    expect_check_failure("component given a duration", tampered_catalog, tampered_rights)
+
     print(f"motion catalog tests passed: {removed['name']} tamper matrix rejected")
-    print("executed checks: 9")
+    print("executed checks: 12")
     return 0
 
 

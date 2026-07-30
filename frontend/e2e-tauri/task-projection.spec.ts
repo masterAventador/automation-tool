@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-import { browser, expect } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import {
+  waitForStartup,
+} from "./navigation";
 
 interface TaskProjectionSummary {
   readonly installationId: string;
@@ -22,8 +25,7 @@ const UUID_V4 =
 
 describe("Task projection production-path acceptance", () => {
   it("loads a snapshot then reaches terminal through the hidden App Tauri Channel", async () => {
-    const heading = await browser.$("h2");
-    await expect(heading).toHaveText("RPA 运营工作台");
+    await waitForStartup();
 
     const result = (await browser.executeAsync((done) => {
       const runtime = globalThis as unknown as {

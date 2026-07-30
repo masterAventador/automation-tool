@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  openSettings,
+  openWorkbenchSection,
+  waitForStartup,
+} from "./navigation";
 
 interface RealAliyunCredentials {
   readonly accessKeyId: string;
@@ -31,27 +36,15 @@ function loadRealCredentials(): RealAliyunCredentials {
   return { accessKeyId, accessKeySecret, region };
 }
 
+/**
+ * 这个 spec 接受两种开机结局：直接进工作台，或停在启动修复关口。
+ * 停在修复关口时要先点进去，否则侧边栏根本不存在——这一段原本在本文件自己的
+ * `openSettings` 里，抽到共享模块时不能连带丢掉。
+ */
 async function waitForApp(): Promise<void> {
-  await browser.waitUntil(
-    async () =>
-      (await browser.$("h2=RPA 运营工作台").isExisting()) ||
-      (await browser.$("button=打开本地修复工具").isExisting()),
-    { timeoutMsg: "production App did not reach workbench or startup repair path" },
-  );
-}
-
-async function openSettings(): Promise<void> {
-  const workbenchHeading = await browser.$("h2=RPA 运营工作台");
-  if (await workbenchHeading.isExisting()) {
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='设置与诊断']]")
-      .click();
-    await expect(await browser.$("h2")).toHaveText("设置与诊断");
-  } else {
-    await expect(await browser.$("button=打开本地修复工具")).toBeDisplayed();
+  if ((await waitForStartup({ allowRepair: true })) === "repair") {
     await browser.$("button=打开本地修复工具").click();
   }
-  await expect(await browser.$(".video-editing-service-settings-card")).toBeDisplayed();
 }
 
 describe("VE-04 hidden App real Aliyun editing-service acceptance", () => {
@@ -124,10 +117,8 @@ describe("VE-04 hidden App real Aliyun editing-service acceptance", () => {
     await reloadedCard.$("button=清除配置").click();
     await expect(reloadedCard).toHaveText(expect.stringContaining("未配置"));
 
-    // 回到工作台首页，避免把页面状态遗留给后续验收用例。
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='工作台']]")
-      .click();
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    // 回到助理页，避免把页面状态遗留给后续验收用例——常驻 App 在多个 spec
+    // 之间是共享的。`waitForStartup` 只等不导航，用它做这件事等于没做。
+    await openWorkbenchSection("AI 助理");
   });
 });

@@ -18,15 +18,20 @@ sandbox spec without ever launching a browser.
 from __future__ import annotations
 
 import hashlib
+import html
 import json
+import math
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend/src"))
 
+from automation_tool.executor.motion_authoring import agent as motion_authoring_agent  # noqa: E402
+from automation_tool.executor.motion_authoring import entry as motion_authoring_entry  # noqa: E402
 from automation_tool.executor.motion_authoring import (  # noqa: E402
     run_motion_authoring_entry,
 )
@@ -52,6 +57,7 @@ from automation_tool.executor.motion_authoring.agent import (  # noqa: E402
     call_video_creation_model,
     COMPOSITION_PATH,
     LOCKED_CATALOG_PART_IDS,
+    SELECTABLE_CATALOG_PARTS,
     RENDER_CANVAS_HEIGHT,
     RENDER_CANVAS_WIDTH,
     _first_message_contract,
@@ -65,6 +71,9 @@ from automation_tool.executor.motion_authoring.agent import (  # noqa: E402
 from automation_tool.executor.motion_authoring.composition_template import (  # noqa: E402
     COMPOSITION_ID,
     SCENE_LAYOUTS,
+)
+from automation_tool.executor.motion_authoring.slot_overflow_probe import (  # noqa: E402
+    ProbeReading,
 )
 
 VENDOR_ROOT = ROOT / "vendor/hyperframes"
@@ -172,7 +181,15 @@ def _valid_beat(**overrides: object) -> dict[str, object]:
         "purpose": "标题引入",
         "start_seconds": 0.0,
         "duration_seconds": 6.0,
-        "catalog_parts": ["data-chart"],
+        # Empty by default, which the prompt tells the model is allowed. Most
+        # tests here are about something else entirely — a script tag reaching
+        # the frame as text, a budget, a timeout — and a fixture that named a
+        # part made every one of them depend on this installation carrying the
+        # 134 packaged parts. It did not, so ten of them errored with the
+        # no-catalog refusal, which is a true refusal answering a question none
+        # of them asked. Naming a part is now something a test does when the
+        # part is the subject.
+        "catalog_parts": [],
         "layout": "title",
         "headline": "本周销售增长",
         "body": "三个要点带你看完",
@@ -214,6 +231,7 @@ class ScriptedModel:
         messages: list[dict[str, str]],
         *,
         timeout_seconds: int,
+        thinking: bool = True,
     ) -> str:
         self.calls.append(messages)
         if not self._responses:
@@ -682,6 +700,7 @@ class AgentAuthoringTests(unittest.TestCase):
             messages: list[dict[str, str]],
             *,
             timeout_seconds: int,
+            thinking: bool = True,
         ) -> str:
             calls.append(1)
             return _valid_model_payload()
@@ -742,6 +761,7 @@ class ModelTimeoutTests(unittest.TestCase):
             messages: list[dict[str, str]],
             *,
             timeout_seconds: int,
+            thinking: bool = True,
         ) -> str:
             seen.append(timeout_seconds)
             return _valid_model_payload()
@@ -906,11 +926,190 @@ class CatalogPartSelectionTest(unittest.TestCase):
         )
         self.assertEqual(len(LOCKED_CATALOG_PART_IDS), 134)
 
-    def test_first_message_offers_the_locked_parts_for_per_beat_selection(self) -> None:
+    def test_first_message_offers_the_selectable_parts_for_per_beat_selection(self) -> None:
         prompt = _first_message_contract(_brief())
-        self.assertIn("134", prompt)
         self.assertIn("data-chart", prompt)
         self.assertIn("catalog_parts", prompt)
+
+    def test_the_selectable_set_excludes_the_parts_this_product_cannot_fill(self) -> None:
+        """Offering a part we cannot put the user's words into wastes a choice.
+
+        Two shapes are excluded, both measured rather than assumed (PC-02):
+        every transition is a demo page — rendered as-is it reads "SCENE A |
+        SCENE B / Glitch / Prompt / use glitch shader transition" — and the
+        script-driven parts keep their copy in JavaScript with per-word
+        timestamps, so substituting there is re-timing an animation.
+        """
+        usability = json.loads(
+            (ROOT / "contracts/video/motion-part-usability.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        deferred = {
+            item["name"] for item in usability["items"] if item["batch"] == "deferred"
+        }
+        selectable = {part["name"] for part in SELECTABLE_CATALOG_PARTS}
+        self.assertLessEqual(selectable, LOCKED_CATALOG_PART_IDS - deferred)
+        # A transition and a script-driven caption, named so the exclusion is
+        # readable rather than only countable.
+        self.assertNotIn("glitch", selectable)
+        self.assertNotIn("caption-kinetic-slam", selectable)
+        self.assertIn("lt-bold-block", selectable)
+
+    def test_every_offered_part_is_one_a_film_can_actually_be_assembled_from(
+        self,
+    ) -> None:
+        """Choosing an offered part must never be what kills the film.
+
+        Measured 2026-07-28, the first run in which the catalog actually reached
+        the agent: the model picked `shimmer-sweep` and the run died with
+        `beat 'beat-1' names 'shimmer-sweep', which the catalog does not carry`.
+        It is catalogued, it is not deferred, and it is a pure visual effect —
+        no declared duration, no declared stage, no frozen slots.
+
+        `assemble_film` needs all three, and the grading only ever asked where a
+        part keeps its copy. So 39 of the 76 offered parts were choices that
+        could not be delivered, and picking any one of them failed the whole
+        film rather than that shot. With three beats a film had almost no chance
+        of surviving.
+
+        PC-02 wrote the rule this restates — offering a part we cannot fill
+        spends a choice on nothing. What is new is that "can be filled" and "can
+        be rendered" are different questions, and only the first was being
+        asked.
+        """
+        catalog = json.loads(
+            (ROOT / "contracts/quality/motion-catalog.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        slots = json.loads(
+            (ROOT / "contracts/video/motion-part-slots.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        renderable = {
+            str(item["name"])
+            for item in catalog["items"]
+            if item.get("duration") and (item.get("dimensions") or {}).get("width")
+        } & {str(part["name"]) for part in slots["parts"]}
+
+        offered = {part["name"] for part in SELECTABLE_CATALOG_PARTS}
+
+        self.assertEqual(
+            offered - renderable,
+            set(),
+            "these parts are offered to the model and cannot be assembled into a film",
+        )
+        # A pure visual effect: catalogued, not deferred, and nothing a shot can
+        # be built from.
+        self.assertNotIn("shimmer-sweep", offered)
+        self.assertIn("lt-bold-block", offered)
+
+    def test_a_deferred_part_is_refused_even_though_the_catalog_lists_it(self) -> None:
+        payload = _valid_storyboard()
+        payload["beats"][0]["catalog_parts"] = ["caption-kinetic-slam"]
+        with self.assertRaises(MotionAuthoringRejected):
+            StoryboardArtifact.from_payload(payload)
+
+    def test_the_prompt_states_what_each_offered_part_is_and_how_long_it_runs(self) -> None:
+        """Bare ids are not a catalog.
+
+        Measured 2026-07-27, two models given only a title and a category
+        picked legal parts and then overshot the 20s sandbox budget by more
+        than 70%, because nothing in the list said `data-chart` runs 15 seconds
+        while `lt-bold-block` runs 4.8.
+        """
+        prompt = _first_message_contract(_brief())
+        chart = next(
+            part for part in SELECTABLE_CATALOG_PARTS if part["name"] == "data-chart"
+        )
+        self.assertIn(chart["title"], prompt)
+        self.assertIn(chart["category"], prompt)
+        self.assertIn("15", prompt)
+        self.assertIn(chart["description"][:40], prompt)
+        # This used to reach for a component — a part with no timeline of its
+        # own — and check the prompt did not invent a duration for it. There are
+        # none left to reach for: a shot's length comes from its part's declared
+        # duration, so a part without one cannot be assembled into a film and is
+        # no longer offered. The guarantee that replaces it is stronger and is
+        # what the prompt now rests on.
+        self.assertTrue(
+            all(part["duration"] for part in SELECTABLE_CATALOG_PARTS),
+            "every offered part must declare how long it runs",
+        )
+
+    def test_the_prompt_says_a_part_length_spends_the_film_budget(self) -> None:
+        """Listing the durations is not enough; the consequence has to be said.
+
+        Measured 2026-07-27 against the real video-creation model: given the
+        durations and a 12s brief, it picked parts totalling 26s of animation
+        and split the film into obedient 3s beats — a 12s flowchart asked to
+        play inside a 3s shot. After this sentence was added, the same brief
+        came back at 0s of timed parts, and a 20s brief used a 4.8s lower third
+        for the presenter beat.
+        """
+        prompt = _first_message_contract(_brief())
+        self.assertIn("选零件时必须同时看时长", prompt)
+        self.assertIn(str(_brief().duration_seconds), prompt)
+
+    def test_the_prompt_no_longer_dumps_every_locked_id(self) -> None:
+        prompt = _first_message_contract(_brief())
+        for excluded in ("glitch", "caption-kinetic-slam"):
+            self.assertNotIn(f"`{excluded}`", prompt)
+            self.assertNotIn(f"'{excluded}'", prompt)
+
+
+class NoPartsCatalogTests(unittest.TestCase):
+    """What an installation without the packaged parts may still do.
+
+    The App resolves the catalog beside its other packaged resources and sends
+    the path with the request, so `None` here means the request omitted it.
+    Both halves of that are worth pinning, because the wrong one is silent:
+    drawing a beat from the template after the model chose a part for it looks
+    exactly like a film nobody asked to use parts in, and that silence is the
+    whole of what PC-04 was — `catalog_parts` existed on every beat for as long
+    as it did while reaching nothing at all.
+    """
+
+    def _agent(self, workspace: AuthoringWorkspace, model: ScriptedModel) -> MotionAuthoringAgent:
+        return MotionAuthoringAgent(
+            workspace=workspace,
+            tools=MotionAuthoringTools(workspace),
+            workflow=load_locked_authoring_workflow(
+                vendor_root=VENDOR_ROOT, contract_path=WORKFLOW_CONTRACT
+            ),
+            model_config=_model_config(),
+            model_call=model,
+        )
+
+    def test_a_storyboard_naming_a_part_is_refused_rather_than_drawn_from_the_template(
+        self,
+    ) -> None:
+        payload = _valid_storyboard([_valid_beat(catalog_parts=["lt-bold-block"])])
+        with TemporaryDirectory() as raw:
+            workspace = _make_workspace(Path(raw))
+            agent = self._agent(
+                workspace, ScriptedModel([_valid_model_payload(payload)])
+            )
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                agent.author(_brief())
+        self.assertIn("no parts catalog", str(ctx.exception))
+
+    def test_a_storyboard_naming_none_is_the_single_template_segment(self) -> None:
+        with TemporaryDirectory() as raw:
+            workspace = _make_workspace(Path(raw))
+            agent = self._agent(workspace, ScriptedModel([_valid_model_payload()]))
+            submission = agent.author(_brief()).submission
+        self.assertEqual(len(submission.segments), 1)
+        segment = submission.segments[0]
+        self.assertEqual(segment.entry_html, submission.entry_html)
+        self.assertEqual(segment.frame_count, submission.frame_count)
+        # The template's own stage, whose type scale is written for it.
+        self.assertEqual(
+            segment.canvas,
+            {"width": 640, "height": 360, "deviceScaleFactor": 2},
+        )
 
 
 class EntryRelativeAssetResolutionTests(unittest.TestCase):
@@ -1148,6 +1347,38 @@ class RenderCanvasGateTests(unittest.TestCase):
         self.assertEqual(RENDER_CANVAS_WIDTH, contract["width"])
         self.assertEqual(RENDER_CANVAS_HEIGHT, contract["height"])
 
+    def test_the_capture_scale_is_declared_and_applied(self) -> None:
+        """Output pixels are the CSS stage times the device scale factor.
+
+        The stage stays 640x360 because the whole type scale in
+        `composition_template` is sized for it; raising the stage instead would
+        leave 42px headlines adrift in a much larger frame. Scaling the device
+        pixel ratio keeps every layout rule untouched and re-rasterises text at
+        the higher resolution, which is what "sharper" has to mean here.
+
+        This class used to assert one more thing — that `worker.mjs` carried
+        `const RENDER_VIEWPORT_WIDTH = 640;` and applied it to the capture. PC-05
+        moved the viewport into the render request, because a catalog part is an
+        independent composition that declares its own stage, so those constants
+        were deleted. The two assertions then said the opposite of what
+        `frontend/tests/motion-render-canvas-per-render.test.mjs` says: that gate
+        asserts the Worker keeps *no* viewport constant of its own. Both were
+        left in place and this one went red, unnoticed, because this file is a
+        script rather than a pytest case and is not in the suite anyone runs.
+        The check the deleted assertions were doing now lives in that mjs gate;
+        what remains here is what only this contract can answer.
+        """
+        contract = json.loads(
+            (ROOT / "contracts/video/motion-render-canvas.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        scale = contract["deviceScaleFactor"]
+        self.assertIsInstance(scale, int)
+        self.assertGreaterEqual(scale, 1)
+        self.assertEqual(contract["outputWidth"], contract["width"] * scale)
+        self.assertEqual(contract["outputHeight"], contract["height"] * scale)
+
     def test_check_accepts_a_composition_sized_to_the_capture_viewport(self) -> None:
         self.assertTrue(check_composition(VALID_COMPOSITION, duration_seconds=6).ok)
 
@@ -1259,10 +1490,27 @@ class OneSentenceBriefBoundsTests(unittest.TestCase):
         )
         self.assertEqual(brief.duration_seconds, maximum)
 
-    def test_a_film_longer_than_the_sandbox_can_capture_is_refused_at_the_brief(
+    def test_a_film_longer_than_the_product_offers_is_refused_at_the_brief(
         self,
     ) -> None:
-        maximum = self._duration_contract()["totalSecondsMaximum"]
+        """The ceiling this path is judged against is its own, not the template's.
+
+        `totalSecondsMaximum` is the sandbox's single-capture limit and still
+        binds the fixed-template path. A film authored here is one render per
+        shot and joined, so the operator may ask for `briefSecondsMaximum` —
+        180 seconds, set by the product owner on 2026-07-28 because at the
+        previous 12 the model declined every catalog part as too expensive for
+        the budget.
+        """
+        contract = self._duration_contract()
+        maximum = contract["briefSecondsMaximum"]
+        self.assertGreaterEqual(maximum, contract["totalSecondsMaximum"])
+        MotionBrief(
+            text="用蓝色商务风做一段本周销售增长说明",
+            aspect_ratio="16:9",
+            duration_seconds=maximum,
+            language="zh",
+        )
         with self.assertRaises(MotionAuthoringRejected):
             MotionBrief(
                 text="用蓝色商务风做一段本周销售增长说明",
@@ -1323,6 +1571,218 @@ class ExecutorEntryTests(unittest.TestCase):
             self.assertTrue((root / COMPOSITION_PATH).is_file())
             self.assertTrue((root / "renderjob.json").is_file())
 
+    def test_the_requested_catalog_root_reaches_the_agent(self) -> None:
+        """Accepting a field and using it are two things, and only one was done.
+
+        `catalogRoot` was added to the accepted request shape and to the agent's
+        constructor, and nothing joined them: the entry validated it and dropped
+        it, so every installation looked to the agent like one carrying no parts
+        at all. Measured 2026-07-28 against the real model through the real App —
+        the submission came back `authoring_refused` after 57 seconds with
+        `the storyboard names catalog parts but this installation carries no
+        parts catalog`, on a machine where the catalog was staged and the App
+        had sent its path.
+
+        This is the third time on this path that a value crossed a boundary and
+        reached nothing: PC-04's `catalog_parts` chosen by the model and read by
+        no one, PC-18's request that never carried the path at all, and this.
+        Each one is invisible from either side — the sender sends, the receiver
+        accepts, and the only symptom is a product that quietly does less.
+
+        The assertion is on what the agent was constructed with rather than on a
+        finished film, because a film needs the 46 MB release tree that is not in
+        the checkout. What failed here is the wiring, and this is where it shows.
+        """
+        seen: dict[str, object] = {}
+        real_agent = motion_authoring_agent.MotionAuthoringAgent
+
+        class RecordingAgent(real_agent):  # type: ignore[misc, valid-type]
+            def __init__(self, **kwargs: object) -> None:
+                seen.update(kwargs)
+                super().__init__(**kwargs)  # type: ignore[arg-type]
+
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            _make_workspace(root)
+            catalog = root / "catalog"
+            catalog.mkdir()
+            model = ScriptedModel([_valid_model_payload()])
+            request = {
+                "schemaVersion": 1,
+                "workspace": str(root),
+                "catalogRoot": str(catalog),
+                "brief": "用蓝色商务风做一段本周销售增长说明",
+                "aspectRatio": "16:9",
+                "durationSeconds": 6,
+                "language": "zh",
+                "brandAssets": [],
+                "model": {
+                    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "modelId": "qwen3.7-max-2026-06-08",
+                    "apiKey": "sk-" + "a" * 40,
+                },
+            }
+            with mock.patch.object(
+                motion_authoring_entry, "MotionAuthoringAgent", RecordingAgent
+            ):
+                run_motion_authoring_entry(request, model_call=model)
+
+        self.assertEqual(
+            seen.get("catalog_root"),
+            catalog,
+            "the entry accepted catalogRoot and never handed it to the agent",
+        )
+
+    def test_the_beat_length_it_suggests_can_always_fit_the_beat_ceiling(self) -> None:
+        """给模型的两条约束不能互相矛盾。
+
+        prompt 一边要求「铺满 0..duration 秒、不重叠不留空」，一边建议「每段
+        2~3 秒」，而 `MAX_STORYBOARD_BEATS` 是 24。片长 72 秒（24×3）以上这两条
+        就无解了：照建议切 180 秒要 60~90 段，一律被 `write_storyboard` 拒；
+        照 24 段切，每段 7.5 秒，又和建议对不上。
+
+        用户等三分钟编排、最后死在最后一步——而他选的是界面给的长度。
+        所以建议时长必须随片长走。
+        """
+        from automation_tool.executor.motion_authoring.agent import (
+            MAX_STORYBOARD_BEATS,
+            suggested_beat_seconds,
+        )
+
+        for duration in (1, 12, 20, 60, 120, MAX_DURATION_SECONDS):
+            low, high = suggested_beat_seconds(duration)
+            self.assertLessEqual(low, high, f"{duration} 秒的建议区间是倒的")
+            self.assertGreaterEqual(low, 1, f"{duration} 秒建议了不足一秒的镜头")
+            # 建议的镜头长度不能超过整片——同一段 prompt 一边要求铺满 0..duration
+            # 秒、一边建议每段比 duration 还长，模型没有任何解。片长下限是 1 秒，
+            # 而建议下限是 2 秒，这两条撞在一起的就是 1 秒那一档。
+            self.assertLessEqual(
+                low, duration, f"{duration} 秒的片子被建议每段 {low} 秒，铺不出来"
+            )
+            # 照建议的**最短**那头切，段数也不能超过上限——否则模型照做就被拒。
+            self.assertLessEqual(
+                math.ceil(duration / low),
+                MAX_STORYBOARD_BEATS,
+                f"{duration} 秒按每段 {low} 秒要切 {math.ceil(duration / low)} 段，"
+                f"超过上限 {MAX_STORYBOARD_BEATS}",
+            )
+
+    def test_the_entry_hands_the_thinking_choice_to_the_model_call(self) -> None:
+        """请求里的开关要真的传到模型调用那一层。
+
+        `catalogRoot` 就是在这一环被丢掉的：entry 校验通过、然后不往下传，
+        于是每台装机在 agent 眼里都像没有零件目录。断言落在**模型调用收到的
+        参数**上，不是「entry 没报错」。
+        """
+        seen: dict[str, object] = {}
+
+        def spy(config, messages, *, timeout_seconds, thinking=True):  # noqa: ANN001, ARG001
+            seen["thinking"] = thinking
+            return _valid_model_payload()
+
+        for requested in (True, False):
+            seen.clear()
+            with TemporaryDirectory() as raw:
+                root = Path(raw)
+                _make_workspace(root)
+                request = {
+                    "schemaVersion": 1,
+                    "workspace": str(root),
+                    "brief": "用蓝色商务风做一段本周销售增长说明",
+                    "aspectRatio": "16:9",
+                    "durationSeconds": 6,
+                    "language": "zh",
+                    "brandAssets": [],
+                    "modelThinking": requested,
+                    "model": {
+                        "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "modelId": "qwen3.7-max-2026-06-08",
+                        "apiKey": "sk-" + "a" * 40,
+                    },
+                }
+                run_motion_authoring_entry(request, model_call=spy)
+            self.assertEqual(seen.get("thinking"), requested)
+
+    def test_the_thinking_choice_reaches_the_model_request(self) -> None:
+        """开关必须真的改到发给模型的那个请求体上。
+
+        这是本周第八次防同一个形状：`catalogRoot` 当初就是**协议接受了、然后被
+        丢掉**，两侧测试各自全绿，产品安静地少做一件事。所以这里断言的是
+        HTTP 请求体，不是「entry 收得下这个字段」。
+        """
+        import json as _json
+        import urllib.request as _urllib
+
+        for thinking, expected in [(True, None), (False, False)]:
+            sent: dict[str, object] = {}
+
+            class _Response:
+                def __enter__(self):
+                    return iter([b'data: {"choices":[{"delta":{"content":"{}"}}]}', b"data: [DONE]"])
+
+                def __exit__(self, *args):
+                    return False
+
+            def _urlopen(request, timeout=None):  # noqa: ANN001, ARG001
+                sent.update(_json.loads(request.data.decode("utf-8")))
+                return _Response()
+
+            with mock.patch.object(_urllib, "urlopen", _urlopen):
+                reply = call_video_creation_model(
+                    _model_config(),
+                    [{"role": "user", "content": "x"}],
+                    timeout_seconds=5,
+                    thinking=thinking,
+                )
+            self.assertEqual(reply, "{}")
+            self.assertEqual(
+                sent.get("enable_thinking"),
+                expected,
+                f"thinking={thinking} 时请求体里的 enable_thinking 不对",
+            )
+
+    def test_a_film_longer_than_one_capture_reaches_the_model(self) -> None:
+        """路线 A 之后，整片帧数不再是一次捕获的事。
+
+        `author()` 顶上那条 `duration * fps <= MAX_FRAME_COUNT` 是单次渲染时代
+        留下的：整片必须塞进沙箱 600 帧。可现在一个镜头一次渲染再拼，受 600 帧
+        约束的是**段**（`plan_film` 逐段判），整片没有这个限制——PC-08 的失败矩阵
+        里写着「20 镜共 3600 帧（远超单次上限）→ 放行」。
+
+        这条守卫留着的后果是实测出来的：界面把上限开到 180 秒、请求校验也放行，
+        60 秒的请求走到这里被拒，理由是 `duration exceeds the snapshot frame
+        budget for this fps`——一个用户既看不懂、也无从规避的说法，因为那个长度
+        正是界面让他选的。
+        """
+        model = ScriptedModel([_valid_model_payload()])
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root)
+            catalog = root / "catalog"
+            catalog.mkdir()
+            agent = MotionAuthoringAgent(
+                workspace=workspace,
+                tools=MotionAuthoringTools(workspace),
+                workflow=load_locked_authoring_workflow(
+                    vendor_root=VENDOR_ROOT, contract_path=WORKFLOW_CONTRACT
+                ),
+                model_config=_model_config(),
+                model_call=model,
+                catalog_root=catalog,
+            )
+            long_film = MotionBrief(
+                text="用蓝色商务风做一段本周销售增长说明",
+                aspect_ratio="16:9",
+                duration_seconds=60,
+                language="zh",
+            )
+            with self.assertRaises(MotionAuthoringRejected) as refusal:
+                agent.author(long_film)
+            # 走到模型、拿到应答、再因为脚本化应答与 60 秒对不上而被后面的门禁拒，
+            # 都是可以的；不可以的是**根本没问模型**就以帧预算为由拒掉。
+            self.assertNotIn("snapshot frame budget", str(refusal.exception))
+            self.assertEqual(len(model.calls), 1, "60 秒的片子必须走到模型")
+
     def test_the_answer_carries_no_workspace_path_and_no_credential(self) -> None:
         """What comes back must be safe to log and safe to hand to the WebView.
 
@@ -1356,6 +1816,503 @@ class ExecutorEntryTests(unittest.TestCase):
             serialized = json.dumps(answer, ensure_ascii=False)
             self.assertNotIn(key, serialized)
             self.assertNotIn(str(root), serialized)
+
+
+# --------------------------------------------------------------------------- #
+# PC-14: pre-render overflow measurement and the one cheap repair round
+# --------------------------------------------------------------------------- #
+
+PROBE_PART = "lt-accent-underline"
+# The part's two frozen anchors (contracts/video/motion-part-slots.v1.json):
+# text run 12 reads "Dr. Maya Chen", run 15 reads "Host · Neuroscientist",
+# both inside a <div>. The frozen budget says slot 12 is 600px at 76px type.
+PROBE_HEADLINE_SLOT = 12
+PROBE_BODY_SLOT = 15
+# 读数是像素（scrollWidth, clientWidth, scrollHeight, clientHeight）外加整篇文档
+# 的尺寸；判定带容差在 slot_overflow_probe 里做（中西文行框差实测约 11-12% 字号）。
+FITS = ProbeReading(
+    slots={
+        PROBE_HEADLINE_SLOT: (500, 600, 80, 100),
+        PROBE_BODY_SLOT: (300, 376, 30, 40),
+    },
+    stage=(1920, 1080),
+)
+HEADLINE_TOO_WIDE = ProbeReading(
+    slots={
+        PROBE_HEADLINE_SLOT: (700, 600, 80, 100),
+        PROBE_BODY_SLOT: (300, 376, 30, 40),
+    },
+    stage=(1920, 1080),
+)
+
+
+def _probe_catalog(root: Path) -> Path:
+    """A catalog carrying the real frozen part as a synthetic 16-run document.
+
+    The frozen slot table addresses text runs by index, so the fixture is
+    generated as sixteen adjacent runs with the two frozen originals at the
+    frozen positions — the release document works the same way, just with more
+    markup between the runs.
+    """
+    texts = [f"run-{index}" for index in range(16)]
+    texts[PROBE_HEADLINE_SLOT] = "Dr. Maya Chen"
+    texts[PROBE_BODY_SLOT] = "Host · Neuroscientist"
+    body = "".join(f"<div>{text}</div>" for text in texts)
+    part = root / "motion-catalog" / "items" / PROBE_PART
+    part.mkdir(parents=True)
+    (part / f"{PROBE_PART}.html").write_text(
+        f"<!doctype html><html><head></head><body>{body}</body></html>",
+        encoding="utf-8",
+    )
+    return root / "motion-catalog"
+
+
+def _probe_beat(**overrides: object) -> dict[str, object]:
+    beat = _valid_beat(
+        catalog_parts=[PROBE_PART],
+        headline="本周销售增长",
+        body="环比上升百分之十二",
+    )
+    beat.update(overrides)
+    return beat
+
+
+def _storyboard_reply(beat: dict[str, object]) -> str:
+    """A repair-round answer: the storyboard alone, nothing else."""
+    return json.dumps({"storyboard": _valid_storyboard([beat])})
+
+
+class ScriptedSlotProbe:
+    """Stands in for the packaged-Chromium probe: one reading per document."""
+
+    def __init__(self, readings: list[list[ProbeReading]]) -> None:
+        self._readings = list(readings)
+        self.batches: list[tuple[Path, ...]] = []
+
+    def __call__(self, documents: tuple[Path, ...]) -> list[ProbeReading]:
+        self.batches.append(tuple(documents))
+        if not self._readings:
+            raise AssertionError("scripted probe ran out of readings")
+        batch = self._readings.pop(0)
+        if len(batch) != len(documents):
+            raise AssertionError(
+                f"scripted probe expected {len(batch)} documents, got {len(documents)}"
+            )
+        return batch
+
+
+class SlotOverflowProbeTests(unittest.TestCase):
+    """The pre-render measurement and the one repair round it may trigger."""
+
+    def _agent(
+        self,
+        workspace: AuthoringWorkspace,
+        model: ScriptedModel,
+        probe: object,
+        catalog_root: Path,
+    ) -> MotionAuthoringAgent:
+        return MotionAuthoringAgent(
+            workspace=workspace,
+            tools=MotionAuthoringTools(workspace),
+            workflow=load_locked_authoring_workflow(
+                vendor_root=VENDOR_ROOT, contract_path=WORKFLOW_CONTRACT
+            ),
+            model_config=_model_config(),
+            model_call=model,
+            catalog_root=catalog_root,
+            slot_probe=probe,
+        )
+
+    def test_the_probe_reads_the_baseline_and_this_films_copy_in_one_batch(self) -> None:
+        """Both documents are measured by the same probe call — same session,
+        so the driver bias cancels (PC-14 decision 3)."""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            probe = ScriptedSlotProbe([[FITS, FITS]])
+            model = ScriptedModel(
+                [_valid_model_payload(_valid_storyboard([_probe_beat()]))]
+            )
+            agent = self._agent(workspace, model, probe, _probe_catalog(root))
+            result = agent.author(_brief())
+
+            self.assertEqual(len(probe.batches), 1)
+            baseline, substituted = probe.batches[0]
+            # The baseline is a marked working copy carrying the part's own
+            # frozen copy — the pristine document has no data-motion-slot marks
+            # to measure.
+            self.assertIn("catalog-baseline/", baseline.as_posix())
+            # Copy is entity-escaped on both sides by the shared writer, so the
+            # readable form is the unescaped one — what the browser measures.
+            baseline_html = html.unescape(baseline.read_text(encoding="utf-8"))
+            self.assertIn('data-motion-slot="12"', baseline_html)
+            self.assertIn("Dr. Maya Chen", baseline_html)
+            # The substituted document is the working copy the film renders.
+            substituted_html = html.unescape(substituted.read_text(encoding="utf-8"))
+            self.assertIn('data-motion-slot="12"', substituted_html)
+            self.assertIn("本周销售增长", substituted_html)
+            # No new overflow: one model call, film authored.
+            self.assertEqual(len(model.calls), 1)
+            self.assertEqual(result.storyboard.beats[0].headline, "本周销售增长")
+
+    def test_a_template_only_film_never_launches_the_probe(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            probe = ScriptedSlotProbe([])
+            model = ScriptedModel([_valid_model_payload()])
+            agent = self._agent(workspace, model, probe, _probe_catalog(root))
+            agent.author(_brief())
+        self.assertEqual(probe.batches, [])
+
+    def test_untouched_slots_are_not_judged(self) -> None:
+        """A slot this film did not write keeps the part's own copy — its
+        overflow *is* the baseline, so it is neither marked nor measured."""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            # Only the headline slot is measured; the body slot is untouched
+            # and the probe reports nothing about it.
+            reading = ProbeReading(
+                slots={PROBE_HEADLINE_SLOT: (500, 600, 80, 100)}, stage=(1920, 1080)
+            )
+            probe = ScriptedSlotProbe([[reading, reading]])
+            model = ScriptedModel(
+                [_valid_model_payload(_valid_storyboard([_probe_beat(body="")]))]
+            )
+            agent = self._agent(workspace, model, probe, _probe_catalog(root))
+            agent.author(_brief())
+        self.assertEqual(len(probe.batches), 1)
+
+    def test_new_overflow_is_repaired_in_one_round_and_the_shorter_copy_ships(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            probe = ScriptedSlotProbe([[FITS, HEADLINE_TOO_WIDE], [FITS, FITS]])
+            model = ScriptedModel(
+                [
+                    _valid_model_payload(_valid_storyboard([_probe_beat()])),
+                    _storyboard_reply(_probe_beat(headline="销售增长")),
+                ]
+            )
+            agent = self._agent(workspace, model, probe, _probe_catalog(root))
+            result = agent.author(_brief())
+
+            # The repair message carried the offending slot and its budget, so
+            # the model knows which direction to rewrite in.
+            self.assertEqual(len(model.calls), 2)
+            repair_request = model.calls[1][-1]
+            self.assertEqual(repair_request["role"], "user")
+            self.assertIn("copy overflows slot 12", repair_request["content"])
+            self.assertIn("600px", repair_request["content"])
+            self.assertIn("storyboard", repair_request["content"])
+            # The repaired copy is what ships — in the artifact, on disk and in
+            # the measured working copy.
+            self.assertEqual(result.storyboard.beats[0].headline, "销售增长")
+            stored = json.loads(
+                (root / "job" / "STORYBOARD.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(stored["beats"][0]["headline"], "销售增长")
+            self.assertEqual(len(probe.batches), 2)
+            repaired_html = html.unescape(
+                probe.batches[1][1].read_text(encoding="utf-8")
+            )
+            self.assertIn("销售增长", repaired_html)
+            self.assertNotIn("本周销售增长", repaired_html)
+
+    def test_a_repair_that_rearranges_the_beats_is_refused(self) -> None:
+        """The guard from `require_repair_changed_only_copy`, wired in: a model
+        that re-times the film under a "shorten the copy" instruction is a new
+        film bypassing every gate already passed."""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            probe = ScriptedSlotProbe([[FITS, HEADLINE_TOO_WIDE]])
+            model = ScriptedModel(
+                [
+                    _valid_model_payload(_valid_storyboard([_probe_beat()])),
+                    _storyboard_reply(
+                        _probe_beat(headline="销售增长", duration_seconds=5.0)
+                    ),
+                ]
+            )
+            agent = self._agent(workspace, model, probe, _probe_catalog(root))
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                agent.author(_brief())
+        self.assertIn("repair round altered more than copy", str(ctx.exception))
+
+    def test_copy_still_overflowing_after_the_repair_round_is_refused(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            probe = ScriptedSlotProbe(
+                [[FITS, HEADLINE_TOO_WIDE], [FITS, HEADLINE_TOO_WIDE]]
+            )
+            model = ScriptedModel(
+                [
+                    _valid_model_payload(_valid_storyboard([_probe_beat()])),
+                    _storyboard_reply(_probe_beat(headline="还是太长的头条")),
+                ]
+            )
+            agent = self._agent(workspace, model, probe, _probe_catalog(root))
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                agent.author(_brief())
+        self.assertIn("after the repair round", str(ctx.exception))
+
+    def test_a_repair_reply_that_carries_more_than_the_storyboard_is_refused(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            probe = ScriptedSlotProbe([[FITS, HEADLINE_TOO_WIDE]])
+            model = ScriptedModel(
+                [
+                    _valid_model_payload(_valid_storyboard([_probe_beat()])),
+                    # A full three-field reply where only the storyboard was
+                    # asked for: refused, not partially accepted.
+                    _valid_model_payload(
+                        _valid_storyboard([_probe_beat(headline="销售增长")])
+                    ),
+                ]
+            )
+            agent = self._agent(workspace, model, probe, _probe_catalog(root))
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                agent.author(_brief())
+        self.assertIn("storyboard alone", str(ctx.exception))
+
+    def test_a_probe_that_cannot_measure_is_a_closed_refusal_not_a_crash(self) -> None:
+        class _DeadProbe:
+            def __call__(self, documents: object) -> object:
+                raise RuntimeError("browser died")
+
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            model = ScriptedModel(
+                [_valid_model_payload(_valid_storyboard([_probe_beat()]))]
+            )
+            agent = self._agent(workspace, model, _DeadProbe(), _probe_catalog(root))
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                agent.author(_brief())
+        self.assertIn("failed to measure", str(ctx.exception))
+
+    def test_a_slot_the_probe_did_not_measure_is_refused_not_passed(self) -> None:
+        """A missing measurement must not pass as a fitting one — a broken mark
+        or a failed page load would otherwise read as green."""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            missing_body_slot = ProbeReading(
+                slots={PROBE_HEADLINE_SLOT: (500, 600, 80, 100)}, stage=(1920, 1080)
+            )
+            probe = ScriptedSlotProbe([[missing_body_slot, missing_body_slot]])
+            model = ScriptedModel(
+                [_valid_model_payload(_valid_storyboard([_probe_beat()]))]
+            )
+            agent = self._agent(workspace, model, probe, _probe_catalog(root))
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                agent.author(_brief())
+        self.assertIn("failed to measure", str(ctx.exception))
+
+    def test_a_probe_that_is_not_callable_is_refused_at_construction(self) -> None:
+        with TemporaryDirectory() as raw:
+            workspace = _make_workspace(Path(raw))
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                MotionAuthoringAgent(
+                    workspace=workspace,
+                    tools=MotionAuthoringTools(workspace),
+                    workflow=load_locked_authoring_workflow(
+                        vendor_root=VENDOR_ROOT, contract_path=WORKFLOW_CONTRACT
+                    ),
+                    model_config=_model_config(),
+                    model_call=ScriptedModel([]),
+                    slot_probe="not-a-probe",
+                )
+        self.assertIn("slot probe", str(ctx.exception))
+
+
+# --------------------------------------------------------------------------- #
+# PC-26: narration into the one-sentence chain — the voice arm, finally chosen
+# --------------------------------------------------------------------------- #
+
+
+class ScriptedNarrator:
+    """Stands in for TTS + ffprobe: text in, (audio path, real seconds) out."""
+
+    def __init__(self, seconds: float) -> None:
+        self._seconds = seconds
+        self.calls: list[tuple[str, str]] = []
+
+    def __call__(self, beat_id: str, text: str) -> tuple[str, float]:
+        self.calls.append((beat_id, text))
+        return (f"narration/{beat_id}.wav", self._seconds)
+
+
+def _narrated_payload(
+    narration: str = "本周销售额环比增长了百分之十二",
+) -> str:
+    """One beat, one narration line — the 1:1 shape the contract now asks for."""
+    script = _valid_script()
+    script["beats"] = [narration]
+    return json.dumps(
+        {
+            "design": _valid_design(),
+            "script": script,
+            "storyboard": _valid_storyboard([_probe_beat()]),
+        }
+    )
+
+
+class NarrationTests(unittest.TestCase):
+    """语音主导、画面跟随：语音臂第一次真的被选中。"""
+
+    def _agent(
+        self,
+        workspace: AuthoringWorkspace,
+        model: ScriptedModel,
+        narrator: object,
+        catalog_root: Path | None,
+    ) -> MotionAuthoringAgent:
+        return MotionAuthoringAgent(
+            workspace=workspace,
+            tools=MotionAuthoringTools(workspace),
+            workflow=load_locked_authoring_workflow(
+                vendor_root=VENDOR_ROOT, contract_path=WORKFLOW_CONTRACT
+            ),
+            model_config=_model_config(),
+            model_call=model,
+            catalog_root=catalog_root,
+            narrator=narrator,
+        )
+
+    def test_the_voice_arm_lengthens_the_shot_past_its_motion(self) -> None:
+        """8 秒旁白配 4.8 秒动效、6 秒声明：max 臂取 8 秒 → 240 帧。
+        在此之前 `voice_seconds` 恒为 None，这条臂从未被选中过（PC-08）。"""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            narrator = ScriptedNarrator(8.0)
+            model = ScriptedModel([_narrated_payload()])
+            agent = self._agent(workspace, model, narrator, _probe_catalog(root))
+            submission = agent.author(_brief()).submission
+
+            self.assertEqual(
+                narrator.calls, [("hook", "本周销售额环比增长了百分之十二")]
+            )
+            self.assertEqual(len(submission.segments), 1)
+            self.assertEqual(submission.segments[0].frame_count, 240)
+
+    def test_without_a_narrator_the_film_stays_exactly_as_before(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            model = ScriptedModel([_narrated_payload()])
+            agent = self._agent(workspace, model, None, _probe_catalog(root))
+            submission = agent.author(_brief()).submission
+        # 零件拍的镜头长 = max(动效, 语音)；无声时就是动效 4.8 秒 → 144 帧，
+        # 与接线前逐字节相同（声明时长只在模板拍无其它信号时兜底）。
+        self.assertEqual(submission.segments[0].frame_count, 144)
+
+    def test_script_beats_must_match_storyboard_beats_when_narrating(self) -> None:
+        """三条旁白词配一段分镜没有归属可言——拒绝，不猜。"""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            model = ScriptedModel(
+                [_valid_model_payload(_valid_storyboard([_probe_beat()]))]
+            )
+            agent = self._agent(
+                workspace, model, ScriptedNarrator(2.0), _probe_catalog(root)
+            )
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                agent.author(_brief())
+        self.assertIn("one to one", str(ctx.exception))
+
+    def test_a_narrator_failure_is_a_closed_refusal_not_a_silent_film(self) -> None:
+        """TTS 挂了不许悄悄出一条无声片——那是本项目最恨的那类静默降级。"""
+
+        class _DeadNarrator:
+            def __call__(self, beat_id: str, text: str) -> tuple[str, float]:
+                raise RuntimeError("tts service is down")
+
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            model = ScriptedModel([_narrated_payload()])
+            agent = self._agent(workspace, model, _DeadNarrator(), _probe_catalog(root))
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                agent.author(_brief())
+        self.assertIn("voiceover synthesis failed", str(ctx.exception))
+
+    def test_an_install_without_the_catalog_stays_silent_and_never_calls_tts(
+        self,
+    ) -> None:
+        """无目录安装走单次整片捕捉，没有逐拍分段供语音臂消费——保持无声，
+        也不为一条用不上的音轨花一次 TTS。边界记录在 PC-26.md。"""
+        with TemporaryDirectory() as raw:
+            workspace = _make_workspace(Path(raw))
+            narrator = ScriptedNarrator(8.0)
+            model = ScriptedModel([_valid_model_payload()])
+            agent = self._agent(workspace, model, narrator, None)
+            agent.author(_brief())
+        self.assertEqual(narrator.calls, [])
+
+    def test_a_narrator_that_is_not_callable_is_refused_at_construction(self) -> None:
+        with TemporaryDirectory() as raw:
+            workspace = _make_workspace(Path(raw))
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                MotionAuthoringAgent(
+                    workspace=workspace,
+                    tools=MotionAuthoringTools(workspace),
+                    workflow=load_locked_authoring_workflow(
+                        vendor_root=VENDOR_ROOT, contract_path=WORKFLOW_CONTRACT
+                    ),
+                    model_config=_model_config(),
+                    model_call=ScriptedModel([]),
+                    narrator="not-a-narrator",
+                )
+        self.assertIn("narrator", str(ctx.exception))
+
+    def test_the_first_message_states_the_one_to_one_narration_contract(self) -> None:
+        message = _first_message_contract(_brief())
+        self.assertIn("旁白", message)
+        self.assertIn("一一对应", message)
+
+    def test_the_answer_carries_each_segments_narration(self) -> None:
+        """App 侧混音需要知道哪段音频属于哪个镜头——段自己带着走。"""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            model = ScriptedModel([_narrated_payload()])
+            agent = self._agent(
+                workspace, model, ScriptedNarrator(8.0), _probe_catalog(root)
+            )
+            payload = agent.author(_brief()).submission.segments[0].to_payload()
+        self.assertEqual(payload["narrationAudio"], "narration/hook.wav")
+        self.assertEqual(payload["narrationSeconds"], 8.0)
+
+    def test_a_silent_films_answer_keeps_its_exact_old_shape(self) -> None:
+        """正式 App 的段解析是 deny_unknown_fields：无声片的形状一个键都不能多。"""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            model = ScriptedModel([_narrated_payload()])
+            agent = self._agent(workspace, model, None, _probe_catalog(root))
+            payload = agent.author(_brief()).submission.segments[0].to_payload()
+        self.assertEqual(
+            sorted(payload),
+            [
+                "allowedAssets",
+                "canvas",
+                "entryHtml",
+                "frameCount",
+                "sourceEndMillis",
+                "sourceStartMillis",
+            ],
+        )
 
 
 if __name__ == "__main__":
