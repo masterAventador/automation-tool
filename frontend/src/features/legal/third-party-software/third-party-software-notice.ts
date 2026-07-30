@@ -221,6 +221,14 @@ export const DISTRIBUTED_COMPONENT_PRESENTATION: Readonly<
     noticeHint:
       "安装包内附带一份清单文件，逐条列出随包分发的每个 Python 组件、版本和它声明的许可证，路径见下。",
   },
+  onnxruntime: {
+    role: "随本机执行器分发的模型推理运行库，用来在本地判断素材声音中是否包含人声。",
+    noticeHint: "它的 MIT 许可证正文随运行库放在安装包内，路径见下。",
+  },
+  "silero-vad-model": {
+    role: "随本机执行器分发的人声检测模型，只在本地处理音频采样，不把视频发送给模型服务。",
+    noticeHint: "模型的 MIT 许可证正文与模型一起放在安装包内，路径见下。",
+  },
   "subtitle-fonts": {
     role: "随安装包分发的开源中文字体，「智能素材成片」用它来把字幕画到画面上；字体本身是完整字符集，不做删减。",
     noticeHint:
@@ -234,6 +242,7 @@ export const ASSET_CATEGORY_LABELS: Readonly<Record<string, string>> = {
   stock_media: "图片与视频素材",
   music_sfx: "音乐与音效",
   codec_binary: "视频编解码程序",
+  ml_model: "本地机器学习模型",
   map_3d: "地图与三维数据",
   generated: "模型生成内容",
 };

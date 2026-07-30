@@ -20,14 +20,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from build_third_party_notice_ui_projection import (  # noqa: E402
+from build_third_party_notice_ui_projection import (
     ASSET_RIGHTS_PATH,
     FFMPEG_TOOLCHAIN_PATH,
     LICENSE_TEXT_ROOT,
+    LOCAL_EXECUTOR_INTERNAL_PREFIX,
     MOTION_RIGHTS_PATH,
     PACKAGED_PATH_PRODUCERS,
     PROJECTION_PATH,
     REPOSITORY_ROOT,
+    SILERO_VAD_RUNTIME_PATH,
     SOURCES_PATH,
     ProjectionError,
     _media_toolchain_path,
@@ -35,8 +37,8 @@ from build_third_party_notice_ui_projection import (  # noqa: E402
     compose_projection,
     subtitle_font_license_path,
 )
-from subtitle_font_assets import OPEN_FONT_LICENSE  # noqa: E402
-from release_assembly import VIDEO_RUNTIME_RESOURCES  # noqa: E402
+from release_assembly import RELEASE_PACKAGE_RESOURCES
+from subtitle_font_assets import OPEN_FONT_LICENSE
 
 # Field names and values that exist only for the internal rights review.
 INTERNAL_REVIEW_MARKERS = (
@@ -93,7 +95,8 @@ def _scan_for_leakage(candidate: dict) -> None:
         project.pop("sourceUrl", None)
     components = displayed.get("distributedComponents")
     _require(
-        isinstance(components, list) and components, "no distributed component is disclosed"
+        isinstance(components, list) and components,
+        "no distributed component is disclosed",
     )
     # A copyleft component has to publish where its corresponding source is, so
     # that one address is as legitimate as a repository URL. A copyright notice
@@ -121,7 +124,8 @@ def _installed_resource_prefixes() -> tuple[str, ...]:
     from telling a user to look inside a directory no installer ever writes.
     """
     return tuple(
-        "/".join(resource.installed_parts) + "/" for resource in VIDEO_RUNTIME_RESOURCES
+        "/".join(str(part) for part in resource["installedParts"]) + "/"
+        for resource in RELEASE_PACKAGE_RESOURCES
     )
 
 
@@ -134,7 +138,13 @@ def _contract_declared_paths() -> frozenset[str]:
         raise CheckError(f"cannot read the media toolchain layout: {error}") from error
     paths = {
         _media_toolchain_path(layout, key)
-        for key in ("license", "notice", "build_info", "source_archive", "x264_source_archive")
+        for key in (
+            "license",
+            "notice",
+            "build_info",
+            "source_archive",
+            "x264_source_archive",
+        )
     }
     # The font licence location is declared the same way: the asset rights
     # register names the packaged file and the Worker spec installs it from that
@@ -143,6 +153,18 @@ def _contract_declared_paths() -> frozenset[str]:
         paths.add(subtitle_font_license_path())
     except ProjectionError as error:
         raise CheckError(f"cannot derive the packaged font licence path: {error}") from error
+    try:
+        silero = json.loads(SILERO_VAD_RUNTIME_PATH.read_text(encoding="utf-8"))
+        model_license = silero["license"]["packagedPath"]
+        runtime_license = silero["runtime"]["packagedLicensePath"]
+        paths.update(
+            {
+                f"{LOCAL_EXECUTOR_INTERNAL_PREFIX}/{model_license}",
+                f"{LOCAL_EXECUTOR_INTERNAL_PREFIX}/{runtime_license}",
+            }
+        )
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+        raise CheckError(f"cannot derive the packaged Silero licences: {error}") from error
     return frozenset(paths)
 
 
@@ -249,7 +271,8 @@ def _require_license_obligations(candidate: dict) -> None:
 
     components = candidate.get("distributedComponents")
     _require(
-        isinstance(components, list) and components, "no distributed component is disclosed"
+        isinstance(components, list) and components,
+        "no distributed component is disclosed",
     )
     assert isinstance(components, list)
     for component in components:

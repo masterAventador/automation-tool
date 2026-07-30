@@ -29,6 +29,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import desktop_e2e_prerequisites as prerequisites  # noqa: E402
 from desktop_e2e_prerequisites import (  # noqa: E402
     ACTION_AUTHORIZATION_PUBLIC_KEY,
     CONTROL_PLANE_PORT_RANGE,
@@ -41,12 +42,11 @@ from desktop_e2e_prerequisites import (  # noqa: E402
     stage_embedded_browser,
     startup_gate_environment,
 )
-import desktop_e2e_prerequisites as prerequisites  # noqa: E402
 
 SHARED_MODULE = "desktop_e2e_prerequisites"
 
 # The two halves of the one Task-offer fixture in this layer. `run_t3_14_acceptance`
-# owns both; `run_h8_01`–`run_h8_06` and `run_t3_18` already import them. Naming
+# owns both; `run_h8_01`-`run_h8_06` and `run_t3_18` already import them. Naming
 # them here is what keeps the next driver from growing a private copy of the offer
 # half and silently dropping the confirmation half.
 SHARED_OFFER_SEEDER = "seed_attempt_and_offer"
@@ -72,10 +72,9 @@ def check_the_startup_gate_environment_supplies_every_compile_time_input() -> No
     ), "the action authorization public key is missing"
     assert prepared["AUTOMATION_TOOL_LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS"].isdigit()
     assert prepared["AUTOMATION_TOOL_LOCAL_ACTION_TASK_LIMIT"].isdigit()
-    assert (
-        prepared["AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN"]
-        == "http://127.0.0.1:19001"
-    ), "the compiled-in origin must name the port this run actually serves"
+    assert prepared["AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN"] == "http://127.0.0.1:19001", (
+        "the compiled-in origin must name the port this run actually serves"
+    )
     assert prepared["PATH"] == "/usr/bin", "caller isolation values must survive"
 
 
@@ -103,8 +102,7 @@ def check_reserved_control_plane_ports_stay_inside_the_project_range() -> None:
         f"{port} is outside the automation-tool range {CONTROL_PLANE_PORT_RANGE}"
     )
     assert reserve_control_plane_port() == port, (
-        "one process runs one Control Plane; drivers that import each other must "
-        "agree on its port"
+        "one process runs one Control Plane; drivers that import each other must agree on its port"
     )
     with socket.socket() as probe:
         probe.settimeout(0.2)
@@ -123,9 +121,7 @@ def check_every_control_plane_driver_goes_through_the_shared_preparation() -> No
     assert len(drivers) >= 30, f"only {len(drivers)} drivers were derived"
 
     unwired = sorted(
-        path.name
-        for path in drivers
-        if SHARED_MODULE not in path.read_text(encoding="utf-8")
+        path.name for path in drivers if SHARED_MODULE not in path.read_text(encoding="utf-8")
     )
     assert not unwired, (
         "these drivers build a control-plane-e2e App without the shared startup "
@@ -140,9 +136,7 @@ def check_no_control_plane_driver_hardcodes_the_shared_port() -> None:
         for path in control_plane_e2e_drivers()
         if re.search(r"\b8765\b", path.read_text(encoding="utf-8"))
     )
-    assert not offenders, (
-        f"these drivers still pin the Control Plane port: {', '.join(offenders)}"
-    )
+    assert not offenders, f"these drivers still pin the Control Plane port: {', '.join(offenders)}"
 
 
 def check_staging_rejects_a_browser_tree_that_fails_verification() -> None:
@@ -214,9 +208,7 @@ def check_the_resource_root_is_where_the_acceptance_app_actually_runs() -> None:
 
 def check_the_derived_driver_set_matches_the_packaged_builds() -> None:
     """The driver set must come from package.json, not from a hand-kept list."""
-    scripts = json.loads((ROOT / "frontend/package.json").read_text(encoding="utf-8"))[
-        "scripts"
-    ]
+    scripts = json.loads((ROOT / "frontend/package.json").read_text(encoding="utf-8"))["scripts"]
     builds = {
         name
         for name, command in scripts.items()
@@ -244,14 +236,10 @@ def check_every_driver_names_the_operations_profile_root_the_app_writes() -> Non
     root passes its App phases and then fails on its own post-conditions, which
     reads exactly like a product regression.
     """
-    source = (
-        ROOT / "frontend/src-tauri/src/browser_profiles.rs"
-    ).read_text(encoding="utf-8")
-    declared = re.search(
-        r'const PROFILE_ROOT_DIRECTORY: &str = "([a-z-]+)";', source
-    )
+    source = (ROOT / "frontend/src-tauri/src/browser_profiles.rs").read_text(encoding="utf-8")
+    declared = re.search(r'const PROFILE_ROOT_DIRECTORY: &str = "([a-z-]+)";', source)
     assert declared is not None, "the Rust Profile root constant moved"
-    assert OPERATIONS_PROFILE_ROOT == declared.group(1), (
+    assert declared.group(1) == OPERATIONS_PROFILE_ROOT, (
         f"OPERATIONS_PROFILE_ROOT is {OPERATIONS_PROFILE_ROOT!r} but the App writes "
         f"{declared.group(1)!r}"
     )
@@ -353,6 +341,7 @@ def check_executor_cache_key_tracks_real_source_inputs() -> None:
         source_path = backend_root / "src/automation_tool/executor/runtime.py"
         spec_path = backend_root / "automation-tool-executor.spec"
         contract_path = repository_root / "contracts/video/motion-render-canvas.v1.json"
+        silero_assets_path = repository_root / "scripts/silero_vad_assets.py"
 
         _write_executor_input(
             repository_root,
@@ -374,6 +363,16 @@ def check_executor_cache_key_tracks_real_source_inputs() -> None:
             "[project]\nname = 'executor-cache-test'\n",
         )
         _write_executor_input(repository_root, "backend/uv.lock", "version = 1\n")
+        _write_executor_input(
+            repository_root,
+            "scripts/silero_vad_assets.py",
+            "SILERO_ASSET_SENTINEL = 'before'\n",
+        )
+        _write_executor_input(
+            repository_root,
+            "scripts/video_runtime_cache.py",
+            "CACHE_SENTINEL = 'locked'\n",
+        )
         for relative in (
             "contracts/protocol/executor-v1.schema.json",
             "contracts/quality/motion-catalog.v1.json",
@@ -395,9 +394,7 @@ def check_executor_cache_key_tracks_real_source_inputs() -> None:
             build_ids.append(build_id)
             package = workspace / "dist/automation-tool-executor"
             package.mkdir(parents=True, exist_ok=True)
-            (package / prerequisites.EXECUTOR_MANIFEST_NAME).write_text(
-                "{}", encoding="utf-8"
-            )
+            (package / prerequisites.EXECUTOR_MANIFEST_NAME).write_text("{}", encoding="utf-8")
             (package / prerequisites.EXECUTOR_MANIFEST_SIGNATURE_NAME).write_text(
                 "test", encoding="utf-8"
             )
@@ -409,9 +406,7 @@ def check_executor_cache_key_tracks_real_source_inputs() -> None:
             stack.enter_context(
                 patch.dict(sys.modules, {"run_e4_07_acceptance": fake_builder_module})
             )
-            stack.enter_context(
-                patch.object(prerequisites, "REPOSITORY_ROOT", repository_root)
-            )
+            stack.enter_context(patch.object(prerequisites, "REPOSITORY_ROOT", repository_root))
             stack.enter_context(
                 patch.object(prerequisites, "BACKEND_ROOT", backend_root, create=True)
             )
@@ -456,16 +451,32 @@ def check_executor_cache_key_tracks_real_source_inputs() -> None:
             fourth_package = prerequisites.ensure_signed_executor_package(
                 build_id="source-sensitive"
             )
+            silero_assets_path.write_text(
+                "SILERO_ASSET_SENTINEL = 'after'\n",
+                encoding="utf-8",
+            )
+            fifth_package = prerequisites.ensure_signed_executor_package(
+                build_id="source-sensitive"
+            )
 
         assert (
-            len({first_package, second_package, third_package, fourth_package}) == 4
-        ), "source, spec and contract bytes must each select a different cached package"
+            len(
+                {
+                    first_package,
+                    second_package,
+                    third_package,
+                    fourth_package,
+                    fifth_package,
+                }
+            )
+            == 5
+        ), "source, spec, contract and model asset builder must each select a new package"
         assert unchanged_package == first_package, (
             "unchanged Executor inputs must keep reusing the same cached package"
         )
-        assert len(build_ids) == 4, (
-            "source, spec and contract input changes must each rebuild instead of "
-            "reusing the stale signed package"
+        assert len(build_ids) == 5, (
+            "source, spec, contract and model asset builder changes must each rebuild "
+            "instead of reusing the stale signed package"
         )
 
 
@@ -474,7 +485,6 @@ def check_locked_browser_archives_use_shared_archive_resolver() -> None:
     assert "archive_path(" in module_source, (
         "locked browser archives must use the shared archive_path() worktree resolver"
     )
-
 
 
 def check_a_stale_cache_names_the_step_that_rebuilds_it() -> None:
@@ -519,13 +529,12 @@ def check_every_declared_check_is_registered() -> None:
     before (T51, T62).
     """
     declared = {
-        name
-        for name, value in globals().items()
-        if name.startswith("check_") and callable(value)
+        name for name, value in globals().items() if name.startswith("check_") and callable(value)
     }
     registered = {check.__name__ for check in CHECKS}
     missing = sorted(declared - registered)
     assert not missing, f"defined but never run: {missing}"
+
 
 CHECKS = (
     check_the_startup_gate_environment_supplies_every_compile_time_input,

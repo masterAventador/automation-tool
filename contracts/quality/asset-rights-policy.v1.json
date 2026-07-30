@@ -50,6 +50,16 @@
       "targetMarkets",
       "patentReview"
     ],
+    "ml_model": [
+      "source",
+      "license",
+      "sha256",
+      "version",
+      "redistributionAllowed",
+      "commercialUseAllowed",
+      "modelWeightsIncluded",
+      "intendedUse"
+    ],
     "map_3d": [
       "source",
       "license",
@@ -156,6 +166,31 @@
           "finding": "Official site identified by the font metadata; no UTM Kabel KT-specific license grant was located during review."
         }
       ]
+    },
+    {
+      "id": "model-silero-vad-v6.2.1",
+      "category": "ml_model",
+      "source": "snakers4/silero-vad official v6.2.1 release model",
+      "sourceUrl": "https://raw.githubusercontent.com/snakers4/silero-vad/v6.2.1/src/silero_vad/data/silero_vad_16k_op15.onnx",
+      "license": "MIT",
+      "licenseVersionOrDate": "MIT License in silero-vad v6.2.1",
+      "acquiredAt": "2026-07-31",
+      "sha256": "7ed98ddbad84ccac4cd0aeb3099049280713df825c610a8ed34543318f1b2c49",
+      "bytes": 1289603,
+      "redistributionAllowed": true,
+      "commercialUseAllowed": true,
+      "reviewedBy": "codex-assisted-rights-review",
+      "reviewedAt": "2026-07-31",
+      "version": "v6.2.1",
+      "modelWeightsIncluded": true,
+      "intendedUse": "Local 16 kHz speech-activity probability inference in the Local Executor",
+      "attribution": "Copyright (c) 2020-present Silero Team",
+      "licenseTextUrl": "https://raw.githubusercontent.com/snakers4/silero-vad/v6.2.1/LICENSE",
+      "licenseTextSha256": "2e63e9a38b6e8fc0c7bc37ce174caca1862870856c6daf5697cfb785e925520b",
+      "licenseTextBytes": 1075,
+      "packagedLicenseName": "SILERO-VAD-LICENSE.txt",
+      "bundledIn": "local-executor",
+      "packagedName": "silero_vad_16k_op15.onnx"
     },
     {
       "id": "font-big-shoulders-display",

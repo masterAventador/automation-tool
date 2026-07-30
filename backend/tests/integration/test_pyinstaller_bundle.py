@@ -7,15 +7,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+from automation_tool.executor.package_manifest import (
+    EXECUTOR_MANIFEST_FILE_NAME,
+    EXECUTOR_SIGNATURE_FILE_NAME,
+)
+from automation_tool.executor.silero_vad import audit_packaged_silero_vad_runtime
+
 # `conftest.py` puts the repository root on `sys.path`; this is the same route
 # it uses for `scripts.acceptance_postgres`.
 from scripts.frozen_artifact_environment import (  # type: ignore[import-not-found]
     frozen_artifact_environment,
-)
-
-from automation_tool.executor.package_manifest import (
-    EXECUTOR_MANIFEST_FILE_NAME,
-    EXECUTOR_SIGNATURE_FILE_NAME,
 )
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -44,7 +45,7 @@ def bootstrap(state_directory: Path) -> bytes:
     ).encode()
 
 
-def test_pyinstaller_onedir_bundle_starts_without_python_and_contains_playwright(
+def test_pyinstaller_onedir_bundle_contains_locked_runtimes_and_starts_without_python(
     tmp_path: Path,
 ) -> None:
     distribution_root = tmp_path / "dist"
@@ -73,6 +74,7 @@ def test_pyinstaller_onedir_bundle_starts_without_python_and_contains_playwright
     suffix = ".exe" if sys.platform == "win32" else ""
     executable = distribution_root / BUNDLE_NAME / f"{BUNDLE_NAME}{suffix}"
     assert executable.is_file()
+    audit_packaged_silero_vad_runtime(executable.parent)
 
     manifest = subprocess.run(
         [
@@ -134,6 +136,9 @@ def test_pyinstaller_onedir_bundle_starts_without_python_and_contains_playwright
         path.name.lower() for path in executable.parent.rglob("*") if path.is_dir()
     )
     assert any("playwright" in path.lower() for path in inventory)
+    assert "_internal/speech/silero-vad/silero_vad_16k_op15.onnx" in inventory
+    assert "_internal/speech/silero-vad/SILERO-VAD-LICENSE.txt" in inventory
+    assert "_internal/onnxruntime/LICENSE" in inventory
     assert not any(
         name == ".local-browsers"
         or name.startswith(("chromium-", "firefox-", "webkit-", "ffmpeg-"))
@@ -143,4 +148,5 @@ def test_pyinstaller_onedir_bundle_starts_without_python_and_contains_playwright
         path.read_text(encoding="utf-8", errors="ignore") for path in work_root.rglob("*.toc")
     )
     assert "playwright" in analysis_text.lower()
+    assert "onnxruntime" in analysis_text.lower()
     assert "automation_tool.executor.browser_runtime" in analysis_text

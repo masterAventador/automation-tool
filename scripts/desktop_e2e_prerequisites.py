@@ -258,14 +258,14 @@ def build_embedded_browser_cache(target_id: str | None = None) -> Path:
     sees. The cache is content-verified on every use, so a damaged one is
     rejected rather than staged.
     """
-    from build_embedded_browser_distribution import (  # noqa: PLC0415
+    from build_embedded_browser_distribution import (
         build_distribution_manifest,
     )
-    from build_embedded_chromium_staging import (  # noqa: PLC0415
+    from build_embedded_chromium_staging import (
+        build_staging,
         load_staging_contract,
         sha256_file,
     )
-    from build_embedded_chromium_staging import build_staging  # noqa: PLC0415
 
     resolved = target_id or release_target_id()
     archive = LOCKED_BROWSER_ARCHIVES.get(resolved)
@@ -297,7 +297,7 @@ def build_embedded_browser_cache(target_id: str | None = None) -> Path:
 
 
 def verify_embedded_browser(tree: Path, target_id: str | None = None) -> None:
-    from build_embedded_browser_distribution import (  # noqa: PLC0415
+    from build_embedded_browser_distribution import (
         DistributionRejected,
         verify_distribution,
     )
@@ -354,7 +354,7 @@ def stage_embedded_browser(
         else:
             return destination
 
-    from build_embedded_browser_distribution import (  # noqa: PLC0415
+    from build_embedded_browser_distribution import (
         install_distribution,
     )
 
@@ -388,6 +388,8 @@ _EXECUTOR_FIXED_INPUTS: Final = (
     "backend/automation-tool-executor.spec",
     "backend/pyproject.toml",
     "backend/uv.lock",
+    "scripts/silero_vad_assets.py",
+    "scripts/video_runtime_cache.py",
 )
 _EXECUTOR_CONTRACT_ROOTS: Final = ("contracts/protocol",)
 _EXECUTOR_SPEC_RESOURCE_PATTERN: Final = re.compile(r"""["']((?:contracts|vendor)/[^"']+)["']""")
@@ -477,7 +479,7 @@ def ensure_signed_executor_package(build_id: str = SHARED_EXECUTOR_BUILD_ID) -> 
         cached / EXECUTOR_MANIFEST_SIGNATURE_NAME
     ).is_file():
         return cached
-    from run_e4_07_acceptance import build_signed_executor  # noqa: PLC0415
+    from run_e4_07_acceptance import build_signed_executor
 
     cached.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
@@ -496,7 +498,7 @@ def install_signed_executor_package(
 ) -> Path:
     """Install the cached signed package in the App's real resource layout."""
     package_source = ensure_signed_executor_package(build_id)
-    from run_e4_14_acceptance import install_executor_package  # noqa: PLC0415
+    from run_e4_14_acceptance import install_executor_package
 
     return install_executor_package(package_source, resource_root=resource_root)
 
@@ -567,12 +569,12 @@ def _start_health_control_plane(*, port: int) -> _HealthControlPlane:
     """
     # Imported lazily: cache-only and staging-only users of this module must not
     # need the backend's dependencies on the import path.
-    import uvicorn  # noqa: PLC0415
+    import uvicorn
 
     backend_source = REPOSITORY_ROOT / "backend" / "src"
     if str(backend_source) not in sys.path:
         sys.path.insert(0, str(backend_source))
-    from automation_tool.control_plane.bootstrap.app import create_app  # noqa: PLC0415
+    from automation_tool.control_plane.bootstrap.app import create_app
 
     server = uvicorn.Server(
         uvicorn.Config(
@@ -605,7 +607,7 @@ def _start_health_control_plane(*, port: int) -> _HealthControlPlane:
 
 def require_product_origin_released(port: int) -> None:
     """Fail if the origin this harness bound is still accepting connections."""
-    from run_i2_13_acceptance import require_port_closed  # noqa: PLC0415
+    from run_i2_13_acceptance import require_port_closed
 
     require_port_closed(port)
 
@@ -636,9 +638,7 @@ def desktop_e2e_startup_harness(
             "occupied; stop its owner instead of reusing or terminating it"
         )
     prepare_startup_gate(private_app_data, resource_root=resource_root)
-    prepared = startup_gate_environment(
-        environment, control_plane_port=PRODUCT_CONTROL_PLANE_PORT
-    )
+    prepared = startup_gate_environment(environment, control_plane_port=PRODUCT_CONTROL_PLANE_PORT)
     server = _start_health_control_plane(port=PRODUCT_CONTROL_PLANE_PORT)
     try:
         yield prepared
@@ -720,9 +720,9 @@ def video_studio_startup_harness(
 
     # Import lazily: the helpers load backend acceptance dependencies, while
     # cache/staging-only users of this module must remain stdlib-only.
-    from acceptance_postgres import managed_test_postgres  # noqa: PLC0415
-    from run_e4_14_acceptance import start_control_plane  # noqa: PLC0415
-    from run_i2_13_acceptance import (  # noqa: PLC0415
+    from acceptance_postgres import managed_test_postgres
+    from run_e4_14_acceptance import start_control_plane
+    from run_i2_13_acceptance import (
         BACKEND_ROOT,
         compose_command,
         require_port_closed,

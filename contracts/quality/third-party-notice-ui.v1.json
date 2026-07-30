@@ -98,6 +98,32 @@
       "upstreamSourceUrl": null
     },
     {
+      "id": "onnxruntime",
+      "name": "ONNX Runtime",
+      "version": "1.24.3",
+      "license": "MIT",
+      "copyleft": false,
+      "copyright": null,
+      "licenseTextId": null,
+      "packagedNoticePath": "local-executor/package/_internal/onnxruntime/LICENSE",
+      "noticeChannelId": null,
+      "packagedSourcePaths": [],
+      "upstreamSourceUrl": null
+    },
+    {
+      "id": "silero-vad-model",
+      "name": "Silero VAD model",
+      "version": "v6.2.1",
+      "license": "MIT",
+      "copyleft": false,
+      "copyright": null,
+      "licenseTextId": null,
+      "packagedNoticePath": "local-executor/package/_internal/speech/silero-vad/SILERO-VAD-LICENSE.txt",
+      "noticeChannelId": null,
+      "packagedSourcePaths": [],
+      "upstreamSourceUrl": null
+    },
+    {
       "id": "subtitle-fonts",
       "name": "Noto Sans CJK SC",
       "version": "Sans2.004",
@@ -140,7 +166,7 @@
   "assetRights": {
     "deniedByDefault": true,
     "sharedRequiredFieldCount": 12,
-    "registeredEntryCount": 4,
+    "registeredEntryCount": 5,
     "categories": [
       {
         "id": "codec_binary",
@@ -157,6 +183,10 @@
       {
         "id": "map_3d",
         "requiredFieldCount": 6
+      },
+      {
+        "id": "ml_model",
+        "requiredFieldCount": 8
       },
       {
         "id": "music_sfx",

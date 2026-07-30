@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import subtitle_font_assets  # noqa: E402
+import subtitle_font_assets
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 LOCK_PATH = REPOSITORY_ROOT / "contracts/quality/third-party-sources.v1.json"
@@ -211,15 +211,21 @@ def validate_asset_rights() -> int:
     ):
         fail("distributionRequiredFields must be a unique list")
     categories = rights.get("requiredCategories")
-    expected = {"font", "stock_media", "music_sfx", "codec_binary", "map_3d", "generated"}
+    expected = {
+        "font",
+        "stock_media",
+        "music_sfx",
+        "codec_binary",
+        "ml_model",
+        "map_3d",
+        "generated",
+    }
     if not isinstance(categories, dict) or set(categories) != expected:
         fail("asset rights categories are incomplete")
     for category, category_fields in categories.items():
         if (
             not isinstance(category_fields, list)
-            or not all(
-                isinstance(field, str) and field for field in category_fields
-            )
+            or not all(isinstance(field, str) and field for field in category_fields)
             or len(category_fields) != len(set(category_fields))
         ):
             fail(f"{category} asset rights fields must be a unique list")
@@ -244,8 +250,10 @@ def validate_asset_rights() -> int:
             if field not in entry or entry[field] in (None, "", []):
                 fail(f"{identifier} rights entry is missing {field}")
         digest = entry.get("sha256")
-        if not isinstance(digest, str) or len(digest) != 64 or any(
-            character not in "0123456789abcdef" for character in digest
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
         ):
             fail(f"{identifier} rights entry has an invalid sha256")
         for permission in (
@@ -254,9 +262,7 @@ def validate_asset_rights() -> int:
         ):
             if not isinstance(entry.get(permission), bool):
                 fail(f"{identifier} rights entry must decide {permission}")
-        if category == "font" and not isinstance(
-            entry.get("embeddingAllowed"), bool
-        ):
+        if category == "font" and not isinstance(entry.get("embeddingAllowed"), bool):
             fail(f"{identifier} rights entry must decide embeddingAllowed")
 
         status = entry.get("rightsStatus")
@@ -276,9 +282,10 @@ def validate_asset_rights() -> int:
                 )
             ):
                 fail(f"{identifier} undetermined rights must remain denied")
-            if not isinstance(entry.get("rightsBlocker"), str) or not entry[
-                "rightsBlocker"
-            ].strip():
+            if (
+                not isinstance(entry.get("rightsBlocker"), str)
+                or not entry["rightsBlocker"].strip()
+            ):
                 fail(f"{identifier} undetermined rights must name the blocker")
             evidence = entry.get("rightsEvidence")
             if not isinstance(evidence, list) or not evidence:

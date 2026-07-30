@@ -8,13 +8,23 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-
 from automation_tool.executor import windows_candidate
 from automation_tool.executor.windows_candidate import (
     WindowsExecutorCandidateRejected,
     audit_windows_executor_candidate,
     build_windows_executor_candidate,
 )
+
+
+@pytest.fixture(autouse=True)
+def _accept_synthetic_silero_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        windows_candidate,
+        "audit_packaged_silero_vad_runtime",
+        lambda bundle: None,
+    )
 
 
 def _write(path: Path, content: bytes = b"fixture") -> Path:
@@ -55,6 +65,24 @@ def test_audit_accepts_a_native_windows_candidate(tmp_path: Path) -> None:
     assert result.file_count == 5
     assert result.pe_file_count == 3
     assert result.package_size > 0
+
+
+def test_audit_rejects_a_candidate_that_fails_the_silero_runtime_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = _candidate(tmp_path)
+
+    def reject(_bundle: Path) -> None:
+        raise windows_candidate.SileroVadUnavailable()
+
+    monkeypatch.setattr(windows_candidate, "audit_packaged_silero_vad_runtime", reject)
+    with pytest.raises(WindowsExecutorCandidateRejected):
+        audit_windows_executor_candidate(
+            bundle_directory=bundle,
+            expected_architecture="x86_64",
+            forbidden_development_roots=(),
+        )
 
 
 def test_pe_parser_accepts_supported_targets_and_rejects_malformed_headers(
