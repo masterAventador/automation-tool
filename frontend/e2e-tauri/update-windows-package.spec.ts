@@ -3,7 +3,11 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { browser, expect } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import {
+  openSettings,
+  waitForStartup,
+} from "./navigation";
 
 interface UpdateState {
   readonly state: string;
@@ -77,14 +81,14 @@ async function waitForInstalledBinary(): Promise<void> {
 
 describe("H8-22 unsigned Windows NSIS package update acceptance", () => {
   it("drives the requested package scenario through the original App", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
     const scenario = process.env.H822_WINDOWS_SCENARIO;
 
     if (scenario === "optional-decisions") {
       await waitForText("发现新版本 0.2.0");
       await clickEnabledButton("稍后提醒");
       await waitForState("ready", "deferred");
-      await browser.$("li=设置与诊断").click();
+      await openSettings();
       await browser.$("button=检查更新").click();
       await waitForText("发现新版本 0.2.0");
       await clickEnabledButton("跳过此版本");
@@ -125,7 +129,7 @@ describe("H8-22 unsigned Windows NSIS package update acceptance", () => {
       const failed = await waitForState("failed");
       assert.equal(failed.stage, "install");
       assert.equal(failed.code, "installation_failed");
-      await browser.$("li=设置与诊断").click();
+      await openSettings();
       await waitForText("更新当前不可用");
       return;
     }

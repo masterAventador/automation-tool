@@ -3,6 +3,10 @@ import { access, writeFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  openWorkbenchSection,
+  waitForStartup,
+} from "./navigation";
 
 interface Preparation {
   readonly installationId: string;
@@ -29,14 +33,14 @@ async function fileExists(path: string): Promise<boolean> {
 
 describe("B5-16 default browser Profile isolation", () => {
   it("keeps the App-owned headless browser alive for an external process and file audit", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_platform_session_reuse_for_acceptance"),
     )) as Preparation;
     assert.match(preparation.installationId, UUID_V4);
 
-    await browser.$("li=平台状态").click();
-    await expect(await browser.$("h2")).toHaveText("平台状态");
+    await openWorkbenchSection("账号与平台");
+    await expect(await browser.$("h2")).toHaveText("账号与平台");
     await browser.$("button=打开登录处理").click();
     await browser.waitUntil(
       async () => (await browser.$("body").getText()).includes(SCAN_FACT),

@@ -1,0 +1,1367 @@
+{
+  "schemaVersion": 1,
+  "id": "motion-part-usability.v1",
+  "policy": "fail_closed",
+  "source": {
+    "id": "hyperframes",
+    "commit": "71d84ff27f1c2b2828f4fdf9015c3da4157140ee",
+    "tag": "v0.7.68",
+    "registryPath": "registry"
+  },
+  "counts": {
+    "total": 134,
+    "copyLocation": {
+      "dom": 52,
+      "mixed": 42,
+      "script": 28,
+      "none": 12
+    },
+    "batch": {
+      "first": 36,
+      "second": 40,
+      "deferred": 58
+    }
+  },
+  "items": [
+    {
+      "name": "app-showcase",
+      "copyLocation": "dom",
+      "visibleTextNodes": 38,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "apple-money-count",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 1,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "blue-sweater-intro-video",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 30,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "caption-blend-difference",
+      "copyLocation": "none",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "caption-clip-wipe",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "caption-editorial-emphasis",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": true,
+      "batch": "deferred"
+    },
+    {
+      "name": "caption-emoji-pop",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "caption-glitch-rgb",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "caption-gradient-fill",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "caption-highlight",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "caption-kinetic-slam",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": true,
+      "batch": "deferred"
+    },
+    {
+      "name": "caption-matrix-decode",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "caption-neon-accent",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "caption-neon-glow",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "caption-parallax-layers",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": true,
+      "batch": "deferred"
+    },
+    {
+      "name": "caption-particle-burst",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "caption-pill-karaoke",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "caption-texture",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": true,
+      "batch": "deferred"
+    },
+    {
+      "name": "caption-weight-shift",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "chromatic-radial-split",
+      "copyLocation": "dom",
+      "visibleTextNodes": 7,
+      "demoPage": true,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": true,
+      "batch": "deferred"
+    },
+    {
+      "name": "cinematic-zoom",
+      "copyLocation": "dom",
+      "visibleTextNodes": 7,
+      "demoPage": true,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": true,
+      "batch": "deferred"
+    },
+    {
+      "name": "code-3d-extrude",
+      "copyLocation": "none",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "code-diff",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 2,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "code-highlight",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 2,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "code-morph",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 2,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "code-particle-assemble",
+      "copyLocation": "none",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "code-scroll",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 2,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "code-shader-dissolve",
+      "copyLocation": "none",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "code-snippet-apple-terminal-basic",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 12,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "code-snippet-apple-terminal-clear-dark",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 12,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "code-snippet-apple-terminal-clear-light",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 12,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "code-snippet-apple-terminal-grass",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 11,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "code-snippet-apple-terminal-homebrew",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 11,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "code-snippet-apple-terminal-man-page",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 9,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "code-snippet-apple-terminal-novel",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 11,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "code-snippet-apple-terminal-ocean",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 10,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "code-snippet-apple-terminal-pro",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 10,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "code-snippet-apple-terminal-red-sands",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 12,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "code-snippet-apple-terminal-silver-aerogel",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 10,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "code-snippet-apple-terminal-solid-colors",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 10,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "code-snippet-dark-2026",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "code-snippet-dark-modern",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "code-snippet-dark-plus",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "code-snippet-flight",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 2,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "code-snippet-high-contrast",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "code-snippet-high-contrast-light",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "code-snippet-light-2026",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "code-snippet-light-modern",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "code-snippet-light-plus",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "code-snippet-monokai",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "code-snippet-solarized-light",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "code-snippet-visual-studio-dark",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "code-snippet-visual-studio-light",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "code-typing",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 2,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "cross-warp-morph",
+      "copyLocation": "dom",
+      "visibleTextNodes": 7,
+      "demoPage": true,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": true,
+      "batch": "deferred"
+    },
+    {
+      "name": "data-chart",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 5,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": true,
+      "batch": "second"
+    },
+    {
+      "name": "domain-warp-dissolve",
+      "copyLocation": "dom",
+      "visibleTextNodes": 7,
+      "demoPage": true,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": true,
+      "batch": "deferred"
+    },
+    {
+      "name": "flash-through-white",
+      "copyLocation": "dom",
+      "visibleTextNodes": 7,
+      "demoPage": true,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": true,
+      "batch": "deferred"
+    },
+    {
+      "name": "flowchart",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 11,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "flowchart-vertical",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 11,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "glitch",
+      "copyLocation": "dom",
+      "visibleTextNodes": 7,
+      "demoPage": true,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": true,
+      "batch": "deferred"
+    },
+    {
+      "name": "grain-overlay",
+      "copyLocation": "none",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "gravitational-lens",
+      "copyLocation": "dom",
+      "visibleTextNodes": 7,
+      "demoPage": true,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": true,
+      "batch": "deferred"
+    },
+    {
+      "name": "grid-pixelate-wipe",
+      "copyLocation": "none",
+      "visibleTextNodes": 0,
+      "demoPage": true,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "instagram-follow",
+      "copyLocation": "dom",
+      "visibleTextNodes": 5,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "ios26-liquid-glass",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 54,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "light-leak",
+      "copyLocation": "dom",
+      "visibleTextNodes": 7,
+      "demoPage": true,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": true,
+      "batch": "deferred"
+    },
+    {
+      "name": "liquid-glass-context-menu",
+      "copyLocation": "dom",
+      "visibleTextNodes": 12,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "liquid-glass-media-controls",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 7,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "liquid-glass-notification",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 9,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "liquid-glass-widgets",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 14,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "logo-outro",
+      "copyLocation": "dom",
+      "visibleTextNodes": 2,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "lower-third-bild",
+      "copyLocation": "script",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "lt-accent-underline",
+      "copyLocation": "dom",
+      "visibleTextNodes": 2,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "lt-bold-block",
+      "copyLocation": "dom",
+      "visibleTextNodes": 2,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": true,
+      "batch": "first"
+    },
+    {
+      "name": "lt-clean-bar",
+      "copyLocation": "dom",
+      "visibleTextNodes": 2,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "lt-color-block",
+      "copyLocation": "dom",
+      "visibleTextNodes": 2,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "lt-dark-card",
+      "copyLocation": "dom",
+      "visibleTextNodes": 2,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "lt-kicker-name",
+      "copyLocation": "dom",
+      "visibleTextNodes": 2,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": true,
+      "batch": "first"
+    },
+    {
+      "name": "lt-mask-reveal",
+      "copyLocation": "dom",
+      "visibleTextNodes": 2,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "lt-side-rule",
+      "copyLocation": "dom",
+      "visibleTextNodes": 2,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "lt-soft-pill",
+      "copyLocation": "dom",
+      "visibleTextNodes": 2,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "lt-stack-bars",
+      "copyLocation": "dom",
+      "visibleTextNodes": 2,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": true,
+      "batch": "first"
+    },
+    {
+      "name": "macos-notification",
+      "copyLocation": "dom",
+      "visibleTextNodes": 5,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "macos-tahoe-liquid-glass",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 75,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "morph-text",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 5,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "motion-blur",
+      "copyLocation": "none",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "news-ticker",
+      "copyLocation": "dom",
+      "visibleTextNodes": 17,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "north-korea-locked-down",
+      "copyLocation": "dom",
+      "visibleTextNodes": 3,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "nyc-paris-flight",
+      "copyLocation": "dom",
+      "visibleTextNodes": 11,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "parallax-unzoom",
+      "copyLocation": "none",
+      "visibleTextNodes": 0,
+      "demoPage": true,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "parallax-zoom",
+      "copyLocation": "none",
+      "visibleTextNodes": 0,
+      "demoPage": true,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "reddit-post",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 8,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "ridged-burn",
+      "copyLocation": "dom",
+      "visibleTextNodes": 7,
+      "demoPage": true,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": true,
+      "batch": "deferred"
+    },
+    {
+      "name": "ripple-waves",
+      "copyLocation": "dom",
+      "visibleTextNodes": 7,
+      "demoPage": true,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": true,
+      "batch": "deferred"
+    },
+    {
+      "name": "sdf-iris",
+      "copyLocation": "dom",
+      "visibleTextNodes": 7,
+      "demoPage": true,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": true,
+      "batch": "deferred"
+    },
+    {
+      "name": "shimmer-sweep",
+      "copyLocation": "none",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "spain-map",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 5,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "spotify-card",
+      "copyLocation": "dom",
+      "visibleTextNodes": 3,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "swirl-vortex",
+      "copyLocation": "dom",
+      "visibleTextNodes": 7,
+      "demoPage": true,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": true,
+      "batch": "deferred"
+    },
+    {
+      "name": "texture-mask-text",
+      "copyLocation": "none",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "thermal-distortion",
+      "copyLocation": "dom",
+      "visibleTextNodes": 7,
+      "demoPage": true,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": true,
+      "batch": "deferred"
+    },
+    {
+      "name": "tiktok-follow",
+      "copyLocation": "dom",
+      "visibleTextNodes": 5,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "transitions-3d",
+      "copyLocation": "dom",
+      "visibleTextNodes": 8,
+      "demoPage": true,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "transitions-blur",
+      "copyLocation": "dom",
+      "visibleTextNodes": 18,
+      "demoPage": true,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "transitions-cover",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 8,
+      "demoPage": true,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "transitions-destruction",
+      "copyLocation": "dom",
+      "visibleTextNodes": 12,
+      "demoPage": true,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "transitions-dissolve",
+      "copyLocation": "dom",
+      "visibleTextNodes": 21,
+      "demoPage": true,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "transitions-distortion",
+      "copyLocation": "dom",
+      "visibleTextNodes": 16,
+      "demoPage": true,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "transitions-grid",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 10,
+      "demoPage": true,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "transitions-light",
+      "copyLocation": "dom",
+      "visibleTextNodes": 8,
+      "demoPage": true,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "transitions-mechanical",
+      "copyLocation": "dom",
+      "visibleTextNodes": 15,
+      "demoPage": true,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "transitions-other",
+      "copyLocation": "dom",
+      "visibleTextNodes": 18,
+      "demoPage": true,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "transitions-push",
+      "copyLocation": "dom",
+      "visibleTextNodes": 21,
+      "demoPage": true,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "transitions-radial",
+      "copyLocation": "dom",
+      "visibleTextNodes": 8,
+      "demoPage": true,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "transitions-scale",
+      "copyLocation": "dom",
+      "visibleTextNodes": 15,
+      "demoPage": true,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "deferred"
+    },
+    {
+      "name": "ui-3d-reveal",
+      "copyLocation": "dom",
+      "visibleTextNodes": 136,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "us-map",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 5,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "us-map-bubble",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 3,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "us-map-flow",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 3,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "us-map-hex",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 5,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "vfx-iphone-device",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 15,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "vfx-liquid-background",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 49,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "vfx-liquid-glass",
+      "copyLocation": "dom",
+      "visibleTextNodes": 10,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "vfx-magnetic",
+      "copyLocation": "dom",
+      "visibleTextNodes": 19,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "vfx-portal",
+      "copyLocation": "dom",
+      "visibleTextNodes": 45,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "vfx-shatter",
+      "copyLocation": "dom",
+      "visibleTextNodes": 34,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "vfx-text-cursor",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 5,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": true,
+      "batch": "second"
+    },
+    {
+      "name": "vignette",
+      "copyLocation": "none",
+      "visibleTextNodes": 0,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "vpn-youtube-spot",
+      "copyLocation": "dom",
+      "visibleTextNodes": 50,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    },
+    {
+      "name": "whip-pan",
+      "copyLocation": "dom",
+      "visibleTextNodes": 7,
+      "demoPage": true,
+      "lengthSensitive": true,
+      "autoFitsFontSize": true,
+      "latinDisplayDesign": true,
+      "batch": "deferred"
+    },
+    {
+      "name": "world-map",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 5,
+      "demoPage": false,
+      "lengthSensitive": true,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "x-post",
+      "copyLocation": "mixed",
+      "visibleTextNodes": 9,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "second"
+    },
+    {
+      "name": "yt-lower-third",
+      "copyLocation": "dom",
+      "visibleTextNodes": 4,
+      "demoPage": false,
+      "lengthSensitive": false,
+      "autoFitsFontSize": false,
+      "latinDisplayDesign": false,
+      "batch": "first"
+    }
+  ]
+}

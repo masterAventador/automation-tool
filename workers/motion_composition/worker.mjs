@@ -25,11 +25,32 @@ const CHROMIUM_MAJOR_MAXIMUM = 999;
 const RENDER_TIMEOUT_SECONDS_MINIMUM = 1;
 const RENDER_TIMEOUT_SECONDS_MAXIMUM = 60;
 const CHROMIUM_VERSION_PATTERN = /(?:^|\s|\/)(\d+)\.\d+\.\d+\.\d+/;
-// The fixed composition viewport every captured frame must match exactly.
+// The viewport travels with the render request, because more than one kind of
+// composition is rendered now. `composition_template` draws on a 640x360 stage
+// its whole type scale is written for; a catalog part is an independent
+// composition that declares its own — 105 of the frozen catalog's parts are
+// 1920x1080, three are 1080x1920 portrait and one is 1440x2560. Rendering a
+// part on the template's stage captures the top-left corner of it, which is the
+// incident `contracts/video/motion-render-canvas.v1.json` records under
+// `rationale.problem`: a valid MP4 that was a still image, invisible to both
+// the authoring gates and this sandbox because neither knew the other's number.
+//
+// What stays fixed here are the bounds. They mirror `requestedCanvas` in that
+// contract; `frontend/tests/motion-render-canvas-per-render.test.mjs` is what
+// keeps the two from drifting.
+//
 // The created CDP target does not inherit `--window-size`, so the render
-// session also forces these metrics through the DevTools protocol.
-const RENDER_VIEWPORT_WIDTH = 640;
-const RENDER_VIEWPORT_HEIGHT = 360;
+// session also forces the requested metrics through the DevTools protocol.
+const CANVAS_WIDTH_MINIMUM = 320;
+const CANVAS_WIDTH_MAXIMUM = 2560;
+const CANVAS_HEIGHT_MINIMUM = 320;
+const CANVAS_HEIGHT_MAXIMUM = 2560;
+const CANVAS_DEVICE_SCALE_FACTOR_MINIMUM = 1;
+const CANVAS_DEVICE_SCALE_FACTOR_MAXIMUM = 3;
+// Output pixels, not CSS pixels: a captured PNG costs what it measures, and the
+// per-frame budget in `motion-render-sandbox-budget.v1.json` is written against
+// that. 1920x1080 at factor 1 and 640x360 at factor 2 both sit inside it.
+const CANVAS_OUTPUT_PIXELS_MAXIMUM = 3686400;
 const MAX_PROTOCOL_RESPONSE_BYTES = 64 * 1024;
 const SANDBOX_FRAMES_MAXIMUM = 600;
 // Wall clock is the stall guard: a hung render is killed at this many seconds.
@@ -120,6 +141,8 @@ function frozenAnimationsExpression(timeMilliseconds) {
   })()`;
 }
 const RESOURCE_MONITOR_INTERVAL_MS = 300;
+/** Rounding slack when comparing a declared window against a declared timeline. */
+const FRAME_TIME_TOLERANCE_SECONDS = 0.001;
 const SANDBOX_FAILURES = {
   cancelled: "render_cancelled",
   mismatch: "chromium_major_mismatch",
@@ -127,6 +150,7 @@ const SANDBOX_FAILURES = {
   protocol: "render_protocol_invalid",
   resource: "render_resource_exceeded",
   static: "render_static_frames",
+  window: "render_window_outside_timeline",
   timeout: "render_timeout",
   unusable: "render_browser_unusable",
 };
@@ -320,11 +344,45 @@ function boundedInteger(value, minimum, maximum) {
   return Number.isInteger(value) && value >= minimum && value <= maximum;
 }
 
+function validCanvas(value) {
+  if (!hasExactKeys(value, ["deviceScaleFactor", "height", "width"])) return false;
+  if (!boundedInteger(value.width, CANVAS_WIDTH_MINIMUM, CANVAS_WIDTH_MAXIMUM)) return false;
+  if (!boundedInteger(value.height, CANVAS_HEIGHT_MINIMUM, CANVAS_HEIGHT_MAXIMUM)) return false;
+  if (!boundedInteger(
+    value.deviceScaleFactor,
+    CANVAS_DEVICE_SCALE_FACTOR_MINIMUM,
+    CANVAS_DEVICE_SCALE_FACTOR_MAXIMUM,
+  )) return false;
+  // The product is what a frame costs. Checking the sides alone would admit
+  // 2560x2560 at factor 3, which is 59 megapixels a frame.
+  const factor = value.deviceScaleFactor;
+  return value.width * factor * value.height * factor <= CANVAS_OUTPUT_PIXELS_MAXIMUM;
+}
+
+
 function validSandboxSpec(value) {
   if (!hasExactKeys(value, [
-    "allowedAssets", "cancelMarker", "entryHtml", "frameCount", "maxCpuSeconds",
-    "maxDurationSeconds", "maxMemoryMegabytes", "maxOutputBytes", "workspace",
+    "allowedAssets", "canvas", "cancelMarker", "entryHtml", "frameCount",
+    "maxCpuSeconds", "maxDurationSeconds", "maxMemoryMegabytes", "maxOutputBytes",
+    "sourceEndMillis", "sourceStartMillis", "workspace",
   ])) return false;
+  // Which stretch of the entry document's own timeline this render covers.
+  // Required, not optional: the rule this replaced — spread the page's whole
+  // timeline over the frames asked for — is right for a film captured in one
+  // pass and silently wrong for a film whose shots share one document, and a
+  // caller that omits the window would get exactly that silence back.
+  //
+  // Whole milliseconds rather than seconds, because the command's HMAC binds to
+  // a canonical JSON that three languages have to produce byte for byte, and a
+  // float does not survive that: Python writes 0.0 where JSON.stringify writes
+  // 0, the proof stops matching and the render command is dropped without a
+  // word. Every other number in this spec is an integer for the same reason.
+  if (
+    !boundedInteger(value.sourceStartMillis, 0, SANDBOX_SECONDS_MAXIMUM * 1000)
+    || !boundedInteger(value.sourceEndMillis, 1, SANDBOX_SECONDS_MAXIMUM * 1000)
+    || value.sourceEndMillis <= value.sourceStartMillis
+  ) return false;
+  if (!validCanvas(value.canvas)) return false;
   if (typeof value.workspace !== "string" || !isAbsolute(value.workspace)) return false;
   if (!validSandboxRelativePath(value.entryHtml)) return false;
   // This Worker holds no cancellation name of its own: the caller says which
@@ -604,6 +662,7 @@ async function renderVerify(renderBrowser, jobId) {
         "--use-mock-keychain",
         "--password-store=basic",
         "--disable-gpu",
+        "--enable-unsafe-swiftshader",
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-component-update",
@@ -823,6 +882,8 @@ class SandboxCdpPipe {
  * memory and output-byte budgets, and process-group kill on every exit.
  */
 function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environment) {
+  // Validated by `validCanvas` before this runs.
+  const canvas = spec.canvas;
   return new Promise((resolve) => {
     let child;
     try {
@@ -832,6 +893,12 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         "--use-mock-keychain",
         "--password-store=basic",
         "--disable-gpu",
+        // Without this, a GPU-less Chromium 149 has no WebGL at all: the
+        // SwiftShader software fallback is refused, a shader composition takes
+        // its no-GL branch and renders one static page, and the static-frame
+        // gate below refuses the job. SwiftShader keeps rendering on the CPU,
+        // so the byte-identical-frames requirement above still holds.
+        "--enable-unsafe-swiftshader",
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-component-update",
@@ -857,7 +924,7 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         "--proxy-bypass-list=<-loopback>",
         `--user-data-dir=${join(jobDirectory, "profile")}`,
         `--crash-dumps-dir=${join(jobDirectory, "crashes")}`,
-        `--window-size=${RENDER_VIEWPORT_WIDTH},${RENDER_VIEWPORT_HEIGHT}`,
+        `--window-size=${canvas.width},${canvas.height}`,
         "about:blank",
       ], {
         detached: true,
@@ -1032,9 +1099,9 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
       }
       await installInterception(sessionId);
       const metrics = await pipe.send("Emulation.setDeviceMetricsOverride", {
-        width: RENDER_VIEWPORT_WIDTH,
-        height: RENDER_VIEWPORT_HEIGHT,
-        deviceScaleFactor: 1,
+        width: canvas.width,
+        height: canvas.height,
+        deviceScaleFactor: canvas.deviceScaleFactor,
         mobile: false,
       }, sessionId);
       if (metrics?.error !== undefined) {
@@ -1070,11 +1137,21 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         returnByValue: true,
       }, sessionId);
       const timelineMetadata = timelineProbe?.result?.result?.value;
+      // Two independent facts, kept separate on purpose. Whether the document
+      // can be seeked depends only on it registering timelines; whether a
+      // requested window can be *validated* depends on the document declaring
+      // its own length. Conflating them skipped seeking entirely for the 31
+      // catalog documents that register a timeline but carry no
+      // `data-duration`, so their typing animations were captured as
+      // identical stills and the static gate below refused them (BM-16,
+      // first seen on `code-snippet-apple-terminal-basic`).
+      const seekableTimelineCount = Number.isInteger(timelineMetadata?.timelineCount)
+        ? timelineMetadata.timelineCount
+        : 0;
       const seekableDuration = (
         Number.isFinite(timelineMetadata?.duration)
         && timelineMetadata.duration > 0
-        && Number.isInteger(timelineMetadata?.timelineCount)
-        && timelineMetadata.timelineCount > 0
+        && seekableTimelineCount > 0
       ) ? timelineMetadata.duration : 0;
       // Warm up before the first kept frame. A composition's first paint
       // triggers lazy work — image decode, canvas and SVG initialisation —
@@ -1123,6 +1200,24 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         finish({ status: "timeout" });
         return;
       }
+      // This shot's own stretch of the timeline, resolved once — it does not
+      // change per frame.
+      //
+      // A window the document cannot satisfy is refused rather than narrowed.
+      // Clamping looks harmless and is not: a window of [5s, 9s] against a six
+      // second document moves for a quarter of its frames and then holds, so
+      // `sawMovement` is set by the early ones, the frame count is right, and
+      // the render reports complete over a shot that is three quarters still.
+      // Every gate downstream stays green. That is the same "reasonable default
+      // downstream" this whole line keeps being bitten by — the Worker is the
+      // only layer that knows `seekableDuration`, so it is the only one that
+      // can say no.
+      const windowStart = spec.sourceStartMillis / 1000;
+      const windowEnd = spec.sourceEndMillis / 1000;
+      if (seekableDuration > 0 && windowEnd > seekableDuration + FRAME_TIME_TOLERANCE_SECONDS) {
+        finish({ status: "window" });
+        return;
+      }
       for (let index = 1; index <= spec.frameCount; index += 1) {
         try {
           await access(join(resolved.workspaceReal, spec.cancelMarker));
@@ -1131,8 +1226,8 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         } catch {
           // The cancellation marker the caller named is absent; continue.
         }
-        if (seekableDuration > 0) {
-          const time = seekableDuration * (index - 1) / spec.frameCount;
+        if (seekableTimelineCount > 0) {
+          const time = windowStart + (windowEnd - windowStart) * (index - 1) / spec.frameCount;
           const seek = await pipe.send("Runtime.evaluate", {
             expression: `(() => {
               const time = ${JSON.stringify(time)};

@@ -60,6 +60,15 @@ enum ControlPlaneOperation {
     RotateDeviceCredential,
     RevokeDeviceCredential,
     ExchangeDeviceSession,
+    FindEditingMaterialByDigest,
+    RegisterEditingMaterial,
+    GetEditingMaterial,
+    UpdateEditingMaterialDescription,
+    ListEditingProjects,
+    CreateEditingProject,
+    GetEditingProject,
+    GetEditingProjectTimeline,
+    SaveEditingProjectTimeline,
     CreateTask,
     StartTaskDiscovery,
     GetTaskTargetPreview,
@@ -90,6 +99,11 @@ impl ControlPlaneOperation {
             | Self::GetWorkbenchMetrics
             | Self::GetDouyinPlatformSession
             | Self::ListAccountInstallations
+            | Self::FindEditingMaterialByDigest
+            | Self::GetEditingMaterial
+            | Self::ListEditingProjects
+            | Self::GetEditingProject
+            | Self::GetEditingProjectTimeline
             | Self::GetTaskTargetPreview
             | Self::ListTasks
             | Self::GetTask
@@ -103,6 +117,8 @@ impl ControlPlaneOperation {
             | Self::RevokeDeviceCredential
             | Self::ExchangeDeviceSession
             | Self::PrepareDouyinPlatformSessionLogout
+            | Self::RegisterEditingMaterial
+            | Self::CreateEditingProject
             | Self::CreateTask
             | Self::StartTaskDiscovery
             | Self::ConfirmTaskTargetPreview
@@ -114,7 +130,9 @@ impl ControlPlaneOperation {
             | Self::RefreshAccountSession
             | Self::ChangeAccountPassword
             | Self::RecoverAccountPassword => "POST",
-            Self::ReplaceTaskTargetExclusions => "PUT",
+            Self::UpdateEditingMaterialDescription
+            | Self::SaveEditingProjectTimeline
+            | Self::ReplaceTaskTargetExclusions => "PUT",
             Self::LogoutAccountSession | Self::RevokeAccountInstallation => "DELETE",
         }
     }
@@ -143,6 +161,18 @@ impl ControlPlaneOperation {
             Self::RotateDeviceCredential => "/api/v1/device-credentials/rotations",
             Self::RevokeDeviceCredential => "/api/v1/device-credentials/revocations",
             Self::ExchangeDeviceSession => "/api/v1/device-sessions",
+            Self::FindEditingMaterialByDigest | Self::RegisterEditingMaterial => {
+                "/api/v1/editing-materials"
+            }
+            Self::GetEditingMaterial => "/api/v1/editing-materials/{material_id}",
+            Self::UpdateEditingMaterialDescription => {
+                "/api/v1/editing-materials/{material_id}/description"
+            }
+            Self::ListEditingProjects | Self::CreateEditingProject => "/api/v1/editing-projects",
+            Self::GetEditingProject => "/api/v1/editing-projects/{project_id}",
+            Self::GetEditingProjectTimeline | Self::SaveEditingProjectTimeline => {
+                "/api/v1/editing-projects/{project_id}/timeline"
+            }
             Self::CreateTask => "/api/v1/tasks",
             Self::StartTaskDiscovery => "/api/v1/tasks/{task_id}/discoveries",
             Self::GetTaskTargetPreview => "/api/v1/tasks/{task_id}/target-preview",
@@ -176,6 +206,13 @@ impl ControlPlaneOperation {
             | Self::GetWorkbenchStatus
             | Self::GetWorkbenchMetrics
             | Self::GetDouyinPlatformSession
+            | Self::FindEditingMaterialByDigest
+            | Self::GetEditingMaterial
+            | Self::UpdateEditingMaterialDescription
+            | Self::ListEditingProjects
+            | Self::GetEditingProject
+            | Self::GetEditingProjectTimeline
+            | Self::SaveEditingProjectTimeline
             | Self::GetTaskTargetPreview
             | Self::ReplaceTaskTargetExclusions
             | Self::PrepareDouyinPlatformSessionLogout
@@ -192,6 +229,8 @@ impl ControlPlaneOperation {
             | Self::CompleteAccountInstallationBinding
             | Self::RotateDeviceCredential
             | Self::ExchangeDeviceSession
+            | Self::RegisterEditingMaterial
+            | Self::CreateEditingProject
             | Self::CreateTask
             | Self::LoginAccountSession
             | Self::RefreshAccountSession => 201,
@@ -4011,6 +4050,60 @@ mod tests {
                 201,
             ),
             (
+                ControlPlaneOperation::FindEditingMaterialByDigest,
+                "GET",
+                "/api/v1/editing-materials",
+                200,
+            ),
+            (
+                ControlPlaneOperation::RegisterEditingMaterial,
+                "POST",
+                "/api/v1/editing-materials",
+                201,
+            ),
+            (
+                ControlPlaneOperation::GetEditingMaterial,
+                "GET",
+                "/api/v1/editing-materials/{material_id}",
+                200,
+            ),
+            (
+                ControlPlaneOperation::UpdateEditingMaterialDescription,
+                "PUT",
+                "/api/v1/editing-materials/{material_id}/description",
+                200,
+            ),
+            (
+                ControlPlaneOperation::ListEditingProjects,
+                "GET",
+                "/api/v1/editing-projects",
+                200,
+            ),
+            (
+                ControlPlaneOperation::CreateEditingProject,
+                "POST",
+                "/api/v1/editing-projects",
+                201,
+            ),
+            (
+                ControlPlaneOperation::GetEditingProject,
+                "GET",
+                "/api/v1/editing-projects/{project_id}",
+                200,
+            ),
+            (
+                ControlPlaneOperation::GetEditingProjectTimeline,
+                "GET",
+                "/api/v1/editing-projects/{project_id}/timeline",
+                200,
+            ),
+            (
+                ControlPlaneOperation::SaveEditingProjectTimeline,
+                "PUT",
+                "/api/v1/editing-projects/{project_id}/timeline",
+                200,
+            ),
+            (
                 ControlPlaneOperation::CreateTask,
                 "POST",
                 "/api/v1/tasks",
@@ -4187,6 +4280,42 @@ mod tests {
             (
                 ControlPlaneOperation::ExchangeDeviceSession,
                 "exchangeDeviceSession",
+            ),
+            (
+                ControlPlaneOperation::FindEditingMaterialByDigest,
+                "findEditingMaterialByDigest",
+            ),
+            (
+                ControlPlaneOperation::RegisterEditingMaterial,
+                "registerEditingMaterial",
+            ),
+            (
+                ControlPlaneOperation::GetEditingMaterial,
+                "getEditingMaterial",
+            ),
+            (
+                ControlPlaneOperation::UpdateEditingMaterialDescription,
+                "updateEditingMaterialDescription",
+            ),
+            (
+                ControlPlaneOperation::ListEditingProjects,
+                "listEditingProjects",
+            ),
+            (
+                ControlPlaneOperation::CreateEditingProject,
+                "createEditingProject",
+            ),
+            (
+                ControlPlaneOperation::GetEditingProject,
+                "getEditingProject",
+            ),
+            (
+                ControlPlaneOperation::GetEditingProjectTimeline,
+                "getEditingProjectTimeline",
+            ),
+            (
+                ControlPlaneOperation::SaveEditingProjectTimeline,
+                "saveEditingProjectTimeline",
             ),
             (ControlPlaneOperation::CreateTask, "createTask"),
             (

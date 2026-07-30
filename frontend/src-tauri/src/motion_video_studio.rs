@@ -27,6 +27,8 @@ const MAX_SUBJECT_CHARS: usize = 80;
 const MAX_LOGO_BYTES: usize = 4 * 1024 * 1024;
 const MILLIS_PER_SECOND: u32 = 1000;
 const STYLE_CONTRACT: &str = include_str!("../../../contracts/video/motion-style-freeze.v1.json");
+const MODEL_CALL_CONTRACT: &str =
+    include_str!("../../../contracts/video/motion-authoring-model-call.v1.json");
 const DURATION_CONTRACT: &str =
     include_str!("../../../contracts/video/motion-storyboard-duration.v1.json");
 const BRIEF_CONTRACT: &str =
@@ -37,6 +39,8 @@ const OFFLINE_MOTION_DEPENDENCIES: &str =
     include_str!("../../../contracts/video/offline-motion-dependencies.v1.json");
 const CANCEL_MARKER_CONTRACT: &str =
     include_str!("../../../contracts/video/motion-render-cancel-marker.v1.json");
+const RENDER_CANVAS_CONTRACT: &str =
+    include_str!("../../../contracts/video/motion-render-canvas.v1.json");
 
 /// The file whose appearance in a RenderJob workspace means "stop".
 ///
@@ -70,6 +74,20 @@ pub fn cancel_marker_file_name() -> Result<&'static str, MotionVideoStudioError>
 /// the worker asset root. The authoring prompt names this exact path, so it is
 /// declared once here and never spelled out again.
 pub const AUTHORING_RUNTIME_ASSET: &str = "runtime/gsap.min.js";
+/// The stage `composition_template` draws on, and the factor its output is
+/// rasterised at.
+///
+/// Declared here rather than passed in: every type and spacing rule in that
+/// template is written for 640x360, so this pair is a property of the template
+/// and not of a request. A catalog part carries its own stage instead — see
+/// `VideoWorkerRenderCanvas`. Mirrors `width`/`height`/`deviceScaleFactor` in
+/// `contracts/video/motion-render-canvas.v1.json`.
+pub const TEMPLATE_CANVAS_WIDTH: u32 = 640;
+pub const TEMPLATE_CANVAS_HEIGHT: u32 = 360;
+pub const TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR: u32 = 2;
+/// The framing the fixed template draws, which it offers no choice about.
+pub const TEMPLATE_ASPECT_RATIO: &str = "16:9";
+
 /// The package the locked catalog calls this runtime.
 const AUTHORING_RUNTIME_PACKAGE: &str = "gsap";
 /// The largest runtime this seed will read. The locked build is ~72 KB; a file
@@ -363,6 +381,31 @@ pub struct MotionVideoBriefRequest {
     aspect_ratio: String,
     duration_seconds: u32,
     language: String,
+    /// Whether the video-creation model reasons before it answers.
+    ///
+    /// Per request rather than per installation: turning it off saves about 31
+    /// seconds of model time, and whether that is worth paying depends on
+    /// whether this particular film is a rehearsal or a delivery.
+    ///
+    /// Required, with no serde default. This App ships its own front end, so a
+    /// request missing this field is not an older caller — it is a caller that
+    /// forgot, and a default here would turn "the operator switched it off"
+    /// into "the film quietly ran with it on". That is the shape this line has
+    /// been bitten by seven times: a value crosses a boundary, something
+    /// downstream has a reasonable fallback, and the product silently does less
+    /// than it was told to.
+    model_thinking: bool,
+}
+
+/// Reasoning stays on unless the operator turns it off — read from the contract
+/// both sides share rather than written here, because the sentence under the
+/// switch is composed from the same file.
+pub fn thinking_default() -> Result<bool, MotionVideoStudioError> {
+    let contract: serde_json::Value =
+        serde_json::from_str(MODEL_CALL_CONTRACT).map_err(|_| draft_invalid())?;
+    contract["thinking"]["defaultEnabled"]
+        .as_bool()
+        .ok_or_else(draft_invalid)
 }
 
 impl MotionVideoBriefRequest {
@@ -372,12 +415,29 @@ impl MotionVideoBriefRequest {
         duration_seconds: u32,
         language: String,
     ) -> Result<Self, MotionVideoStudioError> {
+        Self::one_sentence_with_thinking(
+            brief,
+            aspect_ratio,
+            duration_seconds,
+            language,
+            thinking_default()?,
+        )
+    }
+
+    pub fn one_sentence_with_thinking(
+        brief: String,
+        aspect_ratio: String,
+        duration_seconds: u32,
+        language: String,
+        model_thinking: bool,
+    ) -> Result<Self, MotionVideoStudioError> {
         let value = Self {
             creation_mode: MOTION_BRIEF_CREATION_MODE.to_owned(),
             brief,
             aspect_ratio,
             duration_seconds,
             language,
+            model_thinking,
         };
         value.validate()?;
         Ok(value)
@@ -399,6 +459,10 @@ impl MotionVideoBriefRequest {
         &self.language
     }
 
+    pub const fn model_thinking(&self) -> bool {
+        self.model_thinking
+    }
+
     /// Judged against the two contracts the agent reads, so a brief this side
     /// accepts is one the agent will also accept — the round trip through a
     /// subprocess is not where a user should discover a bound.
@@ -415,7 +479,9 @@ impl MotionVideoBriefRequest {
                 .any(|value| value == &self.aspect_ratio)
             || !limits.languages.iter().any(|value| value == &self.language)
             || self.duration_seconds == 0
-            || self.duration_seconds > duration.total_seconds_maximum()
+            // The one-sentence entry's own ceiling: this path is one render per
+            // shot, so the sandbox's single-capture limit is not what bounds it.
+            || self.duration_seconds > duration.brief_seconds_maximum()
         {
             return Err(draft_invalid());
         }
@@ -468,6 +534,9 @@ pub struct MotionDurationLimits {
     seconds_per_beat_minimum: u32,
     seconds_per_beat_maximum: u32,
     total_seconds_maximum: u32,
+    brief_seconds_maximum: u32,
+    brief_beat_count_maximum: u32,
+    brief_seconds_per_beat_minimum: u32,
     render_wall_seconds_base: u32,
     render_wall_millis_per_frame: u32,
     render_cpu_parallelism: u32,
@@ -498,6 +567,26 @@ impl MotionDurationLimits {
         self.total_seconds_maximum
     }
 
+    /// The longest film the one-sentence entry lets the operator ask for.
+    ///
+    /// Larger than `total_seconds_maximum` because the two answer different
+    /// questions: that one is the sandbox's single-capture limit and still
+    /// binds the fixed-template path, while a one-sentence film is one render
+    /// per shot and joined, so its ceiling is a product decision.
+    pub const fn brief_seconds_maximum(&self) -> u32 {
+        self.brief_seconds_maximum
+    }
+
+    /// The most shots a one-sentence storyboard may be cut into.
+    pub const fn brief_beat_count_maximum(&self) -> u32 {
+        self.brief_beat_count_maximum
+    }
+
+    /// The shortest shot the model is ever told to aim for.
+    pub const fn brief_seconds_per_beat_minimum(&self) -> u32 {
+        self.brief_seconds_per_beat_minimum
+    }
+
     pub const fn frame_count_maximum(&self) -> u32 {
         self.total_seconds_maximum * self.frames_per_second
     }
@@ -512,7 +601,12 @@ impl MotionDurationLimits {
         &self,
         duration_seconds: u32,
     ) -> Result<MotionStoryboardPlan, MotionVideoStudioError> {
-        if duration_seconds == 0 || duration_seconds > self.total_seconds_maximum {
+        // The brief ceiling, not the template one. Asking `total_seconds_maximum`
+        // here was the half of the raise that was missed: the request validator
+        // accepted 60 seconds and this refused it, so the operator waited out
+        // the whole authoring pass — minutes — to be told his film could not be
+        // made, at a length the form had offered him.
+        if duration_seconds == 0 || duration_seconds > self.brief_seconds_maximum {
             return Err(draft_invalid());
         }
         Ok(MotionStoryboardPlan {
@@ -582,6 +676,9 @@ struct DurationContract {
     seconds_per_beat_maximum: u32,
     seconds_per_beat_default: u32,
     total_seconds_maximum: u32,
+    brief_seconds_maximum: u32,
+    brief_beat_count_maximum: u32,
+    brief_seconds_per_beat_minimum: u32,
     render_wall_seconds_base: u32,
     render_wall_millis_per_frame: u32,
     render_cpu_parallelism: u32,
@@ -626,7 +723,29 @@ pub fn duration_limits() -> Result<MotionDurationLimits, MotionVideoStudioError>
             < contract.beat_count_minimum * contract.seconds_per_beat_minimum
         // A total the render sandbox cannot capture would turn a legal user
         // configuration into an opaque configuration error at submit time.
+        // Still asked of `total_seconds_maximum` and not of the brief ceiling:
+        // the fixed-template path captures its whole film in one pass, so this
+        // is its real limit. A one-sentence film is one render per shot and is
+        // bounded per shot instead, which is what let its ceiling be raised to
+        // something an operator would choose rather than something the sandbox
+        // imposes.
         || frame_count_maximum > crate::local_video_orchestrator::SANDBOX_FRAMES_MAXIMUM
+        // The choice the operator is offered may not be shorter than the one
+        // the template path already allows, and a shot still has to fit one
+        // capture — that bound lives on the segment and is enforced where
+        // segments are accepted.
+        || contract.brief_seconds_maximum < contract.total_seconds_maximum
+        // A film at the brief ceiling has to be cuttable into shots this side
+        // can actually render: at most `briefBeatCountMaximum` of them, each
+        // inside one capture. Without this the form could offer a length no
+        // storyboard could legally express, and the refusal would arrive
+        // minutes later with the authoring pass already paid for.
+        || contract.brief_beat_count_maximum == 0
+        || contract.brief_seconds_per_beat_minimum == 0
+        || contract.brief_seconds_maximum
+            > contract
+                .brief_beat_count_maximum
+                .saturating_mul(frame_count_maximum / contract.frames_per_second)
     {
         return Err(draft_invalid());
     }
@@ -637,6 +756,9 @@ pub fn duration_limits() -> Result<MotionDurationLimits, MotionVideoStudioError>
         seconds_per_beat_minimum: contract.seconds_per_beat_minimum,
         seconds_per_beat_maximum: contract.seconds_per_beat_maximum,
         total_seconds_maximum: contract.total_seconds_maximum,
+        brief_seconds_maximum: contract.brief_seconds_maximum,
+        brief_beat_count_maximum: contract.brief_beat_count_maximum,
+        brief_seconds_per_beat_minimum: contract.brief_seconds_per_beat_minimum,
         render_wall_seconds_base: contract.render_wall_seconds_base,
         render_wall_millis_per_frame: contract.render_wall_millis_per_frame,
         render_cpu_parallelism: contract.render_cpu_parallelism,
@@ -714,10 +836,83 @@ impl MotionRenderJobSnapshot {
     }
 }
 
+/// One render inside a film, checked and ready for the sandbox.
+///
+/// A film is a list of these because the catalog's parts do not share a stage:
+/// most declare 1920x1080, three declare 1080x1920, one 1440x2560, and the
+/// built-in template draws on 640x360 at factor 2. One render per shot is what
+/// lets each be itself; bringing them onto one canvas is the join's job, after
+/// each has been captured on its own.
+#[derive(Clone, Debug)]
+pub struct MotionRenderSegment {
+    entry_html: String,
+    allowed_assets: Vec<String>,
+    width: u32,
+    height: u32,
+    device_scale_factor: u32,
+    frame_count: u32,
+    source_start_millis: u32,
+    source_end_millis: u32,
+    // PC-26: the workspace-relative narration for this shot, verified real at
+    // acceptance. None on a silent shot; the mix skips films where every shot
+    // is None, which keeps the pre-narration pipeline byte-identical.
+    narration_audio: Option<String>,
+}
+
+impl MotionRenderSegment {
+    pub fn entry_html(&self) -> &str {
+        &self.entry_html
+    }
+
+    pub fn allowed_assets(&self) -> &[String] {
+        &self.allowed_assets
+    }
+
+    pub const fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub const fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub const fn device_scale_factor(&self) -> u32 {
+        self.device_scale_factor
+    }
+
+    /// Where on the loaded document's own timeline this render starts.
+    ///
+    /// Two template shots load the same composition and differ by nothing else.
+    /// Without this the Worker's only rule was "spread the page's whole
+    /// timeline over the frames asked for", so each of them re-rendered the
+    /// entire film — the kept artifact of 2026-07-28 is twelve seconds made of
+    /// two identical six second halves, each at double speed, with the codec,
+    /// the canvas, the frame count, the duration and the still-image gate all
+    /// green over it.
+    pub const fn source_start_millis(&self) -> u32 {
+        self.source_start_millis
+    }
+
+    /// Where that stretch ends. Always greater than the start.
+    pub const fn source_end_millis(&self) -> u32 {
+        self.source_end_millis
+    }
+
+    pub const fn frame_count(&self) -> u32 {
+        self.frame_count
+    }
+
+    pub fn narration_audio(&self) -> Option<&str> {
+        self.narration_audio.as_deref()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct PreparedMotionRenderJob {
     render_job_id: Uuid,
     allowed_assets: Vec<String>,
+    segments: Vec<MotionRenderSegment>,
+    film_canvas: MotionFilmCanvas,
     plan: MotionStoryboardPlan,
 }
 
@@ -740,6 +935,34 @@ impl PreparedMotionRenderJob {
 
     pub fn allowed_assets(&self) -> &[String] {
         &self.allowed_assets
+    }
+
+    pub fn segments(&self) -> &[MotionRenderSegment] {
+        &self.segments
+    }
+
+    /// The canvas this film is delivered on, settled where the framing is known.
+    ///
+    /// Resolved at prepare time rather than at render time: the render thread
+    /// sees a list of shots and a workspace, and has no way back to the framing
+    /// the user picked.
+    pub const fn film_canvas(&self) -> MotionFilmCanvas {
+        self.film_canvas
+    }
+
+    /// How many frames the finished film carries: the sum of its shots.
+    ///
+    /// Deliberately not the brief's `durationSeconds` x fps, which is what
+    /// `frame_count` reports. A shot runs for whichever is longer, the narrated
+    /// line or the part's own motion, so the requested length steers how much
+    /// the storyboard tries to say rather than where the film is cut off — the
+    /// product owner's correction of 2026-07-27, and the reason the timeline
+    /// plans a film as the sum of its shots.
+    pub fn film_frame_count(&self) -> u32 {
+        self.segments
+            .iter()
+            .map(MotionRenderSegment::frame_count)
+            .sum()
     }
 }
 
@@ -913,6 +1136,27 @@ fn prepare_inside_workspace(
     save_snapshot(store, workspace, &snapshot)?;
     Ok(PreparedMotionRenderJob {
         render_job_id: workspace.job_id(),
+        // One shot, on the template's own stage. Stated rather than left empty
+        // so the render loop has a single shape to walk: a film of one segment
+        // and a film of nine differ in length, not in kind.
+        segments: vec![MotionRenderSegment {
+            entry_html: MOTION_COMPOSITION_FILE.to_owned(),
+            allowed_assets: allowed_assets.clone(),
+            width: TEMPLATE_CANVAS_WIDTH,
+            height: TEMPLATE_CANVAS_HEIGHT,
+            device_scale_factor: TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
+            frame_count: plan.frame_count(),
+            // The whole composition, because this path captures the whole film
+            // in one pass. The window only has work to do where several shots
+            // load one document.
+            source_start_millis: 0,
+            source_end_millis: plan.beat_count() * plan.seconds_per_beat() * 1000,
+            // The fixed-template path predates narration and stays silent.
+            narration_audio: None,
+        }],
+        // The fixed template draws a 16:9 stage and offers no choice of
+        // framing, so its film is delivered on the 16:9 canvas.
+        film_canvas: film_canvas(TEMPLATE_ASPECT_RATIO)?,
         allowed_assets,
         plan,
     })
@@ -999,6 +1243,40 @@ struct AuthoredCompositionAnswer {
     frames_per_second: u32,
     duration_seconds: u32,
     aspect_ratio: String,
+    /// The renders this film is made of, one per shot.
+    ///
+    /// Required rather than optional. Accepting an answer without it and
+    /// falling back to the single composition is exactly the silence PC-04 was
+    /// about: the model chose parts for a year and the choice reached nothing,
+    /// because every layer downstream had a reasonable default. The Executor
+    /// ships inside this App, so there is no older child to be lenient towards.
+    segments: Vec<RenderSegmentAnswer>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RenderSegmentAnswer {
+    entry_html: String,
+    allowed_assets: Vec<String>,
+    canvas: RenderSegmentCanvasAnswer,
+    frame_count: u32,
+    source_start_millis: u32,
+    source_end_millis: u32,
+    // PC-26: which narration belongs to this shot and how long it really is.
+    // Optional as a pair — a silent film's answer carries neither, and the
+    // child only writes them together.
+    #[serde(default)]
+    narration_audio: Option<String>,
+    #[serde(default)]
+    narration_seconds: Option<f64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RenderSegmentCanvasAnswer {
+    width: u32,
+    height: u32,
+    device_scale_factor: u32,
 }
 
 /// The name the agent gives a run it completed.
@@ -1255,21 +1533,7 @@ pub fn accept_authored_render_job(
     }
     let mut allowed_assets = Vec::new();
     for asset in &answer.allowed_assets {
-        // The sandbox resolves these against the worker asset root, so an
-        // absolute path or a parent traversal would point outside the
-        // workspace the App bounds and eventually deletes.
-        if asset.is_empty()
-            || asset.len() > 256
-            || asset.starts_with('/')
-            || asset.contains('\\')
-            || Path::new(asset)
-                .components()
-                .any(|component| !matches!(component, std::path::Component::Normal(_)))
-            || !work.join(asset).is_file()
-        {
-            return Err(authoring_answer_invalid());
-        }
-        allowed_assets.push(asset.clone());
+        allowed_assets.push(workspace_relative_file(&work, asset)?);
     }
     if !allowed_assets
         .iter()
@@ -1277,6 +1541,7 @@ pub fn accept_authored_render_job(
     {
         return Err(authoring_answer_invalid());
     }
+    let segments = accepted_segments(&work, &answer.segments, plan.frames_per_second())?;
     let snapshot = MotionRenderJobSnapshot {
         render_job_id: workspace.job_id(),
         revision: 1,
@@ -1292,8 +1557,113 @@ pub fn accept_authored_render_job(
     Ok(PreparedMotionRenderJob {
         render_job_id: workspace.job_id(),
         allowed_assets,
+        segments,
+        film_canvas: film_canvas(request.aspect_ratio())?,
         plan,
     })
+}
+
+/// One path the child named, as a file that exists inside the workspace.
+///
+/// The sandbox resolves these against the worker asset root, so an absolute
+/// path or a parent traversal would point outside the workspace the App bounds
+/// and eventually deletes. Shared by the composition's own asset list and by
+/// every segment's, so a segment cannot widen the sandbox on terms the
+/// composition was never allowed.
+fn workspace_relative_file(work: &Path, relative: &str) -> Result<String, MotionVideoStudioError> {
+    if relative.is_empty()
+        || relative.len() > 256
+        || relative.starts_with('/')
+        || relative.contains('\\')
+        || Path::new(relative)
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+        || !work.join(relative).is_file()
+    {
+        return Err(authoring_answer_invalid());
+    }
+    Ok(relative.to_owned())
+}
+
+/// Every render this film is made of, or a refusal.
+///
+/// A segment is checked on exactly the terms the single composition already
+/// was, plus the two the sandbox would apply anyway: the stage has to be one
+/// the worker can open, and a render has to fit inside one capture. Both are
+/// asked of the types that own those bounds rather than restated here, so there
+/// stays one place that decides what a frame may cost.
+fn accepted_segments(
+    work: &Path,
+    answered: &[RenderSegmentAnswer],
+    frames_per_second: u32,
+) -> Result<Vec<MotionRenderSegment>, MotionVideoStudioError> {
+    if answered.is_empty() || frames_per_second == 0 {
+        return Err(authoring_answer_invalid());
+    }
+    let mut segments = Vec::with_capacity(answered.len());
+    for segment in answered {
+        let entry_html = workspace_relative_file(work, &segment.entry_html)?;
+        let mut allowed_assets = Vec::with_capacity(segment.allowed_assets.len());
+        for asset in &segment.allowed_assets {
+            allowed_assets.push(workspace_relative_file(work, asset)?);
+        }
+        // The authored composition loads the animation runtime by name. A
+        // segment drawing it without that asset allowed renders a page whose
+        // script never arrives, and a browser reports that by drawing the first
+        // frame and holding it — a still image with every other signal green.
+        if entry_html == MOTION_COMPOSITION_FILE
+            && !allowed_assets
+                .iter()
+                .any(|asset| asset == AUTHORING_RUNTIME_ASSET)
+        {
+            return Err(authoring_answer_invalid());
+        }
+        crate::local_video_orchestrator::VideoWorkerRenderCanvas::new(
+            segment.canvas.width,
+            segment.canvas.height,
+            segment.canvas.device_scale_factor,
+        )
+        .map_err(|_| authoring_answer_invalid())?;
+        if !(1..=crate::local_video_orchestrator::SANDBOX_FRAMES_MAXIMUM)
+            .contains(&segment.frame_count)
+        {
+            return Err(authoring_answer_invalid());
+        }
+        // A window that ends no later than it starts leaves every frame of this
+        // shot seeking nowhere. Checked here rather than in the Worker because
+        // this is where the child's word stops being taken.
+        if segment.source_end_millis <= segment.source_start_millis {
+            return Err(authoring_answer_invalid());
+        }
+        // PC-26: narration arrives as a pair, its audio must really be in the
+        // workspace, and its measured seconds must fit inside this shot — the
+        // child laid the timeline as max(voice, motion), so a line longer than
+        // its own shot means the answer is not the one that plan produced.
+        // Half a frame of float grace: frames = ceil(seconds x fps).
+        let narration_audio = match (&segment.narration_audio, segment.narration_seconds) {
+            (None, None) => None,
+            (Some(audio), Some(seconds)) => {
+                let shot_seconds = f64::from(segment.frame_count) / f64::from(frames_per_second);
+                if !seconds.is_finite() || seconds <= 0.0 || seconds > shot_seconds + 0.5 {
+                    return Err(authoring_answer_invalid());
+                }
+                Some(workspace_relative_file(work, audio)?)
+            }
+            _ => return Err(authoring_answer_invalid()),
+        };
+        segments.push(MotionRenderSegment {
+            entry_html,
+            allowed_assets,
+            width: segment.canvas.width,
+            height: segment.canvas.height,
+            device_scale_factor: segment.canvas.device_scale_factor,
+            frame_count: segment.frame_count,
+            source_start_millis: segment.source_start_millis,
+            source_end_millis: segment.source_end_millis,
+            narration_audio,
+        });
+    }
+    Ok(segments)
 }
 
 /// How an automatically authored film is labelled in the jobs and artifacts
@@ -1355,7 +1725,9 @@ pub fn advance(
         return Err(job_unavailable());
     }
     let valid = match status {
-        MotionRenderJobStatus::Rendering => progress_percent == 55 && artifact.is_none(),
+        MotionRenderJobStatus::Rendering => {
+            RENDERING_PROGRESS.contains(&progress_percent) && artifact.is_none()
+        }
         MotionRenderJobStatus::Encoding => progress_percent == 85 && artifact.is_none(),
         MotionRenderJobStatus::Succeeded => {
             progress_percent == 100 && artifact.is_some() && failure_code.is_none()
@@ -1524,6 +1896,498 @@ pub fn workspace_render_paths(
     Ok((work, output, video))
 }
 
+/// Where the progress bar may sit while shots are being captured.
+///
+/// One band rather than one number, because a film is a list of renders now and
+/// the person watching needs to see it advance. It was a single 55 for as long
+/// as a film was one render, and when the loop started dividing the band among
+/// the shots the state machine still required exactly 55 — so `advance` refused
+/// the first shot's progress and every render failed before a browser started.
+/// The rule lives here once and is read by `advance`, by `validate_snapshot`
+/// and by the loop that produces the numbers, so the three cannot disagree
+/// again.
+///
+/// It stops below the encode stage's 85: a bar that reaches the encode number
+/// while shots are still being captured says the render finished.
+const RENDERING_PROGRESS: std::ops::RangeInclusive<u8> = 5..=84;
+
+/// Where the bar sits while shot `index` of `total` is being captured.
+///
+/// Spread across the band rather than parked on one number: a nine-shot film
+/// that sat still until the last shot finished is indistinguishable from a
+/// stuck one, and these renders are minutes long.
+pub fn rendering_progress_percent(index: usize, total: usize) -> u8 {
+    let start = *RENDERING_PROGRESS.start();
+    let span = u32::from(*RENDERING_PROGRESS.end() - start);
+    if total == 0 {
+        return start;
+    }
+    // Saturating rather than wrapping: `index` comes from a list whose length
+    // the answer decided, and a bar outside its own band is refused by
+    // `advance` — which is exactly the failure this constant was introduced to
+    // stop being possible.
+    let offset = (index as u64 * u64::from(span) / total as u64).min(u64::from(span));
+    start.saturating_add(offset as u8)
+}
+
+/// What a finished film is, as opposed to what any one shot was captured on.
+///
+/// Route A captures each shot on the stage its part declares — 1920x1080 for
+/// 105 of the catalog, 1080x1920 for three, 1440x2560 for one, 640x360 at
+/// factor 2 for the built-in template. A delivered file is one size throughout,
+/// so this is the size every segment is brought onto as it is encoded, and the
+/// size the joined result is measured against afterwards.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MotionFilmCanvas {
+    width: u32,
+    height: u32,
+    frames_per_second: u32,
+}
+
+impl MotionFilmCanvas {
+    pub const fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub const fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub const fn frames_per_second(&self) -> u32 {
+        self.frames_per_second
+    }
+
+    /// The filter chain that puts any captured shot on this canvas.
+    ///
+    /// Scale to fit and pad the remainder, never stretch: the part was laid out
+    /// for the stage it declares, and stretching it is a design change nobody
+    /// asked for. `setsar=1` is required rather than tidy — without it the
+    /// padded stream carries the source's sample aspect ratio and a player
+    /// stretches the result back.
+    ///
+    /// Applied to every segment including the ones already the right size. A
+    /// scale to the size a stream already is costs nothing worth branching on,
+    /// and one unconditional path is what makes the join a stream copy that
+    /// never has to reconcile anything.
+    fn video_filter(&self) -> String {
+        format!(
+            "scale={width}:{height}:force_original_aspect_ratio=decrease,\
+             pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1",
+            width = self.width,
+            height = self.height,
+        )
+    }
+}
+
+/// What a film is encoded as. One value, because the concat demuxer reconciles
+/// nothing: two segments in different pixel formats produce a file whose second
+/// half decodes wrong.
+const FILM_PIXEL_FORMAT: &str = "yuv420p";
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FilmCanvasContract {
+    frames_per_second: u32,
+    pixel_format: String,
+    by_aspect_ratio: BTreeMap<String, FilmCanvasSize>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FilmCanvasSize {
+    width: u32,
+    height: u32,
+}
+
+/// The canvas the film the user asked for is delivered on.
+///
+/// Read from `motion-render-canvas.v1.json` rather than derived from the ratio
+/// string: "16:9" says nothing about how many pixels, and a second place that
+/// decided would be a second answer to give.
+pub fn film_canvas(aspect_ratio: &str) -> Result<MotionFilmCanvas, MotionVideoStudioError> {
+    let contract: serde_json::Value =
+        serde_json::from_str(RENDER_CANVAS_CONTRACT).map_err(|_| draft_invalid())?;
+    let film: FilmCanvasContract =
+        serde_json::from_value(contract["film"].clone()).map_err(|_| draft_invalid())?;
+    if film.frames_per_second != MOTION_FRAMES_PER_SECOND || film.pixel_format != FILM_PIXEL_FORMAT
+    {
+        return Err(draft_invalid());
+    }
+    let size = film
+        .by_aspect_ratio
+        .get(aspect_ratio)
+        .ok_or_else(draft_invalid)?;
+    // A film is delivered on an even-sided canvas because yuv420p subsamples
+    // chroma by two; an odd side makes libx264 refuse the encode outright.
+    if size.width == 0 || size.height == 0 || size.width % 2 == 1 || size.height % 2 == 1 {
+        return Err(draft_invalid());
+    }
+    Ok(MotionFilmCanvas {
+        width: size.width,
+        height: size.height,
+        frames_per_second: film.frames_per_second,
+    })
+}
+
+/// Encode one captured shot onto the film's canvas.
+///
+/// Returns the command rather than running it: the render job owns the wait,
+/// because the wait is where a cancelled job is noticed and a partial file
+/// removed. What belongs here is which arguments produce a segment the join can
+/// stream-copy, and that is the same list wherever it is spawned from.
+pub fn motion_segment_encode_command(
+    ffmpeg: &Path,
+    frames_directory: &Path,
+    output: &Path,
+    canvas: &MotionFilmCanvas,
+    frame_count: u32,
+) -> std::process::Command {
+    let mut command = std::process::Command::new(ffmpeg);
+    command
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-y",
+            "-framerate",
+            &canvas.frames_per_second.to_string(),
+            "-start_number",
+            "1",
+            "-i",
+        ])
+        .arg(frames_directory.join("frame-%05d.png"))
+        .args([
+            "-frames:v",
+            &frame_count.to_string(),
+            "-vf",
+            &canvas.video_filter(),
+            "-r",
+            &canvas.frames_per_second.to_string(),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            FILM_PIXEL_FORMAT,
+            "-movflags",
+            "+faststart",
+        ])
+        .arg(output)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    command
+}
+
+/// Join the encoded shots into the film: check each one first, measure after.
+///
+/// Both halves are load-bearing and they catch different things.
+///
+/// **Before.** A segment that is not already on the canvas is refused rather
+/// than joined. Measured 2026-07-28 with the packaged ffmpeg, concatenating a
+/// 1920x1080 segment with a 1080x1920 one through the concat demuxer and
+/// `-c copy`: exit 0, and the product decodes as 1920x1080, yuv420p, 30fps,
+/// with exactly the frame count its inputs account for. The file is broken
+/// anyway — its second half is portrait content inside a container claiming
+/// landscape, and only the pixels say so. Nothing measurable about the result
+/// distinguishes it from a correct film, which is why the check cannot live
+/// there. This was verified the expensive way: an earlier version of this
+/// function checked only the product, and
+/// `a_join_that_exits_zero_is_still_refused_when_the_film_is_not_what_was_asked_for`
+/// went green against a file whose second half was sideways.
+///
+/// **After.** The product is still measured, for the failures the inputs cannot
+/// show: a join that dropped a segment, or produced fewer frames than its parts
+/// carried. A film that is not the one its shots account for is deleted rather
+/// than handed to the artifact store.
+pub fn join_motion_film(
+    segments: &[PathBuf],
+    output: &Path,
+    canvas: &MotionFilmCanvas,
+    ffmpeg: &Path,
+    ffprobe: &Path,
+    expected_frames: u32,
+) -> Result<(), MotionVideoStudioError> {
+    if segments.is_empty() || expected_frames == 0 {
+        return Err(render_unavailable());
+    }
+    for segment in segments {
+        let shot = probe_film(ffprobe, segment, FrameCount::Skip)?;
+        if shot.width != canvas.width
+            || shot.height != canvas.height
+            || shot.frames_per_second != canvas.frames_per_second
+            || shot.pixel_format != FILM_PIXEL_FORMAT
+        {
+            return Err(render_unavailable());
+        }
+    }
+    let listing = output.with_extension("concat.txt");
+    write_private_file(&listing, concat_listing(segments).as_bytes())?;
+    let joined = std::process::Command::new(ffmpeg)
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+        ])
+        .arg(&listing)
+        .args(["-c", "copy", "-movflags", "+faststart"])
+        .arg(output)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    let _ = std::fs::remove_file(&listing);
+    let refuse = |output: &Path| {
+        let _ = std::fs::remove_file(output);
+        render_unavailable()
+    };
+    if !joined.map(|status| status.success()).unwrap_or(false) {
+        return Err(refuse(output));
+    }
+    let film = probe_film(ffprobe, output, FrameCount::Decode).map_err(|_| refuse(output))?;
+    if film.frames != Some(expected_frames)
+        || film.width != canvas.width
+        || film.height != canvas.height
+        || film.frames_per_second != canvas.frames_per_second
+        || film.pixel_format != FILM_PIXEL_FORMAT
+    {
+        return Err(refuse(output));
+    }
+    Ok(())
+}
+
+/// The ffmpeg argument list that lays each shot's narration onto the joined
+/// film, or None for a silent film.
+///
+/// Pure on purpose: the offsets arithmetic — each line starts where its own
+/// shot starts, which is the sum of the frames before it — is the part a test
+/// can hold still, and an encoder run is not. The video stream passes through
+/// untouched (`-c:v copy`): mixing narration must never re-encode the frames
+/// the still-image gate and the join already verified.
+pub fn narration_mix_arguments(
+    film: &Path,
+    work: &Path,
+    segments: &[MotionRenderSegment],
+    frames_per_second: u32,
+    output: &Path,
+) -> Option<Vec<std::ffi::OsString>> {
+    if frames_per_second == 0 {
+        return None;
+    }
+    let mut narrated: Vec<(PathBuf, u64)> = Vec::new();
+    let mut start_frames: u64 = 0;
+    for segment in segments {
+        if let Some(audio) = segment.narration_audio() {
+            let start_millis = start_frames * 1000 / u64::from(frames_per_second);
+            narrated.push((work.join(audio), start_millis));
+        }
+        start_frames += u64::from(segment.frame_count());
+    }
+    if narrated.is_empty() {
+        return None;
+    }
+    let mut arguments: Vec<std::ffi::OsString> =
+        ["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i"]
+            .iter()
+            .map(std::ffi::OsString::from)
+            .collect();
+    arguments.push(film.into());
+    for (audio, _) in &narrated {
+        arguments.push("-i".into());
+        arguments.push(audio.clone().into());
+    }
+    let mut filter = String::new();
+    for (index, (_, start_millis)) in narrated.iter().enumerate() {
+        // adelay wants one delay per channel; naming it twice covers stereo
+        // sources while a mono one reads the first value only.
+        filter.push_str(&format!(
+            "[{}:a]adelay={start_millis}|{start_millis}[n{index}];",
+            index + 1
+        ));
+    }
+    for index in 0..narrated.len() {
+        filter.push_str(&format!("[n{index}]"));
+    }
+    // normalize=0: amix's default divides every input by the input count, so a
+    // film with three lines would be three times quieter than one with one.
+    // The lines never overlap — each shot holds its own — so no headroom is
+    // needed.
+    filter.push_str(&format!(
+        "amix=inputs={}:normalize=0[voice]",
+        narrated.len()
+    ));
+    for argument in [
+        "-filter_complex",
+        &filter,
+        "-map",
+        "0:v:0",
+        "-map",
+        "[voice]",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-movflags",
+        "+faststart",
+    ] {
+        arguments.push(argument.into());
+    }
+    arguments.push(output.into());
+    Some(arguments)
+}
+
+/// Mix the narration into the joined film, in place, or do nothing for a
+/// silent film.
+///
+/// The mixed file replaces the original only after the re-probe agrees the
+/// video stream is intact — same frame count, same canvas — so a failed mix
+/// can never swap a verified film for a damaged one.
+pub fn mix_narration_into_film(
+    film: &Path,
+    work: &Path,
+    segments: &[MotionRenderSegment],
+    canvas: &MotionFilmCanvas,
+    ffmpeg: &Path,
+    ffprobe: &Path,
+    expected_frames: u32,
+) -> Result<(), MotionVideoStudioError> {
+    let voiced = film.with_extension("voiced.mp4");
+    let Some(arguments) =
+        narration_mix_arguments(film, work, segments, canvas.frames_per_second, &voiced)
+    else {
+        return Ok(());
+    };
+    let refuse = |partial: &Path| {
+        let _ = std::fs::remove_file(partial);
+        render_unavailable()
+    };
+    let mixed = std::process::Command::new(ffmpeg)
+        .args(&arguments)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    if !mixed.map(|status| status.success()).unwrap_or(false) {
+        return Err(refuse(&voiced));
+    }
+    let probed = probe_film(ffprobe, &voiced, FrameCount::Decode).map_err(|_| refuse(&voiced))?;
+    if probed.frames != Some(expected_frames)
+        || probed.width != canvas.width
+        || probed.height != canvas.height
+        || probed.pixel_format != FILM_PIXEL_FORMAT
+    {
+        return Err(refuse(&voiced));
+    }
+    std::fs::rename(&voiced, film).map_err(|_| refuse(&voiced))
+}
+
+/// The demuxer's list file.
+///
+/// `-safe 0` lets the list carry absolute paths, which makes a path data the
+/// demuxer parses: a single quote inside one would close the entry early. The
+/// demuxer's escape for that is the same one a POSIX shell uses.
+fn concat_listing(segments: &[PathBuf]) -> String {
+    let mut listing = String::new();
+    for segment in segments {
+        let escaped = segment.to_string_lossy().replace('\'', "'\\''");
+        listing.push_str(&format!("file '{escaped}'\n"));
+    }
+    listing
+}
+
+struct ProbedFilm {
+    width: u32,
+    height: u32,
+    frames_per_second: u32,
+    pixel_format: String,
+    frames: Option<u32>,
+}
+
+/// Whether a probe should decode the stream to count its frames.
+///
+/// Counting means decoding every frame, which is the cost of the answer being a
+/// fact rather than a claim. Worth paying once for the finished film; not worth
+/// paying per segment, where the question is only what shape the stream is.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum FrameCount {
+    Decode,
+    Skip,
+}
+
+/// What this file actually is, asked of the same toolchain that made it.
+///
+/// `-count_frames` rather than the container's frame count: the container is a
+/// claim and the decoded stream is the fact, and the incident this join is
+/// guarded against is the two disagreeing without saying so.
+fn probe_film(
+    ffprobe: &Path,
+    path: &Path,
+    counting: FrameCount,
+) -> Result<ProbedFilm, MotionVideoStudioError> {
+    let mut command = std::process::Command::new(ffprobe);
+    command.args(["-v", "error"]);
+    if counting == FrameCount::Decode {
+        command.arg("-count_frames");
+    }
+    let output = command
+        .args([
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,avg_frame_rate,pix_fmt,nb_read_frames",
+            "-of",
+            "json",
+        ])
+        .arg(path)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map_err(|_| render_unavailable())?;
+    if !output.status.success() {
+        return Err(render_unavailable());
+    }
+    let document: serde_json::Value =
+        serde_json::from_slice(&output.stdout).map_err(|_| render_unavailable())?;
+    let stream = &document["streams"][0];
+    let rate = stream["avg_frame_rate"]
+        .as_str()
+        .and_then(|value| value.split_once('/'))
+        .and_then(|(numerator, denominator)| {
+            let numerator: u32 = numerator.parse().ok()?;
+            let denominator: u32 = denominator.parse().ok()?;
+            numerator.checked_div(denominator)
+        })
+        .ok_or_else(render_unavailable)?;
+    Ok(ProbedFilm {
+        width: u32::try_from(stream["width"].as_u64().ok_or_else(render_unavailable)?)
+            .map_err(|_| render_unavailable())?,
+        height: u32::try_from(stream["height"].as_u64().ok_or_else(render_unavailable)?)
+            .map_err(|_| render_unavailable())?,
+        frames_per_second: rate,
+        pixel_format: stream["pix_fmt"]
+            .as_str()
+            .ok_or_else(render_unavailable)?
+            .to_owned(),
+        frames: match counting {
+            FrameCount::Skip => None,
+            FrameCount::Decode => Some(
+                stream["nb_read_frames"]
+                    .as_str()
+                    .and_then(|value| value.parse().ok())
+                    .ok_or_else(render_unavailable)?,
+            ),
+        },
+    })
+}
+
 /// The largest single captured frame this gate will read. A 1920x1080 PNG is
 /// a few megabytes; anything past this is not a frame the encoder would accept
 /// either, so refusing to buffer it is not a lost verdict.
@@ -1653,7 +2517,7 @@ fn validate_snapshot(
         && (snapshot.artifact_id.is_none() || snapshot.status == MotionRenderJobStatus::Succeeded);
     let valid_progress = match snapshot.status {
         MotionRenderJobStatus::Queued => snapshot.progress_percent == 5,
-        MotionRenderJobStatus::Rendering => snapshot.progress_percent == 55,
+        MotionRenderJobStatus::Rendering => RENDERING_PROGRESS.contains(&snapshot.progress_percent),
         MotionRenderJobStatus::Encoding => snapshot.progress_percent == 85,
         MotionRenderJobStatus::Succeeded => snapshot.progress_percent == 100,
         MotionRenderJobStatus::Cancelling

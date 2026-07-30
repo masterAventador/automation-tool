@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  openAutomationRuns,
+  openTaskCreate,
+  waitForStartup,
+} from "./navigation";
 
 interface InstallationPreparation {
   readonly installationId: string;
@@ -19,13 +24,13 @@ describe("H8-16F hidden App original-caller MVP journey", () => {
     // browser, so the only browser it can run is the verified embedded
     // Chromium that has to be present before startup. There is nothing left to
     // repair, and the journey now begins where a real operator begins.
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_task_create_form_for_acceptance"),
     )) as InstallationPreparation;
     assert.match(preparation.installationId, UUID_V4);
 
-    await browser.$("li=新建任务").click();
+    await openTaskCreate();
     await expect(await browser.$("h2")).toHaveText("新建运营任务");
     await browser.$("#searchKeyword").setValue("新能源汽车");
     await browser.$("#targetLimit").setValue("2");
@@ -45,10 +50,14 @@ describe("H8-16F hidden App original-caller MVP journey", () => {
 
     await browser.$("button=开始目标发现").click();
     try {
+      // 改版后的账号与平台页上没有「平台状态」这四个字（它只是任务详情页里
+      // 按钮的文案），旧条件在交接成功的页面上也永远为假——2026-07-29 补采
+      // facts 后坐实：交接其实发生了（startButtonExists=false、登录正常在屏），
+      // 是 spec 在等一个不存在的字符串。锚到页头标题 + 真实状态文案。
       await browser.waitUntil(
         async () => {
-          const text = await body.getText();
-          return text.includes("平台状态") && text.includes("登录正常");
+          const heading = await browser.$("h2").getText();
+          return heading === "账号与平台" && (await body.getText()).includes("登录正常");
         },
         {
           timeout: 180_000,
@@ -65,6 +74,7 @@ describe("H8-16F hidden App original-caller MVP journey", () => {
       );
       const openLoginButton = await browser.$("button=打开登录处理");
       const openLoginButtonExists = await openLoginButton.isExisting();
+      const startButton = await browser.$("button=开始目标发现");
       throw new Error(
         `waiting-platform-login handoff facts: ${JSON.stringify({
           discoverySubmitted: text.includes("目标发现命令已提交"),
@@ -75,14 +85,22 @@ describe("H8-16F hidden App original-caller MVP journey", () => {
           platformFailure: text.includes("暂时无法读取抖音登录状态"),
           loginOpenPending: openLoginButtonExists && !(await openLoginButton.isEnabled()),
           loginActionRendered: text.includes("请在打开的运营浏览器中扫码登录"),
+          // 2026-07-29 之前这里没采三种失败 notice 与按钮态，凡 start 调用
+          // 失败（transport / busy / rejected）都表现为「什么都没发生」。
+          noticeRejected: text.includes("尚未满足目标发现条件"),
+          noticeBusy: text.includes("当前设备已有任务正在运行"),
+          noticeUnconfirmed: text.includes("目标发现结果暂时无法确认"),
+          startButtonExists: await startButton.isExisting(),
+          startButtonEnabled:
+            (await startButton.isExisting()) && (await startButton.isEnabled()),
           executorStatus,
           executorDiagnostics,
         })}`,
       );
     }
-    await expect(await browser.$("h2")).toHaveText("平台状态");
+    await expect(await browser.$("h2")).toHaveText("账号与平台");
 
-    await browser.$("li=任务记录").click();
+    await openAutomationRuns();
     await expect(await browser.$("h3=任务运行详情")).toExist();
     await browser.waitUntil(
       async () => (await body.getText()).includes("草稿"),

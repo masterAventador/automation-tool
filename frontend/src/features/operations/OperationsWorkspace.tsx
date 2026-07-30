@@ -582,6 +582,12 @@ export function CreationHub({
         </div>
       ) : section === "editing" ? (
         <div className="embedded-workbench embedded-workbench--focused">
+          {/* 视频剪辑 organises material that already exists; 视频制作 is what
+              generates it. `user-facing-terminology.v1.json` requires the
+              product to say so rather than leave the operator to infer it. */}
+          <Text type="secondary" className="editing-scope-note">
+            视频剪辑：把制作或导入的素材整理成时间轴，独立于视频制作管理剪辑项目与任务。
+          </Text>
           <VideoEditingWorkbench gateway={editingGateway} />
         </div>
       ) : studioOpen ? (

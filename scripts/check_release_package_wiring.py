@@ -39,7 +39,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import release_configuration  # noqa: E402
-from release_assembly import RELEASE_PACKAGE_RESOURCES, VIDEO_RUNTIME_RESOURCES  # noqa: E402
+from release_assembly import (  # noqa: E402
+    ASSEMBLER_INSTALLED_RESOURCES,
+    RELEASE_PACKAGE_RESOURCES,
+)
 
 PLATFORMS = ("macos", "windows")
 # The paths that can produce a distributable artifact. The macOS one is a
@@ -51,6 +54,13 @@ RELEASE_PATHS = (
 )
 AUDIT_PATH = ROOT / "frontend/scripts/audit-production-package.mjs"
 VIDEO_RUNTIME_BUILDER = ROOT / "scripts/prepare_video_runtime.py"
+# Which script produces a staged tree, per category. A resource nobody builds is
+# a release that fails at assembly time, twenty minutes in — so the producer is
+# declared here alongside the resource rather than discovered then.
+CATEGORY_BUILDERS = {
+    "video": VIDEO_RUNTIME_BUILDER,
+    "catalog": ROOT / "scripts/build_motion_catalog_release.py",
+}
 REQUIRED_RELEASE_CALLS = (
     "install_video_runtime(",
     "require_packaged_video_runtime(",
@@ -91,10 +101,14 @@ def check_every_resource_has_an_owner() -> None:
 def check_the_assembler_installs_what_the_bundler_will_not() -> None:
     """Everything the macOS bundler cannot carry must be installed by the assembler."""
     assembler = set(release_configuration.assembler_installed_resources("macos"))
-    installed = {resource.staging_name for resource in VIDEO_RUNTIME_RESOURCES}
+    installed = {
+        resource.staging_name for resource in ASSEMBLER_INSTALLED_RESOURCES
+    }
     # The browser has its own installer (`install_and_seal`) because its
-    # symlinked framework needs one; everything else the assembler owns is
-    # installed by `install_video_runtime`.
+    # symlinked framework needs one. Everything else the assembler owns goes in
+    # through `install_packaged_resources`, so this set is derived per category
+    # rather than naming the video trees — a new category that nobody installs
+    # has to be caught here, not at the end of a twenty-minute release run.
     installed.add("embedded-browser")
     if assembler != installed:
         _reject(
@@ -113,14 +127,15 @@ def check_every_video_resource_has_a_builder() -> None:
     would then reject the staging tree, at the end of a long release run. The
     producer has to be declared alongside the resource, not discovered later.
     """
-    source = VIDEO_RUNTIME_BUILDER.read_text(encoding="utf-8")
     for resource in release_configuration.RELEASE_PACKAGE_RESOURCES:
-        if resource["category"] != "video":
+        category = str(resource["category"])
+        builder = CATEGORY_BUILDERS.get(category)
+        if builder is None:
             continue
-        if f'name="{resource["name"]}"' not in source:
+        if f'name="{resource["name"]}"' not in builder.read_text(encoding="utf-8"):
             _reject(
-                f"{resource['name']} is declared as a packaged video resource but "
-                f"{VIDEO_RUNTIME_BUILDER.name} never builds it"
+                f"{resource['name']} is declared as a packaged {category} resource "
+                f"but {builder.name} never builds it"
             )
 
 

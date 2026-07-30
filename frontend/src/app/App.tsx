@@ -16,6 +16,7 @@ import { StartupGate } from "./StartupGate";
 import type { StartupCheck } from "./startup";
 import { WorkbenchShell } from "./WorkbenchShell";
 import { Diagnostics } from "../features/diagnostics/Diagnostics";
+import { AppUpdateCenter } from "../features/app-updates/AppUpdateCenter";
 import type { AppUpdateGateway } from "../features/app-updates/contracts";
 import { AccountSessionGate } from "../features/account-session/AccountSessionGate";
 import type { AccountSessionGateway } from "../features/account-session/account-session-gateway";
@@ -90,13 +91,23 @@ export function App({
     <StartupGate
       startupCheck={startupCheck}
       repairTools={
-        platformAdapter === undefined ? undefined : (
+        platformAdapter === undefined && appUpdateGateway === undefined ? undefined : (
           <Space orientation="vertical" size="large" className="settings-stack">
+            {appUpdateGateway === undefined ? null : (
+              <AppUpdateCenter gateway={appUpdateGateway} showSettings />
+            )}
             {modelServiceGateway === undefined ? null : (
               <ModelServiceSettings gateway={modelServiceGateway} />
             )}
-            <Diagnostics platform={platformAdapter} />
+            {platformAdapter === undefined ? null : (
+              <Diagnostics platform={platformAdapter} />
+            )}
           </Space>
+        )
+      }
+      updateCenter={
+        appUpdateGateway === undefined ? undefined : (
+          <AppUpdateCenter gateway={appUpdateGateway} showSettings={false} />
         )
       }
     >

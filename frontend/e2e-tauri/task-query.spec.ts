@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-import { browser, expect } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import {
+  waitForStartup,
+} from "./navigation";
 
 interface TaskQuerySummary {
   readonly installationId: string;
@@ -13,8 +16,7 @@ interface TaskQuerySummary {
 
 describe("Task query production-path acceptance", () => {
   it("pages, reads detail, and hides foreign Tasks from the hidden real App", async () => {
-    const heading = await browser.$("h2");
-    await expect(heading).toHaveText("RPA 运营工作台");
+    await waitForStartup();
 
     const summary = (await browser.tauri.execute(({ core }) =>
       core.invoke("query_tasks_for_acceptance"),

@@ -54,12 +54,26 @@ executor = [
     # decide which face draws a character, and brotli is what lets it read the
     # WOFF2 faces -- FreeType decompresses those on its own, fontTools does not.
     "pillow",
-    "fonttools",
-    "brotli",
+    "fonttools==4.63.0",
+    "brotli==1.2.0",
+]
+# Build-time only, and deliberately not in `executor`. The frozen executor spec
+# sets `excludes=[]`, so what ships is decided by the import graph; keeping the
+# font toolchain out of the shipped package's group keeps it out of that graph
+# by construction rather than by a name-based exclusion someone has to maintain.
+#
+# Both are pinned exactly, not floated. `scripts/build_offline_motion_catalog.py`
+# writes a woff2 whose sha256 is locked in
+# `contracts/video/offline-motion-dependencies.v1.json`; a different fontTools or
+# brotli can produce different bytes for the same input, which would read as
+# tampering rather than as an upgrade.
+catalog-build = [
+    "brotli==1.2.0",
+    "fonttools==4.63.0",
 ]
 
 [tool.uv]
-default-groups = ["dev", "executor"]
+default-groups = ["catalog-build", "dev", "executor"]
 
 [tool.pytest.ini_options]
 addopts = ["--strict-config", "--strict-markers", "-ra"]

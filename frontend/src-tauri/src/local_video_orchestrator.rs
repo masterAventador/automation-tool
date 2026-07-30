@@ -230,11 +230,124 @@ impl VideoWorkerRenderBrowserConfiguration {
     }
 }
 
+/// The stage one render draws on.
+///
+/// Not a constant, because more than one kind of composition is rendered:
+/// `composition_template` writes its whole type scale for 640x360, while a
+/// catalog part declares its own stage — 105 of the frozen catalog's parts are
+/// 1920x1080, three are 1080x1920 portrait and one is 1440x2560. A part drawn
+/// on the template's stage is the top-left corner of itself, which is the
+/// incident `contracts/video/motion-render-canvas.v1.json` records: a valid MP4
+/// that was a still image, with neither side able to see the disagreement.
+///
+/// The bounds mirror `requestedCanvas` in that contract;
+/// `frontend/tests/motion-render-canvas-per-render.test.mjs` keeps them aligned.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct VideoWorkerRenderCanvas {
+    width: u32,
+    height: u32,
+    device_scale_factor: u32,
+}
+
+const CANVAS_WIDTH_MINIMUM: u32 = 320;
+const CANVAS_WIDTH_MAXIMUM: u32 = 2560;
+const CANVAS_HEIGHT_MINIMUM: u32 = 320;
+const CANVAS_HEIGHT_MAXIMUM: u32 = 2560;
+const CANVAS_DEVICE_SCALE_FACTOR_MINIMUM: u32 = 1;
+const CANVAS_DEVICE_SCALE_FACTOR_MAXIMUM: u32 = 3;
+/// Output pixels, not CSS pixels: that is what a captured PNG costs.
+const CANVAS_OUTPUT_PIXELS_MAXIMUM: u64 = 3_686_400;
+
+impl VideoWorkerRenderCanvas {
+    pub fn new(
+        width: u32,
+        height: u32,
+        device_scale_factor: u32,
+    ) -> Result<Self, VideoWorkerError> {
+        if !(CANVAS_WIDTH_MINIMUM..=CANVAS_WIDTH_MAXIMUM).contains(&width)
+            || !(CANVAS_HEIGHT_MINIMUM..=CANVAS_HEIGHT_MAXIMUM).contains(&height)
+            || !(CANVAS_DEVICE_SCALE_FACTOR_MINIMUM..=CANVAS_DEVICE_SCALE_FACTOR_MAXIMUM)
+                .contains(&device_scale_factor)
+        {
+            return Err(configuration_invalid());
+        }
+        // The product is what a frame costs; checking the sides alone would
+        // admit 2560x2560 at factor 3, which is 59 megapixels a frame.
+        let output = u64::from(width)
+            * u64::from(height)
+            * u64::from(device_scale_factor)
+            * u64::from(device_scale_factor);
+        if output > CANVAS_OUTPUT_PIXELS_MAXIMUM {
+            return Err(configuration_invalid());
+        }
+        Ok(Self {
+            width,
+            height,
+            device_scale_factor,
+        })
+    }
+
+    fn document(&self) -> serde_json::Value {
+        serde_json::json!({
+            "deviceScaleFactor": self.device_scale_factor,
+            "height": self.height,
+            "width": self.width,
+        })
+    }
+}
+
+/// Which stretch of the loaded document's own timeline one render covers.
+///
+/// A render used to be "this page, this many frames", and the Worker's only
+/// possible rule was to spread the page's whole timeline across those frames.
+/// That is right for a film captured in one pass and wrong the moment several
+/// shots load one document: every template shot of a one-sentence film
+/// re-rendered the entire composition. The kept artifact of 2026-07-28 is
+/// twelve seconds made of two identical six second halves at double speed, and
+/// the codec, canvas, frame count, duration and still-image gate were all green
+/// over it — nothing downstream of here can see the difference.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VideoWorkerSourceWindow {
+    start_millis: u32,
+    end_millis: u32,
+}
+
+impl VideoWorkerSourceWindow {
+    /// Refuses a window no render could sample: ending no later than it begins,
+    /// or reaching past what one render may run for.
+    ///
+    /// Whole milliseconds rather than seconds. The render command's HMAC binds
+    /// to a canonical JSON that this side, the Worker and the Executor must all
+    /// produce byte for byte, and a float does not survive that trip — Python
+    /// writes `0.0` where `JSON.stringify` writes `0`, so the proof stops
+    /// matching and the command is dropped in silence. Every other number in
+    /// the spec is an integer for the same reason.
+    pub fn new(start_millis: u32, end_millis: u32) -> Result<Self, VideoWorkerError> {
+        if end_millis <= start_millis || end_millis > SANDBOX_SECONDS_MAXIMUM.saturating_mul(1000) {
+            return Err(configuration_invalid());
+        }
+        Ok(Self {
+            start_millis,
+            end_millis,
+        })
+    }
+
+    pub const fn start_millis(&self) -> u32 {
+        self.start_millis
+    }
+
+    pub const fn end_millis(&self) -> u32 {
+        self.end_millis
+    }
+}
+
 /// One RenderJob HTML render sandbox request. The workspace is the VF-03
 /// private RenderJob directory; the entry document and every declared asset
 /// are workspace-relative paths that the Worker re-validates for containment.
 #[derive(Clone)]
 pub struct VideoWorkerRenderSandboxRequest {
+    canvas: VideoWorkerRenderCanvas,
+    source_window: VideoWorkerSourceWindow,
     workspace: PathBuf,
     entry_html: String,
     /// The workspace file whose appearance tells the render to stop, named by
@@ -254,6 +367,8 @@ impl fmt::Debug for VideoWorkerRenderSandboxRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("VideoWorkerRenderSandboxRequest")
+            .field("canvas", &self.canvas)
+            .field("source_window", &self.source_window)
             .field("frame_count", &self.frame_count)
             .field("max_duration_seconds", &self.max_duration_seconds)
             .field("max_cpu_seconds", &self.max_cpu_seconds)
@@ -269,6 +384,8 @@ impl VideoWorkerRenderSandboxRequest {
         workspace: PathBuf,
         entry_html: String,
         cancel_marker: String,
+        canvas: VideoWorkerRenderCanvas,
+        source_window: VideoWorkerSourceWindow,
         allowed_assets: Vec<String>,
         frame_count: u32,
         max_duration_seconds: u32,
@@ -295,6 +412,8 @@ impl VideoWorkerRenderSandboxRequest {
             return Err(configuration_invalid());
         }
         Ok(Self {
+            canvas,
+            source_window,
             workspace,
             entry_html,
             cancel_marker,
@@ -311,9 +430,12 @@ impl VideoWorkerRenderSandboxRequest {
         let workspace = self.workspace.to_str().ok_or_else(configuration_invalid)?;
         Ok(serde_json::json!({
             "allowedAssets": self.allowed_assets,
+            "canvas": self.canvas.document(),
             "cancelMarker": self.cancel_marker,
             "entryHtml": self.entry_html,
             "frameCount": self.frame_count,
+            "sourceEndMillis": self.source_window.end_millis(),
+            "sourceStartMillis": self.source_window.start_millis(),
             "maxCpuSeconds": self.max_cpu_seconds,
             "maxDurationSeconds": self.max_duration_seconds,
             "maxMemoryMegabytes": self.max_memory_megabytes,

@@ -18,6 +18,7 @@
     "build:desktop-e2e-h821-assets": "tsc -b && vite build --mode desktop-e2e --outDir dist-h821",
     "build:desktop-e2e-h822-mac-assets": "tsc -b && vite build --mode desktop-e2e --outDir dist-h822-mac",
     "build:desktop-e2e-h822-windows-assets": "tsc -b && vite build --mode desktop-e2e --outDir dist-h822-windows",
+    "build:desktop-e2e-pc16-mac-assets": "tsc -b && vite build --mode control-plane-e2e --outDir dist-pc16-mac",
     "build:tauri:control-plane-test": "tauri build --debug --no-bundle --features control-plane-e2e --config src-tauri/tauri.control-plane-e2e.conf.json",
     "build:tauri:account-session-test": "AUTOMATION_TOOL_ISOLATED_PRODUCT_ACCOUNT_INSTANCE=1 tauri build --debug --no-bundle --features desktop-test-driver --config src-tauri/tauri.account-session-e2e.conf.json",
     "build:tauri:account-management-test": "AUTOMATION_TOOL_ISOLATED_PRODUCT_ACCOUNT_INSTANCE=1 tauri build --debug --no-bundle --features control-plane-e2e,desktop-test-driver --config src-tauri/tauri.account-management-e2e.conf.json",

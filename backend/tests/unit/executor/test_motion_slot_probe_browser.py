@@ -1,0 +1,199 @@
+"""真探针：包内 Chromium 里量标记槽——一次会话、顺序加载、末帧读数。
+
+判据与 PC-17 的预算探针同源：先 seek 到零件自己时间轴的末帧再量（载入瞬间量到的是
+动画飞行中的一帧，量出来的预算描述的是没人看见的画面）；读数按 data-motion-slot
+标记找槽。这里只验编排：真正的像素读数由 SLOT_PROBE_JS 在浏览器里产生。
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from automation_tool.executor.browser_runtime import BrowserRuntime
+from automation_tool.executor.motion_authoring.slot_overflow_probe import (
+    SLOT_PROBE_JS,
+    ProbeReading,
+)
+from automation_tool.executor.motion_authoring.slot_probe_browser import (
+    SLOT_PROBE_PROFILE_DIRECTORY,
+    PackagedSlotProbe,
+)
+
+
+class FakePage:
+    def __init__(self, readings: list[dict[str, list[int]]]) -> None:
+        self._readings = list(readings)
+        self.navigations: list[str] = []
+        self.evaluations: list[str] = []
+        self.fail_evaluate = False
+
+    def goto(self, url: str) -> None:
+        self.navigations.append(url)
+
+    def wait_for_timeout(self, _milliseconds: float) -> None:
+        return None
+
+    def evaluate(self, script: str) -> object:
+        if self.fail_evaluate:
+            raise RuntimeError("private page failure")
+        self.evaluations.append(script)
+        if "scrollWidth" in script:
+            return {
+                "slots": self._readings[len(self.navigations) - 1],
+                "stage": [1920, 1080],
+            }
+        return None
+
+    def title(self) -> str:
+        return "probe"
+
+    def close(self, **_keywords: object) -> None:
+        return None
+
+
+class FakeContext:
+    def __init__(self, page: FakePage) -> None:
+        self.pages = [page]
+        self.close_calls = 0
+
+    def on(self, _event: str, _handler: object) -> None:
+        return None
+
+    def set_default_timeout(self, _timeout: float) -> None:
+        return None
+
+    def set_default_navigation_timeout(self, _timeout: float) -> None:
+        return None
+
+    def new_page(self) -> FakePage:
+        return self.pages[0]
+
+    def close(self, *, reason: str | None = None) -> None:
+        self.close_calls += 1
+
+
+class FakeChromium:
+    def __init__(self, context: FakeContext) -> None:
+        self.context = context
+        self.calls: list[dict[str, object]] = []
+
+    def launch_persistent_context(
+        self,
+        user_data_dir: str | Path,
+        *,
+        accept_downloads: bool,
+        executable_path: str | Path,
+        headless: bool,
+        timeout: float,
+    ) -> FakeContext:
+        self.calls.append(
+            {
+                "user_data_dir": Path(user_data_dir),
+                "executable_path": Path(executable_path),
+                "headless": headless,
+            }
+        )
+        return self.context
+
+
+class FakePlaywright:
+    def __init__(self, chromium: FakeChromium) -> None:
+        self.chromium = chromium
+        self.stop_calls = 0
+
+    def stop(self) -> None:
+        self.stop_calls += 1
+
+
+def _fixture(
+    tmp_path: Path, readings: list[dict[str, list[int]]]
+) -> tuple[PackagedSlotProbe, FakePage, FakeContext, FakeChromium, FakePlaywright, Path]:
+    executable = tmp_path / "chromium"
+    executable.write_bytes(b"browser")
+    executable.chmod(0o700)
+    workspace = tmp_path / "job"
+    workspace.mkdir()
+    page = FakePage(readings)
+    context = FakeContext(page)
+    chromium = FakeChromium(context)
+    playwright = FakePlaywright(chromium)
+    probe = PackagedSlotProbe(
+        browser_executable=executable,
+        profile_directory=workspace / SLOT_PROBE_PROFILE_DIRECTORY,
+        runtime=BrowserRuntime(lambda: playwright),
+    )
+    return probe, page, context, chromium, playwright, workspace
+
+
+def _documents(tmp_path: Path, count: int) -> tuple[Path, ...]:
+    documents = []
+    for position in range(count):
+        document = tmp_path / f"document-{position}.html"
+        document.write_text("<html></html>", encoding="utf-8")
+        documents.append(document)
+    return tuple(documents)
+
+
+def test_every_document_is_measured_by_one_headless_browser_session(
+    tmp_path: Path,
+) -> None:
+    reading = {"12": [205, 347, 35, 32]}
+    probe, page, context, chromium, playwright, workspace = _fixture(
+        tmp_path, [reading, reading]
+    )
+    first, second = _documents(tmp_path, 2)
+
+    results = probe((first, second))
+
+    # 一次启动、无头、私有 Profile 建在工作区下——不是每份文档一个浏览器。
+    assert len(chromium.calls) == 1
+    assert chromium.calls[0]["headless"] is True
+    assert chromium.calls[0]["user_data_dir"] == (
+        workspace / SLOT_PROBE_PROFILE_DIRECTORY
+    ).resolve()
+    assert page.navigations == [first.resolve().as_uri(), second.resolve().as_uri()]
+    expected = ProbeReading(slots={12: (205, 347, 35, 32)}, stage=(1920, 1080))
+    assert results == [expected, expected]
+    # 会话收尾：上下文与驱动都停了。
+    assert context.close_calls == 1
+    assert playwright.stop_calls == 1
+
+
+def test_the_timeline_is_sought_to_its_end_before_each_reading(tmp_path: Path) -> None:
+    reading = {"12": [205, 347, 32, 32]}
+    probe, page, *_rest = _fixture(tmp_path, [reading])
+    (document,) = _documents(tmp_path, 1)
+
+    probe((document,))
+
+    # 每份文档两次 evaluate：先 seek 后量，顺序不可颠倒。
+    assert len(page.evaluations) == 2
+    assert "seek" in page.evaluations[0]
+    assert page.evaluations[1] == SLOT_PROBE_JS
+
+
+def test_readings_are_normalized_to_int_keys_pixel_tuples_and_a_stage(tmp_path: Path) -> None:
+    probe, *_rest = _fixture(tmp_path, [{"12": [400, 347, 32, 32], "15": [205, 347, 32, 32]}])
+    (document,) = _documents(tmp_path, 1)
+
+    (result,) = probe((document,))
+
+    assert result == ProbeReading(
+        slots={12: (400, 347, 32, 32), 15: (205, 347, 32, 32)}, stage=(1920, 1080)
+    )
+
+
+def test_a_failing_page_still_stops_the_browser_and_driver(tmp_path: Path) -> None:
+    probe, page, context, _chromium, playwright, _workspace = _fixture(
+        tmp_path, [{"12": [205, 347, 32, 32]}]
+    )
+    page.fail_evaluate = True
+    (document,) = _documents(tmp_path, 1)
+
+    with pytest.raises(Exception):
+        probe((document,))
+
+    assert context.close_calls == 1
+    assert playwright.stop_calls == 1

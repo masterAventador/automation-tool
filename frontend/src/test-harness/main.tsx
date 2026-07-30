@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
+import { TestHarnessAccountSession } from "./account-session";
 import { createTestHarnessControlPlaneTransport } from "../api/control-plane/test-harness";
 import {
   ControlPlaneTransportError,
@@ -96,6 +97,16 @@ const taskLifecycleProps =
  */
 const videoEditingGateway = createLocalVideoEditingGateway(window.sessionStorage);
 
+/**
+ * `?account=signed-in` renders the customer Demo shape: an account bar above
+ * the shell. The default stays gateless so every existing spec keeps measuring
+ * what it was written against.
+ */
+const accountProps =
+  parameters.get("account") === "signed-in"
+    ? { accountSessionGateway: new TestHarnessAccountSession() }
+    : {};
+
 createRoot(root).render(
   <StrictMode>
     <App
@@ -104,6 +115,7 @@ createRoot(root).render(
       {...taskLifecycleProps}
       {...publishingProps}
       {...videoStudioProps}
+      {...accountProps}
     />
   </StrictMode>,
 );

@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 
 import { browser } from "@wdio/globals";
 
+import {
+  workbenchIsMounted,
+} from "./navigation";
+
 const phase = process.env.AUTOMATION_TOOL_U906_PHASE;
 const loginName = process.env.AUTOMATION_TOOL_U906_LOGIN_NAME;
 const password = process.env.AUTOMATION_TOOL_U906_PASSWORD;
@@ -90,12 +94,14 @@ describe("U9-06 hidden real-Tauri account and device lifecycle", () => {
     }
     if (phase === "offline") {
       await waitForText("暂时无法确认账号状态");
-      assert.doesNotMatch(await bodyText(), /RPA 运营工作台|atas1|atrs1/);
+      assert.equal(await workbenchIsMounted(), false, "这一阶段不得挂载工作台");
+      assert.doesNotMatch(await bodyText(), /atas1|atrs1/);
       return;
     }
     if (phase === "session-invalid" || phase === "disabled") {
       await waitForText("登录自动化运营工具");
-      assert.doesNotMatch(await bodyText(), /RPA 运营工作台|atas1|atrs1/);
+      assert.equal(await workbenchIsMounted(), false, "这一阶段不得挂载工作台");
+      assert.doesNotMatch(await bodyText(), /atas1|atrs1/);
       return;
     }
 
@@ -116,6 +122,7 @@ describe("U9-06 hidden real-Tauri account and device lifecycle", () => {
     assert.equal((revoked as { status: string }).status, "revoked");
     await browser.refresh();
     await waitForText("当前安装实例已失效");
-    assert.doesNotMatch(await bodyText(), /RPA 运营工作台|atas1|atrs1|atdc1/);
+    assert.equal(await workbenchIsMounted(), false, "实例失效后不得挂载工作台");
+    assert.doesNotMatch(await bodyText(), /atas1|atrs1|atdc1/);
   });
 });

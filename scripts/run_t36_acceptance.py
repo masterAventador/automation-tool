@@ -25,12 +25,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -43,7 +45,12 @@ from desktop_e2e_prerequisites import (  # noqa: E402
     prepare_startup_gate,
     startup_gate_environment,
 )
+from build_motion_catalog_release import (  # noqa: E402
+    stage_for_release as stage_motion_catalog,
+)
+from prepare_video_runtime import install as install_resources  # noqa: E402
 from prepare_video_runtime import prepare as prepare_video_runtime  # noqa: E402
+from release_assembly import MOTION_CATALOG_RESOURCES  # noqa: E402
 from run_e4_14_acceptance import require_port_available, start_control_plane  # noqa: E402
 from run_i2_13_acceptance import BACKEND_ROOT, REPOSITORY_ROOT, compose_command  # noqa: E402
 from run_vf_06_acceptance import (  # noqa: E402
@@ -58,6 +65,8 @@ from run_vf_06_acceptance import (  # noqa: E402
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+# The frozen catalog of animation parts, as the release contract declares it.
+(MOTION_CATALOG,) = MOTION_CATALOG_RESOURCES
 SPEC = "./e2e-tauri/motion-one-sentence.spec.ts"
 
 # Why this acceptance runs on a `control-plane-e2e` build and not on
@@ -83,6 +92,8 @@ TAURI_CONFIG = FRONTEND / "src-tauri" / "tauri.t36-e2e.conf.json"
 BUILD_SCRIPT = "build:tauri:t36-test"
 WDIO_CONFIG = "wdio.t36.conf.ts"
 DEFAULT_SECRET = ROOT / ".local/secrets/bailian-model.json"
+# 一次重复要算数，就得几乎每一帧都对得上；4/60 那种是镜头定格。
+REPEAT_MATCH_RATIO = 0.8
 EVIDENCE = ROOT / ".local/embedded-browser-video-studio/t36-evidence"
 # Every isolated resource this run creates carries this stem plus the pid, so a
 # stray container, network or volume can always be traced back to one run of
@@ -255,10 +266,10 @@ def _answers_the_authoring_protocol(entrypoint: Path) -> bool:
 def prepare_resources() -> None:
     """Put the packaged parts where the App resolves them, then verify them.
 
-    The App reads the browser, both Workers and ffmpeg from its resource
-    directory and from nowhere else — there is no environment-variable branch to
-    fall back to — so a missing part here is a product failure the acceptance
-    would report as an unexplained blank window.
+    The App reads the browser, both Workers, ffmpeg and the frozen catalog of
+    animation parts from its resource directory and from nowhere else — there is
+    no environment-variable branch to fall back to — so a missing part here is a
+    product failure the acceptance would report as an unexplained blank window.
     """
     prepare_startup_gate(app_data_directory())
     require_authoring_capable_executor(app_data_directory())
@@ -266,6 +277,18 @@ def prepare_resources() -> None:
     platform = "windows" if sys.platform == "win32" else "macos"
     staging = prepare_video_runtime(platform=platform)
     stage_video_runtime(staging=staging, resource_root=DEBUG_APP_RESOURCE_ROOT)
+    # PC-18: the App now tells the authoring child where the 134 parts are, so a
+    # debug run needs them at the same path a packaged one has them. Without
+    # this the resolver succeeds, the directory is a name with nothing behind
+    # it, and every beat that chose a part fails when its working copy is
+    # written — which reads as the model having produced something unusable.
+    catalog_staging = stage_motion_catalog(staging=ROOT / ".local/t36-catalog").parent
+    install_resources(
+        staging=catalog_staging,
+        resource_root=DEBUG_APP_RESOURCE_ROOT,
+        only=[MOTION_CATALOG.staging_name],
+        platform=platform,
+    )
     installed = require_staged_video_runtime(resource_root=DEBUG_APP_RESOURCE_ROOT)
     runtime = installed["motion-video-worker"] / "runtime/gsap.min.js"
     if not runtime.is_file() or runtime.stat().st_size == 0:
@@ -330,8 +353,6 @@ def run_desktop_acceptance(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        if private_app_data.exists():
-            shutil.rmtree(private_app_data)
         require_port_closed(port)
         if restore.returncode != 0:
             raise RuntimeError("T36 failed to restore production Vite assets")
@@ -357,6 +378,104 @@ def inspect_film(video: Path) -> None:
     print(f"T36 evidence film: {json.dumps(stream, ensure_ascii=False)}")
     if int(stream["nb_read_frames"]) < 2:
         raise RuntimeError("the App produced a single-frame film")
+    # PC-18: a film is now joined from shots captured on different stages —
+    # 1920x1080 for most of the catalog, 1080x1920 for three, 640x360 at factor
+    # 2 for the built-in template. A delivered file is one size throughout, and
+    # the size it must be is declared in `motion-render-canvas.v1.json`.
+    # Measured 2026-07-28: concatenating mismatched shots exits 0 and reports
+    # the right frame count while the second half is sideways, so what the
+    # finished file measures is the only thing that settles it.
+    canvas = json.loads(
+        (ROOT / "contracts/video/motion-render-canvas.v1.json").read_text(encoding="utf-8")
+    )["film"]["byAspectRatio"]["16:9"]
+    if (int(stream["width"]), int(stream["height"])) != (canvas["width"], canvas["height"]):
+        raise RuntimeError(
+            f"the film is {stream['width']}x{stream['height']}, not the "
+            f"{canvas['width']}x{canvas['height']} canvas a 16:9 film is delivered on"
+        )
+    # PC-26: narration is product behaviour now — a catalog-backed film with no
+    # audio track means the TTS-and-mix half quietly fell off, which is exactly
+    # the silent degradation the closed refusals exist to prevent.
+    audio_probe = subprocess.run(
+        [
+            str(ffprobe), "-v", "error", "-select_streams", "a:0",
+            "-show_entries", "stream=codec_name,duration", "-of", "json", str(video),
+        ],
+        capture_output=True, text=True, check=True, timeout=300,
+    )
+    audio_streams = json.loads(audio_probe.stdout).get("streams", [])
+    if not audio_streams:
+        raise RuntimeError("the film carries no narration audio track (PC-26)")
+    print(f"T36 evidence narration: {json.dumps(audio_streams[0], ensure_ascii=False)}")
+    require_no_repeated_stretch(video, float(stream["duration"]))
+
+
+def require_no_repeated_stretch(video: Path, duration_seconds: float) -> None:
+    """The film must not be one stretch of footage played more than once.
+
+    PC-19: every check above this one passed over a film that was six seconds of
+    content played twice at double speed. Codec, canvas, frame count, duration
+    and the still-image gate were all green, because each of them asks about the
+    file and none of them asks whether the *picture* moves on. Two template
+    shots loading one composition rendered the whole composition each.
+
+    What is looked for is **periodicity**, not duplicate frames. The first
+    version of this check refused any two identical samples and was wrong the
+    first time it met a real film: a `data-chart` shot animates for ten seconds
+    and then holds its final frame for five, which is what a motion part is
+    supposed to do — 64 samples, 55 distinct, and every duplicate inside that
+    one held tail. A repeat is a different shape entirely: the *sequence*
+    recurs, so `frame[i] == frame[i + lag]` holds for nearly every i rather than
+    for a handful.
+
+    Deliberately measured on the delivered artifact rather than on the segment
+    list: what the segments were asked to render is the thing under test, and
+    reading the answer back out of the request is how the original defect stayed
+    invisible for nine acceptance runs.
+    """
+    if duration_seconds < 4:
+        return
+    ffmpeg = DEBUG_APP_RESOURCE_ROOT / "media-toolchain/bin/ffmpeg"
+    step = 0.5
+    with tempfile.TemporaryDirectory(prefix="automation-tool-t36-frames-") as raw:
+        frames = Path(raw)
+        offsets: list[float] = []
+        digests: list[str] = []
+        offset = 0.25
+        while offset < duration_seconds - 0.25:
+            still = frames / f"t{offset:.2f}.png"
+            subprocess.run(
+                [str(ffmpeg), "-v", "error", "-ss", f"{offset}", "-i", str(video),
+                 "-frames:v", "1", "-y", str(still)],
+                check=True, timeout=120,
+            )
+            digests.append(hashlib.sha256(still.read_bytes()).hexdigest())
+            offsets.append(offset)
+            offset += step
+    distinct = len(set(digests))
+    # A lag of at least two seconds: shorter than that is a shot holding still,
+    # which is what motion is for. `REPEAT_MATCH_RATIO` is what separates "the
+    # sequence recurs" from "a few frames happen to coincide" — measured, a
+    # genuine repeat matches every comparable frame while the real film above
+    # matched 4 of 60 at its worst lag.
+    minimum_lag = max(4, int(2 / step))
+    for lag in range(minimum_lag, len(digests)):
+        comparable = len(digests) - lag
+        if comparable < 4:
+            break
+        matches = sum(1 for index in range(comparable) if digests[index] == digests[index + lag])
+        if matches >= REPEAT_MATCH_RATIO * comparable:
+            raise RuntimeError(
+                f"the film repeats itself every {lag * step:.1f}s: "
+                f"{matches} of {comparable} sampled frames recur at that lag. "
+                "A film assembled from shots that each re-rendered the whole "
+                "composition looks exactly like this and passes every other "
+                "check (PC-19)."
+            )
+    print(
+        f"T36 evidence film: {len(digests)} samples, {distinct} distinct, "
+        "no stretch recurs"
+    )
 
 
 def main() -> int:
@@ -382,6 +501,12 @@ def main() -> int:
     )
     compose = compose_command(project_name)
     server: subprocess.Popen[bytes] | None = None
+    # A render that fails inside the App leaves its RenderJob workspace, its
+    # snapshot and whatever the Worker wrote in the App data directory. Deleting
+    # all of it on the way out is how a failure becomes "本机渲染未完成" and
+    # nothing else. It is removed at the start of every run, so keeping it on
+    # failure costs one stale copy rather than an accumulation.
+    run_failed = True
     try:
         # The one-sentence feature needs no Control Plane, but the App's startup
         # gate does: it holds the workbench closed until control-plane health
@@ -406,6 +531,7 @@ def main() -> int:
         server = start_control_plane(port=control_plane_port, environment=environment)
         run_desktop_acceptance(api_key, evidence_video, environment)
         inspect_film(evidence_video)
+        run_failed = False
     finally:
         if server is not None:
             server.terminate()
@@ -425,7 +551,13 @@ def main() -> int:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        if private_app_data.exists():
+        # The second of two cleanups that owned this directory. The first one
+        # started keeping it when a run failed and this one deleted it anyway,
+        # so the diagnosis it was kept for was gone before anyone could look.
+        # One owner decides now, and it is the one that knows the outcome.
+        if run_failed:
+            print(f"[T36] kept the App data directory for diagnosis: {private_app_data}")
+        elif private_app_data.exists():
             shutil.rmtree(private_app_data)
         require_port_closed(control_plane_port)
         require_port_closed(database_port)

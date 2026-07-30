@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  WORKBENCH_SHELL,
+  openVideoStudio,
+  openWorkbenchSection,
+} from "./navigation";
 
 /**
  * T36: the one-sentence path, driven the way a customer will drive it.
@@ -19,8 +24,25 @@ import { browser, expect } from "@wdio/globals";
  */
 const BRIEF = "用蓝色商务风做一段本周销售增长说明，三个要点";
 
-/** Three beats of four seconds: what the form submits, from the shared contract. */
-const EXPECTED_FILM_SECONDS = 12;
+/**
+ * The length this run asks for, typed into the form's own control.
+ *
+ * Not what the film measures. A shot is as long as its line or its part's own
+ * motion, whichever is longer, and the film is the sum of its shots — so this
+ * number steers how much the storyboard tries to say and does not cut the
+ * result. The form's own wording says exactly that; the finished length is
+ * measured off the artifact by `inspect_film`.
+ *
+ * Deliberately longer than the twelve second default, because the default is
+ * what kept the packaged parts out of every film. Measured 2026-07-28 against
+ * the real model: at twelve seconds the shortest catalog part costs 37% of the
+ * whole budget and the model declined every one of them — correctly, since the
+ * prompt tells it a part's length is spent from the film's budget. The same
+ * sentence at twenty seconds picked one to two parts. So this run both
+ * exercises the new control and is the only length at which "the film really
+ * used a part" can be observed at all.
+ */
+const EXPECTED_FILM_SECONDS = 20;
 
 /** The stage names a user watches go by, in the order they must appear. */
 const RUNNING_STAGES = ["准备中", "逐帧渲染中", "正在合成视频"] as const;
@@ -67,26 +89,20 @@ const SUBMIT_FAILURES: readonly (readonly [string, string])[] = [
   ],
 ];
 
-async function openWorkbenchSection(name: string): Promise<void> {
-  await browser
-    .$(`//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='${name}']]`)
-    .click();
-}
-
-async function openVideoStudio() {
-  await openWorkbenchSection("工作台");
-  await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
-  await openWorkbenchSection("视频制作");
-  const studio = await browser.$("section[aria-label='视频制作工作区']");
-  await expect(studio).toBeDisplayed();
-  await studio.$("button[aria-label='选择品牌动效成片']").click();
-  return studio;
-}
+/**
+ * The workbench shell, as opposed to the startup check or the startup gate.
+ *
+ * The workbench heading used to be this signal and no longer exists: the redesign
+ * (`c4d0d14`) replaced the single workbench heading with a per-section one, and
+ * the section the App lands on — the assistant — has no heading at all. The
+ * navigation landmark is what survives that, because it is the shell rather
+ * than anything inside it.
+ */
 
 describe("T36 一句话自动制作的真实 App 用户路径", () => {
   it("configures the model, refuses an empty brief, then authors, renders and plays", async function () {
-    // Authoring is a real model round trip and the render captures 360 frames
-    // through a real browser, so this test is minutes long by construction.
+    // Authoring is a real model round trip and every shot is captured frame by
+    // frame through a real browser, so this test is minutes long by construction.
     this.timeout(1_500_000);
 
     const apiKey = process.env.AUTOMATION_TOOL_T36_MODEL_KEY;
@@ -115,21 +131,20 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
     try {
       await browser.waitUntil(
         async () =>
-          (await browser.$("h2=RPA 运营工作台").isExisting()) ||
+          (await browser.$(WORKBENCH_SHELL).isExisting()) ||
           (await browser.$("button=打开本地修复工具").isExisting()),
         { timeout: 120_000, interval: 1_000 },
       );
     } catch {
       throw new Error(`App never left the startup check. Screen was:\n${await startupScreen()}`);
     }
-    if (!(await browser.$("h2=RPA 运营工作台").isExisting())) {
+    if (!(await browser.$(WORKBENCH_SHELL).isExisting())) {
       throw new Error(`App is blocked at the startup gate:\n${await startupScreen()}`);
     }
 
     step("workbench mounted");
     // --- The prerequisite, through the form a user actually fills ----------
-    await openWorkbenchSection("设置与诊断");
-    await expect(await browser.$("h2")).toHaveText("设置与诊断");
+    await openWorkbenchSection("设置");
     const videoModel = await browser.$(".model-service-purpose--video_creative");
     await expect(videoModel).toBeDisplayed();
     await videoModel.$("input[aria-label='视频创作模型服务 API Key']").setValue(apiKey);
@@ -146,11 +161,14 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
     // --- An empty sentence is refused before anything is started ----------
     const studio = await openVideoStudio();
     await expect(await studio.$("textarea[aria-label='一句话视频需求']")).toBeDisplayed();
-    // The entry has no length control, so the length has to be on the card. A
-    // customer who says "make me a three minute intro" otherwise gets a much
-    // shorter film with nothing anywhere saying so.
+    // The length is set through the control a user has, not pre-seeded. A
+    // customer who says "make me a three minute intro" used to get a much
+    // shorter film with nothing anywhere saying so; now he sets it, and the
+    // card restates what he set.
+    const filmSeconds = await studio.$("#motion-brief-seconds");
+    await filmSeconds.setValue(String(EXPECTED_FILM_SECONDS));
     await expect(studio).toHaveText(
-      expect.stringContaining(`会生成一段 ${EXPECTED_FILM_SECONDS} 秒的视频`),
+      expect.stringContaining(`按 ${EXPECTED_FILM_SECONDS} 秒来安排内容`),
     );
     await studio.$("button=开始自动制作").click();
     await expect(studio).toHaveText(
@@ -207,7 +225,17 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
         return text.includes("已提交一句话自动制作") ? "submitted" : "";
       },
       { timeout: 900_000, interval: 1_000, timeoutMsg: "one-sentence submission never landed" },
-    );
+    ).catch(async (error: Error) => {
+      // Fifteen minutes of waiting must not end in a sentence that says only
+      // "it didn't". Measured 2026-07-28: this timeout fired while the packaged
+      // Executor, run standalone with the same request, answered in 67 seconds
+      // — so the wait was not the child being slow, and nothing about the bare
+      // message said where else to look. What is on screen is the one thing
+      // this side can still report.
+      throw new Error(
+        `${error.message}. Studio showed:\n${await studio.getText()}\n---\nPage showed:\n${await startupScreen()}`,
+      );
+    });
     if (submission !== "submitted") {
       throw new Error(submission);
     }
@@ -270,17 +298,24 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
     await expect(player).toBeDisplayed();
     await browser.waitUntil(
       async () =>
-        browser.execute((expectedSeconds: number) => {
+        browser.execute((minimumSeconds: number) => {
           const video = document.querySelector<HTMLVideoElement>("video[aria-label$='成片播放器']");
           return (
             video !== null &&
             video.error === null &&
             video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
             Number.isFinite(video.duration) &&
-            Math.abs(video.duration - expectedSeconds) < 0.2 &&
+            // Deliberately not `duration === the seconds the form submitted`.
+            // A shot runs for whichever is longer, its line or its part's own
+            // motion, and the film is the sum of its shots — the product
+            // owner's correction of 2026-07-27. The submitted length steers how
+            // much the storyboard tries to say; it does not cut the film. What
+            // the film actually measures is asserted against the artifact by
+            // `inspect_film`, with the packaged ffprobe, on the file itself.
+            video.duration > minimumSeconds &&
             (video.currentTime > 0 || video.ended || video.played.length > 0)
           );
-        }, EXPECTED_FILM_SECONDS),
+        }, 1),
       { timeout: 60_000, interval: 250, timeoutMsg: "the App player never decoded and played the film" },
     );
 

@@ -48,8 +48,33 @@ body {
   box-shadow: 0 20px 60px rgb(24 34 48 / 10%);
 }
 
+/* The account bar sits above the shell, so the shell cannot also be the whole
+ * viewport.
+ *
+ * `.desktop-shell` pins itself to `height: 100vh` — that is what stops the
+ * navigation scrolling away, and it is correct when the shell is the page. In
+ * the customer Demo profile it is not: this gate puts a ~52px bar above it, so
+ * bar + shell came to 100vh + 52px, the document scrolled, and the sidebar went
+ * with it while `e2e/shell-layout.spec.ts` stayed green on a harness that never
+ * rendered the bar.
+ *
+ * A flex column with a definite height gives the shell whatever is left instead
+ * of letting it claim the whole window. `overflow: auto` rather than `hidden`
+ * because this container also holds the sign-in card and the device list, which
+ * can legitimately be taller than the window. */
 .account-session-layout {
-  min-height: 100vh;
+  display: flex;
+  height: 100vh;
+  flex-direction: column;
+  overflow: auto;
+}
+
+/* A flex child defaults to `min-height: auto` and refuses to shrink below its
+ * content; without this the shell hands its 100vh straight back. */
+.account-session-layout > .desktop-shell {
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .account-session-bar {
@@ -219,6 +244,13 @@ body {
 
 .video-studio-new-form {
   width: 100%;
+}
+
+/* 一句话卡片上的每个小控件：标签和控件之间要有间距，否则读成一体。 */
+.motion-brief-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .video-method-heading {
@@ -1266,10 +1298,14 @@ body {
   background: #f6f5f0;
 }
 
+/* A column, so a page can ask for "the rest of the height" without knowing how
+ * much chrome is above it. */
 .desktop-content > main {
+  display: flex;
   width: 100%;
   max-width: none;
   min-height: 100%;
+  flex-direction: column;
 }
 
 .desktop-content--assistant {
@@ -1335,9 +1371,17 @@ body {
   border: 0;
 }
 
+/* Fills what is left, rather than subtracting a header height it cannot see.
+ *
+ * `calc(100vh - 64px)` was right only while the page header was the only thing
+ * above the content. The customer Demo profile adds a ~52px account bar, so the
+ * page ran exactly 52px past its container and the composer sat below the fold
+ * — which is what a customer reported on 2026-07-27. */
 .assistant-home {
   display: grid;
-  height: calc(100vh - 64px);
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 0;
   grid-template-rows: minmax(0, 1fr) auto;
 }
 

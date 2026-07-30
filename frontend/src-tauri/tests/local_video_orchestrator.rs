@@ -8,10 +8,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use automation_tool_desktop_lib::local_video_orchestrator::{
     LocalVideoOrchestrator, VideoWorkerErrorCode, VideoWorkerKind, VideoWorkerLaunch,
-    VideoWorkerRenderBrowserConfiguration, VideoWorkerRenderSandboxRequest,
-    VideoWorkerRestartPolicy, VideoWorkerState,
+    VideoWorkerRenderBrowserConfiguration, VideoWorkerRenderCanvas,
+    VideoWorkerRenderSandboxRequest, VideoWorkerRestartPolicy, VideoWorkerSourceWindow,
+    VideoWorkerState,
 };
-use automation_tool_desktop_lib::motion_video_studio::cancel_marker_file_name;
+use automation_tool_desktop_lib::motion_video_studio::{
+    cancel_marker_file_name, TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR, TEMPLATE_CANVAS_HEIGHT,
+    TEMPLATE_CANVAS_WIDTH,
+};
 use uuid::Uuid;
 
 static TEMPORARY_WORKER_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -347,6 +351,13 @@ fn sandbox_request(workspace: &Path) -> VideoWorkerRenderSandboxRequest {
         cancel_marker_file_name()
             .expect("declared cancellation marker")
             .to_owned(),
+        VideoWorkerRenderCanvas::new(
+            TEMPLATE_CANVAS_WIDTH,
+            TEMPLATE_CANVAS_HEIGHT,
+            TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
+        )
+        .expect("the template canvas is inside the declared bounds"),
+        VideoWorkerSourceWindow::new(0, 6_000).expect("a window inside the declared bounds"),
         vec!["assets/style.css".to_owned(), "assets/logo.png".to_owned()],
         6,
         20,
@@ -572,6 +583,13 @@ fn render_sandbox_rejects_invalid_requests() {
             cancel_marker_file_name()
                 .expect("declared cancellation marker")
                 .to_owned(),
+            VideoWorkerRenderCanvas::new(
+                TEMPLATE_CANVAS_WIDTH,
+                TEMPLATE_CANVAS_HEIGHT,
+                TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
+            )
+            .expect("the template canvas is inside the declared bounds"),
+            VideoWorkerSourceWindow::new(0, 6_000).expect("a window inside the declared bounds"),
             assets.into_iter().map(str::to_owned).collect(),
             frames,
             duration,
@@ -590,6 +608,13 @@ fn render_sandbox_rejects_invalid_requests() {
         cancel_marker_file_name()
             .expect("declared cancellation marker")
             .to_owned(),
+        VideoWorkerRenderCanvas::new(
+            TEMPLATE_CANVAS_WIDTH,
+            TEMPLATE_CANVAS_HEIGHT,
+            TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
+        )
+        .expect("the template canvas is inside the declared bounds"),
+        VideoWorkerSourceWindow::new(0, 6_000).expect("a window inside the declared bounds"),
         Vec::new(),
         6,
         20,
@@ -623,6 +648,13 @@ fn render_sandbox_scales_the_cpu_budget_with_the_wall_clock_budget() {
             cancel_marker_file_name()
                 .expect("declared cancellation marker")
                 .to_owned(),
+            VideoWorkerRenderCanvas::new(
+                TEMPLATE_CANVAS_WIDTH,
+                TEMPLATE_CANVAS_HEIGHT,
+                TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
+            )
+            .expect("the template canvas is inside the declared bounds"),
+            VideoWorkerSourceWindow::new(0, 6_000).expect("a window inside the declared bounds"),
             vec!["assets/style.css".to_owned()],
             6,
             duration,
@@ -839,6 +871,13 @@ fn real_worker_render_sandbox_isolates_malicious_html() {
         cancel_marker_file_name()
             .expect("declared cancellation marker")
             .to_owned(),
+        VideoWorkerRenderCanvas::new(
+            TEMPLATE_CANVAS_WIDTH,
+            TEMPLATE_CANVAS_HEIGHT,
+            TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
+        )
+        .expect("the template canvas is inside the declared bounds"),
+        VideoWorkerSourceWindow::new(0, 6_000).expect("a window inside the declared bounds"),
         vec!["assets/style.css".to_owned()],
         3,
         60,

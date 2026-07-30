@@ -64,10 +64,25 @@ const LOCAL_DIAGNOSTICS = new Set<StartupDiagnosticCode>([
 interface StartupGateProps {
   startupCheck: StartupCheck;
   repairTools?: React.ReactNode;
+  /**
+   * The update prompt, rendered while the repair tools stay collapsed. The
+   * updater replaces the whole installed app — resources included — so it is
+   * the standard way a damaged installation heals itself; a repair screen
+   * without it can never receive the version that fixes it. Exactly one
+   * update center is mounted at a time (the expanded repair tools carry their
+   * own settings-mode copy), mirroring how the workbench shell swaps its
+   * prompt copy out on the settings page.
+   */
+  updateCenter?: React.ReactNode;
   children: React.ReactNode;
 }
 
-export function StartupGate({ startupCheck, repairTools, children }: StartupGateProps) {
+export function StartupGate({
+  startupCheck,
+  repairTools,
+  updateCenter,
+  children,
+}: StartupGateProps) {
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<StartupState>({ status: "checking" });
   const [showRepairTools, setShowRepairTools] = useState(false);
@@ -183,7 +198,7 @@ export function StartupGate({ startupCheck, repairTools, children }: StartupGate
               </Space>
             </Card>
           ))}
-          {showRepairTools ? repairTools : null}
+          {showRepairTools ? repairTools : updateCenter}
         </Space>
       </Result>
     </main>

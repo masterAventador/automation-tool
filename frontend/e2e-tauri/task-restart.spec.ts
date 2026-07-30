@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { access, writeFile } from "node:fs/promises";
 
-import { browser, expect } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import {
+  openAutomationRuns,
+  openTaskCreate,
+  waitForStartup,
+} from "./navigation";
 
 interface TaskRestartPreparation {
   readonly installationId: string;
@@ -63,15 +68,13 @@ describe("T3-20 hidden App restart recovery acceptance", () => {
     const unavailablePath = requiredSignalPath("AUTOMATION_TOOL_T320_UNAVAILABLE_FILE");
     const upPath = requiredSignalPath("AUTOMATION_TOOL_T320_UP_FILE");
 
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_task_restart_for_acceptance"),
     )) as TaskRestartPreparation;
     assert.match(preparation.installationId, UUID_V4);
 
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='新建任务']]")
-      .click();
+    await openTaskCreate();
     await browser.$("#searchKeyword").setValue("T3-20 重启恢复");
     await browser.$("#targetLimit").setValue("3");
     await browser.$("button=创建任务").click();
@@ -93,8 +96,15 @@ describe("T3-20 hidden App restart recovery acceptance", () => {
 
     await waitForSignal(upPath);
     await browser.$("button=重新检查").click();
-    await waitForRenderedText("RPA 运营工作台", taskId ?? "", "已取消");
-    await browser.$(`button=${taskId}`).click();
+    await openAutomationRuns();
+    // 列表的行名改版后是创建时刻，不再印 UUID；标识作为惰性的 `data-task-id` 还在。
+    // 详情页仍印完整 UUID，所以下一句按文本等的断言不动。
+    await browser.waitUntil(
+      async () => browser.$(`button[data-task-id="${taskId}"]`).isExisting(),
+      { timeout: 90_000, timeoutMsg: `运行记录里没有出现任务 ${taskId}` },
+    );
+    await waitForRenderedText("已取消");
+    await browser.$(`button[data-task-id="${taskId}"]`).click();
     await waitForRenderedText("任务运行详情", taskId ?? "", "已取消", "任务已取消");
     assert.equal(/产品登录|注册账号|账号登录/.test(await browser.$("body").getText()), false);
   });

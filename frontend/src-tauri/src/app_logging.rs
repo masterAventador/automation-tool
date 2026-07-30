@@ -53,6 +53,14 @@ pub(crate) enum DesktopLogEvent {
     #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
     ExecutorAutoStartRequested,
     ExecutorEmergencyStopRequested,
+    // PC-25：安全注销的删除流程逐步打点。b5_13 的 profile_identity_changed
+    // 用四轮插桩都定位不到是哪一步，因为删除的五个阶段在日志里是一片空白；
+    // 这五个事件与上面的执行器生命周期事件同轴，一份日志给出完整时间线。
+    ProfileRemovalStarted,
+    ProfileRemovalStaged,
+    ProfileRemovalDeleted,
+    ProfileRemovalCompleted,
+    ProfileRemovalRejected,
     ExecutorProcessStartRequested,
     ExecutorProcessStartSucceeded,
     ExecutorProcessStartFailed,
@@ -105,6 +113,11 @@ impl DesktopLogEvent {
             #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
             Self::ExecutorAutoStartRequested => "executor.auto_start.requested",
             Self::ExecutorEmergencyStopRequested => "executor.emergency_stop.requested",
+            Self::ProfileRemovalStarted => "profile.removal.started",
+            Self::ProfileRemovalStaged => "profile.removal.staged",
+            Self::ProfileRemovalDeleted => "profile.removal.deleted",
+            Self::ProfileRemovalCompleted => "profile.removal.completed",
+            Self::ProfileRemovalRejected => "profile.removal.rejected",
             Self::ExecutorProcessStartRequested => "executor.process.start.requested",
             Self::ExecutorProcessStartSucceeded => "executor.process.start.succeeded",
             Self::ExecutorProcessStartFailed => "executor.process.start.failed",
@@ -403,14 +416,20 @@ fn ensure_private_directory(path: &Path) -> io::Result<()> {
 fn create_private_directory(path: &Path) -> io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
 
+    // 父目录一起建（PC-25）：`run()` 在 setup 最开头初始化日志，而 App 私有
+    // 数据目录此刻还不存在——它是稍后由 `prepare_data_directory` 建的。只建
+    // 自己那一层等于「首次运行没有日志」，而首次运行恰是最需要留痕的一次。
+    // recursive 的每一层都带 0700，因此不放宽私密性。
     let mut builder = fs::DirBuilder::new();
     builder.mode(0o700);
+    builder.recursive(true);
     builder.create(path)
 }
 
 #[cfg(not(unix))]
 fn create_private_directory(path: &Path) -> io::Result<()> {
-    fs::create_dir(path)
+    // 同上（PC-25）：首次运行时父目录尚不存在。
+    fs::create_dir_all(path)
 }
 
 #[cfg(unix)]
@@ -761,5 +780,51 @@ mod tests {
                 & 0o777,
             0o600
         );
+    }
+}
+
+#[cfg(test)]
+mod first_run_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// PC-25：**首次运行的 App 根本没有固定事件日志。**
+    ///
+    /// `run()` 在 setup 一开头就用 `app.path().app_data_dir()` 初始化日志，
+    /// 而那个目录此刻还不存在——产品数据目录是稍后由
+    /// `prepare_data_directory` 建的。`create_private_directory` 只建自己
+    /// 那一层，父目录缺失即 NotFound，于是日志初始化失败、后续每一次
+    /// `record()` 全是空转，用户和排障只在 stderr 上得到一行
+    /// 「desktop fixed-event log unavailable」。
+    ///
+    /// 代价是实测过的：b5_13 为定位安全注销失败连查五轮都看不到删除流程
+    /// 的任何一步，正是因为那台机器上的日志从未存在过；h8_22 打包 App 的
+    /// 崩溃 stderr 第一行也是同一句。**留不下痕迹的失败**是这个项目反复
+    /// 遇到的那一类，而这里失效的恰是留痕本身。
+    #[test]
+    fn the_fixed_event_log_survives_a_first_run_with_no_app_data_directory() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let app_data = std::env::temp_dir().join(format!("automation-tool-pc25-first-run-{nonce}"));
+        assert!(!app_data.exists(), "the fixture must start from nothing");
+
+        // 用同步的内部 logger：全局那个走后台线程 + OnceLock，断言会与写入
+        // 赛跑，且同一测试进程里可能早被别的测试占位——两者都会让这条用例
+        // 变成测不出真伪的那种。
+        let mut logger =
+            DesktopLog::initialize(&app_data).expect("first run must still get its event log");
+        logger
+            .record(DesktopLogEvent::AppSetupStarted)
+            .expect("the first event must reach a file");
+
+        let logs = app_data.join(LOG_DIRECTORY_NAME);
+        let written: Vec<_> = fs::read_dir(&logs)
+            .expect("log directory")
+            .filter_map(Result::ok)
+            .collect();
+        assert!(!written.is_empty(), "the first event must reach a file");
+        let _ = fs::remove_dir_all(&app_data);
     }
 }

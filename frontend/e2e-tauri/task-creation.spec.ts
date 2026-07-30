@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-import { browser, expect } from "@wdio/globals";
+import { browser } from "@wdio/globals";
+import {
+  waitForStartup,
+} from "./navigation";
 
 interface TaskCreationSummary {
   readonly installationId: string;
@@ -15,8 +18,7 @@ const UUID_V4 =
 
 describe("Task creation production-path acceptance", () => {
   it("creates and replays one Task from the hidden real Tauri App", async () => {
-    const heading = await browser.$("h2");
-    await expect(heading).toHaveText("RPA 运营工作台");
+    await waitForStartup();
 
     const summary = (await browser.tauri.execute(({ core }) =>
       core.invoke("create_task_for_acceptance"),

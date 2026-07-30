@@ -21,6 +21,18 @@ export default tseslint.config(
     },
   },
   {
+    // A measuring probe is Node at the top level and a browser inside every
+    // `page.evaluate` callback, so it needs both. Declared per directory rather
+    // than per file: the alternative is that the next probe is written, lands
+    // with seven `no-undef` errors, and whoever hits them reaches for an
+    // eslint-disable comment instead — which turns the rule off for real code
+    // as easily as for a callback body.
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: { ...globals.node, ...globals.browser },
+    },
+  },
+  {
     files: ["**/*.{ts,tsx}"],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     languageOptions: {

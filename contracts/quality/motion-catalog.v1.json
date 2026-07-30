@@ -45,6 +45,17 @@
       "path": "registry/blocks/app-showcase",
       "title": "App Showcase",
       "category": "产品与案例展示",
+      "description": "Fitness app product showcase with three floating smartphone screens",
+      "tags": [
+        "showcase",
+        "app",
+        "3d"
+      ],
+      "duration": 5.5,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -61,6 +72,19 @@
       "path": "registry/blocks/apple-money-count",
       "title": "Apple Money Count",
       "category": "产品与案例展示",
+      "description": "Apple-style finance counter that counts from $0 to $10,000, flashes green, and bursts money icons with sound.",
+      "tags": [
+        "showcase",
+        "finance",
+        "kinetic",
+        "youtube",
+        "sfx"
+      ],
+      "duration": 5,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -83,6 +107,18 @@
       "path": "registry/blocks/blue-sweater-intro-video",
       "title": "Blue Sweater Intro Video",
       "category": "社交平台展示",
+      "description": "Warm AI creator intro sequence that resolves into an X follow card for @_blue_sweater_.",
+      "tags": [
+        "showcase",
+        "ai",
+        "creator",
+        "sfx"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -111,6 +147,17 @@
       "path": "registry/components/caption-blend-difference",
       "title": "Blend Difference",
       "category": "文字效果",
+      "description": "Auto-inverting text using mix-blend-mode: difference — flips between white and black per-pixel against the background",
+      "tags": [
+        "text",
+        "text-effect",
+        "effect",
+        "blend-mode",
+        "contrast",
+        "inversion"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -127,6 +174,16 @@
       "path": "registry/components/caption-clip-wipe",
       "title": "Clip Wipe",
       "category": "字幕",
+      "description": "Left-to-right clip-path wipe reveal per word",
+      "tags": [
+        "captions",
+        "caption-style",
+        "wipe",
+        "clip-path",
+        "reveal"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -143,6 +200,16 @@
       "path": "registry/components/caption-editorial-emphasis",
       "title": "Editorial Emphasis",
       "category": "字幕",
+      "description": "Dual-font system with dramatic size contrast for emphasis words",
+      "tags": [
+        "captions",
+        "caption-style",
+        "editorial",
+        "typography",
+        "emphasis"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -159,6 +226,15 @@
       "path": "registry/components/caption-emoji-pop",
       "title": "Emoji Pop",
       "category": "字幕",
+      "description": "Emoji integration with stroked text and horizontal squeeze entrance",
+      "tags": [
+        "captions",
+        "caption-style",
+        "emoji",
+        "social"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -175,6 +251,16 @@
       "path": "registry/components/caption-glitch-rgb",
       "title": "Glitch RGB",
       "category": "字幕",
+      "description": "RGB chromatic aberration with CRT scanline overlay",
+      "tags": [
+        "captions",
+        "caption-style",
+        "glitch",
+        "cyber",
+        "tech"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -191,6 +277,15 @@
       "path": "registry/components/caption-gradient-fill",
       "title": "Gradient Fill",
       "category": "字幕",
+      "description": "Gradient-clipped text with elastic bounce entrance",
+      "tags": [
+        "captions",
+        "caption-style",
+        "gradient",
+        "colorful"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -207,6 +302,16 @@
       "path": "registry/components/caption-highlight",
       "title": "Highlight",
       "category": "字幕",
+      "description": "Red background sweep behind each active word, TikTok-style",
+      "tags": [
+        "captions",
+        "caption-style",
+        "highlight",
+        "social",
+        "tiktok"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -223,6 +328,16 @@
       "path": "registry/components/caption-kinetic-slam",
       "title": "Kinetic Slam",
       "category": "字幕",
+      "description": "Full-screen single-word display with alternating entrance directions",
+      "tags": [
+        "captions",
+        "caption-style",
+        "kinetic",
+        "typography",
+        "slam"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -239,6 +354,16 @@
       "path": "registry/components/caption-matrix-decode",
       "title": "Matrix Decode",
       "category": "字幕",
+      "description": "Character scramble animation before text reveal",
+      "tags": [
+        "captions",
+        "caption-style",
+        "matrix",
+        "scramble",
+        "decode"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -255,6 +380,16 @@
       "path": "registry/components/caption-neon-accent",
       "title": "Neon Accent",
       "category": "字幕",
+      "description": "Multi-color neon glow accents with wiggle drift animation",
+      "tags": [
+        "captions",
+        "caption-style",
+        "neon",
+        "glow",
+        "accent"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -271,6 +406,16 @@
       "path": "registry/components/caption-neon-glow",
       "title": "Neon Glow",
       "category": "字幕",
+      "description": "Cyan and magenta neon glow with keyword accent colors",
+      "tags": [
+        "captions",
+        "caption-style",
+        "neon",
+        "glow",
+        "gaming"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -287,6 +432,16 @@
       "path": "registry/components/caption-parallax-layers",
       "title": "Parallax Layers",
       "category": "字幕",
+      "description": "Behind-subject 3D text layering with vertical stretch effect",
+      "tags": [
+        "captions",
+        "caption-style",
+        "parallax",
+        "3d",
+        "depth"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -303,6 +458,16 @@
       "path": "registry/components/caption-particle-burst",
       "title": "Particle Burst",
       "category": "字幕",
+      "description": "Keyword words trigger colored particle explosions",
+      "tags": [
+        "captions",
+        "caption-style",
+        "particles",
+        "burst",
+        "effects"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -319,6 +484,15 @@
       "path": "registry/components/caption-pill-karaoke",
       "title": "Pill Karaoke",
       "category": "字幕",
+      "description": "Pill-shaped container with per-word karaoke color highlight",
+      "tags": [
+        "captions",
+        "caption-style",
+        "karaoke",
+        "pill"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -335,6 +509,15 @@
       "path": "registry/components/caption-texture",
       "title": "Texture",
       "category": "字幕",
+      "description": "Flowing texture mask over large uppercase text — ships with 6 textures (lava, marble, metal, wood, concrete, rock), configurable via the texture variable",
+      "tags": [
+        "captions",
+        "caption-style",
+        "texture",
+        "mask"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -387,6 +570,15 @@
       "path": "registry/components/caption-weight-shift",
       "title": "Weight Shift",
       "category": "字幕",
+      "description": "Elegant font-weight transition between caption lines",
+      "tags": [
+        "captions",
+        "caption-style",
+        "minimal",
+        "typography"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -403,6 +595,16 @@
       "path": "registry/blocks/chromatic-radial-split",
       "title": "Chromatic Radial Split",
       "category": "转场",
+      "description": "Shader transition with chromatic aberration radial split",
+      "tags": [
+        "transition",
+        "shader"
+      ],
+      "duration": 4,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -419,6 +621,16 @@
       "path": "registry/blocks/cinematic-zoom",
       "title": "Cinematic Zoom",
       "category": "转场",
+      "description": "Shader transition with dramatic zoom blur",
+      "tags": [
+        "transition",
+        "shader"
+      ],
+      "duration": 4,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -435,6 +647,19 @@
       "path": "registry/blocks/code-3d-extrude",
       "title": "Code 3D Extrude",
       "category": "代码演示",
+      "description": "Syntax-highlighted code on a lit, beveled 3D slab that rotates through real space and settles to a readable rest — true WebGL depth and lighting, not a 2D transform.",
+      "tags": [
+        "code",
+        "code-animation",
+        "3d",
+        "webgl",
+        "developer"
+      ],
+      "duration": 8,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -451,6 +676,18 @@
       "path": "registry/blocks/code-diff",
       "title": "Code Diff",
       "category": "代码演示",
+      "description": "An edit shown as a colored diff — removed lines collapse in red, added lines expand in green.",
+      "tags": [
+        "code",
+        "code-animation",
+        "diff",
+        "developer"
+      ],
+      "duration": 6,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -467,6 +704,18 @@
       "path": "registry/blocks/code-highlight",
       "title": "Code Highlight Sweep",
       "category": "代码演示",
+      "description": "A highlight band sweeps across a target line while the surrounding context dims — draws the eye to one line. `line` is 0-based: `line: 1` targets the second displayed line (unlike code-scroll, whose target is 1-based).",
+      "tags": [
+        "code",
+        "code-animation",
+        "highlight",
+        "developer"
+      ],
+      "duration": 5,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -483,6 +732,19 @@
       "path": "registry/blocks/code-morph",
       "title": "Code Morph",
       "category": "代码演示",
+      "description": "One snippet transforms into another — tokens glide between positions, leavers fade out, enterers fade in. Shiki Magic Move re-driven as a paused GSAP timeline.",
+      "tags": [
+        "code",
+        "code-animation",
+        "morph",
+        "refactor",
+        "developer"
+      ],
+      "duration": 7,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -499,6 +761,20 @@
       "path": "registry/blocks/code-particle-assemble",
       "title": "Code Particle Assemble",
       "category": "代码演示",
+      "description": "Thousands of GPU points scatter through space and fly to the exact glyph pixels of the code, resolving into readable syntax-highlighted text — a particle system, not a token tween.",
+      "tags": [
+        "code",
+        "code-animation",
+        "particles",
+        "gpu",
+        "webgl",
+        "developer"
+      ],
+      "duration": 8,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -515,6 +791,18 @@
       "path": "registry/blocks/code-scroll",
       "title": "Code Scroll To Line",
       "category": "代码演示",
+      "description": "The camera scrolls a long file to bring a target line to center and spotlights it — for walking through real modules.",
+      "tags": [
+        "code",
+        "code-animation",
+        "scroll",
+        "developer"
+      ],
+      "duration": 6,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -531,6 +819,19 @@
       "path": "registry/blocks/code-shader-dissolve",
       "title": "Code Shader Dissolve",
       "category": "代码演示",
+      "description": "The code compiles into existence: a GPU fragment shader resolves it out of seeded noise with a chromatic dissolve front and edge glow, then holds crisp.",
+      "tags": [
+        "code",
+        "code-animation",
+        "shader",
+        "webgl",
+        "developer"
+      ],
+      "duration": 7,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -547,6 +848,20 @@
       "path": "registry/blocks/code-snippet-apple-terminal-basic",
       "title": "Code Snippet - Apple Terminal Basic",
       "category": "代码演示",
+      "description": "Apple Terminal Basic profile: white background, black text, per-character typing animation of a shell session.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "terminal",
+        "apple",
+        "apple-terminal"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -563,6 +878,20 @@
       "path": "registry/blocks/code-snippet-apple-terminal-clear-dark",
       "title": "Code Snippet - Apple Terminal Clear Dark",
       "category": "代码演示",
+      "description": "Apple Terminal Clear Dark profile: semi-transparent dark background, per-character typing animation of a shell session.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "terminal",
+        "apple",
+        "apple-terminal"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -579,6 +908,20 @@
       "path": "registry/blocks/code-snippet-apple-terminal-clear-light",
       "title": "Code Snippet - Apple Terminal Clear Light",
       "category": "代码演示",
+      "description": "Apple Terminal Clear Light profile: semi-transparent light background, per-character typing animation of a shell session.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "terminal",
+        "apple",
+        "apple-terminal"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -595,6 +938,20 @@
       "path": "registry/blocks/code-snippet-apple-terminal-grass",
       "title": "Code Snippet - Apple Terminal Grass",
       "category": "代码演示",
+      "description": "Apple Terminal Grass profile: black background with green text, per-character typing animation of a shell session.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "terminal",
+        "apple",
+        "apple-terminal"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -611,6 +968,20 @@
       "path": "registry/blocks/code-snippet-apple-terminal-homebrew",
       "title": "Code Snippet - Apple Terminal Homebrew",
       "category": "代码演示",
+      "description": "Apple Terminal Homebrew profile: black background with bright green text and lime cursor, per-character typing animation of a shell session.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "terminal",
+        "apple",
+        "apple-terminal"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -627,6 +998,20 @@
       "path": "registry/blocks/code-snippet-apple-terminal-man-page",
       "title": "Code Snippet - Apple Terminal Man Page",
       "category": "代码演示",
+      "description": "Apple Terminal Man Page profile: pale yellow background with black text, per-character typing animation of a shell session.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "terminal",
+        "apple",
+        "apple-terminal"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -643,6 +1028,20 @@
       "path": "registry/blocks/code-snippet-apple-terminal-novel",
       "title": "Code Snippet - Apple Terminal Novel",
       "category": "代码演示",
+      "description": "Apple Terminal Novel profile: warm parchment background with dark brown text, per-character typing animation of a shell session.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "terminal",
+        "apple",
+        "apple-terminal"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -659,6 +1058,20 @@
       "path": "registry/blocks/code-snippet-apple-terminal-ocean",
       "title": "Code Snippet - Apple Terminal Ocean",
       "category": "代码演示",
+      "description": "Apple Terminal Ocean profile: deep blue background with white text, per-character typing animation of a shell session.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "terminal",
+        "apple",
+        "apple-terminal"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -675,6 +1088,20 @@
       "path": "registry/blocks/code-snippet-apple-terminal-pro",
       "title": "Code Snippet - Apple Terminal Pro",
       "category": "代码演示",
+      "description": "Apple Terminal Pro profile: black background with grey text and lime green cursor, per-character typing animation of a shell session.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "terminal",
+        "apple",
+        "apple-terminal"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -691,6 +1118,20 @@
       "path": "registry/blocks/code-snippet-apple-terminal-red-sands",
       "title": "Code Snippet - Apple Terminal Red Sands",
       "category": "代码演示",
+      "description": "Apple Terminal Red Sands profile: deep red background with sandy text, per-character typing animation of a shell session.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "terminal",
+        "apple",
+        "apple-terminal"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -707,6 +1148,20 @@
       "path": "registry/blocks/code-snippet-apple-terminal-silver-aerogel",
       "title": "Code Snippet - Apple Terminal Silver Aerogel",
       "category": "代码演示",
+      "description": "Apple Terminal Silver Aerogel profile: dark grey background with white text, per-character typing animation of a shell session.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "terminal",
+        "apple",
+        "apple-terminal"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -723,6 +1178,20 @@
       "path": "registry/blocks/code-snippet-apple-terminal-solid-colors",
       "title": "Code Snippet - Apple Terminal Solid Colors",
       "category": "代码演示",
+      "description": "Apple Terminal Solid Colors profile: deep purple background with white text, per-character typing animation of a shell session.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "terminal",
+        "apple",
+        "apple-terminal"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -739,6 +1208,18 @@
       "path": "registry/blocks/code-snippet-dark-2026",
       "title": "Code Snippet - Dark 2026",
       "category": "代码演示",
+      "description": "VS Code workbench with per-character typing animation in the Dark 2026 theme. Full editor chrome with activity bar, sidebar, tabs, terminal, and status bar.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "vscode"
+      ],
+      "duration": 11,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -761,6 +1242,18 @@
       "path": "registry/blocks/code-snippet-dark-modern",
       "title": "Code Snippet - Dark Modern",
       "category": "代码演示",
+      "description": "VS Code workbench with per-character typing animation in the Dark Modern theme. Full editor chrome with activity bar, sidebar, tabs, terminal, and status bar.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "vscode"
+      ],
+      "duration": 11,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -783,6 +1276,18 @@
       "path": "registry/blocks/code-snippet-dark-plus",
       "title": "Code Snippet - Dark+",
       "category": "代码演示",
+      "description": "VS Code workbench with per-character typing animation in the Dark+ theme. Full editor chrome with activity bar, sidebar, tabs, terminal, and status bar.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "vscode"
+      ],
+      "duration": 11,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -805,6 +1310,18 @@
       "path": "registry/blocks/code-snippet-flight",
       "title": "Code Snippet Flight",
       "category": "代码演示",
+      "description": "Discrete code snippets fly in from the side and assemble into a stacked program, staggered. Block-level FLIP.",
+      "tags": [
+        "code",
+        "code-animation",
+        "flight",
+        "developer"
+      ],
+      "duration": 6,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -821,6 +1338,18 @@
       "path": "registry/blocks/code-snippet-high-contrast",
       "title": "Code Snippet - High Contrast",
       "category": "代码演示",
+      "description": "VS Code workbench with per-character typing animation in the High Contrast theme. Full editor chrome with activity bar, sidebar, tabs, terminal, and status bar.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "vscode"
+      ],
+      "duration": 11,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -843,6 +1372,18 @@
       "path": "registry/blocks/code-snippet-high-contrast-light",
       "title": "Code Snippet - High Contrast Light",
       "category": "代码演示",
+      "description": "VS Code workbench with per-character typing animation in the High Contrast Light theme. Full editor chrome with activity bar, sidebar, tabs, terminal, and status bar.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "vscode"
+      ],
+      "duration": 11,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -865,6 +1406,18 @@
       "path": "registry/blocks/code-snippet-light-2026",
       "title": "Code Snippet - Light 2026",
       "category": "代码演示",
+      "description": "VS Code workbench with per-character typing animation in the Light 2026 theme. Full editor chrome with activity bar, sidebar, tabs, terminal, and status bar.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "vscode"
+      ],
+      "duration": 11,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -887,6 +1440,18 @@
       "path": "registry/blocks/code-snippet-light-modern",
       "title": "Code Snippet - Light Modern",
       "category": "代码演示",
+      "description": "VS Code workbench with per-character typing animation in the Light Modern theme. Full editor chrome with activity bar, sidebar, tabs, terminal, and status bar.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "vscode"
+      ],
+      "duration": 11,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -909,6 +1474,18 @@
       "path": "registry/blocks/code-snippet-light-plus",
       "title": "Code Snippet - Light+",
       "category": "代码演示",
+      "description": "VS Code workbench with per-character typing animation in the Light+ theme. Full editor chrome with activity bar, sidebar, tabs, terminal, and status bar.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "vscode"
+      ],
+      "duration": 11,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -931,6 +1508,18 @@
       "path": "registry/blocks/code-snippet-monokai",
       "title": "Code Snippet - Monokai",
       "category": "代码演示",
+      "description": "VS Code workbench with per-character typing animation in the Monokai theme. Full editor chrome with activity bar, sidebar, tabs, terminal, and status bar.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "vscode"
+      ],
+      "duration": 11,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -953,6 +1542,18 @@
       "path": "registry/blocks/code-snippet-solarized-light",
       "title": "Code Snippet - Solarized Light",
       "category": "代码演示",
+      "description": "VS Code workbench with per-character typing animation in the Solarized Light theme. Full editor chrome with activity bar, sidebar, tabs, terminal, and status bar.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "vscode"
+      ],
+      "duration": 11,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -975,6 +1576,18 @@
       "path": "registry/blocks/code-snippet-visual-studio-dark",
       "title": "Code Snippet - Visual Studio Dark",
       "category": "代码演示",
+      "description": "VS Code workbench with per-character typing animation in the Visual Studio Dark theme. Full editor chrome with activity bar, sidebar, tabs, terminal, and status bar.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "vscode"
+      ],
+      "duration": 11,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -997,6 +1610,18 @@
       "path": "registry/blocks/code-snippet-visual-studio-light",
       "title": "Code Snippet - Visual Studio Light",
       "category": "代码演示",
+      "description": "VS Code workbench with per-character typing animation in the Visual Studio Light theme. Full editor chrome with activity bar, sidebar, tabs, terminal, and status bar.",
+      "tags": [
+        "code",
+        "developer",
+        "showcase",
+        "vscode"
+      ],
+      "duration": 11,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -1019,6 +1644,18 @@
       "path": "registry/blocks/code-typing",
       "title": "Code Typing",
       "category": "代码演示",
+      "description": "Token-streamed typing reveal with a caret that tracks the frontier — deterministic, no CSS animation.",
+      "tags": [
+        "code",
+        "code-animation",
+        "typing",
+        "developer"
+      ],
+      "duration": 5,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": false,
       "files": [
         {
@@ -1035,6 +1672,16 @@
       "path": "registry/blocks/cross-warp-morph",
       "title": "Cross Warp Morph",
       "category": "转场",
+      "description": "Shader transition with cross-warped morphing",
+      "tags": [
+        "transition",
+        "shader"
+      ],
+      "duration": 4,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1051,6 +1698,17 @@
       "path": "registry/blocks/data-chart",
       "title": "Data Chart",
       "category": "数据与地图",
+      "description": "Animated bar + line chart with staggered reveal, NYT-style typography, and value labels",
+      "tags": [
+        "data",
+        "chart",
+        "statistics"
+      ],
+      "duration": 15,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1067,6 +1725,16 @@
       "path": "registry/blocks/domain-warp-dissolve",
       "title": "Domain Warp Dissolve",
       "category": "转场",
+      "description": "Shader transition with fractal noise domain warping",
+      "tags": [
+        "transition",
+        "shader"
+      ],
+      "duration": 4,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1083,6 +1751,16 @@
       "path": "registry/blocks/flash-through-white",
       "title": "Flash Through White",
       "category": "转场",
+      "description": "Shader transition with white flash crossfade",
+      "tags": [
+        "transition",
+        "shader"
+      ],
+      "duration": 4,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1099,6 +1777,17 @@
       "path": "registry/blocks/flowchart",
       "title": "Flowchart",
       "category": "流程图",
+      "description": "Animated decision tree with SVG connectors, sticky-note nodes, cursor interaction, and typing correction",
+      "tags": [
+        "diagram",
+        "flowchart",
+        "interactive"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1115,6 +1804,18 @@
       "path": "registry/blocks/flowchart-vertical",
       "title": "Flowchart Vertical",
       "category": "流程图",
+      "description": "Portrait animated decision tree with SVG connectors, sticky-note nodes, cursor interaction, and typing correction",
+      "tags": [
+        "diagram",
+        "flowchart",
+        "interactive",
+        "portrait"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1440,
+        "height": 2560
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1131,6 +1832,16 @@
       "path": "registry/blocks/glitch",
       "title": "Glitch",
       "category": "转场",
+      "description": "Shader transition with digital glitch artifacts",
+      "tags": [
+        "transition",
+        "shader"
+      ],
+      "duration": 4,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1147,6 +1858,15 @@
       "path": "registry/components/grain-overlay",
       "title": "Grain Overlay",
       "category": "其他",
+      "description": "Animated film grain texture overlay using CSS keyframes — adds warmth and analog character to any composition",
+      "tags": [
+        "texture",
+        "grain",
+        "overlay",
+        "film"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -1163,6 +1883,16 @@
       "path": "registry/blocks/gravitational-lens",
       "title": "Gravitational Lens",
       "category": "转场",
+      "description": "Shader transition with gravitational lensing distortion",
+      "tags": [
+        "transition",
+        "shader"
+      ],
+      "duration": 4,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1179,6 +1909,15 @@
       "path": "registry/components/grid-pixelate-wipe",
       "title": "Grid Pixelate Wipe",
       "category": "转场",
+      "description": "Transition effect where the screen dissolves into a grid of squares that fade out with staggered timing — use between scenes",
+      "tags": [
+        "transition",
+        "wipe",
+        "grid",
+        "pixelate"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -1195,6 +1934,17 @@
       "path": "registry/blocks/instagram-follow",
       "title": "Instagram Follow",
       "category": "社交平台展示",
+      "description": "Animated Instagram follow overlay with profile card and follow button",
+      "tags": [
+        "social",
+        "overlay",
+        "instagram"
+      ],
+      "duration": 4.5,
+      "dimensions": {
+        "width": 1080,
+        "height": 1920
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1217,6 +1967,22 @@
       "path": "registry/blocks/ios26-liquid-glass",
       "title": "iOS 26 Liquid Glass Home Screen",
       "category": "画面内复杂效果",
+      "description": "3D iPhone with a normal iOS 26 home screen, liquid glass app icons, shader wallpaper, dock, and fluid glass notifications that drop from the status area onto a GLTF device model.",
+      "tags": [
+        "liquid-glass-html-in-canvas",
+        "webgpu",
+        "3d",
+        "iphone",
+        "ios26",
+        "notifications",
+        "gltf",
+        "html-in-canvas"
+      ],
+      "duration": 15,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1401,6 +2167,16 @@
       "path": "registry/blocks/light-leak",
       "title": "Light Leak",
       "category": "转场",
+      "description": "Shader transition with cinematic light leak overlay",
+      "tags": [
+        "transition",
+        "shader"
+      ],
+      "duration": 4,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1417,6 +2193,17 @@
       "path": "registry/blocks/liquid-glass-context-menu",
       "title": "Liquid Glass Context Menu",
       "category": "画面内复杂效果",
+      "description": "Frosted glass context menu panel drifting over an aurora shader background",
+      "tags": [
+        "html-in-canvas",
+        "liquid-glass-html-in-canvas",
+        "webgpu"
+      ],
+      "duration": 8,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1439,6 +2226,17 @@
       "path": "registry/blocks/liquid-glass-media-controls",
       "title": "Liquid Glass Media Controls",
       "category": "画面内复杂效果",
+      "description": "Frosted glass media control panels spreading over an aurora shader background",
+      "tags": [
+        "html-in-canvas",
+        "liquid-glass-html-in-canvas",
+        "webgpu"
+      ],
+      "duration": 8,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1461,6 +2259,17 @@
       "path": "registry/blocks/liquid-glass-notification",
       "title": "Liquid Glass Notification",
       "category": "画面内复杂效果",
+      "description": "Frosted glass notification cards floating over an aurora shader background",
+      "tags": [
+        "html-in-canvas",
+        "liquid-glass-html-in-canvas",
+        "webgpu"
+      ],
+      "duration": 8,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1489,6 +2298,17 @@
       "path": "registry/blocks/liquid-glass-widgets",
       "title": "Liquid Glass Widgets",
       "category": "画面内复杂效果",
+      "description": "Frosted glass stat cards, showcase panel and pill chips over an aurora shader background",
+      "tags": [
+        "html-in-canvas",
+        "liquid-glass-html-in-canvas",
+        "webgpu"
+      ],
+      "duration": 8,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1517,6 +2337,17 @@
       "path": "registry/blocks/logo-outro",
       "title": "Logo Outro",
       "category": "其他",
+      "description": "Cinematic logo reveal with piece-by-piece assembly, glow bloom, tagline fade-in, and URL pill",
+      "tags": [
+        "branding",
+        "outro",
+        "logo"
+      ],
+      "duration": 6,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1533,6 +2364,18 @@
       "path": "registry/blocks/lower-third-bild",
       "title": "Lower Third — BILD Style",
       "category": "人名与身份条",
+      "description": "News-style lower third with tight-fit text boxes: white headline bar with red drop-shadow, red sub-line with white drop-shadow.",
+      "tags": [
+        "broadcast",
+        "lower-third",
+        "news",
+        "overlay"
+      ],
+      "duration": 8,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1561,6 +2404,19 @@
       "path": "registry/blocks/lt-accent-underline",
       "title": "Lower Third — Accent Underline",
       "category": "人名与身份条",
+      "description": "Cardless lower third for footage overlay: name rises, an accent rule draws left-to-right, role fades in; text-shadowed for legibility",
+      "tags": [
+        "lower-third",
+        "overlay",
+        "podcast",
+        "interview",
+        "minimal"
+      ],
+      "duration": 4.8,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1577,6 +2433,19 @@
       "path": "registry/blocks/lt-bold-block",
       "title": "Lower Third — Bold Block",
       "category": "人名与身份条",
+      "description": "High-energy podcast lower third: solid dark block wipes in, uppercase name slams up, accent tag pops",
+      "tags": [
+        "lower-third",
+        "overlay",
+        "podcast",
+        "interview",
+        "bold"
+      ],
+      "duration": 4.8,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1593,6 +2462,18 @@
       "path": "registry/blocks/lt-clean-bar",
       "title": "Lower Third — Clean Bar",
       "category": "人名与身份条",
+      "description": "Minimal white-card lower third for podcasts/interviews: accent tab, name + role, clip-wipe entrance",
+      "tags": [
+        "lower-third",
+        "overlay",
+        "podcast",
+        "interview"
+      ],
+      "duration": 4.8,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1609,6 +2490,19 @@
       "path": "registry/blocks/lt-color-block",
       "title": "Lower Third — Color Block",
       "category": "人名与身份条",
+      "description": "High-energy lower third: bold accent-color block slides in with overshoot, condensed name + mono role",
+      "tags": [
+        "lower-third",
+        "overlay",
+        "podcast",
+        "interview",
+        "bold"
+      ],
+      "duration": 4.8,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1625,6 +2519,19 @@
       "path": "registry/blocks/lt-dark-card",
       "title": "Lower Third — Dark Card",
       "category": "人名与身份条",
+      "description": "Charcoal card lower third for bright footage: name, drawn accent underline, role; slide-up entrance",
+      "tags": [
+        "lower-third",
+        "overlay",
+        "podcast",
+        "interview",
+        "dark"
+      ],
+      "duration": 4.8,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1641,6 +2548,19 @@
       "path": "registry/blocks/lt-kicker-name",
       "title": "Lower Third — Kicker Name",
       "category": "人名与身份条",
+      "description": "Cardless lower third with an accent eyebrow/kicker tag, heavy name, and a drawn baseline; for footage",
+      "tags": [
+        "lower-third",
+        "overlay",
+        "podcast",
+        "interview",
+        "bold"
+      ],
+      "duration": 4.8,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1657,6 +2577,19 @@
       "path": "registry/blocks/lt-mask-reveal",
       "title": "Lower Third — Mask Reveal",
       "category": "人名与身份条",
+      "description": "Cardless lower third: an accent sweep crosses and clip-path-reveals a heavy name, role fades up; for footage",
+      "tags": [
+        "lower-third",
+        "overlay",
+        "podcast",
+        "interview",
+        "bold"
+      ],
+      "duration": 4.8,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1673,6 +2606,19 @@
       "path": "registry/blocks/lt-side-rule",
       "title": "Lower Third — Side Rule",
       "category": "人名与身份条",
+      "description": "Cardless lower third with a vertical accent bar; condensed display name + mono role, text-shadowed for footage",
+      "tags": [
+        "lower-third",
+        "overlay",
+        "podcast",
+        "interview",
+        "minimal"
+      ],
+      "duration": 4.8,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1689,6 +2635,19 @@
       "path": "registry/blocks/lt-soft-pill",
       "title": "Lower Third — Soft Pill",
       "category": "人名与身份条",
+      "description": "Rounded white pill lower third for podcasts/interviews: status dot, name + role, scale-pop entrance",
+      "tags": [
+        "lower-third",
+        "overlay",
+        "podcast",
+        "interview",
+        "minimal"
+      ],
+      "duration": 4.8,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1705,6 +2664,19 @@
       "path": "registry/blocks/lt-stack-bars",
       "title": "Lower Third — Stack Bars",
       "category": "人名与身份条",
+      "description": "Two stacked bars: a dark name bar wipes from the left, an accent role bar wipes from the right",
+      "tags": [
+        "lower-third",
+        "overlay",
+        "podcast",
+        "interview",
+        "bold"
+      ],
+      "duration": 4.8,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1721,6 +2693,17 @@
       "path": "registry/blocks/macos-notification",
       "title": "macOS Notification",
       "category": "社交平台展示",
+      "description": "Animated macOS-style notification banner with app icon and message",
+      "tags": [
+        "social",
+        "overlay",
+        "notification"
+      ],
+      "duration": 5,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1737,6 +2720,19 @@
       "path": "registry/blocks/macos-tahoe-liquid-glass",
       "title": "macOS Tahoe Liquid Glass Desktop",
       "category": "画面内复杂效果",
+      "description": "3D MacBook with a macOS Tahoe-style desktop, glass menu bar, Finder window, dock, and cinematic device camera move.",
+      "tags": [
+        "html-in-canvas",
+        "3d",
+        "macos",
+        "tahoe",
+        "gltf"
+      ],
+      "duration": 15,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1861,6 +2857,18 @@
       "path": "registry/components/morph-text",
       "title": "Morph Text",
       "category": "文字效果",
+      "description": "Gooey text morph — cycles through an editable word list using SVG threshold + GSAP-driven blur for a fluid, satisfying transition effect",
+      "tags": [
+        "text",
+        "text-effect",
+        "typography",
+        "morph",
+        "gooey",
+        "kinetic",
+        "animation"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": false,
       "files": [
         {
@@ -1877,6 +2885,16 @@
       "path": "registry/components/motion-blur",
       "title": "Motion Blur",
       "category": "其他",
+      "description": "Velocity-driven motion blur — samples element position each frame and applies a one-sided SVG feGaussianBlur ghost trail proportional to speed",
+      "tags": [
+        "effect",
+        "motion-blur",
+        "velocity",
+        "animation",
+        "physics"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -1893,6 +2911,18 @@
       "path": "registry/blocks/news-ticker",
       "title": "News Ticker",
       "category": "其他",
+      "description": "Premium broadcast-style lower-third ticker with live label, headline ribbon, and scrolling news crawl.",
+      "tags": [
+        "lower-third",
+        "overlay",
+        "news",
+        "ticker"
+      ],
+      "duration": 7,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1909,6 +2939,19 @@
       "path": "registry/blocks/north-korea-locked-down",
       "title": "North Korea Locked Down",
       "category": "产品与案例展示",
+      "description": "Realistic map zoom into North Korea with a red scribble circle, locked-down pop-up label, and reddish editorial wash.",
+      "tags": [
+        "showcase",
+        "map",
+        "annotation",
+        "youtube",
+        "kinetic"
+      ],
+      "duration": 7,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1931,6 +2974,19 @@
       "path": "registry/blocks/nyc-paris-flight",
       "title": "NYC Paris Flight",
       "category": "产品与案例展示",
+      "description": "Apple-style realistic map animation with a plane flying from New York to Paris, marker circle, landing pop, and sound effects.",
+      "tags": [
+        "showcase",
+        "travel",
+        "map",
+        "youtube",
+        "sfx"
+      ],
+      "duration": 6,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -1959,6 +3015,17 @@
       "path": "registry/components/parallax-unzoom",
       "title": "Parallax Unzoom",
       "category": "转场",
+      "description": "Reveal transition — focus card scales down from full frame as siblings parallax in to form a grid (reverse of parallax-zoom)",
+      "tags": [
+        "transition",
+        "reveal",
+        "unzoom",
+        "parallax",
+        "grid",
+        "hero"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -1975,6 +3042,16 @@
       "path": "registry/components/parallax-zoom",
       "title": "Parallax Zoom",
       "category": "转场",
+      "description": "Center card scales up to fill the frame while siblings parallax outward — inspired by the eBay Playbook hero transition",
+      "tags": [
+        "transition",
+        "zoom",
+        "parallax",
+        "grid",
+        "hero"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -1991,6 +3068,17 @@
       "path": "registry/blocks/reddit-post",
       "title": "Reddit Post Card",
       "category": "社交平台展示",
+      "description": "Animated Reddit post card overlay with upvotes and comments",
+      "tags": [
+        "social",
+        "overlay",
+        "reddit"
+      ],
+      "duration": 5,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2007,6 +3095,16 @@
       "path": "registry/blocks/ridged-burn",
       "title": "Ridged Burn",
       "category": "转场",
+      "description": "Shader transition with ridged turbulence burn effect",
+      "tags": [
+        "transition",
+        "shader"
+      ],
+      "duration": 4,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2023,6 +3121,16 @@
       "path": "registry/blocks/ripple-waves",
       "title": "Ripple Waves",
       "category": "转场",
+      "description": "Shader transition with concentric ripple wave distortion",
+      "tags": [
+        "transition",
+        "shader"
+      ],
+      "duration": 4,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2039,6 +3147,16 @@
       "path": "registry/blocks/sdf-iris",
       "title": "SDF Iris",
       "category": "转场",
+      "description": "Shader transition with signed distance field iris reveal",
+      "tags": [
+        "transition",
+        "shader"
+      ],
+      "duration": 4,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2055,6 +3173,15 @@
       "path": "registry/components/shimmer-sweep",
       "title": "Shimmer Sweep",
       "category": "文字效果",
+      "description": "Animated light sweep across text or elements using a CSS gradient mask — ideal for AI accents and premium reveals",
+      "tags": [
+        "text",
+        "shimmer",
+        "highlight",
+        "effect"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -2071,6 +3198,20 @@
       "path": "registry/blocks/spain-map",
       "title": "Spain Map",
       "category": "数据与地图",
+      "description": "Animated Spain choropleth by autonomous community with staggered reveals and gradient legend — D3 conic conformal projection",
+      "tags": [
+        "data",
+        "map",
+        "geography",
+        "spain",
+        "europe",
+        "choropleth"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2087,6 +3228,17 @@
       "path": "registry/blocks/spotify-card",
       "title": "Spotify Now Playing",
       "category": "社交平台展示",
+      "description": "Animated Spotify now-playing card with album art and progress bar",
+      "tags": [
+        "social",
+        "overlay",
+        "spotify"
+      ],
+      "duration": 5,
+      "dimensions": {
+        "width": 1080,
+        "height": 1920
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2103,6 +3255,16 @@
       "path": "registry/blocks/swirl-vortex",
       "title": "Swirl Vortex",
       "category": "转场",
+      "description": "Shader transition with swirling vortex distortion",
+      "tags": [
+        "transition",
+        "shader"
+      ],
+      "duration": 4,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2119,6 +3281,16 @@
       "path": "registry/components/texture-mask-text",
       "title": "Texture Mask Text",
       "category": "文字效果",
+      "description": "CSS luminance masks that cut holes through letterforms - 66 pre-built texture masks from ambientCG PBR color maps",
+      "tags": [
+        "text",
+        "text-effect",
+        "effect",
+        "texture",
+        "mask"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -2531,6 +3703,16 @@
       "path": "registry/blocks/thermal-distortion",
       "title": "Thermal Distortion",
       "category": "转场",
+      "description": "Shader transition with heat haze thermal distortion",
+      "tags": [
+        "transition",
+        "shader"
+      ],
+      "duration": 4,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2547,6 +3729,17 @@
       "path": "registry/blocks/tiktok-follow",
       "title": "TikTok Follow",
       "category": "社交平台展示",
+      "description": "Animated TikTok follow overlay with profile card and follow button",
+      "tags": [
+        "social",
+        "overlay",
+        "tiktok"
+      ],
+      "duration": 4.5,
+      "dimensions": {
+        "width": 1080,
+        "height": 1920
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2569,6 +3762,16 @@
       "path": "registry/blocks/transitions-3d",
       "title": "3D Transitions",
       "category": "转场",
+      "description": "Showcase of 3D perspective flip and rotate transitions",
+      "tags": [
+        "transition",
+        "showcase"
+      ],
+      "duration": 11,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2585,6 +3788,16 @@
       "path": "registry/blocks/transitions-blur",
       "title": "Blur Transitions",
       "category": "转场",
+      "description": "Showcase of blur-based transitions between scenes",
+      "tags": [
+        "transition",
+        "showcase"
+      ],
+      "duration": 20,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2601,6 +3814,16 @@
       "path": "registry/blocks/transitions-cover",
       "title": "Cover Transitions",
       "category": "转场",
+      "description": "Showcase of cover/uncover slide transitions",
+      "tags": [
+        "transition",
+        "showcase"
+      ],
+      "duration": 21,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2617,6 +3840,16 @@
       "path": "registry/blocks/transitions-destruction",
       "title": "Destruction Transitions",
       "category": "转场",
+      "description": "Showcase of destructive break-apart transitions",
+      "tags": [
+        "transition",
+        "showcase"
+      ],
+      "duration": 14,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2633,6 +3866,16 @@
       "path": "registry/blocks/transitions-dissolve",
       "title": "Dissolve Transitions",
       "category": "转场",
+      "description": "Showcase of dissolve and fade transitions",
+      "tags": [
+        "transition",
+        "showcase"
+      ],
+      "duration": 24,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2649,6 +3892,16 @@
       "path": "registry/blocks/transitions-distortion",
       "title": "Distortion Transitions",
       "category": "转场",
+      "description": "Showcase of warp and distortion transitions",
+      "tags": [
+        "transition",
+        "showcase"
+      ],
+      "duration": 21,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2665,6 +3918,16 @@
       "path": "registry/blocks/transitions-grid",
       "title": "Grid Transitions",
       "category": "转场",
+      "description": "Showcase of grid-based tile transitions",
+      "tags": [
+        "transition",
+        "showcase"
+      ],
+      "duration": 11,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2681,6 +3944,16 @@
       "path": "registry/blocks/transitions-light",
       "title": "Light Transitions",
       "category": "转场",
+      "description": "Showcase of light-based glow and flash transitions",
+      "tags": [
+        "transition",
+        "showcase"
+      ],
+      "duration": 21,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2697,6 +3970,16 @@
       "path": "registry/blocks/transitions-mechanical",
       "title": "Mechanical Transitions",
       "category": "转场",
+      "description": "Showcase of mechanical shutter and iris transitions",
+      "tags": [
+        "transition",
+        "showcase"
+      ],
+      "duration": 15,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2713,6 +3996,16 @@
       "path": "registry/blocks/transitions-other",
       "title": "Other Transitions",
       "category": "转场",
+      "description": "Showcase of miscellaneous creative transitions",
+      "tags": [
+        "transition",
+        "showcase"
+      ],
+      "duration": 20,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2729,6 +4022,16 @@
       "path": "registry/blocks/transitions-push",
       "title": "Push Transitions",
       "category": "转场",
+      "description": "Showcase of push and slide transitions",
+      "tags": [
+        "transition",
+        "showcase"
+      ],
+      "duration": 24,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2745,6 +4048,16 @@
       "path": "registry/blocks/transitions-radial",
       "title": "Radial Transitions",
       "category": "转场",
+      "description": "Showcase of radial wipe and reveal transitions",
+      "tags": [
+        "transition",
+        "showcase"
+      ],
+      "duration": 20,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2761,6 +4074,16 @@
       "path": "registry/blocks/transitions-scale",
       "title": "Scale Transitions",
       "category": "转场",
+      "description": "Showcase of scale and zoom transitions",
+      "tags": [
+        "transition",
+        "showcase"
+      ],
+      "duration": 15,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2777,6 +4100,17 @@
       "path": "registry/blocks/ui-3d-reveal",
       "title": "3D UI Reveal",
       "category": "产品与案例展示",
+      "description": "Perspective 3D reveal animation for UI elements",
+      "tags": [
+        "showcase",
+        "3d",
+        "reveal"
+      ],
+      "duration": 13,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2793,6 +4127,19 @@
       "path": "registry/blocks/us-map",
       "title": "US Map",
       "category": "数据与地图",
+      "description": "Animated US choropleth map with staggered state reveals, value labels, and gradient legend — pure inline SVG with GSAP",
+      "tags": [
+        "data",
+        "map",
+        "geography",
+        "usa",
+        "choropleth"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2809,6 +4156,20 @@
       "path": "registry/blocks/us-map-bubble",
       "title": "US Bubble Map",
       "category": "数据与地图",
+      "description": "Animated US bubble map with proportional city markers, value callouts, and connection lines — composable with us-map",
+      "tags": [
+        "data",
+        "map",
+        "geography",
+        "usa",
+        "bubble",
+        "cities"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2825,6 +4186,21 @@
       "path": "registry/blocks/us-map-flow",
       "title": "US Flow Map",
       "category": "数据与地图",
+      "description": "Animated connection arcs between US cities over a base map — composable origin-destination flow visualization",
+      "tags": [
+        "data",
+        "map",
+        "geography",
+        "usa",
+        "flow",
+        "connections",
+        "arcs"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2841,6 +4217,20 @@
       "path": "registry/blocks/us-map-hex",
       "title": "US Hex Grid Map",
       "category": "数据与地图",
+      "description": "Animated hexagonal tile grid map — each state as an equal-weight hex with data fill and abbreviation label",
+      "tags": [
+        "data",
+        "map",
+        "geography",
+        "usa",
+        "hexgrid",
+        "tilegrid"
+      ],
+      "duration": 10,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2857,6 +4247,20 @@
       "path": "registry/blocks/vfx-iphone-device",
       "title": "iPhone & MacBook 3D Showcase",
       "category": "画面内复杂效果",
+      "description": "Real GLTF iPhone 15 Pro Max and MacBook Pro models with live HTML-in-Canvas screen content, morphing glass lens, product review camera choreography, and 360° turntable.",
+      "tags": [
+        "html-in-canvas",
+        "3d",
+        "device",
+        "iphone",
+        "macbook",
+        "gltf"
+      ],
+      "duration": 15,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2897,6 +4301,19 @@
       "path": "registry/blocks/vfx-liquid-background",
       "title": "Liquid Background",
       "category": "画面内复杂效果",
+      "description": "Organic liquid simulation with vertex displacement on a subdivided plane. HTML content floats above rippling fluid surface with real-time wave dynamics.",
+      "tags": [
+        "html-in-canvas",
+        "liquid",
+        "webgl",
+        "displacement",
+        "background"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2913,6 +4330,16 @@
       "path": "registry/blocks/vfx-liquid-glass",
       "title": "Liquid Glass",
       "category": "画面内复杂效果",
+      "description": "VFX composition block",
+      "tags": [
+        "html-in-canvas",
+        "webgl"
+      ],
+      "duration": 20,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2929,6 +4356,16 @@
       "path": "registry/blocks/vfx-magnetic",
       "title": "Magnetic",
       "category": "画面内复杂效果",
+      "description": "VFX composition block",
+      "tags": [
+        "html-in-canvas",
+        "webgl"
+      ],
+      "duration": 15,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2945,6 +4382,16 @@
       "path": "registry/blocks/vfx-portal",
       "title": "Portal",
       "category": "画面内复杂效果",
+      "description": "VFX composition block",
+      "tags": [
+        "html-in-canvas",
+        "webgl"
+      ],
+      "duration": 10,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2961,6 +4408,16 @@
       "path": "registry/blocks/vfx-shatter",
       "title": "Shatter",
       "category": "画面内复杂效果",
+      "description": "VFX composition block",
+      "tags": [
+        "html-in-canvas",
+        "webgl"
+      ],
+      "duration": 12,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2977,6 +4434,19 @@
       "path": "registry/blocks/vfx-text-cursor",
       "title": "VFX Text Cursor",
       "category": "文字效果",
+      "description": "Dramatic text reveal with cursor glow, chromatic shadow rays, and directional lighting on a black stage. Canvas-based shader post-processing with spectral color edges.",
+      "tags": [
+        "html-in-canvas",
+        "text",
+        "shader",
+        "cursor",
+        "chromatic"
+      ],
+      "duration": 8,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -2993,6 +4463,15 @@
       "path": "registry/components/vignette",
       "title": "Vignette",
       "category": "其他",
+      "description": "Cinematic radial vignette overlay using a pure-CSS gradient — darkens the edges to pull focus toward the center",
+      "tags": [
+        "vignette",
+        "overlay",
+        "cinematic",
+        "effect"
+      ],
+      "duration": null,
+      "dimensions": null,
       "officialPreview": true,
       "files": [
         {
@@ -3009,6 +4488,18 @@
       "path": "registry/blocks/vpn-youtube-spot",
       "title": "VPN YouTube Spot",
       "category": "产品与案例展示",
+      "description": "Snappy Apple-style YouTube insert showing a phone finding and installing a friendly VPN app with sound effects.",
+      "tags": [
+        "app",
+        "showcase",
+        "youtube",
+        "sfx"
+      ],
+      "duration": 7,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -3031,6 +4522,16 @@
       "path": "registry/blocks/whip-pan",
       "title": "Whip Pan",
       "category": "转场",
+      "description": "Shader transition simulating a fast camera whip pan",
+      "tags": [
+        "transition",
+        "shader"
+      ],
+      "duration": 4,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -3047,6 +4548,19 @@
       "path": "registry/blocks/world-map",
       "title": "World Map",
       "category": "数据与地图",
+      "description": "Animated world choropleth with country-by-country reveal, tooltip labels, and rotating globe inset — D3 Natural Earth projection",
+      "tags": [
+        "data",
+        "map",
+        "geography",
+        "world",
+        "choropleth"
+      ],
+      "duration": 14,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -3063,6 +4577,17 @@
       "path": "registry/blocks/x-post",
       "title": "X Post Card",
       "category": "社交平台展示",
+      "description": "Animated X/Twitter post card overlay with engagement metrics",
+      "tags": [
+        "social",
+        "overlay",
+        "twitter"
+      ],
+      "duration": 5,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {
@@ -3079,6 +4604,17 @@
       "path": "registry/blocks/yt-lower-third",
       "title": "YouTube Lower Third",
       "category": "社交平台展示",
+      "description": "Animated YouTube subscribe lower third with avatar and channel info",
+      "tags": [
+        "social",
+        "overlay",
+        "youtube"
+      ],
+      "duration": 4.5,
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      },
       "officialPreview": true,
       "files": [
         {

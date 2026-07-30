@@ -370,6 +370,57 @@ def conclusion_for(
     return "cleared"
 
 
+def authoring_facts(kind: str, name: str, manifest: dict[str, object]) -> dict[str, object]:
+    """Upstream's own account of a part, kept for whoever has to orchestrate it.
+
+    This catalog was frozen for a rights audit, which needed identity and
+    digests and nothing else. An orchestrating model reads the same list to
+    answer a different question — which part fits this beat, and how long does
+    it run — and measured on 2026-07-27 two models given only title and category
+    picked legal parts and then overshot the 20s sandbox budget by more than
+    70%, because nothing in the list said `data-chart` runs 15 seconds while
+    `lt-bold-block` runs 4.8.
+
+    These are copied, never paraphrased: they are upstream's words about
+    upstream's parts, and a local rewording would be a second source that goes
+    stale on the next submodule bump with nothing able to notice.
+
+    `duration` and `dimensions` are absent for components by design rather than
+    by omission — upstream splits the registry into blocks, which are standalone
+    sub-compositions owning a canvas and a timeline, and components, which are
+    snippets pasted into a host and own neither. Measured across all 134 items,
+    the two fields are present on exactly the 109 blocks. Carrying that as an
+    explicit `null` is what lets a caller tell "no canvas of its own" apart from
+    "we forgot to record one"; failing closed when the shape flips is what makes
+    an upstream change in this rule something a human looks at.
+    """
+    description = manifest.get("description")
+    if not isinstance(description, str) or not description.strip():
+        fail(f"{name} has no upstream description")
+    tags = manifest.get("tags")
+    if not isinstance(tags, list) or not all(
+        isinstance(tag, str) and tag for tag in tags
+    ):
+        fail(f"{name} tags must be a list of non-empty strings")
+    duration = manifest.get("duration")
+    dimensions = manifest.get("dimensions")
+    if kind == "block":
+        if type(duration) not in (int, float) or duration <= 0:
+            fail(f"{name} is a block without a positive duration: {duration!r}")
+        if not isinstance(dimensions, dict) or set(dimensions) != {"width", "height"}:
+            fail(f"{name} is a block without width/height dimensions: {dimensions!r}")
+        if any(type(dimensions[axis]) is not int or dimensions[axis] <= 0 for axis in dimensions):
+            fail(f"{name} declares a non-positive canvas: {dimensions!r}")
+    elif duration is not None or dimensions is not None:
+        fail(f"{name} is a component yet declares a canvas or duration")
+    return {
+        "description": description,
+        "tags": list(tags),
+        "duration": duration,
+        "dimensions": dict(dimensions) if isinstance(dimensions, dict) else None,
+    }
+
+
 def scan_item(kind: str, directory: Path) -> tuple[dict[str, object], dict[str, object]]:
     manifest = load_json(directory / "registry-item.json")
     if not isinstance(manifest, dict):
@@ -448,6 +499,7 @@ def scan_item(kind: str, directory: Path) -> tuple[dict[str, object], dict[str, 
         "path": f"registry/{kind}s/{name}",
         "title": manifest.get("title", ""),
         "category": category,
+        **authoring_facts(kind, str(name), manifest),
         "officialPreview": False,
         "files": files,
     }

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  openAutomationRuns,
+  waitForStartup,
+} from "./navigation";
 
 interface TargetPreviewUiPreparation {
   readonly installationId: string;
@@ -12,7 +16,7 @@ const UUID_V4 =
 
 describe("Task target preview UI production-path acceptance", () => {
   it("loads, excludes, and confirms from the hidden real App UI", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
+    await waitForStartup();
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_task_target_preview_ui_for_acceptance"),
     )) as TargetPreviewUiPreparation;
@@ -20,6 +24,9 @@ describe("Task target preview UI production-path acceptance", () => {
     assert.match(preparation.taskId, UUID_V4);
 
     await browser.refresh();
+    // 改版后刷新落在 AI 助理页，「等待确认」与「查看运行详情」都在运行记录页。
+    await waitForStartup();
+    await openAutomationRuns();
     const body = await browser.$("body");
     await browser.waitUntil(
       async () => (await body.getText()).includes("等待确认"),

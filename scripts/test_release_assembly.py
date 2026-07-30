@@ -275,6 +275,7 @@ class SingleResourceDeclarationTests(unittest.TestCase):
             "media-toolchain",
             "motion-video-worker",
             "material-video-worker",
+            "motion-catalog",
             "bin/ffmpeg",
             "runtime/node",
             "automation-tool-material-video-worker",
@@ -292,6 +293,7 @@ class SingleResourceDeclarationTests(unittest.TestCase):
                 "media-toolchain",
                 "motion-video-worker",
                 "material-video-worker",
+                "motion-catalog",
             ],
         )
         for resource in self.contract["resources"]:
@@ -353,6 +355,7 @@ class ReleaseConfigurationTests(unittest.TestCase):
                 "local-executor/package/",
                 "material-video-worker/package/",
                 "media-toolchain/",
+                "motion-catalog/",
                 "motion-video-worker/package/",
             ],
         )

@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
+import {
+  openWorkbenchSection,
+  waitForStartup,
+} from "./navigation";
 
 describe("H8-13 hidden App diagnostic export acceptance", () => {
   it("exports only after the user confirms in 设置与诊断", async () => {
-    await expect(await browser.$("h2")).toHaveText("RPA 运营工作台");
-    await browser
-      .$("//li[contains(@class,'ant-menu-item') and .//*[normalize-space()='设置与诊断']]")
-      .click();
-    await expect(await browser.$("h2")).toHaveText("设置与诊断");
+    await waitForStartup();
+    await openWorkbenchSection("设置");
+    await expect(await browser.$("h2")).toHaveText("设置");
 
     const body = await browser.$("body");
     assert.ok((await body.getText()).includes("导出诊断包"));

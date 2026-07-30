@@ -100,6 +100,10 @@ export const PLATFORM_SESSION_NATIVE_ERROR_CODES: ReadonlySet<string> = new Set(
   // The App's private operations Profile.
   "profile_in_use",
   "profile_recovery_required",
+  "profile_identity_changed",
+  "profile_missing",
+  "profile_directory_unsafe",
+  "profile_marker_invalid",
   // Control Plane leg of starting the executor.
   "transport_unavailable",
   "credential_missing",
@@ -124,6 +128,10 @@ export type PlatformSessionGatewayErrorCode =
   | "browser_component_version_incompatible"
   | "profile_in_use"
   | "profile_recovery_required"
+  | "profile_identity_changed"
+  | "profile_missing"
+  | "profile_directory_unsafe"
+  | "profile_marker_invalid"
   | "credential_missing"
   | "installation_access_denied"
   | "installation_conflict"

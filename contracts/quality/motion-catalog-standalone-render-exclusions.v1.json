@@ -1,0 +1,108 @@
+{
+  "version": "motion-catalog-standalone-render-exclusions.v1",
+  "decidedAt": "2026-07-29",
+  "evidence": "docs/development/PC-21.md §18.6",
+  "total": 25,
+  "items": {
+    "code-snippet-dark-2026": {
+      "class": "template-host-instantiated",
+      "reason": "整个合成含全部脚本在 <template> 内（上游原件同构），独立打开是空白页；上游靠宿主克隆实例化"
+    },
+    "code-snippet-dark-modern": {
+      "class": "template-host-instantiated",
+      "reason": "同 code-snippet-dark-2026"
+    },
+    "code-snippet-dark-plus": {
+      "class": "template-host-instantiated",
+      "reason": "同 code-snippet-dark-2026"
+    },
+    "code-snippet-high-contrast": {
+      "class": "template-host-instantiated",
+      "reason": "同 code-snippet-dark-2026"
+    },
+    "code-snippet-high-contrast-light": {
+      "class": "template-host-instantiated",
+      "reason": "同 code-snippet-dark-2026"
+    },
+    "code-snippet-light-2026": {
+      "class": "template-host-instantiated",
+      "reason": "同 code-snippet-dark-2026"
+    },
+    "code-snippet-light-modern": {
+      "class": "template-host-instantiated",
+      "reason": "同 code-snippet-dark-2026"
+    },
+    "code-snippet-light-plus": {
+      "class": "template-host-instantiated",
+      "reason": "同 code-snippet-dark-2026"
+    },
+    "code-snippet-monokai": {
+      "class": "template-host-instantiated",
+      "reason": "同 code-snippet-dark-2026"
+    },
+    "code-snippet-solarized-light": {
+      "class": "template-host-instantiated",
+      "reason": "同 code-snippet-dark-2026"
+    },
+    "code-snippet-visual-studio-dark": {
+      "class": "template-host-instantiated",
+      "reason": "同 code-snippet-dark-2026"
+    },
+    "code-snippet-visual-studio-light": {
+      "class": "template-host-instantiated",
+      "reason": "同 code-snippet-dark-2026"
+    },
+    "liquid-glass-notification": {
+      "class": "replacement-stub-api",
+      "reason": "商标替换把上游 liquid-glass.iife.js 换成只有 style() 的存根，调用方仍在 new LiquidGlass.LiquidGlassCanvas；BM-13 素材替换族收尾，按安排留待 codex"
+    },
+    "liquid-glass-widgets": {
+      "class": "replacement-stub-api",
+      "reason": "同 liquid-glass-notification"
+    },
+    "lower-third-bild": {
+      "class": "static-by-design-overlay",
+      "reason": "字幕条叠加层，时间轴唯一事件是终点隐藏自己，[0,8s) 全程静止即正确形态；产品里作为叠加轨道与运动内容合成"
+    },
+    "spain-map": {
+      "class": "runtime-fetch-blocked",
+      "reason": "运行时 fetch() 地图数据，file:// 沙箱下被 Chromium CORS 拒（数据在发布树内）；等 loopback 数据供给或构建期内联"
+    },
+    "us-map": {
+      "class": "runtime-fetch-blocked",
+      "reason": "同 spain-map"
+    },
+    "us-map-bubble": {
+      "class": "runtime-fetch-blocked",
+      "reason": "同 spain-map"
+    },
+    "us-map-flow": {
+      "class": "runtime-fetch-blocked",
+      "reason": "同 spain-map"
+    },
+    "world-map": {
+      "class": "runtime-fetch-blocked",
+      "reason": "同 spain-map"
+    },
+    "vfx-iphone-device": {
+      "class": "runtime-fetch-blocked",
+      "reason": "three.js 运行时 fetch() 3D 模型，同 spain-map 的 CORS 边界"
+    },
+    "texture-mask-text": {
+      "class": "absolute-path-reference",
+      "reason": "引用 /assets/texture-mask-text/masks/lava.png 绝对路径离开目录树，收集期即拒；内容修正与 BM-13 同批处理"
+    },
+    "vfx-shatter": {
+      "class": "experimental-api-dependency",
+      "reason": "自带 drawElementImage 特性检测但另一路径裸调（534/581 行），依赖实验性 Chromium API；上游代码缺陷"
+    },
+    "vfx-liquid-background": {
+      "class": "frozen-render-pipeline",
+      "reason": "时间轴 15 个 tween、GL 上下文存活，但 seek 四点与真实时间三拍全部同帧；断点在零件内部布线，已收窄未定位；上游内容缺陷"
+    },
+    "vfx-portal": {
+      "class": "frozen-render-pipeline",
+      "reason": "同 vfx-liquid-background"
+    }
+  }
+}

@@ -32,6 +32,7 @@ frontend/dist/
 frontend/dist-h821/
 frontend/dist-h822-mac/
 frontend/dist-h822-windows/
+frontend/dist-pc16-mac/
 frontend/.vite/
 frontend/coverage/
 frontend/playwright-report/

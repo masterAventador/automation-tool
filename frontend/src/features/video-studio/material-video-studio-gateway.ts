@@ -52,6 +52,15 @@ export interface MotionVideoBriefRequest {
   readonly aspectRatio: string;
   readonly durationSeconds: number;
   readonly language: string;
+  /**
+   * Whether the video-creation model reasons before it answers.
+   *
+   * Carried on the request rather than configured once, because it is a
+   * per-film trade: measured 2026-07-28, the reasoning phase is 31 of the 42
+   * seconds authoring takes, and whether that is worth paying depends on
+   * whether the operator is rehearsing or delivering.
+   */
+  readonly modelThinking: boolean;
 }
 
 export type MotionRenderJobStatus =
