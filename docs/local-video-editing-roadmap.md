@@ -49,7 +49,7 @@
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
 | LE-05 | 数据库迁移与仓储 | 项目/素材/时间轴/任务表迁移、SQLAlchemy 仓储；**真实 PostgreSQL** 集成测试，断言落库行；**同任务内加结构性边界测试守住 Material 的描述保护**——`with_ai_description` 只挡住走它的调用方，`dataclasses.replace()` 与直接构造 `Material(...)` 都能到达它要阻止的状态（转换不变式无法由单快照构造校验表达，LE-02 T5 审查实跑证明）。用 AST 做法（**注意：`backend/tests/unit/executor/test_shipped_package_boundary.py` 这个样板不在本线分支上**——它由 `ddc6632` 引入，只存在于未合并的 `feature-audit` / `pc21-b`，`main` 与三条 LE 分支都没有，本线自 `5875191` 分出、比它早。所以 LE-05 要么自己从零写这个 AST 检查，要么先等那条分支合并。连带事实：三条 LE 分支的 `executor/__init__.py` 至今仍导出 `FakeExecutorEngine` 等测试替身，即 CLAUDE.md §9.2 禁止的形态，而 §9.2 点名的守卫在这里并不存在），禁止 `material.py` 之外的模块调用 `replace(` 于 Material 或直接构造它；**并承接 LE-04 新造的三条跨聚合根不变式**（领域对象不持有彼此引用，只能在仓储层成立，LE-04 终审实测三者当前全部 ACCEPTED）：① `EditingJob.project_id` 必须等于其 `timeline_id` 所属 `Timeline.project_id`——`project_id` 同时挂在两处是有意冗余，**普通外键管不住这个三角，需要复合外键或 CHECK**；② `EditingJob.timeline_revision` 必须真实存在；③ 同一 `(timeline_id, revision)` 不得同时有多个 QUEUED 作业；**T1～T5 全部完成**（四表、迁移 `0036`～`0039`、四个 SQLAlchemy 仓储、Material 描述保护的 AST 结构守卫、三条跨聚合根不变式全部由库结构而非应用层检查挡住），证据见 `docs/development/LE-05.md`；**顶格 `🔍 待验收`**——本线拿到的是真实 PostgreSQL 的分层证据，没有任何用户可操作路径：补验收依赖 LE-06（REST 面把四个仓储接到 Control Plane 接口上）与 LE-17（工作台接真实网关，形成正式 App 的用户路径并核对可外部核对的终态），两条都不满足之前不得标完成 | LE-04 | 🔍 待验收 |
-| LE-06 | 剪辑 REST API | `control_plane/api/` 下新增剪辑路由，首期严格对齐现有 `VideoEditingGateway` 六个操作：项目列表/创建（项目 write-once，**不做更新删除**）、时间轴读取/保存、作业列表/提交；素材登记与查询作为 LE-18 的后端前置一并交付。为项目/作业补带总序游标的仓储分页查询；Timeline 保持 write-once，`EditingJob.update(previous, changed)` 的 CAS 不得错接到时间轴路由，Worker 写回由 LE-12 消费。修订冲突的 `currentRevision` 走 `ErrorEnvelope` 严格可选 `details`，不塞 message；开工前须在任务文档【先定】并用数据库守住「一个项目只有一个 timeline_id」，禁止先查后随机插入。FastAPI 真实起服务的契约测试；**T1～T5 已完成并通过逐任务 Codex Review，T6 正在执行真实 Uvicorn/PostgreSQL 契约与模块收口** | LE-05 | 🚧 实现中 |
+| LE-06 | 剪辑 REST API | `control_plane/api/` 下新增剪辑路由，首期严格对齐现有 `VideoEditingGateway` 六个操作：项目列表/创建（项目 write-once，**不做更新删除**）、时间轴读取/保存、作业列表/提交；素材登记与查询作为 LE-18 的后端前置一并交付。为项目/作业补带总序游标的仓储分页查询；Timeline 保持 write-once，`EditingJob.update(previous, changed)` 的 CAS 不得错接到时间轴路由，Worker 写回由 LE-12 消费。修订冲突的 `currentRevision` 走 `ErrorEnvelope` 严格可选 `details`，不塞 message；数据库守住一个项目唯一 timeline 身份。**T1～T6 已完成**：真实 Uvicorn、HTTP 与 PostgreSQL 纵向契约、模块门禁和逐任务 Codex Review 均已收口，证据见 `docs/development/LE-06.md`；正式 App 用户路径依赖 LE-17，完成前顶格 `🔍 待验收` | LE-05 | 🔍 待验收 |
 
 ### 3.4 本地渲染引擎（6 项）
 
@@ -100,25 +100,17 @@
 
 - 任务总数：24
 - ✅ 已完成：4
-- 🔍 待验收：3
-- 🧪 RED / 🚧 实现中：1
+- 🔍 待验收：4
+- 🧪 RED / 🚧 实现中：0
 - ⬜ 未开始：16
-
-### 4.1 并行期间本文件有三份副本，计数只对本分支成立
-
-2026-07-29 起三条工作线各占一棵 worktree，**每条线在自己分支上维护自己那一行的状态**，所以：
-
-- `wt/smart-edit` 的副本看不到 LE-07、LE-09 已标 `🚧 实现中`，§4 的在途计数只反映本分支所知；
-- 三份副本合并时 §4 的计数行**必然冲突**，这是并行开线的预期代价，不是缺陷；
-- **合并的人负责重算 §4**，并逐行核对三份副本里各任务的真实状态，而不是取其中一份覆盖另外两份。
-
-判据仍是老规矩：**说某一项的状态之前，先找到它此刻的证据在哪**。并行期间「证据」的位置是那条线自己的分支，不是本分支的这份副本。
 
 ## 5. 当前下一步
 
-**LE-06 剪辑 REST API。** LE-05 的四张表、四个迁移与四个仓储已落地并顶格 `🔍 待验收`（分层证据齐、无用户路径），LE-06 的前置因此已满足。LE-06 要在 `control_plane/api/` 下严格对齐现有 `VideoEditingGateway` 的项目列表/创建、时间轴读取/保存、作业列表/提交六个操作，并交付 LE-18 会消费的素材登记与查询；项目首期 write-once，不做更新删除。项目与作业列表缺的仓储分页查询在本任务补，排序必须有稳定 tiebreaker。Timeline 仍是不可变修订，作业 CAS 不得接到时间轴路由；一个项目唯一 timeline 身份的数据库方案须先【先定】进任务文档。契约测试必须 FastAPI 真实起服务。
-
-**开工前必读 `docs/development/LE-05.md` 的收口节。** 那里有全部失败类到 HTTP 的映射（**子类数逐表不同，别按前缀猜名字**）；尤其要分开三层：HTTP 请求/域校验拒绝是 422，仓储 `DataRejected` 是服务端 500，坏存量行的 `Invalid*Model` 也是不泄漏细节的 500。只有 `EditingJob.update` 是**双参 CAS**（调用方必须留住 `get` 出来的那个对象当 `previous`），Timeline 没有 update/Stale；`Stale`／`NotFound`／`DataRejected` 三个答案各自对应的动作不得合并。
+**LE-08 自适应抽帧。** 前置 LE-07 已完成分层实现并顶格 `🔍 待验收`，其公开
+`PackagedMediaTools` 可直接消费；私有 `_run_bounded` 不得跨模块导入。LE-08 必须在本模块
+重述四条硬性质：输出落文件不走管道、边写边量、超限即杀、拒绝理由用返回值而不是抛异常。
+先完成本模块有界 ffmpeg 运行器，并用贴边大小、超时回收及“业务结论先于清理失败”RED
+锁住边界；随后依次完成场景切点、长镜头补抽、分档封顶与 768px JPEG 产出。
 
 ## 7. 已知问题：用户可见文案门禁当前为红
 
