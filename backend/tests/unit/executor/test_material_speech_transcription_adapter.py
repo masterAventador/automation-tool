@@ -74,14 +74,8 @@ def _success_body(**overrides: object) -> bytes:
             {
                 "finish_reason": "stop",
                 "index": 0,
+                "logprobs": None,
                 "message": {
-                    "annotations": [
-                        {
-                            "emotion": "neutral",
-                            "language": "zh",
-                            "type": "audio_info",
-                        }
-                    ],
                     "content": "欢迎使用本地音轨转写。",
                     "role": "assistant",
                 },
@@ -91,6 +85,7 @@ def _success_body(**overrides: object) -> bytes:
         "id": "chatcmpl-speech-001",
         "model": "qwen3-asr-flash-2026-02-10",
         "object": "chat.completion",
+        "system_fingerprint": None,
         "usage": {
             "completion_tokens": 12,
             "completion_tokens_details": {"text_tokens": 12},
@@ -112,6 +107,20 @@ def _adapter() -> BailianSpeechTranscriptionAdapter:
             timeout_seconds=90,
         )
     )
+
+
+def test_current_bailian_success_shape_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        transcription,
+        "_open_request",
+        lambda _request, *, timeout: Response(_success_body()),
+    )
+
+    transcript = _adapter().transcribe(SpeechAudioBatch(_wav(), 100))
+
+    assert transcript == "欢迎使用本地音轨转写。"
 
 
 def test_request_is_one_base64_wav_and_contains_no_video_or_url_shape(
@@ -209,8 +218,8 @@ def test_non_numeric_timeout_is_a_fixed_redacted_configuration_rejection() -> No
                 {
                     "finish_reason": "length",
                     "index": 0,
+                    "logprobs": None,
                     "message": {
-                        "annotations": [],
                         "content": "部分结果",
                         "role": "assistant",
                     },
@@ -222,17 +231,38 @@ def test_non_numeric_timeout_is_a_fixed_redacted_configuration_rejection() -> No
                 {
                     "finish_reason": "stop",
                     "index": 0,
+                    "logprobs": None,
                     "message": {
-                        "annotations": [],
                         "content": "",
                         "role": "assistant",
                     },
                 }
             ]
         ),
+        _success_body(
+            choices=[
+                {
+                    "finish_reason": "stop",
+                    "index": 0,
+                    "logprobs": {"private": "unexpected"},
+                    "message": {
+                        "content": "完整结果",
+                        "role": "assistant",
+                    },
+                }
+            ]
+        ),
+        _success_body(system_fingerprint="\0private"),
         _success_body(future=True),
     ],
-    ids=["no-choice", "incomplete", "empty", "open-top-level-shape"],
+    ids=[
+        "no-choice",
+        "incomplete",
+        "empty",
+        "non-empty-logprobs",
+        "invalid-system-fingerprint",
+        "open-top-level-shape",
+    ],
 )
 def test_open_or_partial_responses_are_fixed_rejections(
     body: bytes,

@@ -27,6 +27,7 @@ _TOP_LEVEL_KEYS: Final = {
     "id",
     "model",
     "object",
+    "system_fingerprint",
     "usage",
 }
 
@@ -278,24 +279,27 @@ def _parse_response(raw: bytes) -> str:
     ):
         _reject()
     _validated_text(document.get("id"), maximum=512)
+    system_fingerprint = document.get("system_fingerprint")
+    if system_fingerprint is not None:
+        _validated_text(system_fingerprint, maximum=512)
     choices = document.get("choices")
     if not isinstance(choices, list) or len(choices) != 1:
         _reject()
     choice = choices[0]
     if (
         not isinstance(choice, dict)
-        or set(choice) != {"finish_reason", "index", "message"}
+        or set(choice) != {"finish_reason", "index", "logprobs", "message"}
         or choice.get("finish_reason") != "stop"
         or choice.get("index") != 0
         or type(choice.get("index")) is not int
+        or choice.get("logprobs") is not None
     ):
         _reject()
     message = choice.get("message")
     if (
         not isinstance(message, dict)
-        or set(message) != {"annotations", "content", "role"}
+        or set(message) != {"content", "role"}
         or message.get("role") != "assistant"
-        or not isinstance(message.get("annotations"), list)
     ):
         _reject()
     return _validated_text(

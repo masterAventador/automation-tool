@@ -1,0 +1,350 @@
+#!/usr/bin/env python3
+"""Run LE-14 through real human speech, Silero VAD, Bailian and PostgreSQL."""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import hashlib
+import http.client
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import urllib.request
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import IO, NoReturn, cast
+
+from run_le_13_acceptance import Le13AcceptanceFailure
+from run_le_13_acceptance import (
+    prepare_verified_media_toolchain as _prepare_verified_media_toolchain,
+)
+from run_le_13_acceptance import read_bailian_api_key as _read_bailian_api_key
+from silero_vad_assets import (
+    SileroVadAssetContractRejected,
+    SileroVadAssetUnavailable,
+)
+from silero_vad_assets import ensure_silero_vad_assets as _ensure_silero_vad_assets
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+BACKEND_ROOT = REPOSITORY_ROOT / "backend"
+DEFAULT_SECRET = REPOSITORY_ROOT / ".local/secrets/bailian-model.json"
+CONTRACT_PATH = REPOSITORY_ROOT / "contracts/quality/le-14-speech-acceptance.v1.json"
+ACCEPTANCE_TEST = "tests/integration/test_material_speech_real_acceptance.py"
+SECRET_PATH_ENVIRONMENT = "AUTOMATION_TOOL_LE14_SECRET_PATH"
+TOOLCHAIN_ROOT_ENVIRONMENT = "AUTOMATION_TOOL_LE14_TOOLCHAIN_ROOT"
+VOICE_PATH_ENVIRONMENT = "AUTOMATION_TOOL_LE14_VOICE_PATH"
+CONTRACT_ID = "automation-tool.le-14-speech-acceptance.v1"
+DATASET_HOMEPAGE = "https://www.openslr.org/12"
+DATASET_NAME = "LibriSpeech"
+DATASET_SPLIT = "dev-clean"
+FIXTURE_UTTERANCE_ID = "1272-128104-0000"
+FIXTURE_SOURCE_PATH = "1272/128104/1272-128104-0000.flac"
+FIXTURE_SOURCE_URL = (
+    "https://qianwen-res.oss-cn-beijing.aliyuncs.com/"
+    "Qwen2-Audio/audio/1272-128104-0000.flac"
+)
+LICENSE_SOURCE_URL = DATASET_HOMEPAGE
+MAXIMUM_CONTRACT_BYTES = 64 * 1024
+MAXIMUM_FIXTURE_BYTES = 256 * 1024
+FETCH_TIMEOUT_SECONDS = 120
+_PASS_SUMMARY_PATTERN = re.compile(r"^1 passed in \d+(?:\.\d+)?s$", re.MULTILINE)
+
+
+class Le14AcceptanceFailure(RuntimeError):
+    """A fixed failure that does not reflect credentials or private paths."""
+
+
+@dataclass(frozen=True, slots=True)
+class VoiceFixtureContract:
+    source_url: str
+    bytes: int
+    sha256: str
+
+
+class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: http.client.HTTPMessage,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        del req, code, msg, headers, newurl
+        with contextlib.suppress(OSError, ValueError):
+            fp.close()
+        _reject("LE-14 speech fixture is unavailable")
+
+
+def _reject(message: str) -> NoReturn:
+    raise Le14AcceptanceFailure(message) from None
+
+
+def _digest(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        _reject("LE-14 speech fixture contract is invalid")
+    return value
+
+
+def _load_fixture_contract(path: Path) -> VoiceFixtureContract:
+    try:
+        metadata = path.lstat()
+        if (
+            stat.S_ISLNK(metadata.st_mode)
+            or not stat.S_ISREG(metadata.st_mode)
+            or not 0 < metadata.st_size <= MAXIMUM_CONTRACT_BYTES
+        ):
+            _reject("LE-14 speech fixture contract is invalid")
+        document = json.loads(path.read_bytes().decode("utf-8"))
+    except Le14AcceptanceFailure:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        _reject("LE-14 speech fixture contract is invalid")
+    if not isinstance(document, dict):
+        _reject("LE-14 speech fixture contract is invalid")
+    policy = document.get("policy")
+    upstream = document.get("upstream")
+    fixture = document.get("fixture")
+    license_record = document.get("license")
+    if (
+        document.get("schemaVersion") != 1
+        or document.get("id") != CONTRACT_ID
+        or not isinstance(policy, dict)
+        or policy
+        != {
+            "acceptanceOnly": True,
+            "shipped": False,
+            "applicationRuntimeDownloadAllowed": False,
+        }
+        or not isinstance(upstream, dict)
+        or upstream
+        != {
+            "datasetHomepage": DATASET_HOMEPAGE,
+            "dataset": DATASET_NAME,
+            "split": DATASET_SPLIT,
+            "utteranceId": FIXTURE_UTTERANCE_ID,
+        }
+        or not isinstance(fixture, dict)
+        or fixture.get("sourcePath") != FIXTURE_SOURCE_PATH
+        or fixture.get("sourceUrl") != FIXTURE_SOURCE_URL
+        or fixture.get("format")
+        != {
+            "container": "flac",
+            "codec": "flac",
+            "channels": 1,
+            "sampleRateHz": 16_000,
+            "durationMs": 5_855,
+        }
+        or not isinstance(license_record, dict)
+        or license_record
+        != {
+            "spdx": "CC-BY-4.0",
+            "sourceUrl": LICENSE_SOURCE_URL,
+            "attribution": (
+                "LibriSpeech: an ASR corpus based on public domain audio books; "
+                "Vassil Panayotov, Guoguo Chen, Daniel Povey and Sanjeev Khudanpur"
+            ),
+        }
+    ):
+        _reject("LE-14 speech fixture contract is invalid")
+    byte_count = fixture.get("bytes")
+    if type(byte_count) is not int or not 44 <= byte_count <= MAXIMUM_FIXTURE_BYTES:
+        _reject("LE-14 speech fixture contract is invalid")
+    return VoiceFixtureContract(
+        source_url=FIXTURE_SOURCE_URL,
+        bytes=byte_count,
+        sha256=_digest(fixture.get("sha256")),
+    )
+
+
+def _fetch_fixture(url: str) -> bytes:
+    if url != FIXTURE_SOURCE_URL:
+        _reject("LE-14 speech fixture is unavailable")
+    try:
+        opener = urllib.request.build_opener(_RejectRedirectHandler())
+        with opener.open(url, timeout=FETCH_TIMEOUT_SECONDS) as response:
+            if (
+                getattr(response, "status", None) != 200
+                or getattr(response, "geturl", lambda: None)() != FIXTURE_SOURCE_URL
+            ):
+                _reject("LE-14 speech fixture is unavailable")
+            payload = bytes(response.read(MAXIMUM_FIXTURE_BYTES + 1))
+    except (OSError, ValueError, urllib.error.URLError):
+        _reject("LE-14 speech fixture is unavailable")
+    if len(payload) > MAXIMUM_FIXTURE_BYTES:
+        _reject("LE-14 speech fixture is unavailable")
+    return payload
+
+
+def prepare_voice_fixture(
+    destination: Path,
+    *,
+    contract_path: Path = CONTRACT_PATH,
+    fetch: Callable[[str], bytes] | None = None,
+) -> Path:
+    """Fetch the one acceptance-only voice fixture into a new private file."""
+
+    contract = _load_fixture_contract(contract_path)
+    try:
+        destination.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        _reject("LE-14 speech fixture is unavailable")
+    else:
+        _reject("LE-14 speech fixture is unavailable")
+    try:
+        payload = (
+            _fetch_fixture(contract.source_url)
+            if fetch is None
+            else fetch(contract.source_url)
+        )
+    except Le14AcceptanceFailure:
+        raise
+    except Exception:  # noqa: BLE001 - injected fetchers are an untrusted boundary
+        _reject("LE-14 speech fixture is unavailable")
+    if (
+        type(payload) is not bytes
+        or len(payload) != contract.bytes
+        or hashlib.sha256(payload).hexdigest() != contract.sha256
+    ):
+        _reject("LE-14 speech fixture is unavailable")
+    descriptor: int | None = None
+    created = False
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(destination, flags, 0o600)
+        created = True
+        remaining = memoryview(payload)
+        while remaining:
+            written = os.write(descriptor, remaining)
+            if written <= 0:
+                raise OSError("short write")
+            remaining = remaining[written:]
+        os.fsync(descriptor)
+        metadata = os.fstat(descriptor)
+        current = destination.lstat()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_ISLNK(current.st_mode)
+            or not os.path.samestat(metadata, current)
+            or metadata.st_size != contract.bytes
+            or (os.name != "nt" and stat.S_IMODE(metadata.st_mode) != 0o600)
+        ):
+            raise OSError("fixture output changed")
+    except OSError:
+        if created:
+            try:
+                destination.unlink()
+            except OSError:
+                pass
+        _reject("LE-14 speech fixture is unavailable")
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+    return destination
+
+
+def read_bailian_api_key(secret_path: Path) -> str:
+    try:
+        return cast(str, _read_bailian_api_key(secret_path))
+    except Le13AcceptanceFailure:
+        _reject("LE-14 model credential is unavailable")
+
+
+def prepare_verified_media_toolchain(resource_root: Path) -> Path:
+    try:
+        return cast(Path, _prepare_verified_media_toolchain(resource_root))
+    except Le13AcceptanceFailure:
+        _reject("LE-14 packaged media toolchain is unavailable")
+
+
+def ensure_silero_vad_assets() -> Path:
+    try:
+        return cast(Path, _ensure_silero_vad_assets())
+    except (OSError, SileroVadAssetContractRejected, SileroVadAssetUnavailable):
+        _reject("LE-14 Silero VAD runtime is unavailable")
+
+
+def run_acceptance(secret_path: Path) -> None:
+    """Run the isolated real acceptance without placing the key in argv or env."""
+
+    api_key = read_bailian_api_key(secret_path)
+    ensure_silero_vad_assets()
+    with tempfile.TemporaryDirectory(
+        prefix="automation-tool-le14-acceptance-"
+    ) as directory:
+        root = Path(directory)
+        toolchain = prepare_verified_media_toolchain(root / "runtime").resolve()
+        voice = prepare_voice_fixture(root / "human-speech.flac").resolve()
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("PYTEST_")
+        }
+        environment[SECRET_PATH_ENVIRONMENT] = os.fspath(secret_path)
+        environment[TOOLCHAIN_ROOT_ENVIRONMENT] = os.fspath(toolchain)
+        environment[VOICE_PATH_ENVIRONMENT] = os.fspath(voice)
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                ACCEPTANCE_TEST,
+                "-q",
+                "-s",
+                "-o",
+                "addopts=",
+            ],
+            cwd=BACKEND_ROOT,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    combined = completed.stdout + completed.stderr
+    if api_key in combined or os.fspath(secret_path) in combined:
+        _reject("LE-14 acceptance output leaked private input")
+    if (
+        completed.returncode != 0
+        or _PASS_SUMMARY_PATTERN.search(completed.stdout) is None
+    ):
+        _reject("LE-14 real acceptance failed")
+    print(completed.stdout.strip())
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--secret", type=Path, default=DEFAULT_SECRET)
+    arguments = parser.parse_args()
+    try:
+        secret_path = Path(os.path.abspath(arguments.secret))
+        run_acceptance(secret_path)
+    except (OSError, Le14AcceptanceFailure) as error:
+        message = (
+            str(error)
+            if isinstance(error, Le14AcceptanceFailure) and str(error)
+            else "LE-14 real acceptance failed"
+        )
+        raise SystemExit(message) from None
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

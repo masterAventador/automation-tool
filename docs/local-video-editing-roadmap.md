@@ -67,7 +67,7 @@
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
 | LE-13 | 素材理解 | 抽帧送百炼多模态，产出描述、标签与镜头时间区间并写回 Material；**关闭深度思考**（`enable_thinking=false`，作为配置项非硬编码，见设计文档 §4.5）；超时/拒答/空描述/token 超限的失败矩阵；真实模型调用验收。T1～T4、Codex Review finding 修复与真实纵向复验全部完成，证据见 `docs/development/LE-13.md` | LE-08 | ✅ 已完成 |
-| LE-14 | 人声检测与转写 | 三级漏斗：`silencedetect` 判有无声音 → Silero VAD（本地 ONNX，约 2 MB）判是人声还是纯环境音 → 仅对人声素材调百炼语音识别转写（只传音轨不传视频，避免为筛选步骤打包 140 MB+ 的本地 Whisper）。产出 `has_speech`、`speech_segments_ms`、`speech_transcript` 写回 Material；**onnxruntime 与 VAD 模型必须进安装包并有出厂门禁核对**；纯音乐误判人声、人声判成环境音、转写为空、方言/嘈杂环境、ASR 超时、路人背景说话被当主体的失败矩阵。T1 已完成并通过 Codex Review；T2 已完成真实模型推理、摘要缓存、权利/许可证登记及 macOS/Windows 出厂门禁，首轮 Codex Review 的双架构 wheel、包体积、最低系统版本与摘要校验后重开路径四项 finding 均已按 RED→GREEN 修复，补正提交最终复审无 finding；T3 已完成有界音轨抽取、只传 WAV 的百炼 ASR 与 Material 三列原子写回，首轮与补正复审的五项 finding 均已修复，最终复审确认补正有效；T4 已完成六类结果语义与失败矩阵，padding 证据膨胀已按 RED→GREEN 修复，最终 Codex Review 无 finding；T5 已锁定摘要真人声、真实 Silero/ASR、纯音乐零调用与 PostgreSQL 原始行判据，待 RED→GREEN，证据见 `docs/development/LE-14.md` | LE-07 | 🚧 实现中 |
+| LE-14 | 人声检测与转写 | 三级漏斗：`silencedetect` 判有无声音 → Silero VAD（本地 ONNX，约 2 MB）判是人声还是纯环境音 → 仅对人声素材调百炼语音识别转写（只传音轨不传视频，避免为筛选步骤打包 140 MB+ 的本地 Whisper）。产出 `has_speech`、`speech_segments_ms`、`speech_transcript` 写回 Material；**onnxruntime 与 VAD 模型必须进安装包并有出厂门禁核对**；纯音乐误判人声、人声判成环境音、转写为空、方言/嘈杂环境、ASR 超时、路人背景说话被当主体的失败矩阵。T1～T4 及各轮 Review finding 已全部收口；T5 已完成摘要锁定真人声、真实随包 FFmpeg/Silero/百炼 ASR、纯音乐零调用、PostgreSQL 原始行与 PyInstaller 正式候选纵向验收，真实终态及模块门禁见 `docs/development/LE-14.md`，待本 Task Codex Review | LE-07 | 🚧 实现中 |
 | LE-15 | 文案分句与旁白合成 | 一句话经百炼文本模型产出脚本分句（**关闭深度思考**，见设计文档 §4.5）；TTS 合成每句并取真实音频时长；支持用户上传录音替代（转写后对齐句子，复用 LE-14 的 ASR） | LE-06,LE-14 | ⬜ 未开始 |
 | LE-16 | 语义匹配与片段选择 | 句子与素材描述语义匹配（有转写的素材把转写文本一并纳入匹配依据；**关闭深度思考**，见设计文档 §4.5）；在选中素材的镜头区间内挑最贴片段产出 in/out 点；**有人声素材按"自带旁白片段"编排：时长由原声内容决定、独立占段、用原声与转写字幕、不配 TTS**；文案句子只分配给无人声素材；素材不足、单条过短、匹配全低于阈值、全部素材均有人声的处理；产出 Timeline 草稿。**LE-07 交接的硬约束**：探测报出的 duration 取自容器头，**不保证时长内每一帧都存在**——实测 faststart 截断件（半个下载）报出的是完整时长，截到 25% 仍报 60000 ms 而实际只剩 268/1500 帧，且它不产生任何拒绝码、按码分支看不见；挑 in/out 点不得默认「时长内帧完备」。依据见 `docs/development/LE-07.md` Q2 | LE-13,LE-15 | ⬜ 未开始 |
 
@@ -77,7 +77,7 @@
 | --- | --- | --- | --- | --- |
 | LE-17 | 工作台接真实网关 | `main.tsx` 生产组合根从 sessionStorage 草稿网关换成真实 Control Plane 网关；提交路径打通不再固定抛错；重写 `e2e-tauri/video-editing.spec.ts`，断言目标从"诚实展示不可用"改为真实出片；**同任务内必须重写前端 Timeline 契约**——`video-editing-dto.ts` 那份手写 zod 副本与新后端模型**整体不兼容，需按 `timeline.py` 重写而非逐点修补**（drift 由 LE-03 在 T2/T3/T4 改后端时造成，终审核基线 `d00f547` 确认此前前后端逐字同步）。LE-03 终审用真实 zod 探针实测：带转场的后端时间轴、带 `sourceInMs`/`sourceOutMs`/`gainDb` 的 clip、`narration`/`ambient`/`music` 三种轨道，**前端一律拒绝**。分歧至少七处：① `timelineClipSchema` 是 `z.strictObject` 且缺三个新字段，后端快照是硬报错不是静默忽略；② 仍用 `sourceArtifactId`（`ArtifactId`），后端已改指 `MaterialId`；③ 布局 refine 对所有轨道要求「不许重叠」，而新后端转场靠真实重叠实现；④ 无画面轨首尾相接、`visual.end == duration`、每种轨道至多一条等核心不变式；⑤ `transitionKindSchema` 仍含 `"cut"`；⑥ `timelineTrackKindSchema` 仍是单一音频轨；⑦ `MAX_TRACKS = 32`（应为 5） | LE-06 | ⬜ 未开始 |
 | LE-18 | 素材库界面 | 导入素材、展示 AI 描述与标签、**标注哪些素材有人说话并可试听/查看转写**、编辑描述、去重提示、缺失素材提示；**LE-07 交接**：`MaterialPathRegistry` **没有 forget/删除接口**（T6 未要求、当时无调用方），素材删除必须先补；缺失素材提示要分三种理由——`FILE_MISSING`（不在了，去找回来）、`FILE_UNREADABLE`（还在原地但读不了，别让用户去找）、`FILE_CHANGED`（换过了，重新导入）。依据见 `docs/development/LE-07.md` T6 修复轮 Q5；用户可见文案全中文且无未解释术语。**LE-07 交接的硬约束**：`UNDECODABLE` 的文案不得写死成「文件已损坏」——实测默认布局 MP4（浏览器/yt-dlp 常态）在下载完成前一律报这个码，必须留「稍后重试」路径；`SOURCE_NOT_AT_REST` 才是明确的「还在写，等一下」。依据见 `docs/development/LE-07.md`「交接给 LE-18」。**修复轮新增三条**：① 导入配方是四步且都是公开的——`approve_source` 取受守卫的首个 stat → `probe_material` → `register` → `require_source_unchanged` 闭窗，**不要自己 `Path.stat()`**（裸 `FileNotFoundError` 会带出操作者私有路径）；② 新拒绝码 `WORKSPACE_UNUSABLE` 的文案是「本机暂存空间不够/不可写」，既不是「文件坏了」也不是「重试」，实测卷满时每条素材都会撞上它；③ 注册表**有意不自建目录**，调用方用普通 `mkdir` 建的子目录在 umask 022 下是 0755，会被判 `REGISTRY_UNREADABLE`——负担在调用方，建目录要显式 0700。依据见 `docs/development/LE-07.md` T7 修复轮 | LE-17 | ⬜ 未开始 |
-| LE-19 | 智能剪辑入口 | 一句话输入 → 生成 Timeline 草稿落进工作台；"一键直出片"跳过审阅走同一生成器；进度与取消可见；**剪辑模块的产品形态在此最终确定，同任务内更新 `contracts/quality/user-facing-terminology.v1.json` 的 `video_editing_module` 条目使其与实际界面一致，并让 `check_user_facing_branding.py` 转绿**（见 §7 已知问题） | LE-16,LE-18 | ⬜ 未开始 |
+| LE-19 | 智能剪辑入口 | 一句话输入 → 生成 Timeline 草稿落进工作台；"一键直出片"跳过审阅走同一生成器；进度与取消可见；**剪辑模块的产品形态在此最终确定，同任务内复核 `contracts/quality/user-facing-terminology.v1.json` 的 `video_editing_module` 条目与实际界面一致，并让当前已绿的 `check_user_facing_branding.py` 保持绿色**（见 §7 现状） | LE-16,LE-18 | ⬜ 未开始 |
 | LE-24 | 深度思考开关与耗时告知 | 智能剪辑入口的高级选项里增加一个总开关，统一控制素材理解、文案分句、语义匹配三处模型调用是否开启深度思考；默认关闭；用户偏好持久化并在下次进入时保持；**开关旁必须显示开启后预计多花的时间，该数字由实测得出，禁止估计或编造**——先用固定素材集实测开/关两种模式的端到端耗时差，若耗时随素材条数线性增长则按条数动态计算展示（如"约多花 3 秒 × 素材条数"），否则展示实测区间；实测数据与计算方式写入 `docs/development/LE-24.md`；用户可见文案无未解释术语，过 `check_user_facing_branding.py`；开关状态真实传达到模型请求参数，断言请求体中该字段随开关变化 | LE-16,LE-19 | ⬜ 未开始 |
 
 ### 3.7 字体（1 项）
@@ -106,38 +106,19 @@
 
 ## 5. 当前下一步
 
-**LE-14 人声检测与转写 T5 RED。** T1～T4 已收口；真人声摘要、真实 Silero/ASR、
-纯音乐零调用和 PostgreSQL 原始行判据已【先定】，先用不存在的验收驱动取得捕获力，再补
-真实生产组合路径；模块收口时执行一次完整门禁与 Codex Review。
+**LE-14 人声检测与转写 T5 Codex Review。** T1～T5 实现、真实纵向验收与模块收口门禁
+均已完成；实现检查点提交推送后执行 Review，有 finding 按 RED→GREEN 修复，无 finding
+则把 LE-14 顶格收口为 `🔍 待验收` 并进入 LE-15 T1。
 
-## 7. 已知问题：用户可见文案门禁当前为红
+## 7. 用户可见文案门禁现已恢复绿色
 
-`python3 scripts/check_user_facing_branding.py` 目前 exit 1，报两条：
+合入 main 的真实工作台功能后，`OperationsWorkspace.tsx` 已有「视频剪辑」及
+「独立于视频制作」的实际说明，不再靠已删除设置卡片中的“视频剪辑服务”巧合满足契约。
+2026-07-31 在 LE-14 模块收口实跑 `python3 scripts/check_user_facing_branding.py`，
+结果为 `user-facing branding and plain-language scan passed (54 frontend, 284 native files)`。
 
-```
-frontend/src/app/WorkbenchShell.tsx: concept video_editing_module (独立视频剪辑模块)
-  lost the copy '独立于视频制作'
-  lost the copy '视频剪辑'
-```
-
-契约 `contracts/quality/user-facing-terminology.v1.json` 的 `video_editing_module` 要求 `WorkbenchShell.tsx` 同时出现这两句，来源是 CQ-01「普通用户可理解性」——让用户分得清剪辑模块和视频制作不是一回事。
-
-**两条的归属不同，已实测确认：**
-
-| 缺失文案 | 引入时点 | 归属 |
-| --- | --- | --- |
-| `独立于视频制作` | 分支基点 `origin/main` 上已缺失 | UI-01 改版 `c4d0d14` |
-| `视频剪辑` | LE-01 Task 4 新增 | 本线 |
-
-基线经临时 worktree 检出 `origin/main` 实跑门禁确认，不是推断。
-
-第二条的成因：该词此前**唯一的满足者**是设置页那句「管理模型、视频剪辑**服务**、本机执行器…」，作为「视频剪辑服务」的一部分被匹配到。那句话描述的是已删除的阿里云凭据卡片，删除正确，但契约因此失去满足者——属于巧合满足被消除，不是删错了东西。
-
-**根因是产品形态变了而契约没跟上：** UI-01 把独立剪辑模块并进了视频制作工作区（`WorkbenchShell.test.tsx` 已断言菜单中不存在「视频剪辑」菜单项，`OperationsWorkspace.tsx` 出现「轻量剪辑」Tab），所以「独立于视频制作」不再成立。
-
-**决定：不在 LE-01 内修。** 本线 LE-17、LE-19 会重建剪辑模块，形态还要再变一次，此刻改契约是白定；为让门禁变绿而临时塞一句文案则是糊弄门禁。该门禁的转绿归 LE-19，届时按最终界面更新契约条目。
-
-在此之前，**LE-01 及本线中间任务的全量门禁允许该项为红**，但必须核对输出恰好是上述两条——多出任何一条都说明是新引入的，必须当场处理。
+LE-19 仍负责按最终产品形态复核 `video_editing_module` 契约，但目标改为保持门禁绿色，
+不再把这里登记成当前已知红项。
 
 ### 7.1 覆盖率与全库门禁（LE-03 实测登记，均非本线引入）
 
@@ -145,7 +126,9 @@ frontend/src/app/WorkbenchShell.tsx: concept video_editing_module (独立视频�
 
 **后端 CI 有三个全库红的门禁，均非本线引入。** `ruff check .` 约 98 个错误、`mypy` 17 个错误、`pytest --cov` 的 `fail_under = 100`；三者都在 `.github/workflows/quality.yml` 的 backend job 里（第 57、58、61 行），意味着该 job 在 main 上本来就过不去。LE-03 T5 复核（2026-07-29）：`ruff check .` 仍 98 个（与 LE-03 改动前后一致，未新增）；`mypy` 仍 17 个，分布跨 8 个文件（`src/automation_tool/executor/` 5 个、`tests/integration/` 3 个、`tests/unit/`（非 executor 子目录）3 个、`tests/unit/executor/` 6 个），并非此前记录所说的"全在 `tests/unit/executor/` 下"，但总数一致，未新增。详见 `docs/development/LE-03.md`。
 
-**`scripts/check_acceptance_evidence_depth.py` 在仓库里不存在**，但项目 `CLAUDE.md` §9.1 引用了它并称之为门禁。LE-03 T5 复核确认依旧不存在。归属未定，登记在此待后续任务处理。
+**验收证据深度门禁已补交。** `scripts/check_acceptance_evidence_depth.py` 现已存在；
+LE-14 模块收口实跑 `acceptance evidence depth: 40 checks passed`。此前 LE-03 登记的
+“脚本不存在”事实已失效，不再作为遗留项。
 
 ## 6. 首期不做
 
