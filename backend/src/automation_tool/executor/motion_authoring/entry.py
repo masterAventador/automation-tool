@@ -31,6 +31,10 @@ from automation_tool.executor.motion_authoring.agent import (
     load_locked_authoring_workflow,
     load_thinking_default,
 )
+from automation_tool.executor.motion_authoring.slot_probe_browser import (
+    SLOT_PROBE_PROFILE_DIRECTORY,
+    PackagedSlotProbe,
+)
 
 SCHEMA_VERSION: Final = 1
 MAX_REQUEST_BYTES: Final = 64 * 1024
@@ -53,6 +57,10 @@ _REQUEST_FIELDS: Final = frozenset(
 # becoming shape-invalid to express a condition the agent already reports.
 _OPTIONAL_REQUEST_FIELDS: Final = frozenset(
     {
+        # Optional on the same terms as the catalog: absent means this caller
+        # has no authorized browser to measure with, and the agent then runs
+        # without the overflow probe — today's behaviour, never a fake pass.
+        "browserExecutable",
         "catalogRoot",
         # Optional so an older caller keeps today's behaviour: reasoning stays
         # on unless somebody asked for it to be off. Measured 2026-07-28, that
@@ -175,6 +183,10 @@ _ENTRY_REASON_TOKENS: Final = {
     "workspace is not a usable render workspace": "workspace_unusable",
     "catalog root is missing": "catalog_root_missing",
     "catalog root must be an absolute path the App resolved": "catalog_root_not_absolute",
+    "browser executable is missing": "browser_executable_missing",
+    "browser executable must be an absolute path the App authorized": (
+        "browser_executable_not_absolute"
+    ),
     "brand assets are not the declared shape": "brand_assets_shape_invalid",
     "duration must be a whole number of seconds": "duration_not_whole_seconds",
     "request is not the declared shape": "request_shape_invalid",
@@ -475,6 +487,26 @@ def _catalog_root(document: dict[str, Any]) -> Path | None:
     return root
 
 
+def _browser_executable(document: dict[str, Any]) -> Path | None:
+    """The packaged browser the App authorized for measuring, or nothing.
+
+    Absent means an App too old to send it — the agent then authors without
+    the overflow probe, which is exactly what it did before the probe existed.
+    Present, it is checked on the workspace's terms: this path is handed to a
+    launcher, so a relative one would resolve against whatever the Executor's
+    working directory happens to be.
+    """
+    payload = document.get("browserExecutable")
+    if payload is None:
+        return None
+    if not isinstance(payload, str) or not payload:
+        raise _reject("browser executable is missing")
+    path = Path(payload)
+    if not path.is_absolute():
+        raise _reject("browser executable must be an absolute path the App authorized")
+    return path
+
+
 def _brief(document: dict[str, Any]) -> MotionBrief:
     assets = document["brandAssets"]
     if not isinstance(assets, list) or not all(type(a) is str for a in assets):
@@ -514,6 +546,7 @@ def run_motion_authoring_entry(
     workspace = _workspace(document["workspace"])
     brief = _brief(document)
     model = _model(document["model"])
+    browser = _browser_executable(document)
     try:
         thinking = document.get("modelThinking", load_thinking_default())
         if type(thinking) is not bool:
@@ -529,6 +562,14 @@ def run_motion_authoring_entry(
             model_call=model_call,
             model_thinking=thinking,
             catalog_root=_catalog_root(document),
+            slot_probe=(
+                None
+                if browser is None
+                else PackagedSlotProbe(
+                    browser_executable=browser,
+                    profile_directory=workspace.root / SLOT_PROBE_PROFILE_DIRECTORY,
+                )
+            ),
         )
         result = agent.author(brief)
     except MotionAuthoringUnavailable as error:

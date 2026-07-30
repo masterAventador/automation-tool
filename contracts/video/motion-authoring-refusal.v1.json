@@ -118,6 +118,8 @@
     "brief_language_unsupported",
     "brief_text_out_of_range",
     "brief_too_many_brand_assets",
+    "browser_executable_missing",
+    "browser_executable_not_absolute",
     "catalog_root_missing",
     "catalog_root_not_absolute",
     "duration_not_whole_seconds",
@@ -159,6 +161,8 @@
   "nonRefusalOutcomes": {
     "app_request_invalid": [
       "brand_assets_shape_invalid",
+      "browser_executable_missing",
+      "browser_executable_not_absolute",
       "duration_not_whole_seconds",
       "model_configuration_shape_invalid",
       "model_thinking_choice_invalid",
