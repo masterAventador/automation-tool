@@ -403,6 +403,68 @@ def test_invalid_or_conflicting_content_lengths_are_rejected(
         )
 
 
+@pytest.mark.parametrize("header_shape", ["repeated", "combined"])
+def test_repeated_content_lengths_are_bounded_before_parsing(
+    header_shape: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = json.dumps(
+        {
+            "id": "req-repeated-length",
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"content": '{"description":"不应被接受"}'},
+                }
+            ],
+        }
+    ).encode()
+    length_header = b"Content-Length: " + str(len(body)).encode() + b"\r\n"
+    header_lines = (
+        length_header * 5
+        if header_shape == "repeated"
+        else b"Content-Length: " + b", ".join([str(len(body)).encode()] * 5) + b"\r\n"
+    )
+    wire = (
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+        + header_lines
+        + b"Connection: close\r\n\r\n"
+        + body
+    )
+
+    class _RepeatedLengthSocket:
+        def makefile(self, _mode: str) -> io.BytesIO:
+            return io.BytesIO(wire)
+
+    response = http.client.HTTPResponse(cast(Any, _RepeatedLengthSocket()))
+    response.begin()
+
+    def open_request(
+        _request: urllib.request.Request,
+        *,
+        timeout: float,
+    ) -> http.client.HTTPResponse:
+        assert timeout == 12.5
+        return response
+
+    monkeypatch.setattr(urllib.request, "urlopen", open_request)
+
+    with pytest.raises(
+        MaterialUnderstandingRejected,
+        match="material understanding request rejected",
+    ):
+        _adapter().understand(
+            (
+                MaterialUnderstandingFrame(
+                    timestamp_ms=0,
+                    is_scene_cut=True,
+                    jpeg_bytes=b"\xff\xd8\xff\xd9",
+                ),
+            ),
+            options=MaterialUnderstandingOptions(),
+        )
+
+
 @pytest.mark.parametrize("non_ows", [b"\x0b", b"\x0c", b"\xa0"])
 def test_non_http_whitespace_in_content_length_is_rejected(
     non_ows: bytes,

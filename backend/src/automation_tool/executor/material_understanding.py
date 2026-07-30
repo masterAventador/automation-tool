@@ -42,21 +42,16 @@ def _declared_response_bytes(response: object) -> int | None:
     raw_values = get_all("Content-Length")
     if raw_values is None:
         return None
-    if not isinstance(raw_values, list):
+    if not isinstance(raw_values, list) or len(raw_values) != 1:
         _reject()
 
-    values: list[int] = []
-    for raw_value in raw_values:
-        if type(raw_value) is not str:
-            _reject()
-        for token in raw_value.split(","):
-            token = token.strip(" \t")
-            if not token or not token.isascii() or not token.isdigit():
-                _reject()
-            values.append(int(token))
-    if not values or any(value != values[0] for value in values[1:]):
+    raw_value = raw_values[0]
+    if type(raw_value) is not str or "," in raw_value:
         _reject()
-    return values[0]
+    token = raw_value.strip(" \t")
+    if not token or not token.isascii() or not token.isdigit():
+        _reject()
+    return int(token)
 
 
 @dataclass(frozen=True, slots=True)
