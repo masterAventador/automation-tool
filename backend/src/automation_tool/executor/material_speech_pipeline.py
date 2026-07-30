@@ -194,7 +194,7 @@ class LocalAudibleSpeechAnalyzer:
             vad = self.vad_factory()
             if not isinstance(vad, SpeechProbabilityAnalyzer):
                 _reject()
-            segments, pcm_bytes = _detect_speech_segments(
+            segments, confirmed_speech_duration_ms, pcm_bytes = _detect_speech_segments(
                 pcm_path,
                 vad,
                 duration_ms=facts.duration_ms,
@@ -203,7 +203,7 @@ class LocalAudibleSpeechAnalyzer:
             if not segments:
                 return MaterialSpeechAnalysis(False, (), None)
             if not _has_primary_speech_evidence(
-                segments,
+                confirmed_speech_duration_ms,
                 duration_ms=facts.duration_ms,
             ):
                 _reject()
@@ -377,7 +377,7 @@ def _detect_speech_segments(
     *,
     duration_ms: int,
     approved: os.stat_result | None = None,
-) -> tuple[tuple[tuple[int, int], ...], int]:
+) -> tuple[tuple[tuple[int, int], ...], int, int]:
     probabilities: list[float] = []
     pcm_bytes = 0
     remaining_pcm_bytes = duration_ms * PCM_BYTES_PER_MILLISECOND
@@ -424,7 +424,11 @@ def _detect_speech_segments(
         duration_ms,
         math.ceil(pcm_bytes / PCM_BYTES_PER_SAMPLE * 1_000 / SAMPLE_RATE_HZ),
     )
-    return _aggregate_probabilities(probabilities, duration_ms=actual_duration_ms), pcm_bytes
+    segments, confirmed_speech_duration_ms = _aggregate_probability_evidence(
+        probabilities,
+        duration_ms=actual_duration_ms,
+    )
+    return segments, confirmed_speech_duration_ms, pcm_bytes
 
 
 def _aggregate_probabilities(
@@ -432,8 +436,22 @@ def _aggregate_probabilities(
     *,
     duration_ms: int,
 ) -> tuple[tuple[int, int], ...]:
+    segments, _confirmed_speech_duration_ms = _aggregate_probability_evidence(
+        probabilities,
+        duration_ms=duration_ms,
+    )
+    return segments
+
+
+def _aggregate_probability_evidence(
+    probabilities: list[float],
+    *,
+    duration_ms: int,
+) -> tuple[tuple[tuple[int, int], ...], int]:
     segments: list[tuple[int, int]] = []
     candidate_start: int | None = None
+    candidate_positive_duration_ms = 0
+    confirmed_positive_duration_ms = 0
     consecutive_speech_chunks = 0
     confirmed = False
     silence_chunks = 0
@@ -441,6 +459,11 @@ def _aggregate_probabilities(
         if probability >= VAD_THRESHOLD:
             if candidate_start is None:
                 candidate_start = index
+            chunk_start_ms = index * VAD_CHUNK_MILLISECONDS
+            candidate_positive_duration_ms += max(
+                0,
+                min(duration_ms, chunk_start_ms + VAD_CHUNK_MILLISECONDS) - chunk_start_ms,
+            )
             consecutive_speech_chunks += 1
             if consecutive_speech_chunks >= MIN_SPEECH_CHUNKS:
                 confirmed = True
@@ -450,6 +473,7 @@ def _aggregate_probabilities(
             continue
         if not confirmed:
             candidate_start = None
+            candidate_positive_duration_ms = 0
             consecutive_speech_chunks = 0
             silence_chunks = 0
             continue
@@ -465,7 +489,9 @@ def _aggregate_probabilities(
                 end_ms=first_silence * VAD_CHUNK_MILLISECONDS + SPEECH_PADDING_MS,
                 duration_ms=duration_ms,
             )
+            confirmed_positive_duration_ms += candidate_positive_duration_ms
         candidate_start = None
+        candidate_positive_duration_ms = 0
         consecutive_speech_chunks = 0
         confirmed = False
         silence_chunks = 0
@@ -477,9 +503,10 @@ def _aggregate_probabilities(
             end_ms=first_trailing_silence * VAD_CHUNK_MILLISECONDS + SPEECH_PADDING_MS,
             duration_ms=duration_ms,
         )
+        confirmed_positive_duration_ms += candidate_positive_duration_ms
     if len(segments) > MAX_SPEECH_SEGMENTS:
         _reject()
-    return tuple(segments)
+    return tuple(segments), confirmed_positive_duration_ms
 
 
 def _append_segment(
@@ -500,15 +527,13 @@ def _append_segment(
 
 
 def _has_primary_speech_evidence(
-    segments: tuple[tuple[int, int], ...],
+    confirmed_speech_duration_ms: int,
     *,
     duration_ms: int,
 ) -> bool:
-    speech_duration_ms = sum(end_ms - start_ms for start_ms, end_ms in segments)
     return (
-        speech_duration_ms >= MIN_PRIMARY_SPEECH_DURATION_MS
-        or speech_duration_ms * 100
-        >= duration_ms * MIN_PRIMARY_SPEECH_COVERAGE_PERCENT
+        confirmed_speech_duration_ms >= MIN_PRIMARY_SPEECH_DURATION_MS
+        or confirmed_speech_duration_ms * 100 >= duration_ms * MIN_PRIMARY_SPEECH_COVERAGE_PERCENT
     )
 
 
