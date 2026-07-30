@@ -48,7 +48,7 @@
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| LE-05 | 数据库迁移与仓储 | 项目/素材/时间轴/任务表迁移、SQLAlchemy 仓储；**真实 PostgreSQL** 集成测试，断言落库行；**同任务内加结构性边界测试守住 Material 的描述保护**——`with_ai_description` 只挡住走它的调用方，`dataclasses.replace()` 与直接构造 `Material(...)` 都能到达它要阻止的状态（转换不变式无法由单快照构造校验表达，LE-02 T5 审查实跑证明）。用 AST 做法（**注意：`backend/tests/unit/executor/test_shipped_package_boundary.py` 这个样板不在本线分支上**——它由 `ddc6632` 引入，只存在于未合并的 `feature-audit` / `pc21-b`，`main` 与三条 LE 分支都没有，本线自 `5875191` 分出、比它早。所以 LE-05 要么自己从零写这个 AST 检查，要么先等那条分支合并。连带事实：三条 LE 分支的 `executor/__init__.py` 至今仍导出 `FakeExecutorEngine` 等测试替身，即 CLAUDE.md §9.2 禁止的形态，而 §9.2 点名的守卫在这里并不存在），禁止 `material.py` 之外的模块调用 `replace(` 于 Material 或直接构造它；**并承接 LE-04 新造的三条跨聚合根不变式**（领域对象不持有彼此引用，只能在仓储层成立，LE-04 终审实测三者当前全部 ACCEPTED）：① `EditingJob.project_id` 必须等于其 `timeline_id` 所属 `Timeline.project_id`——`project_id` 同时挂在两处是有意冗余，**普通外键管不住这个三角，需要复合外键或 CHECK**；② `EditingJob.timeline_revision` 必须真实存在；③ 同一 `(timeline_id, revision)` 不得同时有多个 QUEUED 作业 | LE-04 | 🚧 实现中 |
+| LE-05 | 数据库迁移与仓储 | 项目/素材/时间轴/任务表迁移、SQLAlchemy 仓储；**真实 PostgreSQL** 集成测试，断言落库行；**同任务内加结构性边界测试守住 Material 的描述保护**——`with_ai_description` 只挡住走它的调用方，`dataclasses.replace()` 与直接构造 `Material(...)` 都能到达它要阻止的状态（转换不变式无法由单快照构造校验表达，LE-02 T5 审查实跑证明）。用 AST 做法（**注意：`backend/tests/unit/executor/test_shipped_package_boundary.py` 这个样板不在本线分支上**——它由 `ddc6632` 引入，只存在于未合并的 `feature-audit` / `pc21-b`，`main` 与三条 LE 分支都没有，本线自 `5875191` 分出、比它早。所以 LE-05 要么自己从零写这个 AST 检查，要么先等那条分支合并。连带事实：三条 LE 分支的 `executor/__init__.py` 至今仍导出 `FakeExecutorEngine` 等测试替身，即 CLAUDE.md §9.2 禁止的形态，而 §9.2 点名的守卫在这里并不存在），禁止 `material.py` 之外的模块调用 `replace(` 于 Material 或直接构造它；**并承接 LE-04 新造的三条跨聚合根不变式**（领域对象不持有彼此引用，只能在仓储层成立，LE-04 终审实测三者当前全部 ACCEPTED）：① `EditingJob.project_id` 必须等于其 `timeline_id` 所属 `Timeline.project_id`——`project_id` 同时挂在两处是有意冗余，**普通外键管不住这个三角，需要复合外键或 CHECK**；② `EditingJob.timeline_revision` 必须真实存在；③ 同一 `(timeline_id, revision)` 不得同时有多个 QUEUED 作业；**T1～T5 全部完成**（四表、迁移 `0036`～`0039`、四个 SQLAlchemy 仓储、Material 描述保护的 AST 结构守卫、三条跨聚合根不变式全部由库结构而非应用层检查挡住），证据见 `docs/development/LE-05.md`；**顶格 `🔍 待验收`**——本线拿到的是真实 PostgreSQL 的分层证据，没有任何用户可操作路径：补验收依赖 LE-06（REST 面把四个仓储接到 Control Plane 接口上）与 LE-17（工作台接真实网关，形成正式 App 的用户路径并核对可外部核对的终态），两条都不满足之前不得标完成 | LE-04 | 🔍 待验收 |
 | LE-06 | 剪辑 REST API | `control_plane/api/` 下新增剪辑路由：项目 CRUD、素材登记与查询、时间轴保存与修订、任务提交与查询；FastAPI 真实起服务的契约测试 | LE-05 | ⬜ 未开始 |
 
 ### 3.4 本地渲染引擎（6 项）
@@ -100,8 +100,8 @@
 
 - 任务总数：24
 - ✅ 已完成：4
-- 🔍 待验收：1
-- 🧪 RED / 🚧 实现中：1
+- 🔍 待验收：2
+- 🧪 RED / 🚧 实现中：0
 - ⬜ 未开始：18
 
 ### 4.1 并行期间本文件有三份副本，计数只对本分支成立
@@ -116,7 +116,9 @@
 
 ## 5. 当前下一步
 
-**LE-05 数据库迁移与仓储。** LE-04 已完成，`EditingProject`/`EditingJob` 两个聚合根、`OutputSpec`/`CaptionStyle` 值对象、六态状态机与八个失败码均已实现并接入 `domain/__init__.py` 转出口；`Timeline` 已接上 `project_id`。LE-05 需要项目/素材/时间轴/任务表的迁移与 SQLAlchemy 仓储，并在同任务内补齐 Material 描述保护的结构性边界测试。
+**LE-06 剪辑 REST API。** LE-05 的四张表、四个迁移与四个仓储已落地并顶格 `🔍 待验收`（分层证据齐、无用户路径），LE-06 的前置因此已满足。LE-06 要在 `control_plane/api/` 下把这四个仓储接到项目 CRUD、素材登记与查询、时间轴保存与修订、任务提交与查询上，并做 FastAPI 真实起服务的契约测试。
+
+**开工前必读 `docs/development/LE-05.md` 的收口节。** 那里有全部失败类到 HTTP 的映射（**子类数逐表不同，别按前缀猜名字**）、`update` 是**双参 CAS**（调用方必须留住 `get` 出来的那个对象当 `previous`）、以及 `Stale`／`NotFound`／`DataRejected` 三个答案各自对应的动作——这三件事按错了会把「停下来重读」写成「作业不存在」。
 
 ## 7. 已知问题：用户可见文案门禁当前为红
 
