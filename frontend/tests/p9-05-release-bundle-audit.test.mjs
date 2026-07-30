@@ -76,7 +76,7 @@ test("P9-05 rejects runtime data, user material, credentials, and test/debug con
     ["assets/driver.bin", "TAURI_WEBDRIVER_PORT"],
     ["assets/debug.txt", "http://127.0.0.1:1420"],
     ["assets/session.txt", "atds1.private-control-plane-session"],
-    ["assets/private.pem", "-----BEGIN PRIVATE KEY-----"],
+    ["assets/private.pem", "-----BEGIN PRIVATE KEY-----\nfixture"],
   ];
   for (const [relativePath, content] of cases) {
     const fixture = await createBundle();
@@ -96,6 +96,30 @@ test("P9-05 rejects runtime data, user material, credentials, and test/debug con
     } finally {
       await rm(fixture.root, { recursive: true, force: true });
     }
+  }
+});
+
+test("P9-05 does not mistake null-terminated crypto format names for a private key", async () => {
+  const fixture = await createBundle("windows");
+  try {
+    await writeFile(
+      join(fixture.bundle, "codec.exe"),
+      Buffer.from(
+        [
+          "-----BEGIN RSA PRIVATE KEY-----",
+          "-----BEGIN EC PRIVATE KEY-----",
+          "-----BEGIN OPENSSH PRIVATE KEY-----",
+        ].join("\0"),
+      ),
+    );
+    const result = await auditReleaseBundle({
+      bundleRoot: fixture.bundle,
+      executorPackagePath: fixture.executor,
+      platform: "windows",
+    });
+    assert.equal(result.fileCount, 5);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
   }
 });
 

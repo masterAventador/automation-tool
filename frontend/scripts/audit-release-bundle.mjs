@@ -87,12 +87,21 @@ const forbiddenContentMarkers = [
   "ws://127.0.0.1:1420",
   "http://localhost:1420",
   "ws://localhost:1420",
+  developmentVerifyingKey,
+].map((marker) => Buffer.from(marker));
+// FFmpeg and other crypto-capable binaries legitimately embed the names of
+// supported PEM formats as null-terminated strings. A private key header is a
+// line, so require its line ending instead of rejecting a compiled capability
+// string that contains no key material.
+for (const header of [
   "-----BEGIN PRIVATE KEY-----",
   "-----BEGIN RSA PRIVATE KEY-----",
   "-----BEGIN EC PRIVATE KEY-----",
   "-----BEGIN OPENSSH PRIVATE KEY-----",
-  developmentVerifyingKey,
-].map((marker) => Buffer.from(marker));
+]) {
+  forbiddenContentMarkers.push(Buffer.from(`${header}\n`));
+  forbiddenContentMarkers.push(Buffer.from(`${header}\r\n`));
+}
 forbiddenContentMarkers.push(Buffer.from(developmentVerifyingKey, "base64url"));
 const maximumMarkerLength = Math.max(...forbiddenContentMarkers.map((marker) => marker.length));
 

@@ -53,6 +53,9 @@ from build_embedded_chromium_staging import (  # noqa: E402
     load_staging_contract,
     sha256_file,
 )
+from build_motion_catalog_release import (  # noqa: E402
+    stage_for_release as stage_motion_catalog,
+)
 from check_embedded_browser_package import (  # noqa: E402
     PackageAuditReport,
     audit_embedded_browser_package,
@@ -74,8 +77,10 @@ from production_assets import (  # noqa: E402
 )
 from release_assembly import (  # noqa: E402
     install_and_seal,
+    install_motion_catalog,
     install_video_runtime,
     require_packaged_browser,
+    require_packaged_motion_catalog,
     require_packaged_video_runtime,
 )
 from release_configuration import (  # noqa: E402
@@ -555,11 +560,21 @@ def main() -> int:
         payload = build_directory / "payload"
         announce("Preparing the pinned video runtime resources (cached per machine)")
         video_runtime = prepare_video_runtime(platform="windows")
+        announce("Staging the frozen catalog of animation parts")
+        motion_catalog = stage_motion_catalog(
+            staging=build_directory / "catalog"
+        ).parent
         announce("Assembling the release payload, verifying it, then sealing")
         installed_video = install_video_runtime(
             application=payload, staging=video_runtime, platform="windows"
         )
         announce(f"Video runtime staged into the payload: {sorted(installed_video)}")
+        installed_catalog = install_motion_catalog(
+            application=payload, staging=motion_catalog, platform="windows"
+        )
+        announce(
+            f"Motion catalog staged into the payload: {sorted(installed_catalog)}"
+        )
         install_and_seal(
             application=payload,
             staging=staging,
@@ -573,6 +588,7 @@ def main() -> int:
             application=payload, target_id=TARGET_ID, platform="windows"
         )
         require_packaged_video_runtime(application=payload, platform="windows")
+        require_packaged_motion_catalog(application=payload, platform="windows")
 
         configuration = write_release_configuration(
             build_directory, executor, payload

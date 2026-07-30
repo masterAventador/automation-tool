@@ -191,7 +191,7 @@ class AssemblerIsTheOnlyPathTests(unittest.TestCase):
         # the verified path and the shipped path could drift apart again.
         self.assertNotIn("install_distribution(", source)
 
-    def test_every_release_path_installs_and_gates_all_five_resources(self) -> None:
+    def test_every_release_path_installs_and_gates_all_declared_resources(self) -> None:
         # Writing the assembler without wiring it into the paths that produce a
         # shipped package is exactly how the browser gap survived its first fix,
         # and how `TauriPublishWorkspaceGateway` shipped unreachable. The gate
@@ -202,6 +202,8 @@ class AssemblerIsTheOnlyPathTests(unittest.TestCase):
                 for call in (
                     "install_video_runtime(",
                     "require_packaged_video_runtime(",
+                    "install_motion_catalog(",
+                    "require_packaged_motion_catalog(",
                     "install_and_seal(",
                     "require_packaged_browser(",
                 ):
