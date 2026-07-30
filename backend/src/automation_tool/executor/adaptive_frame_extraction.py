@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import stat
 import subprocess
@@ -16,6 +17,7 @@ from pathlib import Path
 _OUTPUT_POLL_SECONDS = 0.02
 _PROCESS_REAP_SECONDS = 5.0
 _SCRATCH_PREFIX = "automation-tool-frame-extraction-"
+_WORKSPACE_PROBE_NAME = ".workspace-write-probe"
 
 
 class AdaptiveFrameRejection(StrEnum):
@@ -84,17 +86,19 @@ def _collect_bounded_ffmpeg(
     except OSError:
         return AdaptiveFrameRejection.TOOL_FAILED
 
-    try:
-        with process:
+    with process:
+        try:
             ended = _wait_for_bounded_output(
                 process,
                 workspace,
                 seconds=seconds,
                 output_limit_bytes=output_limit_bytes,
             )
-    except BaseException:
-        _kill_and_reap(process)
-        raise
+        except BaseException:
+            # Popen.__exit__ waits without a deadline for ordinary exceptions,
+            # so the child must be stopped before control leaves this context.
+            _kill_and_reap(process)
+            raise
 
     if isinstance(ended, AdaptiveFrameRejection):
         return ended
@@ -107,6 +111,8 @@ def _collect_bounded_ffmpeg(
     if ended < 0:
         return AdaptiveFrameRejection.TOOL_FAILED
     if ended > 0:
+        if not _workspace_accepts_write(workspace):
+            return AdaptiveFrameRejection.WORKSPACE_UNUSABLE
         return AdaptiveFrameRejection.UNDECODABLE
     try:
         return BoundedFfmpegOutput(
@@ -114,6 +120,22 @@ def _collect_bounded_ffmpeg(
         )
     except OSError:
         return AdaptiveFrameRejection.WORKSPACE_UNUSABLE
+
+
+def _workspace_accepts_write(workspace: Path) -> bool:
+    """Distinguish a failed decode from FFmpeg losing its output workspace."""
+    probe = workspace / _WORKSPACE_PROBE_NAME
+    try:
+        with probe.open("xb") as sink:
+            sink.write(b"\0")
+            sink.flush()
+            os.fsync(sink.fileno())
+        probe.unlink()
+        return True
+    except OSError:
+        with suppress(OSError):
+            probe.unlink()
+        return False
 
 
 def _wait_for_bounded_output(

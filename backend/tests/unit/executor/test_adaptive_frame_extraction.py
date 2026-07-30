@@ -121,6 +121,55 @@ def test_bounded_ffmpeg_kills_and_reaps_a_timed_out_process(tmp_path: Path) -> N
     assert not marker.exists()
 
 
+def test_bounded_ffmpeg_kills_and_reaps_when_monitoring_is_interrupted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spawned: list[subprocess.Popen[bytes]] = []
+    real_popen = subprocess.Popen
+
+    def recording_popen(*args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:
+        process: subprocess.Popen[bytes] = real_popen(*args, **kwargs)
+        spawned.append(process)
+        return process
+
+    def monitoring_failure(
+        _workspace: Path,
+    ) -> tuple[int, tuple[Path, ...]] | AdaptiveFrameRejection:
+        raise RuntimeError("monitoring failed")
+
+    monkeypatch.setattr(
+        "automation_tool.executor.adaptive_frame_extraction.subprocess.Popen",
+        recording_popen,
+    )
+    monkeypatch.setattr(adaptive_frame_extraction, "_measure_output", monitoring_failure)
+
+    with pytest.raises(RuntimeError, match="monitoring failed"):
+        _run(_writer(8, tmp_path / "must-not-finish", linger=1))
+
+    assert len(spawned) == 1
+    assert spawned[0].returncode is not None
+    assert spawned[0].returncode != 0
+
+
+def test_failed_tool_reports_an_unusable_workspace_before_bad_media(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_open = Path.open
+
+    def refuse_workspace_probe(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self.name == adaptive_frame_extraction._WORKSPACE_PROBE_NAME:
+            raise OSError("workspace is full")
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", refuse_workspace_probe)
+
+    result = _run(_writer(8, tmp_path / "finished", exit_code=1))
+
+    assert result is AdaptiveFrameRejection.WORKSPACE_UNUSABLE
+
+
 def test_cleanup_failure_cannot_replace_an_undecodable_verdict(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
