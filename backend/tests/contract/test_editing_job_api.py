@@ -259,6 +259,9 @@ def test_openapi_exposes_only_submit_project_list_and_job_detail() -> None:
     assert detail["get"]["operationId"] == "getEditingJob"
     for operation in (*collection.values(), detail["get"]):
         assert operation["security"] == [{"AppSession": []}]
+        assert operation["responses"]["422"]["content"]["application/json"]["schema"] == {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+        }
     assert "patch" not in collection
     assert "delete" not in collection
     submit_schema = schema["components"]["schemas"]["EditingJobSubmitRequest"]

@@ -107,7 +107,11 @@ def _list_response(page: EditingJobListPage) -> EditingJobListResponse:
         status.HTTP_409_CONFLICT: {
             "description": "Editing job conflicts with stored work",
             "model": ErrorEnvelope,
-        }
+        },
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "description": "Request validation failed",
+            "model": ErrorEnvelope,
+        },
     },
 )
 async def submit_editing_job(
@@ -137,6 +141,12 @@ async def submit_editing_job(
     "",
     response_model=EditingJobListResponse,
     operation_id="listEditingJobs",
+    responses={
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "description": "Request validation failed",
+            "model": ErrorEnvelope,
+        }
+    },
 )
 async def list_editing_jobs(
     project_id: str,
@@ -168,6 +178,12 @@ async def list_editing_jobs(
     "/{job_id}",
     response_model=EditingJobResponse,
     operation_id="getEditingJob",
+    responses={
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "description": "Request validation failed",
+            "model": ErrorEnvelope,
+        }
+    },
 )
 async def get_editing_job(
     job_id: str,
