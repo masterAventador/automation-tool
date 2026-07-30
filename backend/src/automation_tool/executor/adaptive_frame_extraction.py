@@ -214,8 +214,8 @@ def _supplement_ffmpeg_argv(
         "1",
         "-q:v",
         "2",
-        "-strict",
-        "unofficial",
+        "-pix_fmt",
+        "yuvj420p",
         os.fspath(workspace / f"{_SUPPLEMENT_OUTPUT_PREFIX}%012d{_SUPPLEMENT_OUTPUT_SUFFIX}"),
     ]
 

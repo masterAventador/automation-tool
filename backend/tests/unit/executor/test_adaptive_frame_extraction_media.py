@@ -65,6 +65,7 @@ def scene_media(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     nonzero_start = root / "nonzero start.mp4"
     ntsc_boundary = root / "ntsc just over eight seconds.mp4"
     short_video_long_audio = root / "short video long audio.mp4"
+    long_flat_color = root / "long flat color.mp4"
     _encode(
         tools.ffmpeg_path,
         "-f",
@@ -163,6 +164,18 @@ def scene_media(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         "aac",
         os.fspath(short_video_long_audio),
     )
+    _encode(
+        tools.ffmpeg_path,
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=black:s=160x90:r=10:d=12",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        os.fspath(long_flat_color),
+    )
     return {
         "hard_cuts": hard_cuts,
         "single_scene": single_scene,
@@ -170,6 +183,7 @@ def scene_media(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         "nonzero_start": nonzero_start,
         "ntsc_boundary": ntsc_boundary,
         "short_video_long_audio": short_video_long_audio,
+        "long_flat_color": long_flat_color,
     }
 
 
@@ -357,6 +371,30 @@ def test_video_stream_may_end_before_the_container_and_audio_stream(
 
     assert isinstance(result, tuple)
     assert tuple(frame.timestamp_ms for frame in result) == (0,)
+
+
+def test_scene_and_supplement_jpegs_preserve_the_same_full_range_color(
+    scene_media: dict[str, Path],
+) -> None:
+    source, approved = approve_source(scene_media["long_flat_color"])
+
+    result = extract_adaptive_frame_candidates(
+        _packaged_tools(),
+        source,
+        approved,
+        duration_ms=12_000,
+    )
+
+    assert isinstance(result, tuple)
+    assert tuple(frame.timestamp_ms for frame in result) == (0, 8_000)
+    colors: list[tuple[int, int, int]] = []
+    for frame in result:
+        with Image.open(BytesIO(frame.jpeg_bytes)) as image:
+            color = image.convert("RGB").getpixel((80, 45))
+        assert isinstance(color, tuple)
+        assert len(color) == 3
+        colors.append((color[0], color[1], color[2]))
+    assert colors == [(0, 0, 0), (0, 0, 0)]
 
 
 def test_final_scene_supplement_failure_still_rejects_the_material(
