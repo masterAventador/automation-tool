@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http.client
 import inspect
+import io
 import json
 import os
 import traceback
@@ -272,26 +273,38 @@ def test_model_response_is_bounded_before_json_parsing(
 def test_truncated_http_response_is_fixed_and_redacted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class _TruncatedResponse:
-        def __enter__(self) -> _TruncatedResponse:
-            return self
+    body = json.dumps(
+        {
+            "id": "req-truncated",
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"content": '{"description":"不完整但可解析"}'},
+                }
+            ],
+        }
+    ).encode()
+    wire = (
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+        + str(len(body) + 128).encode()
+        + b"\r\nConnection: close\r\n\r\n"
+        + body
+    )
 
-        def __exit__(self, *_args: object) -> None:
-            return None
+    class _TruncatedSocket:
+        def makefile(self, _mode: str) -> io.BytesIO:
+            return io.BytesIO(wire)
 
-        def read(self, _size: int = -1) -> bytes:
-            raise http.client.IncompleteRead(
-                f"private response {API_KEY}".encode(),
-                128,
-            )
+    response = http.client.HTTPResponse(cast(Any, _TruncatedSocket()))
+    response.begin()
 
     def open_request(
         _request: urllib.request.Request,
         *,
         timeout: float,
-    ) -> _TruncatedResponse:
+    ) -> http.client.HTTPResponse:
         assert timeout == 12.5
-        return _TruncatedResponse()
+        return response
 
     monkeypatch.setattr(urllib.request, "urlopen", open_request)
 

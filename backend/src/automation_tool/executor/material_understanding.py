@@ -265,8 +265,12 @@ class BailianMaterialUnderstandingAdapter:
                 request,
                 timeout=self._config.timeout_seconds,
             ) as response:
+                declared_response_bytes = getattr(response, "length", None)
                 raw_response = response.read(_MAX_RESPONSE_BYTES + 1)
-            if len(raw_response) > _MAX_RESPONSE_BYTES:
+            if len(raw_response) > _MAX_RESPONSE_BYTES or (
+                type(declared_response_bytes) is int
+                and len(raw_response) != declared_response_bytes
+            ):
                 _reject()
             document = json.loads(raw_response.decode("utf-8"))
             choice = document["choices"][0]
