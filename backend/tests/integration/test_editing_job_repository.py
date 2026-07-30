@@ -862,6 +862,65 @@ async def test_an_update_writes_the_mutable_half_of_exactly_one_row(
 
 
 @pytest.mark.asyncio
+async def test_an_update_cannot_walk_a_rows_timestamp_backwards(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    """The compare-and-set does not compare the *incoming* timestamp with anything.
+
+    `updated_at = previous.updated_at` tests the stored value against the version
+    the caller read. It says nothing about the value being written, so without a
+    separate guard a hand-built `changed` carrying an earlier instant lands and
+    the row moves back in time. Verified against a real database before the
+    guard existed: the write succeeded and the stored `updated_at` was 80 seconds
+    earlier than the row it replaced.
+
+    The old `updated_at <` predicate did cover this, and it is the only thing it
+    covered that the compare-and-set does not -- replays cannot recur, because the
+    version a replay names stops existing the moment the first write lands.
+
+    Why it is worth a guard even though only a hand-built object can reach it:
+    LE-06 and LE-12 order and page over `updated_at`, so a row that walks
+    backwards does not fail anywhere, it silently sorts into the wrong place.
+    """
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyEditingJobRepository(database)
+    try:
+        await reset_data(database)
+        project_id = EditingProjectId.new()
+        timeline_id = TimelineId.new()
+        await store_scene(database, project_id, timeline_id)
+        job = make_job(EditingJobId.new(), project_id, timeline_id)
+        await repository.save(job)
+
+        backwards = EditingJob(
+            job_id=job.job_id,
+            project_id=project_id,
+            timeline_id=timeline_id,
+            timeline_revision=REVISION,
+            status=EditingJobStatus.RUNNING,
+            failure_code=None,
+            output_artifact_id=None,
+            created_at=CREATED_AT,
+            updated_at=UPDATED_AT - timedelta(seconds=80),
+        )
+        assert backwards.updated_at > backwards.created_at
+
+        with pytest.raises(EditingJobDataRejected):
+            await repository.update(job, backwards)
+
+        # Nothing moved: not the status, and above all not the timestamp.
+        assert await stored_row(database, job.job_id.uuid) == row_values(
+            job.job_id.uuid, project_id.uuid, timeline_id.uuid
+        )
+        assert await repository.get(job.job_id) == job
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
 async def test_an_update_cannot_move_a_job_to_another_timeline_revision(
     postgresql_url: str,
     alembic_runner: AlembicRunner,

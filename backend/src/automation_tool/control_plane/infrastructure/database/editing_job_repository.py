@@ -268,10 +268,15 @@ class SqlAlchemyEditingJobRepository:
         that was wrong.** The mistake is worth recording because it looked like
         an optimistic-concurrency check and was not one: a live caller's new
         timestamp is `now()`, which is always later than whatever is stored, so
-        the predicate passed for *every* caller. It rejected replays and clocks
-        running backwards, and nothing else. Paired with a check that the row's
-        status was a legal source for the new one, it still let this through --
-        reproduced on a real database:
+        the predicate passed for *every* caller. What it did catch was replays
+        and clocks running backwards -- and neither is worthless, so both are
+        accounted for below rather than dropped: replays are covered by the
+        comparison itself (the version a replay names stops existing once the
+        first write lands), and a backwards timestamp is refused by the guard,
+        because nothing in the statement compares the *incoming* timestamp with
+        anything. Paired with a check that the row's status was a legal source
+        for the new one, the old predicate still let this through -- reproduced
+        on a real database:
 
         1. the row is `QUEUED`; a scheduler reads it;
         2. another instance dispatches the job, so the row becomes `RUNNING`;
@@ -324,6 +329,10 @@ class SqlAlchemyEditingJobRepository:
             or not isinstance(changed, EditingJob)
             or previous.job_id != changed.job_id
             or not EditingJobStateMachine.can_transition(previous.status, changed.status)
+            # `<`, deliberately: the domain permits a transition whose timestamp
+            # equals its predecessor's, and the comparison's own equality case is
+            # what makes the version a pair rather than just an instant.
+            or changed.updated_at < previous.updated_at
         ):
             raise EditingJobDataRejected
         values = _mutable_values(changed)

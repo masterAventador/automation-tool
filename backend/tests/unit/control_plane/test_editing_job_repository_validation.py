@@ -761,6 +761,77 @@ async def test_an_update_refuses_a_pair_naming_two_different_jobs() -> None:
         await database.close()
 
 
+@pytest.mark.asyncio
+async def test_an_update_refuses_a_timestamp_that_goes_backwards() -> None:
+    """The one thing the old `updated_at <` predicate really did guard.
+
+    The compare-and-set replaced that predicate and re-covered most of what it
+    caught: a replay cannot recur, because the version pair it names is gone the
+    moment the first write lands. **Clocks running backwards it does not cover.**
+    Nothing in the statement compares the incoming timestamp with the stored one
+    -- the stored one is only tested for equality with `previous` -- so a
+    `changed` carrying an earlier instant writes it, and the row's `updated_at`
+    moves back in time.
+
+    `_moved_to` refuses that, so no transition method can produce it; reaching it
+    needs a hand-built `EditingJob`. That is the same door the identity-column
+    split just closed for re-pointing, and leaving this one open while closing
+    that one would be an odd place to stop. It also matters downstream: LE-06 and
+    LE-12 order and filter on `updated_at`, and a row that moved backwards
+    reorders silently rather than failing.
+
+    `<` and not `<=`. Equality is load-bearing: the domain permits a transition
+    whose timestamp equals its predecessor's, and
+    `test_the_version_is_the_status_and_the_timestamp_together` in the
+    integration suite depends on exactly that being allowed through.
+    """
+    database = unreachable_database()
+    try:
+        repository = repository_module.SqlAlchemyEditingJobRepository(database)
+        # A session that would report a successful write, so a missing guard
+        # shows up as a write that went through rather than as some other error.
+        object.__setattr__(database, "_sessions", StubSessions(None, rowcount=1))
+        previous = make_job()
+        backwards = make_job(
+            previous.job_id,
+            previous.project_id,
+            previous.timeline_id,
+            status=EditingJobStatus.RUNNING,
+            updated_at=previous.updated_at - timedelta(seconds=80),
+        )
+        # Still after `created_at`, so the domain builds it without complaint --
+        # the row is not malformed, it just goes back in time.
+        assert backwards.updated_at > backwards.created_at
+        assert EditingJobStateMachine.can_transition(previous.status, backwards.status)
+        with pytest.raises(EditingJobDataRejected):
+            await repository.update(previous, backwards)
+
+        # The endpoint stays legal, which is what keeps the guard from being one
+        # notch too strong.
+        same_instant = make_job(
+            previous.job_id,
+            previous.project_id,
+            previous.timeline_id,
+            status=EditingJobStatus.RUNNING,
+            updated_at=previous.updated_at,
+        )
+        await repository.update(previous, same_instant)
+        # ... and one microsecond earlier is already refused.
+        with pytest.raises(EditingJobDataRejected):
+            await repository.update(
+                previous,
+                make_job(
+                    previous.job_id,
+                    previous.project_id,
+                    previous.timeline_id,
+                    status=EditingJobStatus.RUNNING,
+                    updated_at=previous.updated_at - timedelta(microseconds=1),
+                ),
+            )
+    finally:
+        await database.close()
+
+
 def test_the_two_column_sets_partition_the_row_exactly() -> None:
     """The guarantee that survived narrowing the update.
 
