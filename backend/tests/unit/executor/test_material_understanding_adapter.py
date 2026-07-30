@@ -334,6 +334,75 @@ def test_truncated_http_response_is_fixed_and_redacted(
     assert API_KEY not in formatted
 
 
+@pytest.mark.parametrize(
+    "content_length_headers",
+    [
+        ("invalid",),
+        ("{actual}", "{larger}"),
+        ("{actual}, {larger}",),
+    ],
+)
+def test_invalid_or_conflicting_content_lengths_are_rejected(
+    content_length_headers: tuple[str, ...],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = json.dumps(
+        {
+            "id": "req-malformed-length",
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"content": '{"description":"不应被接受"}'},
+                }
+            ],
+        }
+    ).encode()
+    header_lines = b"".join(
+        b"Content-Length: "
+        + value.format(actual=len(body), larger=len(body) + 128).encode()
+        + b"\r\n"
+        for value in content_length_headers
+    )
+    wire = (
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+        + header_lines
+        + b"Connection: close\r\n\r\n"
+        + body
+    )
+
+    class _MalformedLengthSocket:
+        def makefile(self, _mode: str) -> io.BytesIO:
+            return io.BytesIO(wire)
+
+    response = http.client.HTTPResponse(cast(Any, _MalformedLengthSocket()))
+    response.begin()
+
+    def open_request(
+        _request: urllib.request.Request,
+        *,
+        timeout: float,
+    ) -> http.client.HTTPResponse:
+        assert timeout == 12.5
+        return response
+
+    monkeypatch.setattr(urllib.request, "urlopen", open_request)
+
+    with pytest.raises(
+        MaterialUnderstandingRejected,
+        match="material understanding request rejected",
+    ):
+        _adapter().understand(
+            (
+                MaterialUnderstandingFrame(
+                    timestamp_ms=0,
+                    is_scene_cut=True,
+                    jpeg_bytes=b"\xff\xd8\xff\xd9",
+                ),
+            ),
+            options=MaterialUnderstandingOptions(),
+        )
+
+
 def test_public_types_do_not_leak_provider_names() -> None:
     public_names = {
         MaterialUnderstandingAdapter.__name__,

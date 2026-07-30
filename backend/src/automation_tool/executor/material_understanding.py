@@ -32,6 +32,33 @@ def _reject() -> NoReturn:
     raise MaterialUnderstandingRejected from None
 
 
+def _declared_response_bytes(response: object) -> int | None:
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return None
+    get_all = getattr(headers, "get_all", None)
+    if not callable(get_all):
+        _reject()
+    raw_values = get_all("Content-Length")
+    if raw_values is None:
+        return None
+    if not isinstance(raw_values, list):
+        _reject()
+
+    values: list[int] = []
+    for raw_value in raw_values:
+        if type(raw_value) is not str:
+            _reject()
+        for token in raw_value.split(","):
+            token = token.strip()
+            if not token or not token.isascii() or not token.isdigit():
+                _reject()
+            values.append(int(token))
+    if not values or any(value != values[0] for value in values[1:]):
+        _reject()
+    return values[0]
+
+
 @dataclass(frozen=True, slots=True)
 class MaterialUnderstandingFrame:
     """One path-free JPEG observation supplied by the local extractor."""
@@ -265,7 +292,7 @@ class BailianMaterialUnderstandingAdapter:
                 request,
                 timeout=self._config.timeout_seconds,
             ) as response:
-                declared_response_bytes = getattr(response, "length", None)
+                declared_response_bytes = _declared_response_bytes(response)
                 raw_response = response.read(_MAX_RESPONSE_BYTES + 1)
             if len(raw_response) > _MAX_RESPONSE_BYTES or (
                 type(declared_response_bytes) is int
