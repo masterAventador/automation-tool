@@ -8,6 +8,7 @@ import stat
 import subprocess
 import tempfile
 import time
+from array import array
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -229,26 +230,26 @@ def _globally_uniform_indices(timestamps: tuple[int, ...], limit: int) -> tuple[
 
     target_denominator = limit - 1
     time_span = timestamps[-1] - timestamps[0]
-    previous_costs: list[int | None] = [None] * len(timestamps)
+    previous_costs = array("q", [-1]) * len(timestamps)
     previous_costs[0] = 0
-    parent_rows: list[list[int]] = []
+    parent_rows: list[array[int]] = []
 
     for position in range(1, limit - 1):
         target_numerator = timestamps[0] * target_denominator + time_span * position
-        current_costs: list[int | None] = [None] * len(timestamps)
-        parents = [-1] * len(timestamps)
-        best_previous_cost: int | None = None
+        current_costs = array("q", [-1]) * len(timestamps)
+        parents = array("i", [-1]) * len(timestamps)
+        best_previous_cost = -1
         best_previous_index = -1
 
         for candidate_index in range(position, len(timestamps) - limit + position + 1):
             previous_index = candidate_index - 1
             previous_cost = previous_costs[previous_index]
-            if previous_cost is not None and (
-                best_previous_cost is None or previous_cost < best_previous_cost
+            if previous_cost >= 0 and (
+                best_previous_cost < 0 or previous_cost < best_previous_cost
             ):
                 best_previous_cost = previous_cost
                 best_previous_index = previous_index
-            if best_previous_cost is None:
+            if best_previous_cost < 0:
                 continue
             distance = abs(
                 timestamps[candidate_index] * target_denominator - target_numerator
@@ -260,12 +261,10 @@ def _globally_uniform_indices(timestamps: tuple[int, ...], limit: int) -> tuple[
         parent_rows.append(parents)
 
     final_internal_index = -1
-    final_cost: int | None = None
+    final_cost = -1
     for candidate_index in range(limit - 2, len(timestamps) - 1):
         candidate_cost = previous_costs[candidate_index]
-        if candidate_cost is not None and (
-            final_cost is None or candidate_cost < final_cost
-        ):
+        if candidate_cost >= 0 and (final_cost < 0 or candidate_cost < final_cost):
             final_cost = candidate_cost
             final_internal_index = candidate_index
     assert final_internal_index >= 0

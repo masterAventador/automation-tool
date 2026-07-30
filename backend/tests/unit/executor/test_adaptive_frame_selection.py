@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tracemalloc
 from pathlib import Path
 from typing import Any
 
@@ -105,6 +106,22 @@ def test_scene_cut_sampling_assigns_all_time_targets_globally() -> None:
 
     assert selected_scenes == (0, 232, 5_721, 8_892, 11_752, 14_999)
     assert selected_supplements == ()
+
+
+def test_global_scene_cut_matching_keeps_tracking_memory_bounded() -> None:
+    timestamps = tuple(range(10_000))
+
+    tracemalloc.start()
+    try:
+        selected_indices = adaptive_frame_extraction._globally_uniform_indices(timestamps, 60)
+        _, peak_bytes = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert len(selected_indices) == 60
+    assert selected_indices[0] == 0
+    assert selected_indices[-1] == len(timestamps) - 1
+    assert peak_bytes < 5 * 1024 * 1024
 
 
 def test_four_hour_single_scene_is_capped_before_supplement_seek(
