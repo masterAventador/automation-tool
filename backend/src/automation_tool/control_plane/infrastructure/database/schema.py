@@ -2346,6 +2346,7 @@ editing_projects = Table(
     "editing_projects",
     metadata,
     Column("project_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
     Column("title", String(length=MAX_PROJECT_TITLE_CHARACTERS), nullable=False),
     Column("output_width", Integer(), nullable=False),
     Column("output_height", Integer(), nullable=False),
@@ -2356,36 +2357,20 @@ editing_projects = Table(
     Column("caption_stroke_px", Integer(), nullable=False),
     Column("caption_line_spacing", Double(), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
-    PrimaryKeyConstraint("project_id", name="pk_editing_projects"),
-)
-
-editing_project_installations = Table(
-    "editing_project_installations",
-    metadata,
-    Column("project_id", UUID(as_uuid=True), nullable=False),
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
-    ForeignKeyConstraint(
-        ["project_id"],
-        ["editing_projects.project_id"],
-        name="fk_editing_project_installations_project",
-        ondelete="RESTRICT",
-    ),
     ForeignKeyConstraint(
         ["installation_id"],
         ["installations.id"],
-        name="fk_editing_project_installations_installation",
+        name="fk_editing_projects_installation",
         ondelete="RESTRICT",
     ),
-    PrimaryKeyConstraint(
-        "project_id",
-        name="pk_editing_project_installations",
-    ),
+    PrimaryKeyConstraint("project_id", name="pk_editing_projects"),
 )
 
 Index(
-    "ix_editing_project_installations_installation_project",
-    editing_project_installations.c.installation_id,
-    editing_project_installations.c.project_id,
+    "ix_editing_projects_installation_created_project",
+    editing_projects.c.installation_id,
+    editing_projects.c.created_at,
+    editing_projects.c.project_id,
 )
 
 materials = Table(

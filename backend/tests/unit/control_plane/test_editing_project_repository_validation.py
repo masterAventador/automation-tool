@@ -8,6 +8,7 @@ PostgreSQL is in the integration suite.
 
 from __future__ import annotations
 
+import inspect
 import traceback
 from datetime import UTC, datetime, timedelta, timezone
 from typing import cast
@@ -37,7 +38,7 @@ from automation_tool.control_plane.domain import (
     OutputSpec,
     TaskId,
 )
-from automation_tool.control_plane.infrastructure.database import Database
+from automation_tool.control_plane.infrastructure.database import Database, editing_projects
 from automation_tool.control_plane.infrastructure.database import (
     editing_project_repository as repository_module,
 )
@@ -187,81 +188,111 @@ def test_repository_refuses_a_database_it_does_not_own() -> None:
         repository_module.SqlAlchemyEditingProjectRepository(cast(Database, object()))
 
 
+def test_repository_has_one_required_installation_scoped_api() -> None:
+    repository_type = repository_module.SqlAlchemyEditingProjectRepository
+    assert list(inspect.signature(repository_type.save).parameters) == [
+        "self",
+        "project",
+        "installation_id",
+    ]
+    assert list(inspect.signature(repository_type.get).parameters) == [
+        "self",
+        "project_id",
+        "installation_id",
+    ]
+    assert list(inspect.signature(repository_type.list_page).parameters) == [
+        "self",
+        "installation_id",
+        "before_created_at",
+        "before_project_id",
+        "limit",
+    ]
+    assert not hasattr(repository_type, "save_for_installation")
+    assert not hasattr(repository_type, "get_for_installation")
+    assert not hasattr(repository_type, "list_page_for_installation")
+    assert editing_projects.c.installation_id.nullable is False
+
+
 @pytest.mark.asyncio
 async def test_repository_refuses_foreign_argument_types() -> None:
     database = unreachable_database()
     try:
         repository = repository_module.SqlAlchemyEditingProjectRepository(database)
+        installation_id = InstallationId.new()
         with pytest.raises(EditingProjectDataRejected):
-            await repository.save(cast(EditingProject, object()))
+            await repository.save(cast(EditingProject, object()), installation_id)
         # A bare UUID and a sibling identifier carry exactly the value the column
         # would accept, so the type has to be checked before the statement is
         # built rather than left to the database.
         with pytest.raises(EditingProjectDataRejected):
-            await repository.get(cast(EditingProjectId, EditingProjectId.new().uuid))
-        with pytest.raises(EditingProjectDataRejected):
-            await repository.get(cast(EditingProjectId, TaskId.new()))
-        with pytest.raises(EditingProjectDataRejected):
-            await repository.save_for_installation(
-                cast(EditingProject, object()),
-                InstallationId.new(),
+            await repository.get(
+                cast(EditingProjectId, EditingProjectId.new().uuid),
+                installation_id,
             )
         with pytest.raises(EditingProjectDataRejected):
-            await repository.save_for_installation(
-                make_project(),
-                cast(InstallationId, object()),
-            )
-        with pytest.raises(EditingProjectDataRejected):
-            await repository.get_for_installation(
+            await repository.get(
                 cast(EditingProjectId, TaskId.new()),
                 InstallationId.new(),
             )
         with pytest.raises(EditingProjectDataRejected):
-            await repository.get_for_installation(
+            await repository.save(
+                make_project(),
+                cast(InstallationId, object()),
+            )
+        with pytest.raises(EditingProjectDataRejected):
+            await repository.get(
+                cast(EditingProjectId, TaskId.new()),
+                InstallationId.new(),
+            )
+        with pytest.raises(EditingProjectDataRejected):
+            await repository.get(
                 EditingProjectId.new(),
                 cast(InstallationId, object()),
             )
         with pytest.raises(EditingProjectDataRejected):
             await repository.list_page(
+                installation_id=installation_id,
                 before_created_at=None,
                 before_project_id=None,
                 limit=cast(int, True),
             )
         with pytest.raises(EditingProjectDataRejected):
             await repository.list_page(
+                installation_id=installation_id,
                 before_created_at=SHANGHAI.fromutc(CREATED_AT.replace(tzinfo=SHANGHAI)),
                 before_project_id=EditingProjectId.new(),
                 limit=20,
             )
         with pytest.raises(EditingProjectDataRejected):
             await repository.list_page(
+                installation_id=installation_id,
                 before_created_at=CREATED_AT,
                 before_project_id=cast(EditingProjectId, TaskId.new()),
                 limit=20,
             )
         with pytest.raises(EditingProjectDataRejected):
-            await repository.list_page_for_installation(
+            await repository.list_page(
                 installation_id=cast(InstallationId, object()),
                 before_created_at=None,
                 before_project_id=None,
                 limit=20,
             )
         with pytest.raises(EditingProjectDataRejected):
-            await repository.list_page_for_installation(
+            await repository.list_page(
                 installation_id=InstallationId.new(),
                 before_created_at=CREATED_AT,
                 before_project_id=None,
                 limit=20,
             )
         with pytest.raises(EditingProjectDataRejected):
-            await repository.list_page_for_installation(
+            await repository.list_page(
                 installation_id=InstallationId.new(),
                 before_created_at=SHANGHAI.fromutc(CREATED_AT.replace(tzinfo=SHANGHAI)),
                 before_project_id=EditingProjectId.new(),
                 limit=20,
             )
         with pytest.raises(EditingProjectDataRejected):
-            await repository.list_page_for_installation(
+            await repository.list_page(
                 installation_id=InstallationId.new(),
                 before_created_at=CREATED_AT,
                 before_project_id=cast(EditingProjectId, TaskId.new()),
@@ -284,41 +315,19 @@ async def test_an_unreachable_database_is_refused_without_leaking_the_connection
     database = unreachable_database()
     try:
         repository = repository_module.SqlAlchemyEditingProjectRepository(database)
+        installation_id = InstallationId.new()
         with pytest.raises(EditingProjectPersistenceUnavailable) as loaded:
-            await repository.get(EditingProjectId.new())
+            await repository.get(EditingProjectId.new(), installation_id)
         with pytest.raises(EditingProjectPersistenceUnavailable) as saved:
-            await repository.save(make_project())
+            await repository.save(make_project(), installation_id)
         with pytest.raises(EditingProjectPersistenceUnavailable) as listed:
             await repository.list_page(
+                installation_id=installation_id,
                 before_created_at=None,
                 before_project_id=None,
                 limit=20,
             )
-        with pytest.raises(EditingProjectPersistenceUnavailable) as scoped_loaded:
-            await repository.get_for_installation(
-                EditingProjectId.new(),
-                InstallationId.new(),
-            )
-        with pytest.raises(EditingProjectPersistenceUnavailable) as scoped_saved:
-            await repository.save_for_installation(
-                make_project(),
-                InstallationId.new(),
-            )
-        with pytest.raises(EditingProjectPersistenceUnavailable) as scoped_listed:
-            await repository.list_page_for_installation(
-                installation_id=InstallationId.new(),
-                before_created_at=None,
-                before_project_id=None,
-                limit=20,
-            )
-        for captured in (
-            loaded,
-            saved,
-            listed,
-            scoped_loaded,
-            scoped_saved,
-            scoped_listed,
-        ):
+        for captured in (loaded, saved, listed):
             rendered = "".join(traceback.format_exception(captured.value))
             for token in LEAKED_TOKENS:
                 assert token not in rendered
@@ -337,41 +346,19 @@ async def test_a_database_error_is_refused_without_leaking_its_message() -> None
             "_sessions",
             FailingSessions(SQLAlchemyError("private database failure")),
         )
+        installation_id = InstallationId.new()
         with pytest.raises(EditingProjectPersistenceUnavailable) as loaded:
-            await repository.get(EditingProjectId.new())
+            await repository.get(EditingProjectId.new(), installation_id)
         with pytest.raises(EditingProjectPersistenceUnavailable) as saved:
-            await repository.save(make_project())
+            await repository.save(make_project(), installation_id)
         with pytest.raises(EditingProjectPersistenceUnavailable) as listed:
             await repository.list_page(
+                installation_id=installation_id,
                 before_created_at=None,
                 before_project_id=None,
                 limit=20,
             )
-        with pytest.raises(EditingProjectPersistenceUnavailable) as scoped_loaded:
-            await repository.get_for_installation(
-                EditingProjectId.new(),
-                InstallationId.new(),
-            )
-        with pytest.raises(EditingProjectPersistenceUnavailable) as scoped_saved:
-            await repository.save_for_installation(
-                make_project(),
-                InstallationId.new(),
-            )
-        with pytest.raises(EditingProjectPersistenceUnavailable) as scoped_listed:
-            await repository.list_page_for_installation(
-                installation_id=InstallationId.new(),
-                before_created_at=None,
-                before_project_id=None,
-                limit=20,
-            )
-        for captured in (
-            loaded,
-            saved,
-            listed,
-            scoped_loaded,
-            scoped_saved,
-            scoped_listed,
-        ):
+        for captured in (loaded, saved, listed):
             assert "private" not in "".join(traceback.format_exception(captured.value))
             assert captured.value.__cause__ is None
     finally:
@@ -407,41 +394,19 @@ async def test_an_authentication_failure_is_refused_without_leaking_the_role() -
         assert not isinstance(failure, OSError | SQLAlchemyError)
         assert asyncpg.exceptions.PostgresError in type(failure).__mro__
         object.__setattr__(database, "_sessions", FailingSessions(failure))
+        installation_id = InstallationId.new()
         with pytest.raises(EditingProjectPersistenceUnavailable) as loaded:
-            await repository.get(EditingProjectId.new())
+            await repository.get(EditingProjectId.new(), installation_id)
         with pytest.raises(EditingProjectPersistenceUnavailable) as saved:
-            await repository.save(make_project())
+            await repository.save(make_project(), installation_id)
         with pytest.raises(EditingProjectPersistenceUnavailable) as listed:
             await repository.list_page(
+                installation_id=installation_id,
                 before_created_at=None,
                 before_project_id=None,
                 limit=20,
             )
-        with pytest.raises(EditingProjectPersistenceUnavailable) as scoped_loaded:
-            await repository.get_for_installation(
-                EditingProjectId.new(),
-                InstallationId.new(),
-            )
-        with pytest.raises(EditingProjectPersistenceUnavailable) as scoped_saved:
-            await repository.save_for_installation(
-                make_project(),
-                InstallationId.new(),
-            )
-        with pytest.raises(EditingProjectPersistenceUnavailable) as scoped_listed:
-            await repository.list_page_for_installation(
-                installation_id=InstallationId.new(),
-                before_created_at=None,
-                before_project_id=None,
-                limit=20,
-            )
-        for captured in (
-            loaded,
-            saved,
-            listed,
-            scoped_loaded,
-            scoped_saved,
-            scoped_listed,
-        ):
+        for captured in (loaded, saved, listed):
             rendered = "".join(traceback.format_exception(captured.value))
             assert "le05_leaked_user" not in rendered
             assert captured.value.__cause__ is None
@@ -463,51 +428,41 @@ async def test_a_conflicting_insert_is_already_registered_and_says_no_more() -> 
         object.__setattr__(
             database,
             "_sessions",
-            FailingSessions(
-                IntegrityError(
-                    "insert into editing_projects",
-                    None,
-                    Exception("Key (project_id)=(le05-private-detail) already exists"),
-                )
-            ),
+            FailingSessions(integrity_failure("pk_editing_projects")),
         )
         with pytest.raises(EditingProjectAlreadyRegistered) as captured:
-            await repository.save(make_project())
+            await repository.save(make_project(), InstallationId.new())
         rendered = "".join(traceback.format_exception(captured.value))
-        assert "le05-private-detail" not in rendered
+        assert "private" not in rendered
         assert captured.value.__cause__ is None
     finally:
         await database.close()
 
 
 @pytest.mark.asyncio
-async def test_scoped_save_maps_known_and_foreign_constraint_failures() -> None:
+async def test_save_maps_known_and_foreign_constraint_failures() -> None:
     database = unreachable_database()
     repository = repository_module.SqlAlchemyEditingProjectRepository(database)
     try:
-        for constraint_name in (
-            "pk_editing_projects",
-            "pk_editing_project_installations",
-        ):
-            object.__setattr__(
-                database,
-                "_sessions",
-                FailingSessions(integrity_failure(constraint_name)),
+        object.__setattr__(
+            database,
+            "_sessions",
+            FailingSessions(integrity_failure("pk_editing_projects")),
+        )
+        with pytest.raises(EditingProjectAlreadyRegistered) as duplicate:
+            await repository.save(
+                make_project(),
+                InstallationId.new(),
             )
-            with pytest.raises(EditingProjectAlreadyRegistered) as duplicate:
-                await repository.save_for_installation(
-                    make_project(),
-                    InstallationId.new(),
-                )
-            assert "private" not in "".join(traceback.format_exception(duplicate.value))
+        assert "private" not in "".join(traceback.format_exception(duplicate.value))
 
         object.__setattr__(
             database,
             "_sessions",
-            FailingSessions(integrity_failure("fk_editing_project_installations_installation")),
+            FailingSessions(integrity_failure("fk_editing_projects_installation")),
         )
         with pytest.raises(EditingProjectDataRejected) as rejected:
-            await repository.save_for_installation(
+            await repository.save(
                 make_project(),
                 InstallationId.new(),
             )
@@ -538,14 +493,13 @@ async def test_a_missing_row_is_not_found_and_a_present_row_hydrates() -> None:
     database = unreachable_database()
     try:
         repository = repository_module.SqlAlchemyEditingProjectRepository(database)
+        installation_id = InstallationId.new()
 
         object.__setattr__(database, "_sessions", StubSessions(None))
         with pytest.raises(EditingProjectNotFound):
-            await repository.get(EditingProjectId.new())
-        with pytest.raises(EditingProjectNotFound):
-            await repository.get_for_installation(
+            await repository.get(
                 EditingProjectId.new(),
-                InstallationId.new(),
+                installation_id,
             )
 
         project = make_project()
@@ -554,28 +508,16 @@ async def test_a_missing_row_is_not_found_and_a_present_row_hydrates() -> None:
             "_sessions",
             StubSessions(hydration_row(project_id=project.project_id.uuid)),
         )
-        await repository.save_for_installation(project, InstallationId.new())
-        assert await repository.get(project.project_id) == project
-        assert (
-            await repository.get_for_installation(
-                project.project_id,
-                InstallationId.new(),
-            )
-            == project
-        )
+        await repository.save(project, installation_id)
+        assert await repository.get(project.project_id, installation_id) == project
         assert await repository.list_page(
+            installation_id=installation_id,
             before_created_at=CREATED_AT,
             before_project_id=project.project_id,
             limit=20,
         ) == (project,)
-        assert await repository.list_page_for_installation(
-            installation_id=InstallationId.new(),
-            before_created_at=CREATED_AT,
-            before_project_id=project.project_id,
-            limit=20,
-        ) == (project,)
-        assert await repository.list_page_for_installation(
-            installation_id=InstallationId.new(),
+        assert await repository.list_page(
+            installation_id=installation_id,
             before_created_at=None,
             before_project_id=None,
             limit=20,
@@ -588,6 +530,7 @@ async def test_a_missing_row_is_not_found_and_a_present_row_hydrates() -> None:
         )
         with pytest.raises(InvalidEditingProjectModel):
             await repository.list_page(
+                installation_id=installation_id,
                 before_created_at=None,
                 before_project_id=None,
                 limit=20,

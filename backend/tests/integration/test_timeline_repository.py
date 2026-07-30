@@ -20,6 +20,7 @@ foreign key has no ON DELETE action and the other LE-05 integration files delete
 
 from __future__ import annotations
 
+import secrets
 import traceback
 from datetime import UTC, datetime
 from typing import cast
@@ -44,6 +45,7 @@ from automation_tool.control_plane.domain import (
     CaptionStyle,
     EditingProject,
     EditingProjectId,
+    InstallationId,
     InvalidTimelineModel,
     MaterialId,
     OutputSpec,
@@ -67,6 +69,7 @@ from automation_tool.control_plane.domain.timeline import (
 from automation_tool.control_plane.infrastructure.database import (
     Database,
     editing_projects,
+    installations,
     timelines,
 )
 from automation_tool.control_plane.infrastructure.database.editing_project_repository import (
@@ -78,6 +81,7 @@ from automation_tool.control_plane.infrastructure.database.timeline_repository i
 
 # Carrying microseconds, so a timestamp column that silently truncates is caught.
 CREATED_AT = datetime(2026, 7, 29, 3, 21, 45, 123_456, tzinfo=UTC)
+OWNER = InstallationId.parse("00000000-0000-4000-8000-000000000001")
 
 MATERIAL_ONE = MaterialId.new()
 MATERIAL_TWO = MaterialId.new()
@@ -400,7 +404,21 @@ async def reset_data(database: Database) -> None:
 
 async def store_project(database: Database, project_id: EditingProjectId) -> None:
     """Through T1's repository, not a raw INSERT -- the production path."""
-    await SqlAlchemyEditingProjectRepository(database).save(make_project(project_id))
+    async with database.session() as session:
+        exists = await session.scalar(
+            select(installations.c.id).where(installations.c.id == OWNER.uuid)
+        )
+        if exists is None:
+            await session.execute(
+                insert(installations).values(
+                    id=OWNER.uuid,
+                    device_public_key=secrets.token_bytes(32),
+                )
+            )
+    await SqlAlchemyEditingProjectRepository(database).save(
+        make_project(project_id),
+        OWNER,
+    )
 
 
 async def stored_row(database: Database, timeline_id: UUID, revision: int) -> dict[str, object]:

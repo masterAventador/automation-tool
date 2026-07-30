@@ -37,7 +37,6 @@ from automation_tool.control_plane.domain import (
 )
 from automation_tool.control_plane.infrastructure.database import (
     Database,
-    editing_project_installations,
     editing_projects,
     installations,
 )
@@ -61,6 +60,7 @@ PREVIOUS_REVISION = "20260728_0035"
 # on the first row that used the new freedom.
 EXPECTED_COLUMNS = {
     "project_id": ("uuid", "NO", None),
+    "installation_id": ("uuid", "NO", None),
     "title": ("character varying", "NO", 200),
     "output_width": ("integer", "NO", None),
     "output_height": ("integer", "NO", None),
@@ -71,7 +71,12 @@ EXPECTED_COLUMNS = {
     "caption_line_spacing": ("double precision", "NO", None),
     "created_at": ("timestamp with time zone", "NO", None),
 }
-EXPECTED_CONSTRAINTS = {"pk_editing_projects"}
+EXPECTED_CONSTRAINTS = {
+    "pk_editing_projects",
+    "fk_editing_projects_installation",
+}
+EXPECTED_INDEXES = {"ix_editing_projects_installation_created_project"}
+OWNER = InstallationId.parse("00000000-0000-4000-8000-000000000001")
 
 
 def forged_identifier(value: UUID) -> EditingProjectId:
@@ -112,6 +117,7 @@ def row_values(project_id: UUID, **overrides: object) -> dict[str, object]:
     """The exact column payload `save` is expected to write."""
     values: dict[str, object] = {
         "project_id": project_id,
+        "installation_id": OWNER.uuid,
         "title": TITLE,
         "output_width": 1280,
         "output_height": 720,
@@ -128,8 +134,17 @@ def row_values(project_id: UUID, **overrides: object) -> dict[str, object]:
 
 async def reset_data(database: Database) -> None:
     async with database.session() as session:
-        await session.execute(delete(editing_project_installations))
         await session.execute(delete(editing_projects))
+        exists = await session.scalar(
+            select(installations.c.id).where(installations.c.id == OWNER.uuid)
+        )
+        if exists is None:
+            await session.execute(
+                insert(installations).values(
+                    id=OWNER.uuid,
+                    device_public_key=secrets.token_bytes(32),
+                )
+            )
 
 
 async def seed_installation(database: Database) -> InstallationId:
@@ -178,7 +193,7 @@ async def test_saved_project_lands_as_typed_columns_and_hydrates_back_equal(
         project_id = EditingProjectId.new()
         project = make_project(project_id)
 
-        await repository.save(project)
+        await repository.save(project, OWNER)
 
         row = await stored_row(database, project_id)
         assert row == row_values(project_id.uuid)
@@ -195,7 +210,7 @@ async def test_saved_project_lands_as_typed_columns_and_hydrates_back_equal(
         assert isinstance(created_at, datetime)
         assert created_at.tzinfo is UTC
 
-        loaded = await repository.get(project_id)
+        loaded = await repository.get(project_id, OWNER)
         assert loaded == project
         assert loaded.created_at.tzinfo is UTC
         assert type(loaded.caption_style.line_spacing) is float
@@ -250,8 +265,8 @@ async def test_the_longest_values_the_domain_accepts_still_fit_the_columns(
             created_at=CREATED_AT,
         )
 
-        await repository.save(project)
-        assert await repository.get(project_id) == project
+        await repository.save(project, OWNER)
+        assert await repository.get(project_id, OWNER) == project
         row = await stored_row(database, project_id)
         assert row["title"] == longest_title
         assert row["caption_font_key"] == longest_font_key
@@ -289,18 +304,21 @@ async def test_missing_project_and_duplicate_save_are_refused_differently(
         project_id = EditingProjectId.new()
 
         with pytest.raises(EditingProjectNotFound):
-            await repository.get(project_id)
+            await repository.get(project_id, OWNER)
 
-        await repository.save(make_project(project_id))
+        await repository.save(make_project(project_id), OWNER)
         # The second project differs in two columns, not one: if only the title
         # moved, a uniqueness guard mistakenly placed on `created_at` would
         # refuse this row too and the test could not tell the two apart.
         with pytest.raises(EditingProjectAlreadyRegistered):
-            await repository.save(make_project(project_id, title="改名后的项目", created_at=LATER))
+            await repository.save(
+                make_project(project_id, title="改名后的项目", created_at=LATER),
+                OWNER,
+            )
 
         # A rejected duplicate must not be an upsert in disguise.
         assert (await stored_row(database, project_id))["title"] == TITLE
-        assert (await repository.get(project_id)).title == TITLE
+        assert (await repository.get(project_id, OWNER)).title == TITLE
     finally:
         await reset_data(database)
         await database.close()
@@ -326,15 +344,18 @@ async def test_project_pages_use_created_at_and_project_id_as_one_total_order(
                     project_id,
                     title=f"同一时刻项目 {index}",
                     created_at=CREATED_AT,
-                )
+                ),
+                OWNER,
             )
 
         first = await repository.list_page(
+            installation_id=OWNER,
             before_created_at=None,
             before_project_id=None,
             limit=2,
         )
         second = await repository.list_page(
+            installation_id=OWNER,
             before_created_at=first[-1].created_at,
             before_project_id=first[-1].project_id,
             limit=2,
@@ -347,12 +368,14 @@ async def test_project_pages_use_created_at_and_project_id_as_one_total_order(
 
         with pytest.raises(EditingProjectDataRejected):
             await repository.list_page(
+                installation_id=OWNER,
                 before_created_at=CREATED_AT,
                 before_project_id=None,
                 limit=2,
             )
         with pytest.raises(EditingProjectDataRejected):
             await repository.list_page(
+                installation_id=OWNER,
                 before_created_at=None,
                 before_project_id=None,
                 limit=102,
@@ -384,13 +407,13 @@ async def test_editing_projects_have_a_database_enforced_installation_owner(
             created_at=LATER,
         )
 
-        await repository.save_for_installation(owned, owner)
-        await repository.save_for_installation(foreign, other)
+        await repository.save(owned, owner)
+        await repository.save(foreign, other)
 
-        assert await repository.get_for_installation(owned.project_id, owner) == owned
+        assert await repository.get(owned.project_id, owner) == owned
         with pytest.raises(EditingProjectNotFound):
-            await repository.get_for_installation(foreign.project_id, owner)
-        assert await repository.list_page_for_installation(
+            await repository.get(foreign.project_id, owner)
+        assert await repository.list_page(
             installation_id=owner,
             before_created_at=None,
             before_project_id=None,
@@ -401,72 +424,26 @@ async def test_editing_projects_have_a_database_enforced_installation_owner(
             ownership_rows = (
                 (
                     await session.execute(
-                        select(editing_project_installations).order_by(
-                            editing_project_installations.c.project_id
-                        )
+                        select(
+                            editing_projects.c.project_id,
+                            editing_projects.c.installation_id,
+                        ).order_by(editing_projects.c.project_id)
                     )
                 )
                 .mappings()
                 .all()
-            )
-            columns = {
-                cast(str, row["column_name"]): (
-                    cast(str, row["data_type"]),
-                    cast(str, row["is_nullable"]),
-                )
-                for row in (
-                    await session.execute(
-                        text(
-                            "select column_name, data_type, is_nullable "
-                            "from information_schema.columns "
-                            "where table_schema = 'public' "
-                            "and table_name = 'editing_project_installations'"
-                        )
-                    )
-                )
-                .mappings()
-                .all()
-            }
-            constraints = set(
-                await session.scalars(
-                    text(
-                        "select conname from pg_constraint where conrelid = "
-                        "'public.editing_project_installations'::regclass"
-                    )
-                )
-            )
-            indexes = set(
-                await session.scalars(
-                    text(
-                        "select indexname from pg_indexes "
-                        "where schemaname = 'public' "
-                        "and tablename = 'editing_project_installations'"
-                    )
-                )
             )
         assert {(row["project_id"], row["installation_id"]) for row in ownership_rows} == {
             (owned.project_id.uuid, owner.uuid),
             (foreign.project_id.uuid, other.uuid),
         }
-        assert columns == {
-            "project_id": ("uuid", "NO"),
-            "installation_id": ("uuid", "NO"),
-        }
-        assert constraints >= {
-            "pk_editing_project_installations",
-            "fk_editing_project_installations_project",
-            "fk_editing_project_installations_installation",
-        }
-        assert "ix_editing_project_installations_installation_project" in indexes
 
         with pytest.raises(IntegrityError):
-            async with database.session() as session:
-                await session.execute(
-                    insert(editing_project_installations).values(
-                        project_id=owned.project_id.uuid,
-                        installation_id=other.uuid,
-                    )
-                )
+            await insert_row(
+                database,
+                EditingProjectId.new().uuid,
+                installation_id=InstallationId.new().uuid,
+            )
     finally:
         await reset_data(database)
         if owner_ids:
@@ -551,7 +528,7 @@ async def test_rows_the_domain_would_refuse_are_refused_at_hydration(
             project_id = EditingProjectId.new()
             await insert_row(database, project_id.uuid, **overrides)
             with pytest.raises(InvalidEditingProjectModel):
-                await repository.get(project_id)
+                await repository.get(project_id, OWNER)
     finally:
         await reset_data(database)
         await database.close()
@@ -579,7 +556,7 @@ async def test_a_stored_identifier_of_the_wrong_uuid_version_is_refused(
         assert await stored_project_ids(database) == [nil_uuid]
 
         with pytest.raises(InvalidEditingProjectModel):
-            await repository.get(forged_identifier(nil_uuid))
+            await repository.get(forged_identifier(nil_uuid), OWNER)
     finally:
         await reset_data(database)
         await database.close()
@@ -625,9 +602,9 @@ async def test_wrong_credentials_are_refused_without_leaking_the_identity(
     try:
         repository = SqlAlchemyEditingProjectRepository(database)
         with pytest.raises(EditingProjectPersistenceUnavailable) as loaded:
-            await repository.get(EditingProjectId.new())
+            await repository.get(EditingProjectId.new(), OWNER)
         with pytest.raises(EditingProjectPersistenceUnavailable) as saved:
-            await repository.save(make_project(EditingProjectId.new()))
+            await repository.save(make_project(EditingProjectId.new()), OWNER)
         for captured in (loaded, saved):
             rendered = "".join(traceback.format_exception(captured.value))
             assert role not in rendered
@@ -674,9 +651,19 @@ async def test_migration_creates_the_declared_shape_and_drops_it(
                     )
                 )
             )
+            indexes = set(
+                await session.scalars(
+                    text(
+                        "select indexname from pg_indexes "
+                        "where schemaname = 'public' "
+                        "and tablename = 'editing_projects'"
+                    )
+                )
+            )
         assert revision == HEAD_REVISION
         assert columns == EXPECTED_COLUMNS
         assert constraints >= EXPECTED_CONSTRAINTS
+        assert indexes >= EXPECTED_INDEXES
         # `schema.py` and the migration each declare these widths separately, and
         # until this assertion existed nothing compared them: narrowing the Table
         # to `String(length=32)` left the whole suite green, because every other

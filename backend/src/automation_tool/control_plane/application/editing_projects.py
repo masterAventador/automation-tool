@@ -77,19 +77,19 @@ class EditingProjectListPage:
 
 
 class EditingProjectRepository(Protocol):
-    async def save_for_installation(
+    async def save(
         self,
         project: EditingProject,
         installation_id: InstallationId,
     ) -> None: ...
 
-    async def get_for_installation(
+    async def get(
         self,
         project_id: EditingProjectId,
         installation_id: InstallationId,
     ) -> EditingProject: ...
 
-    async def list_page_for_installation(
+    async def list_page(
         self,
         *,
         installation_id: InstallationId,
@@ -182,7 +182,7 @@ class EditingProjectService:
             caption_style=caption_style,
             created_at=self._clock(),
         )
-        await self._repository.save_for_installation(project, installation_id)
+        await self._repository.save(project, installation_id)
         return project
 
     async def get(
@@ -199,7 +199,7 @@ class EditingProjectService:
             parsed_project_id = None
         if parsed_project_id is None:
             raise EditingProjectNotFound
-        return await self._repository.get_for_installation(
+        return await self._repository.get(
             parsed_project_id,
             installation_id,
         )
@@ -218,7 +218,7 @@ class EditingProjectService:
         ):
             raise InvalidEditingProjectQuery
         boundary = None if cursor is None else _decode_cursor(cursor)
-        projects = await self._repository.list_page_for_installation(
+        projects = await self._repository.list_page(
             installation_id=installation_id,
             before_created_at=None if boundary is None else boundary.created_at,
             before_project_id=None if boundary is None else boundary.project_id,

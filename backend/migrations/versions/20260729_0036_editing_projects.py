@@ -17,9 +17,10 @@ check constraints mirroring the domain's bounds, and this is not an oversight:
   constraints would suggest the database validates rows when the guard that
   actually has to hold is the repository hydrating through the constructor.
 
-Cross-aggregate invariants are a different matter and do go into the schema:
-0038 and 0039 add the composite foreign key and the partial unique index that
-no domain object can enforce, because no domain object can see both sides.
+Cross-aggregate invariants are a different matter and do go into the schema.
+Every project has one owning Installation from its first row, while 0038 and
+0039 add the composite foreign key and the partial unique index that no domain
+object can enforce, because no domain object can see both sides.
 
 **This is the opposite of what 0032 and 0034 did**, and the difference is
 deliberate rather than drift. Those two migrations packed the cloud-editing
@@ -60,6 +61,11 @@ def upgrade() -> None:
     op.create_table(
         "editing_projects",
         sa.Column("project_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column(
+            "installation_id",
+            postgresql.UUID(as_uuid=True),
+            nullable=False,
+        ),
         sa.Column("title", sa.String(length=200), nullable=False),
         sa.Column("output_width", sa.Integer, nullable=False),
         sa.Column("output_height", sa.Integer, nullable=False),
@@ -69,7 +75,19 @@ def upgrade() -> None:
         sa.Column("caption_stroke_px", sa.Integer, nullable=False),
         sa.Column("caption_line_spacing", sa.Double, nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["installation_id"],
+            ["installations.id"],
+            name="fk_editing_projects_installation",
+            ondelete="RESTRICT",
+        ),
         sa.PrimaryKeyConstraint("project_id", name="pk_editing_projects"),
+    )
+    op.create_index(
+        "ix_editing_projects_installation_created_project",
+        "editing_projects",
+        ["installation_id", "created_at", "project_id"],
+        unique=False,
     )
 
 

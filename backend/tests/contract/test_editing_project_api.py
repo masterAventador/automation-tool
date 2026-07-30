@@ -53,7 +53,7 @@ class MemoryEditingProjectRepository:
         self.projects: dict[EditingProjectId, tuple[InstallationId, EditingProject]] = {}
         self.failure: Exception | None = None
 
-    async def save_for_installation(
+    async def save(
         self,
         project: EditingProject,
         installation_id: InstallationId,
@@ -64,7 +64,7 @@ class MemoryEditingProjectRepository:
             raise EditingProjectAlreadyRegistered
         self.projects[project.project_id] = (installation_id, project)
 
-    async def get_for_installation(
+    async def get(
         self,
         project_id: EditingProjectId,
         installation_id: InstallationId,
@@ -79,7 +79,7 @@ class MemoryEditingProjectRepository:
             raise EditingProjectNotFound
         return project
 
-    async def list_page_for_installation(
+    async def list_page(
         self,
         *,
         installation_id: InstallationId,
