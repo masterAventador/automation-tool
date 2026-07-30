@@ -9,7 +9,7 @@ import re
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final, NoReturn, Protocol, runtime_checkable
+from typing import IO, Final, NoReturn, Protocol, cast, runtime_checkable
 
 _BAILIAN_BASE_URL: Final = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 _VISION_MODEL_ID: Final = "qwen3.7-max-2026-06-08"
@@ -30,6 +30,28 @@ class MaterialUnderstandingRejected(RuntimeError):
 
 def _reject() -> NoReturn:
     raise MaterialUnderstandingRejected from None
+
+
+class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: http.client.HTTPMessage,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        _reject()
+
+
+def _open_request(
+    request: urllib.request.Request,
+    *,
+    timeout: float,
+) -> http.client.HTTPResponse:
+    opener = urllib.request.build_opener(_RejectRedirectHandler())
+    return cast(http.client.HTTPResponse, opener.open(request, timeout=timeout))
 
 
 def _declared_response_bytes(response: object) -> int | None:
@@ -283,7 +305,7 @@ class BailianMaterialUnderstandingAdapter:
             },
         )
         try:
-            with urllib.request.urlopen(
+            with _open_request(
                 request,
                 timeout=self._config.timeout_seconds,
             ) as response:

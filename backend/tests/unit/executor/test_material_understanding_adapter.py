@@ -14,6 +14,7 @@ from typing import Any, cast
 
 import pytest
 
+from automation_tool.executor import material_understanding as material_understanding_module
 from automation_tool.executor.material_understanding import (
     BailianMaterialUnderstandingAdapter,
     BailianMaterialUnderstandingConfig,
@@ -71,7 +72,7 @@ def _install_transport(
         calls.append((request, timeout))
         return _reply()
 
-    monkeypatch.setattr(urllib.request, "urlopen", open_request)
+    monkeypatch.setattr(material_understanding_module, "_open_request", open_request)
     return calls
 
 
@@ -187,7 +188,7 @@ def test_transport_failure_is_fixed_and_redacted(
             "/Users/operator/Private Videos/source clip.mp4"
         )
 
-    monkeypatch.setattr(urllib.request, "urlopen", fail_transport)
+    monkeypatch.setattr(material_understanding_module, "_open_request", fail_transport)
 
     with pytest.raises(
         MaterialUnderstandingRejected,
@@ -229,6 +230,55 @@ def test_direct_config_cannot_bypass_the_locked_endpoint() -> None:
         )
 
 
+def test_transport_installs_a_redirect_rejecting_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    installed_handlers: list[urllib.request.BaseHandler] = []
+
+    class _Opener:
+        def open(
+            self,
+            _request: urllib.request.Request,
+            *,
+            timeout: float,
+        ) -> _Response:
+            assert timeout == 12.5
+            return _reply()
+
+    def build_opener(
+        *handlers: urllib.request.BaseHandler,
+    ) -> _Opener:
+        installed_handlers.extend(handlers)
+        return _Opener()
+
+    monkeypatch.setattr(urllib.request, "build_opener", build_opener)
+
+    response = material_understanding_module._open_request(
+        urllib.request.Request(
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+        ),
+        timeout=12.5,
+    )
+
+    assert isinstance(response, _Response)
+    assert len(installed_handlers) == 1
+    redirect_handler = installed_handlers[0]
+    assert isinstance(redirect_handler, urllib.request.HTTPRedirectHandler)
+    with pytest.raises(MaterialUnderstandingRejected):
+        redirect_handler.redirect_request(
+            urllib.request.Request(
+                "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+                data=b'{"private":"material"}',
+                headers={"Authorization": f"Bearer {API_KEY}"},
+            ),
+            io.BytesIO(),
+            307,
+            "Temporary Redirect",
+            http.client.HTTPMessage(),
+            "https://attacker.invalid/collect",
+        )
+
+
 def test_model_response_is_bounded_before_json_parsing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -253,7 +303,7 @@ def test_model_response_is_bounded_before_json_parsing(
         assert timeout == 12.5
         return _OversizedResponse()
 
-    monkeypatch.setattr(urllib.request, "urlopen", open_request)
+    monkeypatch.setattr(material_understanding_module, "_open_request", open_request)
 
     with pytest.raises(MaterialUnderstandingRejected):
         _adapter().understand(
@@ -306,7 +356,7 @@ def test_truncated_http_response_is_fixed_and_redacted(
         assert timeout == 12.5
         return response
 
-    monkeypatch.setattr(urllib.request, "urlopen", open_request)
+    monkeypatch.setattr(material_understanding_module, "_open_request", open_request)
 
     with pytest.raises(
         MaterialUnderstandingRejected,
@@ -385,7 +435,7 @@ def test_invalid_or_conflicting_content_lengths_are_rejected(
         assert timeout == 12.5
         return response
 
-    monkeypatch.setattr(urllib.request, "urlopen", open_request)
+    monkeypatch.setattr(material_understanding_module, "_open_request", open_request)
 
     with pytest.raises(
         MaterialUnderstandingRejected,
@@ -447,7 +497,7 @@ def test_repeated_content_lengths_are_bounded_before_parsing(
         assert timeout == 12.5
         return response
 
-    monkeypatch.setattr(urllib.request, "urlopen", open_request)
+    monkeypatch.setattr(material_understanding_module, "_open_request", open_request)
 
     with pytest.raises(
         MaterialUnderstandingRejected,
@@ -505,7 +555,7 @@ def test_non_http_whitespace_in_content_length_is_rejected(
         assert timeout == 12.5
         return response
 
-    monkeypatch.setattr(urllib.request, "urlopen", open_request)
+    monkeypatch.setattr(material_understanding_module, "_open_request", open_request)
 
     with pytest.raises(
         MaterialUnderstandingRejected,
