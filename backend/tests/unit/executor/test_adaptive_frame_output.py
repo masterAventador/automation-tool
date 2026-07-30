@@ -548,22 +548,35 @@ def test_interruption_after_registration_does_not_repeat_the_rollback(
             and frame.f_code is adaptive_frame_extraction._write_exclusive_frame.__code__
             and frame.f_lineno == interruption_line
         ):
-            sys.settrace(None)
+            sys.settrace(previous_trace)
             raise KeyboardInterrupt("injected cancellation")
         return interrupt_after_append
 
+    original_trace = sys.gettrace()
+
+    def existing_trace(frame: Any, event: str, argument: Any) -> Any:
+        del frame, event, argument
+        return existing_trace
+
     try:
-        sys.settrace(interrupt_after_append)
-        with pytest.raises(KeyboardInterrupt, match="injected cancellation"):
-            extract_adaptive_frames(
-                tools,
-                source,
-                approved,
-                output,
-                duration_ms=1,
-            )
+        sys.settrace(existing_trace)
+        previous_trace = sys.gettrace()
+        try:
+            sys.settrace(interrupt_after_append)
+            with pytest.raises(KeyboardInterrupt, match="injected cancellation"):
+                extract_adaptive_frames(
+                    tools,
+                    source,
+                    approved,
+                    output,
+                    duration_ms=1,
+                )
+        finally:
+            sys.settrace(previous_trace)
+
+        assert sys.gettrace() is existing_trace
     finally:
-        sys.settrace(None)
+        sys.settrace(original_trace)
 
     assert unlink_calls == 1
     assert (output / "frame-000001.jpg").read_bytes() == b"concurrent writer"
