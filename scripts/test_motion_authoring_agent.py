@@ -18,6 +18,7 @@ sandbox spec without ever launching a browser.
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import math
 import sys
@@ -1812,6 +1813,307 @@ class ExecutorEntryTests(unittest.TestCase):
             serialized = json.dumps(answer, ensure_ascii=False)
             self.assertNotIn(key, serialized)
             self.assertNotIn(str(root), serialized)
+
+
+# --------------------------------------------------------------------------- #
+# PC-14: pre-render overflow measurement and the one cheap repair round
+# --------------------------------------------------------------------------- #
+
+PROBE_PART = "lt-accent-underline"
+# The part's two frozen anchors (contracts/video/motion-part-slots.v1.json):
+# text run 12 reads "Dr. Maya Chen", run 15 reads "Host · Neuroscientist",
+# both inside a <div>. The frozen budget says slot 12 is 600px at 76px type.
+PROBE_HEADLINE_SLOT = 12
+PROBE_BODY_SLOT = 15
+FITS = {PROBE_HEADLINE_SLOT: (False, True), PROBE_BODY_SLOT: (False, False)}
+HEADLINE_TOO_WIDE = {
+    PROBE_HEADLINE_SLOT: (True, True),
+    PROBE_BODY_SLOT: (False, False),
+}
+
+
+def _probe_catalog(root: Path) -> Path:
+    """A catalog carrying the real frozen part as a synthetic 16-run document.
+
+    The frozen slot table addresses text runs by index, so the fixture is
+    generated as sixteen adjacent runs with the two frozen originals at the
+    frozen positions — the release document works the same way, just with more
+    markup between the runs.
+    """
+    texts = [f"run-{index}" for index in range(16)]
+    texts[PROBE_HEADLINE_SLOT] = "Dr. Maya Chen"
+    texts[PROBE_BODY_SLOT] = "Host · Neuroscientist"
+    body = "".join(f"<div>{text}</div>" for text in texts)
+    part = root / "motion-catalog" / "items" / PROBE_PART
+    part.mkdir(parents=True)
+    (part / f"{PROBE_PART}.html").write_text(
+        f"<!doctype html><html><head></head><body>{body}</body></html>",
+        encoding="utf-8",
+    )
+    return root / "motion-catalog"
+
+
+def _probe_beat(**overrides: object) -> dict[str, object]:
+    beat = _valid_beat(
+        catalog_parts=[PROBE_PART],
+        headline="本周销售增长",
+        body="环比上升百分之十二",
+    )
+    beat.update(overrides)
+    return beat
+
+
+def _storyboard_reply(beat: dict[str, object]) -> str:
+    """A repair-round answer: the storyboard alone, nothing else."""
+    return json.dumps({"storyboard": _valid_storyboard([beat])})
+
+
+class ScriptedSlotProbe:
+    """Stands in for the packaged-Chromium probe: one reading per document."""
+
+    def __init__(self, readings: list[list[dict[int, tuple[bool, bool]]]]) -> None:
+        self._readings = list(readings)
+        self.batches: list[tuple[Path, ...]] = []
+
+    def __call__(self, documents: tuple[Path, ...]) -> list[dict[int, tuple[bool, bool]]]:
+        self.batches.append(tuple(documents))
+        if not self._readings:
+            raise AssertionError("scripted probe ran out of readings")
+        batch = self._readings.pop(0)
+        if len(batch) != len(documents):
+            raise AssertionError(
+                f"scripted probe expected {len(batch)} documents, got {len(documents)}"
+            )
+        return batch
+
+
+class SlotOverflowProbeTests(unittest.TestCase):
+    """The pre-render measurement and the one repair round it may trigger."""
+
+    def _agent(
+        self,
+        workspace: AuthoringWorkspace,
+        model: ScriptedModel,
+        probe: object,
+        catalog_root: Path,
+    ) -> MotionAuthoringAgent:
+        return MotionAuthoringAgent(
+            workspace=workspace,
+            tools=MotionAuthoringTools(workspace),
+            workflow=load_locked_authoring_workflow(
+                vendor_root=VENDOR_ROOT, contract_path=WORKFLOW_CONTRACT
+            ),
+            model_config=_model_config(),
+            model_call=model,
+            catalog_root=catalog_root,
+            slot_probe=probe,
+        )
+
+    def test_the_probe_reads_the_baseline_and_this_films_copy_in_one_batch(self) -> None:
+        """Both documents are measured by the same probe call — same session,
+        so the driver bias cancels (PC-14 decision 3)."""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            probe = ScriptedSlotProbe([[FITS, FITS]])
+            model = ScriptedModel(
+                [_valid_model_payload(_valid_storyboard([_probe_beat()]))]
+            )
+            agent = self._agent(workspace, model, probe, _probe_catalog(root))
+            result = agent.author(_brief())
+
+            self.assertEqual(len(probe.batches), 1)
+            baseline, substituted = probe.batches[0]
+            # The baseline is a marked working copy carrying the part's own
+            # frozen copy — the pristine document has no data-motion-slot marks
+            # to measure.
+            self.assertIn("catalog-baseline/", baseline.as_posix())
+            # Copy is entity-escaped on both sides by the shared writer, so the
+            # readable form is the unescaped one — what the browser measures.
+            baseline_html = html.unescape(baseline.read_text(encoding="utf-8"))
+            self.assertIn('data-motion-slot="12"', baseline_html)
+            self.assertIn("Dr. Maya Chen", baseline_html)
+            # The substituted document is the working copy the film renders.
+            substituted_html = html.unescape(substituted.read_text(encoding="utf-8"))
+            self.assertIn('data-motion-slot="12"', substituted_html)
+            self.assertIn("本周销售增长", substituted_html)
+            # No new overflow: one model call, film authored.
+            self.assertEqual(len(model.calls), 1)
+            self.assertEqual(result.storyboard.beats[0].headline, "本周销售增长")
+
+    def test_a_template_only_film_never_launches_the_probe(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            probe = ScriptedSlotProbe([])
+            model = ScriptedModel([_valid_model_payload()])
+            agent = self._agent(workspace, model, probe, _probe_catalog(root))
+            agent.author(_brief())
+        self.assertEqual(probe.batches, [])
+
+    def test_untouched_slots_are_not_judged(self) -> None:
+        """A slot this film did not write keeps the part's own copy — its
+        overflow *is* the baseline, so it is neither marked nor measured."""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            # Only the headline slot is measured; the body slot is untouched
+            # and the probe reports nothing about it.
+            reading = {PROBE_HEADLINE_SLOT: (False, True)}
+            probe = ScriptedSlotProbe([[reading, reading]])
+            model = ScriptedModel(
+                [_valid_model_payload(_valid_storyboard([_probe_beat(body="")]))]
+            )
+            agent = self._agent(workspace, model, probe, _probe_catalog(root))
+            agent.author(_brief())
+        self.assertEqual(len(probe.batches), 1)
+
+    def test_new_overflow_is_repaired_in_one_round_and_the_shorter_copy_ships(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            probe = ScriptedSlotProbe([[FITS, HEADLINE_TOO_WIDE], [FITS, FITS]])
+            model = ScriptedModel(
+                [
+                    _valid_model_payload(_valid_storyboard([_probe_beat()])),
+                    _storyboard_reply(_probe_beat(headline="销售增长")),
+                ]
+            )
+            agent = self._agent(workspace, model, probe, _probe_catalog(root))
+            result = agent.author(_brief())
+
+            # The repair message carried the offending slot and its budget, so
+            # the model knows which direction to rewrite in.
+            self.assertEqual(len(model.calls), 2)
+            repair_request = model.calls[1][-1]
+            self.assertEqual(repair_request["role"], "user")
+            self.assertIn("copy overflows slot 12", repair_request["content"])
+            self.assertIn("600px", repair_request["content"])
+            self.assertIn("storyboard", repair_request["content"])
+            # The repaired copy is what ships — in the artifact, on disk and in
+            # the measured working copy.
+            self.assertEqual(result.storyboard.beats[0].headline, "销售增长")
+            stored = json.loads(
+                (root / "job" / "STORYBOARD.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(stored["beats"][0]["headline"], "销售增长")
+            self.assertEqual(len(probe.batches), 2)
+            repaired_html = html.unescape(
+                probe.batches[1][1].read_text(encoding="utf-8")
+            )
+            self.assertIn("销售增长", repaired_html)
+            self.assertNotIn("本周销售增长", repaired_html)
+
+    def test_a_repair_that_rearranges_the_beats_is_refused(self) -> None:
+        """The guard from `require_repair_changed_only_copy`, wired in: a model
+        that re-times the film under a "shorten the copy" instruction is a new
+        film bypassing every gate already passed."""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            probe = ScriptedSlotProbe([[FITS, HEADLINE_TOO_WIDE]])
+            model = ScriptedModel(
+                [
+                    _valid_model_payload(_valid_storyboard([_probe_beat()])),
+                    _storyboard_reply(
+                        _probe_beat(headline="销售增长", duration_seconds=5.0)
+                    ),
+                ]
+            )
+            agent = self._agent(workspace, model, probe, _probe_catalog(root))
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                agent.author(_brief())
+        self.assertIn("repair round altered more than copy", str(ctx.exception))
+
+    def test_copy_still_overflowing_after_the_repair_round_is_refused(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            probe = ScriptedSlotProbe(
+                [[FITS, HEADLINE_TOO_WIDE], [FITS, HEADLINE_TOO_WIDE]]
+            )
+            model = ScriptedModel(
+                [
+                    _valid_model_payload(_valid_storyboard([_probe_beat()])),
+                    _storyboard_reply(_probe_beat(headline="还是太长的头条")),
+                ]
+            )
+            agent = self._agent(workspace, model, probe, _probe_catalog(root))
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                agent.author(_brief())
+        self.assertIn("after the repair round", str(ctx.exception))
+
+    def test_a_repair_reply_that_carries_more_than_the_storyboard_is_refused(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            probe = ScriptedSlotProbe([[FITS, HEADLINE_TOO_WIDE]])
+            model = ScriptedModel(
+                [
+                    _valid_model_payload(_valid_storyboard([_probe_beat()])),
+                    # A full three-field reply where only the storyboard was
+                    # asked for: refused, not partially accepted.
+                    _valid_model_payload(
+                        _valid_storyboard([_probe_beat(headline="销售增长")])
+                    ),
+                ]
+            )
+            agent = self._agent(workspace, model, probe, _probe_catalog(root))
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                agent.author(_brief())
+        self.assertIn("storyboard alone", str(ctx.exception))
+
+    def test_a_probe_that_cannot_measure_is_a_closed_refusal_not_a_crash(self) -> None:
+        class _DeadProbe:
+            def __call__(self, documents: object) -> object:
+                raise RuntimeError("browser died")
+
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            model = ScriptedModel(
+                [_valid_model_payload(_valid_storyboard([_probe_beat()]))]
+            )
+            agent = self._agent(workspace, model, _DeadProbe(), _probe_catalog(root))
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                agent.author(_brief())
+        self.assertIn("failed to measure", str(ctx.exception))
+
+    def test_a_slot_the_probe_did_not_measure_is_refused_not_passed(self) -> None:
+        """A missing measurement must not pass as a fitting one — a broken mark
+        or a failed page load would otherwise read as green."""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root / "job")
+            missing_body_slot = {PROBE_HEADLINE_SLOT: (False, True)}
+            probe = ScriptedSlotProbe([[missing_body_slot, missing_body_slot]])
+            model = ScriptedModel(
+                [_valid_model_payload(_valid_storyboard([_probe_beat()]))]
+            )
+            agent = self._agent(workspace, model, probe, _probe_catalog(root))
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                agent.author(_brief())
+        self.assertIn("failed to measure", str(ctx.exception))
+
+    def test_a_probe_that_is_not_callable_is_refused_at_construction(self) -> None:
+        with TemporaryDirectory() as raw:
+            workspace = _make_workspace(Path(raw))
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                MotionAuthoringAgent(
+                    workspace=workspace,
+                    tools=MotionAuthoringTools(workspace),
+                    workflow=load_locked_authoring_workflow(
+                        vendor_root=VENDOR_ROOT, contract_path=WORKFLOW_CONTRACT
+                    ),
+                    model_config=_model_config(),
+                    model_call=ScriptedModel([]),
+                    slot_probe="not-a-probe",
+                )
+        self.assertIn("slot probe", str(ctx.exception))
 
 
 if __name__ == "__main__":

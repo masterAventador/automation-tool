@@ -193,6 +193,11 @@ def _with_font_rules(html: str, font_css: str) -> str:
 
 
 WORKING_COPY_DIRECTORY: Final = "catalog"
+# Where PC-14's probe stages the *baseline* working copies: the same parts
+# carrying their own frozen copy, marked the same way, so overflow can be
+# compared between two documents measured in one browser session. Beside the
+# render tree, never inside it — nothing here is renderable film material.
+BASELINE_COPY_DIRECTORY: Final = "catalog-baseline"
 # How a part document reaches the catalog root: it sits at `items/<name>/`.
 # Font rules are injected into that document while the contract records their
 # artifacts from the root, so the prefix has to be applied by whoever generates
@@ -337,6 +342,7 @@ def _copy_referenced(
 
 
 __all__ = [
+    "BASELINE_COPY_DIRECTORY",
     "PART_TO_CATALOG_ROOT",
     "PartSlot",
     "SHARED_DEPENDENCIES",

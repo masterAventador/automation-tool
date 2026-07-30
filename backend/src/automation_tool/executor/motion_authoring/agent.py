@@ -46,7 +46,7 @@ import re
 import urllib.error
 import urllib.request
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
@@ -61,6 +61,12 @@ from automation_tool.executor.motion_authoring.composition_template import (
 from automation_tool.executor.motion_authoring.resources import (
     CONTRACTS_ROOT,
     RESOURCE_ROOT,
+)
+from automation_tool.executor.motion_authoring.slot_overflow_probe import (
+    SlotProbeRejected,
+    SlotProbeUnmeasured,
+    require_no_new_overflow,
+    session_budgets,
 )
 
 # --------------------------------------------------------------------------- #
@@ -849,6 +855,25 @@ def require_repair_changed_only_copy(
             or original.layout != revised.layout
         ):
             _reject("repair round altered more than copy")
+
+
+def _repair_message(overflow: str) -> str:
+    """The one repair instruction: shorten the copy, change nothing else.
+
+    Carries the probe's own finding — slot number, container width, type size —
+    because a refusal the model can act on says how much room there is, not
+    only that the copy was too long. English on purpose: the branding gate
+    reads Chinese literals in a `.py` source as operator copy, and this string
+    only ever reaches the model.
+    """
+    return (
+        "The film was assembled, but this copy overflows its slot where the "
+        f"part's own copy did not: {overflow}. Rewrite only the copy so it "
+        'fits. Answer with exactly {"storyboard": {...}} — the same beats with '
+        "the same beat_id, purpose, start_seconds, duration_seconds, "
+        "catalog_parts and layout, and with a shorter headline, body or items. "
+        "No other fields."
+    )
 
 
 @dataclass(frozen=True)
@@ -2013,6 +2038,8 @@ class MotionAuthoringAgent:
         fps: int = DEFAULT_FPS,
         model_timeout_seconds: int = MODEL_TIMEOUT_SECONDS,
         catalog_root: Path | None = None,
+        slot_probe: Callable[[tuple[Path, ...]], Sequence[Mapping[int, tuple[bool, bool]]]]
+        | None = None,
     ) -> None:
         # Supplied by the App, which resolves it beside the other packaged
         # resources; this process does not go looking for it. `None` means this
@@ -2024,6 +2051,13 @@ class MotionAuthoringAgent:
         verify_closed_tool_surface(tools)
         if not isinstance(workflow, WorkflowReference):
             _reject("workflow reference required")
+        # `None` means no measurement — the caller had no authorized browser to
+        # measure with — which keeps every existing caller's behaviour. It must
+        # never mean "measured and fits".
+        _require(
+            slot_probe is None or callable(slot_probe),
+            "slot probe must be callable or absent",
+        )
         _require(type(fps) is int and 1 <= fps <= 120, "fps out of range")
         _require(
             type(model_timeout_seconds) is int
@@ -2038,6 +2072,7 @@ class MotionAuthoringAgent:
         self._model_thinking = model_thinking
         self._fps = fps
         self._model_timeout_seconds = model_timeout_seconds
+        self._slot_probe = slot_probe
 
     def _call(self, messages: list[dict[str, str]]) -> dict[str, Any]:
         assert self._model_config is not None  # guarded in author()
@@ -2105,6 +2140,12 @@ class MotionAuthoringAgent:
                 artifact_prefix=PART_TO_CATALOG_ROOT,
             )
 
+        # Computed once and shared with the overflow probe below: the probe has
+        # to know which slots this film filled, and deriving that a second time
+        # would be one drift away from measuring slots the film never wrote.
+        # Beat ids are unique — `duplicate beat id` is refused at the artifact.
+        copies = {beat.beat_id: catalog.copy_for(beat) for beat in storyboard.beats}
+
         film = assemble_film(
             beats=[
                 BeatPlan(
@@ -2113,7 +2154,7 @@ class MotionAuthoringAgent:
                     # the first, because a shot is one render and two parts on
                     # one stage is the sub-composition mechanism route B adds.
                     part=beat.catalog_parts[0] if beat.catalog_parts else None,
-                    copy=catalog.copy_for(beat),
+                    copy=copies[beat.beat_id],
                     voice_seconds=None,
                     declared_seconds=beat.duration_seconds,
                     start_seconds=beat.start_seconds,
@@ -2132,6 +2173,8 @@ class MotionAuthoringAgent:
             segment_frames_maximum=MAX_FRAME_COUNT,
             font_css_for=font_css_for,
         )
+        if self._slot_probe is not None:
+            self._require_copy_fits_measured(film, catalog, copies, font_css_for)
         return tuple(
             RenderSegment(
                 entry_html=segment.entry_html,
@@ -2147,6 +2190,99 @@ class MotionAuthoringAgent:
             )
             for segment in film.segments
         )
+
+    def _require_copy_fits_measured(
+        self,
+        film: Any,
+        catalog: PartsCatalog,
+        copies: Mapping[str, Mapping[int, str]],
+        font_css_for: Callable[[str], str],
+    ) -> None:
+        """Measure this film's copy against the part's own, in one session.
+
+        The baseline is a *marked working copy carrying the part's frozen
+        copy*, not the pristine release document: marks are only stamped on
+        slots a film writes, so the pristine document has nothing a browser
+        can find. Only the slots this film filled are judged — an untouched
+        slot still holds the original copy, whose overflow *is* the baseline.
+
+        Both documents go to the probe in one call, so they are read by one
+        browser session and the driver bias cancels (PC-14 decision 3).
+        """
+        from .part_workspace import (
+            BASELINE_COPY_DIRECTORY,
+            PartSlot,
+            write_part_working_copy,
+        )
+
+        slots_by_part = {
+            part["name"]: part["slots"] for part in catalog.slot_table["parts"]
+        }
+        judged = []
+        documents: list[Path] = []
+        for segment in film.segments:
+            if segment.part is None or not segment.slot_budgets:
+                continue
+            filled = copies.get(segment.beat_id) or {}
+            budgets = tuple(
+                budget for budget in segment.slot_budgets if budget.index in filled
+            )
+            if not budgets:
+                continue
+            frozen = slots_by_part[segment.part]
+            baseline_entry = write_part_working_copy(
+                workspace=self._workspace,
+                catalog_root=catalog.root,
+                name=segment.part,
+                slots=tuple(
+                    PartSlot(
+                        index=slot["index"],
+                        original=slot["original"],
+                        parent_tag=slot["parentTag"],
+                    )
+                    for slot in frozen
+                ),
+                copy={
+                    slot["index"]: slot["original"]
+                    for slot in frozen
+                    if slot["index"] in filled
+                },
+                font_css=font_css_for(segment.part),
+                directory=BASELINE_COPY_DIRECTORY,
+            )
+            documents.append(self._workspace.resolve(baseline_entry))
+            documents.append(self._workspace.resolve(segment.entry_html))
+            judged.append(budgets)
+        if not judged:
+            return
+        assert self._slot_probe is not None  # guarded by the caller
+        try:
+            readings = list(self._slot_probe(tuple(documents)))
+        except Exception:
+            # A browser that would not launch, a page that never loaded: not
+            # something a model round can repair and never a pass. The closed
+            # reason keeps it out of the "describe the film differently" card.
+            _reject("slot overflow probe failed to measure")
+            raise AssertionError from None  # pragma: no cover
+        if len(readings) != len(documents) or not all(
+            isinstance(reading, Mapping) for reading in readings
+        ):
+            _reject("slot overflow probe failed to measure")
+        offences: list[str] = []
+        for position, budgets in enumerate(judged):
+            try:
+                require_no_new_overflow(
+                    session_budgets(budgets, readings[2 * position]),
+                    readings[2 * position + 1],
+                )
+            except SlotProbeUnmeasured:
+                _reject("slot overflow probe failed to measure")
+            except SlotProbeRejected as overflow:
+                # Collected rather than raised: the repair round carries every
+                # offending slot at once, not one per model round.
+                offences.append(str(overflow))
+        if offences:
+            raise SlotProbeRejected("; ".join(offences))
 
     def author(self, brief: MotionBrief) -> AuthoringResult:
         if self._model_config is None:
@@ -2187,33 +2323,59 @@ class MotionAuthoringAgent:
         script = self._tools.write_script(data["script"])
         storyboard = self._tools.write_storyboard(data["storyboard"])
 
-        composition_html = _compose(design, storyboard, duration_seconds=brief.duration_seconds)
-        composition_path = self._tools.write_composition(COMPOSITION_PATH, composition_html)
-        lint = self._tools.lint(composition_path)
-        check = self._tools.check(composition_path, brief.duration_seconds)
-
-        # No repair round: the document is this machine's own deterministic
-        # output, so a failure here is a defect in the template or in the beat
-        # timings — neither of which a further model round can see or repair.
-        if not lint.ok or not check.ok:
-            _reject(
-                "composition failed static gates: "
-                f"{sorted(lint.codes() | check.codes())}"
+        # One cheap repair round (PC-14): measured overflow is the one failure
+        # a further model round can actually fix — the fix is shorter copy, a
+        # few dozen bytes, not the 13KB document rewrite T92 removed.
+        for repair_rounds_left in (1, 0):
+            composition_html = _compose(
+                design, storyboard, duration_seconds=brief.duration_seconds
             )
+            composition_path = self._tools.write_composition(
+                COMPOSITION_PATH, composition_html
+            )
+            lint = self._tools.lint(composition_path)
+            check = self._tools.check(composition_path, brief.duration_seconds)
 
-        snapshot = self._tools.snapshot(
-            composition_path, brief.duration_seconds, self._fps, film_frames_maximum
-        )
-        # PC-03..PC-09: the beats that named a catalog part become their own
-        # renders, on the stage those parts declare. Beats that named none stay
-        # on the template segment this composition already is. Before this, the
-        # model's choice of parts was validated and then thrown away.
-        segments = self._segments_for(
-            storyboard,
-            template_entry=composition_path,
-            template_assets=allowed_assets,
-            template_frames=snapshot.frame_count,
-        )
+            # No repair round for static gates: the document is this machine's
+            # own deterministic output, so a failure here is a defect in the
+            # template or in the beat timings — neither of which a further
+            # model round can see or repair.
+            if not lint.ok or not check.ok:
+                _reject(
+                    "composition failed static gates: "
+                    f"{sorted(lint.codes() | check.codes())}"
+                )
+
+            snapshot = self._tools.snapshot(
+                composition_path, brief.duration_seconds, self._fps, film_frames_maximum
+            )
+            # PC-03..PC-09: the beats that named a catalog part become their own
+            # renders, on the stage those parts declare. Beats that named none stay
+            # on the template segment this composition already is. Before this, the
+            # model's choice of parts was validated and then thrown away.
+            try:
+                segments = self._segments_for(
+                    storyboard,
+                    template_entry=composition_path,
+                    template_assets=allowed_assets,
+                    template_frames=snapshot.frame_count,
+                )
+                break
+            except SlotProbeRejected as overflow:
+                if not repair_rounds_left:
+                    _reject("copy overflows its slot after the repair round")
+                messages.append({"role": "assistant", "content": json.dumps(data)})
+                messages.append(
+                    {"role": "user", "content": _repair_message(str(overflow))}
+                )
+                data = self._call(messages)
+                _require(
+                    set(data) == {"storyboard"},
+                    "repair response must carry the storyboard alone",
+                )
+                repaired = StoryboardArtifact.from_payload(data["storyboard"])
+                require_repair_changed_only_copy(storyboard, repaired)
+                storyboard = self._tools.write_storyboard(data["storyboard"])
         submission = self._tools.submit_render_job(
             entry_html=composition_path,
             allowed_assets=allowed_assets,

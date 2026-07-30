@@ -48,6 +48,16 @@ class SlotProbeRejected(RuntimeError):
     """
 
 
+class SlotProbeUnmeasured(SlotProbeRejected):
+    """A slot the probe should have seen was not in its reading.
+
+    Distinct from an overflow because the two have different next steps: an
+    overflow is copy the model can shorten in a repair round, while a missing
+    measurement is a broken mark or a failed page load — spending a model round
+    on it would ask for a rewrite of copy that was never the problem.
+    """
+
+
 def session_budgets(
     frozen: Sequence[SlotBudget],
     original: Mapping[int, tuple[bool, bool]],
@@ -62,7 +72,7 @@ def session_budgets(
     for budget in frozen:
         measurement = original.get(budget.index)
         if measurement is None:
-            raise SlotProbeRejected(
+            raise SlotProbeUnmeasured(
                 f"the original document's probe did not measure slot {budget.index}; "
                 "a missing measurement must not pass as a fitting one"
             )
@@ -93,7 +103,7 @@ def require_no_new_overflow(
     for budget in budgets:
         measurement = substituted.get(budget.index)
         if measurement is None:
-            raise SlotProbeRejected(
+            raise SlotProbeUnmeasured(
                 f"the substituted document's probe did not measure slot "
                 f"{budget.index}; a missing measurement must not pass as a "
                 "fitting one"
@@ -112,6 +122,7 @@ def require_no_new_overflow(
 __all__ = [
     "SLOT_PROBE_JS",
     "SlotProbeRejected",
+    "SlotProbeUnmeasured",
     "require_no_new_overflow",
     "session_budgets",
 ]
