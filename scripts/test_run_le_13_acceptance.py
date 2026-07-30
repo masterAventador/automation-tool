@@ -256,6 +256,45 @@ class Le13AcceptanceRunnerTests(unittest.TestCase):
             contract,
         )
 
+    def test_media_toolchain_probe_timeout_is_a_fixed_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            resource_root = Path(directory)
+            staging = resource_root / "staging"
+            installed_toolchain = resource_root / "media-toolchain"
+            private_binary = installed_toolchain / "bin" / "ffmpeg"
+
+            with (
+                patch.object(
+                    run_le_13_acceptance,
+                    "host_platform",
+                    return_value="macos",
+                ),
+                patch.object(
+                    run_le_13_acceptance,
+                    "prepare_video_runtime",
+                    return_value=staging,
+                ),
+                patch.object(
+                    run_le_13_acceptance,
+                    "install_video_runtime",
+                    return_value={"media-toolchain": installed_toolchain},
+                ),
+                patch.object(
+                    run_le_13_acceptance,
+                    "validate_toolchain_contract",
+                ),
+                patch.object(
+                    run_le_13_acceptance,
+                    "validate_toolchain_candidate",
+                    side_effect=subprocess.TimeoutExpired([private_binary], 15),
+                ),
+                self.assertRaisesRegex(
+                    run_le_13_acceptance.Le13AcceptanceFailure,
+                    r"^LE-13 packaged media toolchain is unavailable$",
+                ),
+            ):
+                run_le_13_acceptance.prepare_verified_media_toolchain(resource_root)
+
 
 if __name__ == "__main__":
     unittest.main()

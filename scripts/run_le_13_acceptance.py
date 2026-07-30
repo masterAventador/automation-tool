@@ -158,6 +158,7 @@ def prepare_verified_media_toolchain(resource_root: Path) -> Path:
         json.JSONDecodeError,
         MediaToolchainContractError,
         VideoRuntimeUnavailable,
+        subprocess.TimeoutExpired,
     ):
         raise Le13AcceptanceFailure(
             "LE-13 packaged media toolchain is unavailable"
