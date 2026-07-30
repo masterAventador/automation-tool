@@ -38,7 +38,7 @@
   "bundle": {
     "active": true,
     "macOS": {
-      "minimumSystemVersion": "13.0"
+      "minimumSystemVersion": "13.4"
     }
   },
   "plugins": {

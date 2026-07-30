@@ -40,9 +40,7 @@ BROWSER_RESOURCE_NAME: Final = "embedded-browser"
 MACOS_RESOURCE_PREFIX: Final = ("Contents", "Resources")
 
 _REPOSITORY_ROOT: Final = Path(__file__).resolve().parents[1]
-_STAGING_CONTRACT: Final = (
-    _REPOSITORY_ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
-)
+_STAGING_CONTRACT: Final = _REPOSITORY_ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
 
 _PLATFORM_TARGET_PREFIX: Final = {"macos": "macos-", "windows": "windows-"}
 
@@ -163,9 +161,7 @@ def browser_resource_root(bundle_root: Path, platform: str) -> Path:
 def _other_root_entries(target_id: str) -> frozenset[str]:
     contract = load_staging_contract(_STAGING_CONTRACT)
     return frozenset(
-        target.root_entry
-        for name, target in contract.targets.items()
-        if name != target_id
+        target.root_entry for name, target in contract.targets.items() if name != target_id
     )
 
 
@@ -188,7 +184,7 @@ def _require_contained_symlink(link: Path, bundle_root: Path, browser_root: Path
         # Missing target, or a symlink loop. Either way it cannot be shown to
         # stay inside, and at runtime it is an unexplained failure.
         _reject("package contains a symlink that does not resolve")
-        raise AssertionError("unreachable")
+        raise AssertionError("unreachable") from None
     package = bundle_root.resolve()
     if not (target == package or package in target.parents):
         _reject("package contains a symlink that resolves outside the package")
@@ -259,14 +255,10 @@ def audit_embedded_browser_package(
     package_files += distribution.verified_files
     package_bytes += distribution.total_bytes
     if not (
-        size_bounds.min_browser_bytes
-        <= distribution.total_bytes
-        <= size_bounds.max_browser_bytes
+        size_bounds.min_browser_bytes <= distribution.total_bytes <= size_bounds.max_browser_bytes
     ):
         _reject("packaged browser tree is outside the release size bounds")
-    if not (
-        size_bounds.min_package_bytes <= package_bytes <= size_bounds.max_package_bytes
-    ):
+    if not (size_bounds.min_package_bytes <= package_bytes <= size_bounds.max_package_bytes):
         _reject("release package is outside the release size bounds")
 
     return PackageAuditReport(

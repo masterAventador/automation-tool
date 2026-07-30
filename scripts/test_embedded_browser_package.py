@@ -52,8 +52,7 @@ TARGET_ID = "macos-arm64"
 PLATFORM = "macos"
 ROOT_ENTRY = "chrome-mac-arm64"
 EXECUTABLE = (
-    "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/"
-    "Google Chrome for Testing"
+    "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
 )
 MUTABLE_FILE = "chrome-mac-arm64/Google Chrome for Testing.app/Contents/Info.plist"
 
@@ -176,9 +175,7 @@ class EmbeddedBrowserPackageTests(unittest.TestCase):
             1125 * 1024 * 1024,
         )
         self.assertGreaterEqual(RELEASE_SIZE_BOUNDS.max_package_bytes, payload)
-        self.assertLessEqual(
-            RELEASE_SIZE_BOUNDS.max_package_bytes, payload + payload // 10
-        )
+        self.assertLessEqual(RELEASE_SIZE_BOUNDS.max_package_bytes, payload + payload // 10)
 
     def test_declared_production_payload_lists_every_shipped_part(self) -> None:
         self.assertEqual(
@@ -362,11 +359,7 @@ class DistributionInstallationTests(unittest.TestCase):
         digest = _write_zip(
             archive,
             _synthetic_entries(),
-            {
-                "chrome-mac-arm64/Google Chrome for Testing.app/Contents/Current": (
-                    "Info.plist"
-                )
-            },
+            {"chrome-mac-arm64/Google Chrome for Testing.app/Contents/Current": ("Info.plist")},
         )
         build_staging(
             contract=load_staging_contract(STAGING_CONTRACT_PATH),
@@ -409,10 +402,13 @@ class DistributionInstallationTests(unittest.TestCase):
 
     def test_failed_install_leaves_no_half_written_destination(self) -> None:
         destination = self.base / "Resources/embedded-browser"
-        with unittest.mock.patch(
-            "build_embedded_browser_distribution.shutil.copytree",
-            side_effect=OSError("disk full"),
-        ), self.assertRaises(OSError):
+        with (
+            unittest.mock.patch(
+                "build_embedded_browser_distribution.shutil.copytree",
+                side_effect=OSError("disk full"),
+            ),
+            self.assertRaises(OSError),
+        ):
             install_distribution(staging=self.staging, destination=destination)
         self.assertFalse(destination.exists())
         install_distribution(staging=self.staging, destination=destination)
@@ -578,9 +574,7 @@ class ProductionPackageAuditTests(unittest.TestCase):
         (self.distribution / "index.html").write_text("<html></html>", encoding="utf-8")
         (self.distribution / "assets" / RELEASE_ASSET_NAME).write_text(
             "globalThis.desktop = true;"
-            + "".join(
-                f"invoke({marker!r});" for marker in required_distribution_markers()
-            ),
+            + "".join(f"invoke({marker!r});" for marker in required_distribution_markers()),
             encoding="utf-8",
         )
         self.cargo_manifest = self.base / "Cargo.toml"
@@ -651,10 +645,7 @@ class ProductionPackageAuditTests(unittest.TestCase):
 
     def test_webdriver_binary_marker_is_rejected(self) -> None:
         binary = self.base / "webdriver-binary"
-        binary.write_bytes(
-            b"tauri-driver --port 4444"
-            b"ZGVtby1lYjE2LXJlbGVhc2Uta2V5LWJ5dGVzLTMyISE"
-        )
+        binary.write_bytes(b"tauri-driver --port 4444ZGVtby1lYjE2LXJlbGVhc2Uta2V5LWJ5dGVzLTMyISE")
         result = self._audit(binary)
         self.assertNotEqual(result.returncode, 0)
 

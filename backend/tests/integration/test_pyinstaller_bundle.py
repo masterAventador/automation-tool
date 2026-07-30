@@ -7,17 +7,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-# `conftest.py` puts the repository root on `sys.path`; this is the same route
-# it uses for `scripts.acceptance_postgres`.
-from scripts.frozen_artifact_environment import (  # type: ignore[import-not-found]
-    frozen_artifact_environment,
-)
-
 from automation_tool.executor.package_manifest import (
     EXECUTOR_MANIFEST_FILE_NAME,
     EXECUTOR_SIGNATURE_FILE_NAME,
 )
 from automation_tool.executor.silero_vad import audit_packaged_silero_vad_runtime
+
+# `conftest.py` puts the repository root on `sys.path`; this is the same route
+# it uses for `scripts.acceptance_postgres`.
+from scripts.frozen_artifact_environment import (  # type: ignore[import-not-found]
+    frozen_artifact_environment,
+)
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 BUNDLE_NAME = "automation-tool-executor"

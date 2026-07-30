@@ -90,7 +90,7 @@ def test_desktop_package_does_not_advertise_an_unsupported_macos_version() -> No
         (REPOSITORY_ROOT / "frontend/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
     )
 
-    assert tauri["bundle"]["macOS"]["minimumSystemVersion"] == "13.0"
+    assert tauri["bundle"]["macOS"]["minimumSystemVersion"] == "13.4"
 
 
 def test_executor_spec_builds_a_console_onedir_from_the_formal_module_entry() -> None:
