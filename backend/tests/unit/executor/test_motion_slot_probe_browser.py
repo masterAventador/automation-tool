@@ -12,7 +12,10 @@ from pathlib import Path
 import pytest
 
 from automation_tool.executor.browser_runtime import BrowserRuntime
-from automation_tool.executor.motion_authoring.slot_overflow_probe import SLOT_PROBE_JS
+from automation_tool.executor.motion_authoring.slot_overflow_probe import (
+    SLOT_PROBE_JS,
+    ProbeReading,
+)
 from automation_tool.executor.motion_authoring.slot_probe_browser import (
     SLOT_PROBE_PROFILE_DIRECTORY,
     PackagedSlotProbe,
@@ -20,7 +23,7 @@ from automation_tool.executor.motion_authoring.slot_probe_browser import (
 
 
 class FakePage:
-    def __init__(self, readings: list[dict[str, list[bool]]]) -> None:
+    def __init__(self, readings: list[dict[str, list[int]]]) -> None:
         self._readings = list(readings)
         self.navigations: list[str] = []
         self.evaluations: list[str] = []
@@ -37,7 +40,10 @@ class FakePage:
             raise RuntimeError("private page failure")
         self.evaluations.append(script)
         if "scrollWidth" in script:
-            return self._readings[len(self.navigations) - 1]
+            return {
+                "slots": self._readings[len(self.navigations) - 1],
+                "stage": [1920, 1080],
+            }
         return None
 
     def title(self) -> str:
@@ -102,7 +108,7 @@ class FakePlaywright:
 
 
 def _fixture(
-    tmp_path: Path, readings: list[dict[str, list[bool]]]
+    tmp_path: Path, readings: list[dict[str, list[int]]]
 ) -> tuple[PackagedSlotProbe, FakePage, FakeContext, FakeChromium, FakePlaywright, Path]:
     executable = tmp_path / "chromium"
     executable.write_bytes(b"browser")
@@ -133,7 +139,7 @@ def _documents(tmp_path: Path, count: int) -> tuple[Path, ...]:
 def test_every_document_is_measured_by_one_headless_browser_session(
     tmp_path: Path,
 ) -> None:
-    reading = {"12": [False, True]}
+    reading = {"12": [205, 347, 35, 32]}
     probe, page, context, chromium, playwright, workspace = _fixture(
         tmp_path, [reading, reading]
     )
@@ -148,14 +154,15 @@ def test_every_document_is_measured_by_one_headless_browser_session(
         workspace / SLOT_PROBE_PROFILE_DIRECTORY
     ).resolve()
     assert page.navigations == [first.resolve().as_uri(), second.resolve().as_uri()]
-    assert results == [{12: (False, True)}, {12: (False, True)}]
+    expected = ProbeReading(slots={12: (205, 347, 35, 32)}, stage=(1920, 1080))
+    assert results == [expected, expected]
     # 会话收尾：上下文与驱动都停了。
     assert context.close_calls == 1
     assert playwright.stop_calls == 1
 
 
 def test_the_timeline_is_sought_to_its_end_before_each_reading(tmp_path: Path) -> None:
-    reading = {"12": [False, False]}
+    reading = {"12": [205, 347, 32, 32]}
     probe, page, *_rest = _fixture(tmp_path, [reading])
     (document,) = _documents(tmp_path, 1)
 
@@ -167,18 +174,20 @@ def test_the_timeline_is_sought_to_its_end_before_each_reading(tmp_path: Path) -
     assert page.evaluations[1] == SLOT_PROBE_JS
 
 
-def test_readings_are_normalized_to_int_keys_and_bool_pairs(tmp_path: Path) -> None:
-    probe, *_rest = _fixture(tmp_path, [{"12": [True, False], "15": [False, False]}])
+def test_readings_are_normalized_to_int_keys_pixel_tuples_and_a_stage(tmp_path: Path) -> None:
+    probe, *_rest = _fixture(tmp_path, [{"12": [400, 347, 32, 32], "15": [205, 347, 32, 32]}])
     (document,) = _documents(tmp_path, 1)
 
     (result,) = probe((document,))
 
-    assert result == {12: (True, False), 15: (False, False)}
+    assert result == ProbeReading(
+        slots={12: (400, 347, 32, 32), 15: (205, 347, 32, 32)}, stage=(1920, 1080)
+    )
 
 
 def test_a_failing_page_still_stops_the_browser_and_driver(tmp_path: Path) -> None:
     probe, page, context, _chromium, playwright, _workspace = _fixture(
-        tmp_path, [{"12": [False, False]}]
+        tmp_path, [{"12": [205, 347, 32, 32]}]
     )
     page.fail_evaluate = True
     (document,) = _documents(tmp_path, 1)

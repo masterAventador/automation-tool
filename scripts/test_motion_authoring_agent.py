@@ -72,6 +72,9 @@ from automation_tool.executor.motion_authoring.composition_template import (  # 
     COMPOSITION_ID,
     SCENE_LAYOUTS,
 )
+from automation_tool.executor.motion_authoring.slot_overflow_probe import (  # noqa: E402
+    ProbeReading,
+)
 
 VENDOR_ROOT = ROOT / "vendor/hyperframes"
 WORKFLOW_CONTRACT = ROOT / "contracts/video/motion-authoring-workflow.v1.json"
@@ -1825,11 +1828,22 @@ PROBE_PART = "lt-accent-underline"
 # both inside a <div>. The frozen budget says slot 12 is 600px at 76px type.
 PROBE_HEADLINE_SLOT = 12
 PROBE_BODY_SLOT = 15
-FITS = {PROBE_HEADLINE_SLOT: (False, True), PROBE_BODY_SLOT: (False, False)}
-HEADLINE_TOO_WIDE = {
-    PROBE_HEADLINE_SLOT: (True, True),
-    PROBE_BODY_SLOT: (False, False),
-}
+# 读数是像素（scrollWidth, clientWidth, scrollHeight, clientHeight）外加整篇文档
+# 的尺寸；判定带容差在 slot_overflow_probe 里做（中西文行框差实测约 11-12% 字号）。
+FITS = ProbeReading(
+    slots={
+        PROBE_HEADLINE_SLOT: (500, 600, 80, 100),
+        PROBE_BODY_SLOT: (300, 376, 30, 40),
+    },
+    stage=(1920, 1080),
+)
+HEADLINE_TOO_WIDE = ProbeReading(
+    slots={
+        PROBE_HEADLINE_SLOT: (700, 600, 80, 100),
+        PROBE_BODY_SLOT: (300, 376, 30, 40),
+    },
+    stage=(1920, 1080),
+)
 
 
 def _probe_catalog(root: Path) -> Path:
@@ -1871,11 +1885,11 @@ def _storyboard_reply(beat: dict[str, object]) -> str:
 class ScriptedSlotProbe:
     """Stands in for the packaged-Chromium probe: one reading per document."""
 
-    def __init__(self, readings: list[list[dict[int, tuple[bool, bool]]]]) -> None:
+    def __init__(self, readings: list[list[ProbeReading]]) -> None:
         self._readings = list(readings)
         self.batches: list[tuple[Path, ...]] = []
 
-    def __call__(self, documents: tuple[Path, ...]) -> list[dict[int, tuple[bool, bool]]]:
+    def __call__(self, documents: tuple[Path, ...]) -> list[ProbeReading]:
         self.batches.append(tuple(documents))
         if not self._readings:
             raise AssertionError("scripted probe ran out of readings")
@@ -1959,7 +1973,9 @@ class SlotOverflowProbeTests(unittest.TestCase):
             workspace = _make_workspace(root / "job")
             # Only the headline slot is measured; the body slot is untouched
             # and the probe reports nothing about it.
-            reading = {PROBE_HEADLINE_SLOT: (False, True)}
+            reading = ProbeReading(
+                slots={PROBE_HEADLINE_SLOT: (500, 600, 80, 100)}, stage=(1920, 1080)
+            )
             probe = ScriptedSlotProbe([[reading, reading]])
             model = ScriptedModel(
                 [_valid_model_payload(_valid_storyboard([_probe_beat(body="")]))]
@@ -2089,7 +2105,9 @@ class SlotOverflowProbeTests(unittest.TestCase):
         with TemporaryDirectory() as raw:
             root = Path(raw)
             workspace = _make_workspace(root / "job")
-            missing_body_slot = {PROBE_HEADLINE_SLOT: (False, True)}
+            missing_body_slot = ProbeReading(
+                slots={PROBE_HEADLINE_SLOT: (500, 600, 80, 100)}, stage=(1920, 1080)
+            )
             probe = ScriptedSlotProbe([[missing_body_slot, missing_body_slot]])
             model = ScriptedModel(
                 [_valid_model_payload(_valid_storyboard([_probe_beat()]))]

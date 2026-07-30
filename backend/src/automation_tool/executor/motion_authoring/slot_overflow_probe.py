@@ -10,6 +10,33 @@ measured in the *same* browser session and only the difference matters — the
 driver bias cancels itself. The frozen numbers survive as the hint the model
 gets back: slot N is this wide at this type size.
 
+Why the judgement compares pixel *excesses*, with a grace on the difference
+----------------------------------------------------------------------------
+Two rounds of real measurement on 2026-07-30, both against the packaged
+Chromium and the frozen release tree:
+
+1. A CJK line box is about 11–12% of the type size taller than the Latin line
+   box the parts were designed around: lt-clean-bar's body slot is 32px tall
+   around its own Latin copy, and a four-character Chinese line measures 35px
+   in it. Under a boolean `scrollHeight > clientHeight` judgement *any* Chinese
+   copy — the product's primary language — reads as new overflow in 5 of the
+   37 anchored parts, and the repair round then asks the model for something
+   shortening can never deliver.
+2. The baseline often carries a few pixels of excess of its own (lt-clean-bar's
+   headline slot reads 59/55 around its Latin original). A grace applied to the
+   substituted document's *absolute* excess is eaten by that baseline excess,
+   and the CJK line-box difference stacked on top misjudges again (measured:
+   4px baseline excess + 6px script difference at 52px type).
+
+So the rule is a difference rule: the substituted document's excess may exceed
+the original document's excess by at most a grace —
+
+* horizontally: 1px, the same rounding allowance the frozen budget probe uses
+  (`measure-motion-part-slots.mjs` judges `> clientWidth + 1`);
+* vertically: max(1, round(15% × font size)) — covers the measured script
+  line-box difference, while an extra wrapped line (≥120% of the font size)
+  is far past it and still fails.
+
 The probe finds slots by the `data-motion-slot` marks the working-copy writer
 stamps (`part_workspace._slot_marks`); numbering text runs again in JavaScript
 would be the same misplacement risk that module refuses everywhere else.
@@ -17,30 +44,64 @@ would be the same misplacement risk that module refuses everywhere else.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
 from typing import Final, Mapping, Sequence
 
 from .slot_budget import SlotBudget, SlotOverflow, require_within_budget
 
-# Returns {"<index>": [overflowsX, overflowsY]} for every marked slot. A mark
-# listing several indices (slots sharing one box) reports the same box for each
-# of them — they share its overflow, as `_slot_marks` already states.
+# Returns `{"slots": {"<index>": [scrollWidth, clientWidth, scrollHeight,
+# clientHeight]}, "stage": [documentWidth, documentHeight]}`. A mark listing
+# several indices (slots sharing one box) reports the same box for each of
+# them — they share its overflow, as `_slot_marks` already states. Pixels, not
+# booleans: the grace depends on the slot's type size, which only the
+# budget-holding side knows. The document extent is what catches the parts
+# whose boxes auto-grow — their box-level numbers never move while the copy
+# pushes the whole part past the stage edge (measured: lt-clean-bar's bar at
+# 3019px on a 1920px stage, scrollWidth == clientWidth throughout).
 SLOT_PROBE_JS: Final = """
 () => {
   const measured = {};
   for (const element of document.querySelectorAll("[data-motion-slot]")) {
-    const overflowsX = element.scrollWidth > element.clientWidth;
-    const overflowsY = element.scrollHeight > element.clientHeight;
+    const reading = [
+      element.scrollWidth, element.clientWidth,
+      element.scrollHeight, element.clientHeight,
+    ];
     for (const index of element.getAttribute("data-motion-slot").split(" ")) {
-      measured[index] = [overflowsX, overflowsY];
+      measured[index] = reading;
     }
   }
-  return measured;
+  return {
+    slots: measured,
+    stage: [
+      document.documentElement.scrollWidth,
+      document.documentElement.scrollHeight,
+    ],
+  };
 }
 """
 
 
+@dataclass(frozen=True, slots=True)
+class ProbeReading:
+    """One document, as the probe measured it: every marked box, plus the whole.
+
+    `stage` is the document's own extent, not the declared canvas: both
+    documents are compared against each other, so the judgement stays relative
+    and driver-independent — the same reason the slot readings are.
+    """
+
+    slots: Mapping[int, Sequence[int]]
+    stage: tuple[int, int]
+
+# The rounding grace the frozen budget probe already applies horizontally.
+_WIDTH_GRACE_PX: Final = 1
+# The measured CJK-versus-Latin line-box difference is 11–12% of the type
+# size; 15% covers it with margin while staying far below one wrapped line.
+_LINE_BOX_GRACE_RATIO: Final = 0.15
+
+
 class SlotProbeRejected(RuntimeError):
-    """The film's copy overflows where the part's own copy did not.
+    """The film's copy overflows meaningfully more than the part's own copy.
 
     Also raised when a measurement is missing: a slot the probe could not see
     must not pass as "does not overflow" — that would turn a broken mark or a
@@ -58,71 +119,95 @@ class SlotProbeUnmeasured(SlotProbeRejected):
     """
 
 
-def session_budgets(
-    frozen: Sequence[SlotBudget],
-    original: Mapping[int, tuple[bool, bool]],
-) -> tuple[SlotBudget, ...]:
-    """The frozen budgets with their baselines replaced by this session's.
+def _excesses(measurement: Sequence[int]) -> tuple[int, int]:
+    scroll_width, client_width, scroll_height, client_height = measurement
+    return (
+        max(0, int(scroll_width) - int(client_width)),
+        max(0, int(scroll_height) - int(client_height)),
+    )
 
-    Width and type size stay frozen — they are the hint the model gets — while
-    the overflow baseline comes from measuring the *original* document in the
-    same browser session that will measure the substituted one.
-    """
-    effective = []
-    for budget in frozen:
-        measurement = original.get(budget.index)
-        if measurement is None:
-            raise SlotProbeUnmeasured(
-                f"the original document's probe did not measure slot {budget.index}; "
-                "a missing measurement must not pass as a fitting one"
-            )
-        overflows_x, overflows_y = measurement
-        effective.append(
-            SlotBudget(
-                index=budget.index,
-                usable_width_px=budget.usable_width_px,
-                font_size_px=budget.font_size_px,
-                baseline_overflows_x=bool(overflows_x),
-                baseline_overflows_y=bool(overflows_y),
-            )
+
+def _measurement(
+    reading: ProbeReading, budget: SlotBudget, document: str
+) -> Sequence[int]:
+    measurement = reading.slots.get(budget.index)
+    if measurement is None:
+        raise SlotProbeUnmeasured(
+            f"the {document} document's probe did not measure slot "
+            f"{budget.index}; a missing measurement must not pass as a "
+            "fitting one"
         )
-    return tuple(effective)
+    return measurement
+
+
+def _stage_escapes(
+    budgets: Sequence[SlotBudget],
+    original: ProbeReading,
+    substituted: ProbeReading,
+) -> list[str]:
+    """Did the copy push the whole part further past the stage than its own did?
+
+    Judged relatively, like everything else here: the original document's
+    extent *is* the stage for a well-formed part (measured 1920×1080 for every
+    baseline today), and a baseline that already runs beyond it stays the
+    baseline. The vertical grace follows the document's largest judged type
+    size — the CJK line-box difference propagates to the document extent the
+    same way it does to a box.
+    """
+    grace_y = max(
+        1,
+        round(max(budget.font_size_px for budget in budgets) * _LINE_BOX_GRACE_RATIO),
+    )
+    findings = []
+    for axis, direction, grace in ((0, "horizontally", _WIDTH_GRACE_PX), (1, "vertically", grace_y)):
+        if substituted.stage[axis] > original.stage[axis] + grace:
+            findings.append(
+                f"copy pushes the part beyond its own stage {direction}; the "
+                f"part's own copy ends at {original.stage[axis]}px and this "
+                f"copy reaches {substituted.stage[axis]}px"
+            )
+    return findings
 
 
 def require_no_new_overflow(
     budgets: Sequence[SlotBudget],
-    substituted: Mapping[int, tuple[bool, bool]],
+    original: ProbeReading,
+    substituted: ProbeReading,
 ) -> None:
     """Every slot at once: the model repairs from the full list, not the first.
 
-    `require_within_budget` decides one slot; this collects every offender so
-    the repair round carries all of them — retrying per-slot would spend one
-    model round per slot for information this probe already has.
+    `require_within_budget` decides one slot and words the finding; this
+    collects every offender so the repair round carries all of them — retrying
+    per-slot would spend one model round per slot for information this probe
+    already has.
     """
     offences: list[str] = []
     for budget in budgets:
-        measurement = substituted.get(budget.index)
-        if measurement is None:
-            raise SlotProbeUnmeasured(
-                f"the substituted document's probe did not measure slot "
-                f"{budget.index}; a missing measurement must not pass as a "
-                "fitting one"
-            )
-        overflows_x, overflows_y = measurement
+        original_x, original_y = _excesses(_measurement(original, budget, "original"))
+        substituted_x, substituted_y = _excesses(
+            _measurement(substituted, budget, "substituted")
+        )
+        vertical_grace = max(1, round(budget.font_size_px * _LINE_BOX_GRACE_RATIO))
         try:
             require_within_budget(
-                budget, overflows_x=bool(overflows_x), overflows_y=bool(overflows_y)
+                # The frozen baseline booleans came off another driver; the
+                # comparison here is same-session by construction, so the
+                # judged budget's baseline is "no worse than the original".
+                replace(budget, baseline_overflows_x=False, baseline_overflows_y=False),
+                overflows_x=substituted_x > original_x + _WIDTH_GRACE_PX,
+                overflows_y=substituted_y > original_y + vertical_grace,
             )
         except SlotOverflow as overflow:
             offences.append(str(overflow))
+    offences.extend(_stage_escapes(budgets, original, substituted))
     if offences:
         raise SlotProbeRejected("; ".join(offences))
 
 
 __all__ = [
     "SLOT_PROBE_JS",
+    "ProbeReading",
     "SlotProbeRejected",
     "SlotProbeUnmeasured",
     "require_no_new_overflow",
-    "session_budgets",
 ]

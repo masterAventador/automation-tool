@@ -63,10 +63,10 @@ from automation_tool.executor.motion_authoring.resources import (
     RESOURCE_ROOT,
 )
 from automation_tool.executor.motion_authoring.slot_overflow_probe import (
+    ProbeReading,
     SlotProbeRejected,
     SlotProbeUnmeasured,
     require_no_new_overflow,
-    session_budgets,
 )
 
 # --------------------------------------------------------------------------- #
@@ -2038,8 +2038,7 @@ class MotionAuthoringAgent:
         fps: int = DEFAULT_FPS,
         model_timeout_seconds: int = MODEL_TIMEOUT_SECONDS,
         catalog_root: Path | None = None,
-        slot_probe: Callable[[tuple[Path, ...]], Sequence[Mapping[int, tuple[bool, bool]]]]
-        | None = None,
+        slot_probe: Callable[[tuple[Path, ...]], Sequence[ProbeReading]] | None = None,
     ) -> None:
         # Supplied by the App, which resolves it beside the other packaged
         # resources; this process does not go looking for it. `None` means this
@@ -2265,15 +2264,14 @@ class MotionAuthoringAgent:
             _reject("slot overflow probe failed to measure")
             raise AssertionError from None  # pragma: no cover
         if len(readings) != len(documents) or not all(
-            isinstance(reading, Mapping) for reading in readings
+            isinstance(reading, ProbeReading) for reading in readings
         ):
             _reject("slot overflow probe failed to measure")
         offences: list[str] = []
         for position, budgets in enumerate(judged):
             try:
                 require_no_new_overflow(
-                    session_budgets(budgets, readings[2 * position]),
-                    readings[2 * position + 1],
+                    budgets, readings[2 * position], readings[2 * position + 1]
                 )
             except SlotProbeUnmeasured:
                 _reject("slot overflow probe failed to measure")

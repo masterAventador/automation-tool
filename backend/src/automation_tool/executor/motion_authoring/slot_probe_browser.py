@@ -1,9 +1,9 @@
 """The packaged-Chromium slot probe: one session, every document, end-frame reads.
 
-This is the runtime half of PC-14. The judgement (`session_budgets`,
-`require_no_new_overflow`) is pure logic in `slot_overflow_probe.py`; what lives
-here is the only part that needs a browser — loading the marked working copies
-and reading `scrollWidth`/`clientWidth` off the marked boxes.
+This is the runtime half of PC-14. The judgement (`require_no_new_overflow`)
+is pure logic in `slot_overflow_probe.py`; what lives here is the only part
+that needs a browser — loading the marked working copies and reading the
+scroll/client boxes off the marked elements.
 
 Two measurement rules inherited from the probe that froze the budgets
 (`frontend/scripts/measure-motion-part-slots.mjs`):
@@ -37,7 +37,10 @@ from automation_tool.executor.browser_runtime import (
     BrowserLaunchRequest,
     BrowserRuntime,
 )
-from automation_tool.executor.motion_authoring.slot_overflow_probe import SLOT_PROBE_JS
+from automation_tool.executor.motion_authoring.slot_overflow_probe import (
+    SLOT_PROBE_JS,
+    ProbeReading,
+)
 
 # Where the probe's throwaway Chromium profile lives, relative to the render
 # workspace root. Inside the workspace so the App's workspace deletion is the
@@ -81,9 +84,7 @@ class PackagedSlotProbe:
     def __repr__(self) -> str:
         return "PackagedSlotProbe(<redacted>)"
 
-    def __call__(
-        self, documents: tuple[Path, ...]
-    ) -> list[dict[int, tuple[bool, bool]]]:
+    def __call__(self, documents: tuple[Path, ...]) -> list[ProbeReading]:
         self._profile_directory.mkdir(parents=True, exist_ok=True)
         request = BrowserLaunchRequest(
             # Resolved so the request's symlink refusal judges the real path —
@@ -92,7 +93,7 @@ class PackagedSlotProbe:
             profile_directory=self._profile_directory.resolve(),
             headless=True,
         )
-        readings: list[dict[int, tuple[bool, bool]]] = []
+        readings: list[ProbeReading] = []
         with self._runtime.running(request):
             page = self._runtime.primary_window().playwright_page
             for document in documents:
@@ -100,12 +101,21 @@ class PackagedSlotProbe:
                 page.wait_for_timeout(_LOAD_SETTLE_MILLISECONDS)  # type: ignore[attr-defined]
                 page.evaluate(_SEEK_TO_END_JS)  # type: ignore[attr-defined]
                 page.wait_for_timeout(_SEEK_SETTLE_MILLISECONDS)  # type: ignore[attr-defined]
-                measured = page.evaluate(SLOT_PROBE_JS)  # type: ignore[attr-defined]
+                measured = dict(page.evaluate(SLOT_PROBE_JS))  # type: ignore[attr-defined]
+                stage = measured["stage"]
                 readings.append(
-                    {
-                        int(index): (bool(flags[0]), bool(flags[1]))
-                        for index, flags in dict(measured).items()
-                    }
+                    ProbeReading(
+                        slots={
+                            int(index): (
+                                int(pixels[0]),
+                                int(pixels[1]),
+                                int(pixels[2]),
+                                int(pixels[3]),
+                            )
+                            for index, pixels in dict(measured["slots"]).items()
+                        },
+                        stage=(int(stage[0]), int(stage[1])),
+                    )
                 )
         return readings
 
