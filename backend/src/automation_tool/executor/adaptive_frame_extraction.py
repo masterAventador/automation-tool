@@ -620,13 +620,15 @@ def _write_final_frames(
         for filename, artifact in zip(created, artifacts, strict=True):
             _require_written_frame(workspace, filename, artifact.byte_size)
         return tuple(artifacts)
-    except OSError:
+    except BaseException as error:
         for filename in reversed(created):
             with suppress(OSError):
                 workspace.unlink(filename)
         with suppress(OSError):
             workspace.fsync()
-        return AdaptiveFrameRejection.WORKSPACE_UNUSABLE
+        if isinstance(error, OSError):
+            return AdaptiveFrameRejection.WORKSPACE_UNUSABLE
+        raise
 
 
 def _write_exclusive_frame(
@@ -636,8 +638,10 @@ def _write_exclusive_frame(
     created: list[str],
 ) -> None:
     descriptor: int | None = None
+    opened = False
     try:
         descriptor = workspace.open_exclusive(filename)
+        opened = True
         created.append(filename)
         if os.name != "nt":  # pragma: no branch - native platform split
             cast(Callable[[int, int], None], vars(os)["fchmod"])(descriptor, 0o600)
@@ -653,10 +657,13 @@ def _write_exclusive_frame(
         closing_descriptor = descriptor
         descriptor = None
         os.close(closing_descriptor)
-    except Exception:
+    except BaseException:
         if descriptor is not None:
             with suppress(OSError):
                 os.close(descriptor)
+        if opened:
+            with suppress(OSError):
+                workspace.unlink(filename)
         raise
 
 

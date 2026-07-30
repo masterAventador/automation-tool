@@ -390,6 +390,53 @@ def test_close_failure_removes_the_frame_that_was_just_created(
     assert tuple(output.iterdir()) == ()
 
 
+def test_memory_failure_after_exclusive_create_removes_the_partial_frame(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tools = _fake_tools(tmp_path)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"media")
+    source, approved = approve_source(source)
+    output = tmp_path / "output"
+    output.mkdir(mode=0o700)
+    monkeypatch.setattr(
+        adaptive_frame_extraction,
+        "extract_adaptive_frame_candidates",
+        lambda *_args, **_kwargs: (
+            ExtractedFrame(timestamp_ms=0, is_scene_cut=True, jpeg_bytes=b"first"),
+            ExtractedFrame(timestamp_ms=8_000, is_scene_cut=False, jpeg_bytes=b"second"),
+        ),
+    )
+    real_memoryview = memoryview
+    memoryview_calls = 0
+
+    def fail_second_memoryview(payload: bytes) -> memoryview:
+        nonlocal memoryview_calls
+        memoryview_calls += 1
+        if memoryview_calls == 2:
+            raise MemoryError("injected allocation failure")
+        return real_memoryview(payload)
+
+    monkeypatch.setattr(
+        adaptive_frame_extraction,
+        "memoryview",
+        fail_second_memoryview,
+        raising=False,
+    )
+
+    with pytest.raises(MemoryError, match="injected allocation failure"):
+        extract_adaptive_frames(
+            tools,
+            source,
+            approved,
+            output,
+            duration_ms=8_001,
+        )
+
+    assert tuple(output.iterdir()) == ()
+
+
 @pytest.mark.parametrize(
     ("media_name", "duration_ms", "expected_count", "expected_size"),
     [
