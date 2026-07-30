@@ -578,6 +578,7 @@ def test_interruption_after_registration_does_not_repeat_the_rollback(
     finally:
         sys.settrace(original_trace)
 
+    assert sys.gettrace() is original_trace
     assert unlink_calls == 1
     assert (output / "frame-000001.jpg").read_bytes() == b"concurrent writer"
 
