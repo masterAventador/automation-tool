@@ -359,6 +359,47 @@ def test_video_stream_may_end_before_the_container_and_audio_stream(
     assert tuple(frame.timestamp_ms for frame in result) == (0,)
 
 
+def test_final_scene_supplement_failure_still_rejects_the_material(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ffprobe = tmp_path / "ffprobe"
+    ffmpeg = tmp_path / "ffmpeg"
+    for tool in (ffprobe, ffmpeg):
+        tool.write_text("#!/bin/sh\nexit 0\n", encoding="ascii")
+        tool.chmod(0o700)
+    tools = PackagedMediaTools(ffprobe_path=ffprobe, ffmpeg_path=ffmpeg)
+    source = tmp_path / "damaged.mp4"
+    source.write_bytes(b"media")
+    source, approved = approve_source(source)
+    outputs: Iterator[BoundedFfmpegOutput | AdaptiveFrameRejection] = iter(
+        (
+            BoundedFfmpegOutput(files=(("scene-000000000000.jpg", b"scene"),)),
+            AdaptiveFrameRejection.UNDECODABLE,
+        )
+    )
+
+    def fail_in_the_final_scene(
+        *_args: Any, **_kwargs: Any
+    ) -> BoundedFfmpegOutput | AdaptiveFrameRejection:
+        return next(outputs)
+
+    monkeypatch.setattr(
+        adaptive_frame_extraction,
+        "_run_bounded_ffmpeg",
+        fail_in_the_final_scene,
+    )
+
+    result = extract_adaptive_frame_candidates(
+        tools,
+        source,
+        approved,
+        duration_ms=16_001,
+    )
+
+    assert result is AdaptiveFrameRejection.UNDECODABLE
+
+
 def test_non_tail_supplement_failure_still_rejects_the_material(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

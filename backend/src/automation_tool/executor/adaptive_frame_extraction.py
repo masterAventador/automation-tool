@@ -145,12 +145,6 @@ def extract_adaptive_frame_candidates(
         except MaterialProbeRejected:
             return AdaptiveFrameRejection.SOURCE_UNAVAILABLE
         if isinstance(output, AdaptiveFrameRejection):
-            # The scene pass immediately above decoded the unchanged source through
-            # EOF. A container (or its audio stream) may continue beyond the final
-            # video frame, so the first empty seek in the final scene means video
-            # EOF; an empty seek in an earlier scene still rejects the material.
-            if output is AdaptiveFrameRejection.UNDECODABLE and is_in_final_scene:
-                break
             return output
         frame = _parse_supplement_frame(output)
         if isinstance(frame, AdaptiveFrameRejection):
@@ -220,6 +214,8 @@ def _supplement_ffmpeg_argv(
         "1",
         "-q:v",
         "2",
+        "-strict",
+        "unofficial",
         os.fspath(workspace / f"{_SUPPLEMENT_OUTPUT_PREFIX}%012d{_SUPPLEMENT_OUTPUT_SUFFIX}"),
     ]
 
