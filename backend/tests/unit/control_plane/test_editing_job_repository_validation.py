@@ -53,6 +53,7 @@ from automation_tool.control_plane.domain import (
     EditingJobStateMachine,
     EditingJobStatus,
     EditingProjectId,
+    InstallationId,
     InvalidEditingJobModel,
     TaskId,
     TimelineId,
@@ -93,6 +94,9 @@ TIMELINE_REVISION = 3
 # the only thing that tells them apart.
 PRIMARY_KEY_NAME = "pk_editing_jobs"
 QUEUED_INDEX_NAME = "uq_editing_jobs_queued_timeline_revision"
+TIMELINE_FOREIGN_KEY_NAME = "fk_editing_jobs_timeline_revision"
+PROJECT_OWNER_FOREIGN_KEY_NAME = "fk_editing_jobs_project_owner"
+OWNER = InstallationId.parse("00000000-0000-4000-8000-000000000001")
 
 
 class FailingSessionScope:
@@ -268,15 +272,19 @@ async def test_repository_refuses_foreign_argument_types() -> None:
         repository = repository_module.SqlAlchemyEditingJobRepository(database)
         job = make_job()
         with pytest.raises(EditingJobDataRejected):
-            await repository.save(cast(EditingJob, object()))
+            await repository.save(cast(EditingJob, object()), OWNER)
+        with pytest.raises(EditingJobDataRejected):
+            await repository.save(job, cast(InstallationId, job.job_id))
         with pytest.raises(EditingJobDataRejected):
             await repository.update(make_job(), cast(EditingJob, object()))
         with pytest.raises(EditingJobDataRejected):
             await repository.update(cast(EditingJob, object()), make_job())
         with pytest.raises(EditingJobDataRejected):
-            await repository.get(cast(EditingJobId, job.job_id.uuid))
+            await repository.get(cast(EditingJobId, job.job_id.uuid), OWNER)
         with pytest.raises(EditingJobDataRejected):
-            await repository.get(cast(EditingJobId, TaskId.new()))
+            await repository.get(cast(EditingJobId, TaskId.new()), OWNER)
+        with pytest.raises(EditingJobDataRejected):
+            await repository.get(job.job_id, cast(InstallationId, TaskId.new()))
     finally:
         await database.close()
 
@@ -306,11 +314,11 @@ async def test_an_unreachable_database_is_refused_without_leaking_the_connection
         repository = repository_module.SqlAlchemyEditingJobRepository(database)
         job = make_job()
         with pytest.raises(EditingJobPersistenceUnavailable) as saved:
-            await repository.save(job)
+            await repository.save(job, OWNER)
         with pytest.raises(EditingJobPersistenceUnavailable) as updated:
             await repository.update(*started_pair(job.job_id))
         with pytest.raises(EditingJobPersistenceUnavailable) as loaded:
-            await repository.get(job.job_id)
+            await repository.get(job.job_id, OWNER)
         for captured in (saved, updated, loaded):
             rendered = "".join(traceback.format_exception(captured.value))
             for token in LEAKED_TOKENS:
@@ -332,15 +340,48 @@ async def test_a_database_error_is_refused_without_leaking_its_message() -> None
         )
         job = make_job()
         with pytest.raises(EditingJobPersistenceUnavailable) as saved:
-            await repository.save(job)
+            await repository.save(job, OWNER)
         with pytest.raises(EditingJobPersistenceUnavailable) as updated:
             await repository.update(*started_pair(job.job_id))
         with pytest.raises(EditingJobPersistenceUnavailable) as loaded:
-            await repository.get(job.job_id)
+            await repository.get(job.job_id, OWNER)
         for captured in (saved, updated, loaded):
             rendered = "".join(traceback.format_exception(captured.value))
             assert "le05_leaked_database_failure" not in rendered
             assert captured.value.__cause__ is None
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    (
+        SQLAlchemyError("le05_leaked_list_database_failure"),
+        RuntimeError("le05_leaked_list_driver_failure"),
+    ),
+    ids=("sqlalchemy", "driver"),
+)
+async def test_list_failures_are_unavailable_without_leaking_details(
+    failure: Exception,
+) -> None:
+    database = unreachable_database()
+    try:
+        repository = repository_module.SqlAlchemyEditingJobRepository(database)
+        object.__setattr__(database, "_sessions", FailingSessions(failure))
+
+        with pytest.raises(EditingJobPersistenceUnavailable) as captured:
+            await repository.list_page_by_project(
+                installation_id=OWNER,
+                project_id=EditingProjectId.new(),
+                before_updated_at=None,
+                before_job_id=None,
+                limit=20,
+            )
+
+        rendered = "".join(traceback.format_exception(captured.value))
+        assert str(failure) not in rendered
+        assert captured.value.__cause__ is None
     finally:
         await database.close()
 
@@ -377,11 +418,11 @@ async def test_an_authentication_failure_is_refused_without_leaking_the_role() -
         object.__setattr__(database, "_sessions", FailingSessions(failure))
         job = make_job()
         with pytest.raises(EditingJobPersistenceUnavailable) as saved:
-            await repository.save(job)
+            await repository.save(job, OWNER)
         with pytest.raises(EditingJobPersistenceUnavailable) as updated:
             await repository.update(*started_pair(job.job_id))
         with pytest.raises(EditingJobPersistenceUnavailable) as loaded:
-            await repository.get(job.job_id)
+            await repository.get(job.job_id, OWNER)
         for captured in (saved, updated, loaded):
             rendered = "".join(traceback.format_exception(captured.value))
             assert "le05_leaked_user" not in rendered
@@ -442,11 +483,13 @@ def integrity_error(sqlstate: object, constraint_name: object, detail: str) -> I
         # exception would produce. It has to degrade to the answer that claims
         # least, not to a guess.
         ("23505", ABSENT_CAUSE, EditingJobDataRejected),
-        # Only one foreign key exists on this table, so the code alone is enough
-        # -- and the name is deliberately wrong here to prove the code is what
-        # decides.
-        ("23503", "some_other_name", EditingJobTimelineRevisionMissing),
-        ("23503", ABSENT_CAUSE, EditingJobTimelineRevisionMissing),
+        # Two foreign keys now exist. Only the revision constraint means that a
+        # timeline revision is missing; the owner constraint and unknown names
+        # must not be misreported as that public conflict.
+        ("23503", TIMELINE_FOREIGN_KEY_NAME, EditingJobTimelineRevisionMissing),
+        ("23503", PROJECT_OWNER_FOREIGN_KEY_NAME, EditingJobDataRejected),
+        ("23503", "some_other_name", EditingJobDataRejected),
+        ("23503", ABSENT_CAUSE, EditingJobDataRejected),
         # NOT NULL and CHECK: neither can come from this table as it stands, and
         # neither improves on a retry.
         ("23502", None, EditingJobDataRejected),
@@ -459,7 +502,9 @@ def integrity_error(sqlstate: object, constraint_name: object, detail: str) -> I
         "unknown-constraint",
         "unique-without-a-name",
         "unique-without-a-cause",
-        "foreign-key",
+        "timeline-foreign-key",
+        "project-owner-foreign-key",
+        "unknown-foreign-key",
         "foreign-key-without-a-cause",
         "not-null",
         "check",
@@ -496,7 +541,7 @@ async def test_each_integrity_violation_gets_its_own_answer(
             ),
         )
         with pytest.raises(expected) as captured:
-            await repository.save(make_job())
+            await repository.save(make_job(), OWNER)
         rendered = "".join(traceback.format_exception(captured.value))
         assert "le05-private-detail" not in rendered
         assert captured.value.__cause__ is None
@@ -523,7 +568,7 @@ async def test_an_integrity_error_without_a_driver_exception_is_still_refused() 
             FailingSessions(IntegrityError("insert into editing_jobs", None, None)),  # type: ignore[arg-type]
         )
         with pytest.raises(EditingJobDataRejected):
-            await repository.save(make_job())
+            await repository.save(make_job(), OWNER)
     finally:
         await database.close()
 
@@ -545,7 +590,13 @@ async def test_an_update_that_violates_a_constraint_is_refused_the_same_way() ->
         object.__setattr__(
             database,
             "_sessions",
-            FailingSessions(integrity_error("23503", None, "Key (le05-private-detail) ...")),
+            FailingSessions(
+                integrity_error(
+                    "23503",
+                    TIMELINE_FOREIGN_KEY_NAME,
+                    "Key (le05-private-detail) ...",
+                )
+            ),
         )
         with pytest.raises(EditingJobTimelineRevisionMissing) as captured:
             await repository.update(*started_pair())
@@ -569,8 +620,8 @@ async def test_a_missing_job_is_not_found_and_a_present_one_hydrates() -> None:
 
         object.__setattr__(database, "_sessions", StubSessions(None))
         with pytest.raises(EditingJobNotFound):
-            await repository.get(EditingJobId.new())
-        await repository.save(make_job())
+            await repository.get(EditingJobId.new(), OWNER)
+        await repository.save(make_job(), OWNER)
 
         job = make_job()
         object.__setattr__(
@@ -584,7 +635,7 @@ async def test_a_missing_job_is_not_found_and_a_present_one_hydrates() -> None:
                 )
             ),
         )
-        assert await repository.get(job.job_id) == job
+        assert await repository.get(job.job_id, OWNER) == job
     finally:
         await database.close()
 
@@ -624,7 +675,7 @@ async def test_a_serialisation_failure_is_not_reported_as_an_unavailable_databas
         previous, changed = started_pair()
         with pytest.raises(SerialiserFailure):
             if method == "save":
-                await repository.save(changed)
+                await repository.save(changed, OWNER)
             else:
                 await repository.update(previous, changed)
     finally:
@@ -842,13 +893,15 @@ def test_the_two_column_sets_partition_the_row_exactly() -> None:
     replaces "write everything" -- a new column has to be classified, or it
     belongs to neither set and this fails.
 
-    Compared against the table as well as the serialiser, so that a column added
-    to `schema.py` and forgotten in `_column_values` is caught too.
+    `_column_values` is the domain-owned part. `_insert_values` must add exactly
+    the installation owner, and its complete result must match the table.
     """
     assert repository_module._IDENTITY_COLUMNS.isdisjoint(repository_module._MUTABLE_COLUMNS)
     partition = repository_module._IDENTITY_COLUMNS | repository_module._MUTABLE_COLUMNS
     assert partition == set(repository_module._column_values(make_job()))
-    assert partition == {column.name for column in editing_jobs.columns}
+    assert set(repository_module._insert_values(make_job(), OWNER)) == {
+        column.name for column in editing_jobs.columns
+    }
     # And the filter really drops the identity half rather than passing
     # everything through.
     assert set(repository_module._mutable_values(make_job())) == (

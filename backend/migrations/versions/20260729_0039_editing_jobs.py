@@ -62,6 +62,7 @@ def upgrade() -> None:
         "editing_jobs",
         sa.Column("job_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("project_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("installation_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("timeline_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("timeline_revision", sa.Integer, nullable=False),
         sa.Column("status", sa.String(length=16), nullable=False),
@@ -70,6 +71,11 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("job_id", name="pk_editing_jobs"),
+        sa.ForeignKeyConstraint(
+            ["project_id", "installation_id"],
+            ["editing_projects.project_id", "editing_projects.installation_id"],
+            name="fk_editing_jobs_project_owner",
+        ),
         sa.ForeignKeyConstraint(
             ["timeline_id", "timeline_revision", "project_id"],
             ["timelines.timeline_id", "timelines.revision", "timelines.project_id"],
@@ -82,6 +88,12 @@ def upgrade() -> None:
         ["timeline_id", "timeline_revision"],
         unique=True,
         postgresql_where=sa.text("status = 'queued'"),
+    )
+    op.create_index(
+        "ix_editing_jobs_installation_project_updated_job",
+        "editing_jobs",
+        ["installation_id", "project_id", "updated_at", "job_id"],
+        unique=False,
     )
 
 

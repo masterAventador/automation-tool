@@ -441,6 +441,138 @@
         "title": "EditingCaptionStyle",
         "type": "object"
       },
+      "EditingJobFailureCode": {
+        "description": "Why a render stopped, grouped by what the user can do about it.",
+        "enum": [
+          "invalid_timeline",
+          "material_unavailable",
+          "material_unsupported",
+          "font_unavailable",
+          "render_failed",
+          "resource_exhausted",
+          "permission_denied",
+          "worker_lost"
+        ],
+        "title": "EditingJobFailureCode",
+        "type": "string"
+      },
+      "EditingJobListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EditingJobResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "title": "EditingJobListResponse",
+        "type": "object"
+      },
+      "EditingJobResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "failureCode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditingJobFailureCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "jobId": {
+            "title": "Jobid",
+            "type": "string"
+          },
+          "outputArtifactId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outputartifactid"
+          },
+          "projectId": {
+            "title": "Projectid",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/EditingJobStatus"
+          },
+          "timelineId": {
+            "title": "Timelineid",
+            "type": "string"
+          },
+          "timelineRevision": {
+            "minimum": 1.0,
+            "title": "Timelinerevision",
+            "type": "integer"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "jobId",
+          "projectId",
+          "timelineId",
+          "timelineRevision",
+          "status",
+          "failureCode",
+          "outputArtifactId",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "EditingJobResponse",
+        "type": "object"
+      },
+      "EditingJobStatus": {
+        "description": "Where one render is in its life.\n\nSix states, deliberately. There is no PAUSED — a 5-55 second local\nrender has no pause story. There is no OUTCOME_UNCERTAIN either: that\nstate exists for platform side effects nobody can re-read, whereas the\noutput file here is ours to inspect, and a half-written mp4 is simply\na failure to delete.",
+        "enum": [
+          "queued",
+          "running",
+          "cancelling",
+          "succeeded",
+          "failed",
+          "cancelled"
+        ],
+        "title": "EditingJobStatus",
+        "type": "string"
+      },
+      "EditingJobSubmitRequest": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "EditingJobSubmitRequest",
+        "type": "object"
+      },
       "EditingMaterialCreateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2979,6 +3111,53 @@
         ]
       }
     },
+    "/api/v1/editing-jobs/{job_id}": {
+      "get": {
+        "operationId": "getEditingJob",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Get Editing Job",
+        "tags": [
+          "editing-jobs"
+        ]
+      }
+    },
     "/api/v1/editing-materials": {
       "get": {
         "operationId": "findEditingMaterialByDigest",
@@ -3347,6 +3526,147 @@
         "summary": "Get Editing Project",
         "tags": [
           "editing-projects"
+        ]
+      }
+    },
+    "/api/v1/editing-projects/{project_id}/jobs": {
+      "get": {
+        "operationId": "listEditingJobs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingJobListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "List Editing Jobs",
+        "tags": [
+          "editing-jobs"
+        ]
+      },
+      "post": {
+        "operationId": "submitEditingJob",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditingJobSubmitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Editing job conflicts with stored work"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Submit Editing Job",
+        "tags": [
+          "editing-jobs"
         ]
       }
     },

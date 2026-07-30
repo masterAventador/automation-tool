@@ -100,6 +100,7 @@ from automation_tool.control_plane.infrastructure.database.timeline_repository i
 CREATED_AT = datetime(2026, 7, 30, 4, 15, 30, 123_456, tzinfo=UTC)
 UPDATED_AT = CREATED_AT + timedelta(seconds=90)
 OWNER = InstallationId.parse("00000000-0000-4000-8000-000000000001")
+FOREIGN_OWNER = InstallationId.parse("00000000-0000-4000-8000-000000000002")
 
 TIMELINE_DURATION_MS = 6_000
 REVISION = 3
@@ -109,6 +110,7 @@ PREVIOUS_REVISION = "20260729_0038"
 EXPECTED_COLUMNS = {
     "job_id": ("uuid", "NO", None),
     "project_id": ("uuid", "NO", None),
+    "installation_id": ("uuid", "NO", None),
     "timeline_id": ("uuid", "NO", None),
     "timeline_revision": ("integer", "NO", None),
     "status": ("character varying", "NO", 16),
@@ -119,12 +121,14 @@ EXPECTED_COLUMNS = {
 }
 EXPECTED_CONSTRAINTS = {
     "pk_editing_jobs",
+    "fk_editing_jobs_project_owner",
     "fk_editing_jobs_timeline_revision",
 }
 
 EXPECTED_TABLE_TYPES = {
     "job_id": "UUID",
     "project_id": "UUID",
+    "installation_id": "UUID",
     "timeline_id": "UUID",
     "timeline_revision": "Integer",
     "status": "String",
@@ -140,6 +144,10 @@ EXPECTED_TABLE_TYPES = {
 # not is what the next `--autogenerate` offers to drop.
 EXPECTED_TABLE_CONSTRAINTS = {
     "pk_editing_jobs": ("PrimaryKeyConstraint", ["job_id"]),
+    "fk_editing_jobs_project_owner": (
+        "ForeignKeyConstraint",
+        ["project_id", "installation_id"],
+    ),
     "fk_editing_jobs_timeline_revision": (
         "ForeignKeyConstraint",
         ["timeline_id", "timeline_revision", "project_id"],
@@ -149,6 +157,8 @@ EXPECTED_TABLE_CONSTRAINTS = {
 QUEUED_INDEX_NAME = "uq_editing_jobs_queued_timeline_revision"
 PRIMARY_KEY_NAME = "pk_editing_jobs"
 FOREIGN_KEY_NAME = "fk_editing_jobs_timeline_revision"
+PROJECT_OWNER_FOREIGN_KEY_NAME = "fk_editing_jobs_project_owner"
+PAGE_INDEX_NAME = "ix_editing_jobs_installation_project_updated_job"
 
 # The third invariant lives in an `Index`, which is **not** in
 # `Table.constraints` and therefore invisible to the constraint comparison
@@ -160,11 +170,16 @@ EXPECTED_TABLE_INDEXES = {
         ["timeline_id", "timeline_revision"],
         True,
         "editing_jobs.status = 'queued'",
-    )
+    ),
+    PAGE_INDEX_NAME: (
+        ["installation_id", "project_id", "updated_at", "job_id"],
+        False,
+        None,
+    ),
 }
 
 
-def compiled_predicate(clause: ColumnElement[bool]) -> str:
+def compiled_predicate(clause: ColumnElement[bool] | None) -> str | None:
     """A `WHERE` clause with its literals rendered rather than parameterised.
 
     `literal_binds` is the whole point. Without it the comparison renders as
@@ -179,6 +194,8 @@ def compiled_predicate(clause: ColumnElement[bool]) -> str:
     same text for this predicate, and asking for the latter costs an untyped
     constructor call for nothing.
     """
+    if clause is None:
+        return None
     return str(clause.compile(compile_kwargs={"literal_binds": True}))
 
 
@@ -257,22 +274,33 @@ async def reset_data(database: Database) -> None:
         await session.execute(delete(editing_projects))
 
 
-async def store_project(database: Database, project_id: EditingProjectId) -> None:
-    """Through T1's repository, not a raw INSERT -- the production path."""
+async def store_installation(
+    database: Database,
+    installation_id: InstallationId,
+) -> None:
     async with database.session() as session:
         exists = await session.scalar(
-            select(installations.c.id).where(installations.c.id == OWNER.uuid)
+            select(installations.c.id).where(installations.c.id == installation_id.uuid)
         )
         if exists is None:
             await session.execute(
                 insert(installations).values(
-                    id=OWNER.uuid,
+                    id=installation_id.uuid,
                     device_public_key=secrets.token_bytes(32),
                 )
             )
+
+
+async def store_project(
+    database: Database,
+    project_id: EditingProjectId,
+    installation_id: InstallationId = OWNER,
+) -> None:
+    """Through T1's repository, not a raw INSERT -- the production path."""
+    await store_installation(database, installation_id)
     await SqlAlchemyEditingProjectRepository(database).save(
         make_project(project_id),
-        OWNER,
+        installation_id,
     )
 
 
@@ -303,6 +331,7 @@ def row_values(
     values: dict[str, object] = {
         "job_id": job_id,
         "project_id": project_id,
+        "installation_id": OWNER.uuid,
         "timeline_id": timeline_id,
         "timeline_revision": REVISION,
         "status": EditingJobStatus.QUEUED.value,
@@ -356,7 +385,7 @@ async def test_saved_job_lands_as_typed_columns_and_hydrates_back_equal(
         job_id = EditingJobId.new()
         job = make_job(job_id, project_id, timeline_id)
 
-        await repository.save(job)
+        await repository.save(job, OWNER)
 
         row = await stored_row(database, job_id.uuid)
         assert row == row_values(job_id.uuid, project_id.uuid, timeline_id.uuid)
@@ -369,13 +398,90 @@ async def test_saved_job_lands_as_typed_columns_and_hydrates_back_equal(
             assert isinstance(stored, datetime)
             assert stored.tzinfo is UTC
 
-        loaded = await repository.get(job_id)
+        loaded = await repository.get(job_id, OWNER)
         assert loaded == job
         # Identity, not equality: a `StrEnum` member equals its own text, so
         # `== "queued"` holds for the bare string this has to rule out.
         assert loaded.status is EditingJobStatus.QUEUED
         assert loaded.created_at.tzinfo is UTC
         assert loaded.updated_at.tzinfo is UTC
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_owner_scope_and_compound_page_order_hold_on_postgresql(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyEditingJobRepository(database)
+    try:
+        await reset_data(database)
+        project_id = EditingProjectId.new()
+        timeline_id = TimelineId.new()
+        await store_scene(database, project_id, timeline_id)
+        await store_installation(database, FOREIGN_OWNER)
+
+        identifiers = tuple(
+            EditingJobId.parse(value)
+            for value in (
+                "00000000-0000-4000-8000-000000000101",
+                "00000000-0000-4000-8000-000000000102",
+                "00000000-0000-4000-8000-000000000103",
+            )
+        )
+        jobs = tuple(
+            make_job(
+                identifier,
+                project_id,
+                timeline_id,
+                status=EditingJobStatus.RUNNING,
+            )
+            for identifier in identifiers
+        )
+        for job in jobs:
+            await repository.save(job, OWNER)
+
+        first = await repository.list_page_by_project(
+            installation_id=OWNER,
+            project_id=project_id,
+            before_updated_at=None,
+            before_job_id=None,
+            limit=2,
+        )
+        second = await repository.list_page_by_project(
+            installation_id=OWNER,
+            project_id=project_id,
+            before_updated_at=first[-1].updated_at,
+            before_job_id=first[-1].job_id,
+            limit=2,
+        )
+
+        assert tuple(job.job_id for job in first) == (
+            identifiers[2],
+            identifiers[1],
+        )
+        assert tuple(job.job_id for job in second) == (identifiers[0],)
+        assert (
+            await repository.list_page_by_project(
+                installation_id=FOREIGN_OWNER,
+                project_id=project_id,
+                before_updated_at=None,
+                before_job_id=None,
+                limit=20,
+            )
+            == ()
+        )
+        with pytest.raises(EditingJobNotFound):
+            await repository.get(identifiers[0], FOREIGN_OWNER)
+        with pytest.raises(EditingJobDataRejected):
+            await repository.save(
+                make_job(EditingJobId.new(), project_id, timeline_id),
+                FOREIGN_OWNER,
+            )
     finally:
         await reset_data(database)
         await database.close()
@@ -431,9 +537,9 @@ async def test_every_state_and_the_facts_it_carries_round_trip(
             output_artifact_id=output_artifact_id,
         )
 
-        await repository.save(job)
+        await repository.save(job, OWNER)
 
-        loaded = await repository.get(job_id)
+        loaded = await repository.get(job_id, OWNER)
         assert loaded == job
         assert loaded.status is job.status
         assert loaded.failure_code is job.failure_code
@@ -465,9 +571,9 @@ async def test_a_stored_job_cannot_be_registered_twice(
         job_id = EditingJobId.new()
 
         with pytest.raises(EditingJobNotFound):
-            await repository.get(job_id)
+            await repository.get(job_id, OWNER)
 
-        await repository.save(make_job(job_id, project_id, timeline_id))
+        await repository.save(make_job(job_id, project_id, timeline_id), OWNER)
         with pytest.raises(EditingJobAlreadyRegistered):
             await repository.save(
                 make_job(
@@ -476,7 +582,8 @@ async def test_a_stored_job_cannot_be_registered_twice(
                     timeline_id,
                     status=EditingJobStatus.RUNNING,
                     updated_at=UPDATED_AT + timedelta(seconds=1),
-                )
+                ),
+                OWNER,
             )
         assert await stored_row(database, job_id.uuid) == row_values(
             job_id.uuid, project_id.uuid, timeline_id.uuid
@@ -592,7 +699,10 @@ async def test_a_job_cannot_claim_a_project_its_timeline_does_not_belong_to(
         # Through the repository, the same row gets an answer a caller can act
         # on -- and the DETAIL line quoting all three key values must not travel.
         with pytest.raises(EditingJobTimelineRevisionMissing) as refused:
-            await repository.save(make_job(EditingJobId.new(), other_project, timeline_id))
+            await repository.save(
+                make_job(EditingJobId.new(), other_project, timeline_id),
+                OWNER,
+            )
         rendered = "".join(traceback.format_exception(refused.value))
         assert str(other_project) not in rendered
         assert str(timeline_id) not in rendered
@@ -602,7 +712,7 @@ async def test_a_job_cannot_claim_a_project_its_timeline_does_not_belong_to(
         # Correcting only the project makes the same job land, so the refusal
         # was about the three columns belonging together and nothing else.
         job_id = EditingJobId.new()
-        await repository.save(make_job(job_id, project_id, timeline_id))
+        await repository.save(make_job(job_id, project_id, timeline_id), OWNER)
         assert await stored_job_ids(database) == {job_id.uuid}
     finally:
         await reset_data(database)
@@ -643,7 +753,8 @@ async def test_a_job_cannot_name_a_revision_that_was_never_stored(
 
         with pytest.raises(EditingJobTimelineRevisionMissing):
             await repository.save(
-                make_job(EditingJobId.new(), project_id, timeline_id, revision=REVISION + 1)
+                make_job(EditingJobId.new(), project_id, timeline_id, revision=REVISION + 1),
+                OWNER,
             )
         assert await stored_job_ids(database) == set()
 
@@ -651,7 +762,10 @@ async def test_a_job_cannot_name_a_revision_that_was_never_stored(
         # revision rather than anything else about the row.
         await store_timeline(database, timeline_id, project_id, REVISION + 1)
         job_id = EditingJobId.new()
-        await repository.save(make_job(job_id, project_id, timeline_id, revision=REVISION + 1))
+        await repository.save(
+            make_job(job_id, project_id, timeline_id, revision=REVISION + 1),
+            OWNER,
+        )
         assert await stored_job_ids(database) == {job_id.uuid}
     finally:
         await reset_data(database)
@@ -678,7 +792,7 @@ async def test_one_revision_may_have_only_one_queued_render(
         timeline_id = TimelineId.new()
         await store_scene(database, project_id, timeline_id)
         first = EditingJobId.new()
-        await repository.save(make_job(first, project_id, timeline_id))
+        await repository.save(make_job(first, project_id, timeline_id), OWNER)
 
         with pytest.raises(IntegrityError) as injected:
             await insert_row(database, EditingJobId.new().uuid, project_id.uuid, timeline_id.uuid)
@@ -686,7 +800,10 @@ async def test_one_revision_may_have_only_one_queued_render(
         assert constraint_name_of(injected.value) == QUEUED_INDEX_NAME
 
         with pytest.raises(EditingJobRevisionAlreadyQueued) as refused:
-            await repository.save(make_job(EditingJobId.new(), project_id, timeline_id))
+            await repository.save(
+                make_job(EditingJobId.new(), project_id, timeline_id),
+                OWNER,
+            )
         rendered = "".join(traceback.format_exception(refused.value))
         assert str(timeline_id) not in rendered
         assert refused.value.__cause__ is None
@@ -696,7 +813,10 @@ async def test_one_revision_may_have_only_one_queued_render(
         # the index is not simply refusing every second job on a timeline.
         await store_timeline(database, timeline_id, project_id, REVISION + 1)
         second = EditingJobId.new()
-        await repository.save(make_job(second, project_id, timeline_id, revision=REVISION + 1))
+        await repository.save(
+            make_job(second, project_id, timeline_id, revision=REVISION + 1),
+            OWNER,
+        )
         assert await stored_job_ids(database) == {first.uuid, second.uuid}
     finally:
         await reset_data(database)
@@ -764,7 +884,7 @@ async def test_finished_renders_of_one_revision_coexist_with_a_queued_one(
             ),
         ]
         for job in history:
-            await repository.save(job)
+            await repository.save(job, OWNER)
         # A second succeeded render of the same revision, because "at most one"
         # must not have leaked into the non-queued states either.
         repeat = make_job(
@@ -774,9 +894,9 @@ async def test_finished_renders_of_one_revision_coexist_with_a_queued_one(
             status=EditingJobStatus.SUCCEEDED,
             output_artifact_id=ArtifactId.new(),
         )
-        await repository.save(repeat)
+        await repository.save(repeat, OWNER)
         queued = make_job(EditingJobId.new(), project_id, timeline_id)
-        await repository.save(queued)
+        await repository.save(queued, OWNER)
 
         assert await stored_job_ids(database) == {
             *(job.job_id.uuid for job in history),
@@ -808,14 +928,14 @@ async def test_leaving_the_queue_frees_the_slot_for_the_next_render(
         timeline_id = TimelineId.new()
         await store_scene(database, project_id, timeline_id)
         first = make_job(EditingJobId.new(), project_id, timeline_id)
-        await repository.save(first)
+        await repository.save(first, OWNER)
 
         started = first.start(UPDATED_AT + timedelta(seconds=1))
         await repository.update(first, started)
-        assert (await repository.get(first.job_id)).status is EditingJobStatus.RUNNING
+        assert (await repository.get(first.job_id, OWNER)).status is EditingJobStatus.RUNNING
 
         second = make_job(EditingJobId.new(), project_id, timeline_id)
-        await repository.save(second)
+        await repository.save(second, OWNER)
         assert await stored_job_ids(database) == {first.job_id.uuid, second.job_id.uuid}
     finally:
         await reset_data(database)
@@ -852,11 +972,11 @@ async def test_an_update_writes_the_mutable_half_of_exactly_one_row(
         await store_scene(database, project_id, timeline_id)
         await store_timeline(database, timeline_id, project_id, REVISION + 1)
         job = make_job(EditingJobId.new(), project_id, timeline_id)
-        await repository.save(job)
+        await repository.save(job, OWNER)
         # Same status, same instant, different row: the version this update
         # names belongs to two rows, and only one of them may move.
         neighbour = make_job(EditingJobId.new(), project_id, timeline_id, revision=REVISION + 1)
-        await repository.save(neighbour)
+        await repository.save(neighbour, OWNER)
         assert neighbour.status is job.status
         assert neighbour.updated_at == job.updated_at
 
@@ -866,7 +986,7 @@ async def test_an_update_writes_the_mutable_half_of_exactly_one_row(
         succeeded = started.succeed(artifact, UPDATED_AT + timedelta(seconds=2))
         await repository.update(started, succeeded)
 
-        assert await repository.get(job.job_id) == succeeded
+        assert await repository.get(job.job_id, OWNER) == succeeded
         assert await stored_row(database, job.job_id.uuid) == row_values(
             job.job_id.uuid,
             project_id.uuid,
@@ -875,7 +995,7 @@ async def test_an_update_writes_the_mutable_half_of_exactly_one_row(
             output_artifact_id=artifact.uuid,
             updated_at=UPDATED_AT + timedelta(seconds=2),
         )
-        assert await repository.get(neighbour.job_id) == neighbour
+        assert await repository.get(neighbour.job_id, OWNER) == neighbour
     finally:
         await reset_data(database)
         await database.close()
@@ -912,7 +1032,7 @@ async def test_an_update_cannot_walk_a_rows_timestamp_backwards(
         timeline_id = TimelineId.new()
         await store_scene(database, project_id, timeline_id)
         job = make_job(EditingJobId.new(), project_id, timeline_id)
-        await repository.save(job)
+        await repository.save(job, OWNER)
 
         backwards = EditingJob(
             job_id=job.job_id,
@@ -934,7 +1054,7 @@ async def test_an_update_cannot_walk_a_rows_timestamp_backwards(
         assert await stored_row(database, job.job_id.uuid) == row_values(
             job.job_id.uuid, project_id.uuid, timeline_id.uuid
         )
-        assert await repository.get(job.job_id) == job
+        assert await repository.get(job.job_id, OWNER) == job
     finally:
         await reset_data(database)
         await database.close()
@@ -983,7 +1103,7 @@ async def test_an_update_cannot_move_a_job_to_another_timeline_revision(
         await store_timeline(database, other_timeline, other_project, REVISION)
 
         job = make_job(EditingJobId.new(), project_id, timeline_id)
-        await repository.save(job)
+        await repository.save(job, OWNER)
 
         # Built by hand rather than through a transition method, which is the
         # only way to reach this: the domain's own methods never touch these
@@ -1063,7 +1183,7 @@ async def test_an_update_matches_only_the_exact_version_it_was_read_from(
         timeline_id = TimelineId.new()
         await store_scene(database, project_id, timeline_id)
         job = make_job(EditingJobId.new(), project_id, timeline_id)
-        await repository.save(job)
+        await repository.save(job, OWNER)
 
         # The base the caller claims to have read, moved off the stored version
         # by one tick in each direction. `changed` is a legal transition in all
@@ -1073,11 +1193,11 @@ async def test_an_update_matches_only_the_exact_version_it_was_read_from(
 
         if accepted:
             await repository.update(base, changed)
-            assert (await repository.get(job.job_id)) == changed
+            assert (await repository.get(job.job_id, OWNER)) == changed
         else:
             with pytest.raises(EditingJobStale):
                 await repository.update(base, changed)
-            assert (await repository.get(job.job_id)) == job
+            assert (await repository.get(job.job_id, OWNER)) == job
     finally:
         await reset_data(database)
         await database.close()
@@ -1156,7 +1276,7 @@ async def test_a_stale_snapshot_is_refused_even_when_its_transition_is_legal(
         timeline_id = TimelineId.new()
         await store_scene(database, project_id, timeline_id)
         queued = make_job(EditingJobId.new(), project_id, timeline_id)
-        await repository.save(queued)
+        await repository.save(queued, OWNER)
 
         # Walk to the snapshot the stale caller will hold, then on to what the
         # row really becomes. Every step is a legal edge applied through the
@@ -1179,7 +1299,7 @@ async def test_a_stale_snapshot_is_refused_even_when_its_transition_is_legal(
         with pytest.raises(EditingJobStale):
             await repository.update(snapshot, stale_move)
 
-        assert await repository.get(queued.job_id) == row_state
+        assert await repository.get(queued.job_id, OWNER) == row_state
     finally:
         await reset_data(database)
         await database.close()
@@ -1217,13 +1337,13 @@ async def test_the_version_is_the_status_and_the_timestamp_together(
         timeline_id = TimelineId.new()
         await store_scene(database, project_id, timeline_id)
         queued = make_job(EditingJobId.new(), project_id, timeline_id)
-        await repository.save(queued)
+        await repository.save(queued, OWNER)
 
         # Same instant, which the domain permits.
         running = queued.start(UPDATED_AT)
         assert running.updated_at == queued.updated_at
         await repository.update(queued, running)
-        assert (await repository.get(queued.job_id)).status is EditingJobStatus.RUNNING
+        assert (await repository.get(queued.job_id, OWNER)).status is EditingJobStatus.RUNNING
 
         stale = queued.fail(
             EditingJobFailureCode.INVALID_TIMELINE, UPDATED_AT + timedelta(seconds=1)
@@ -1231,7 +1351,7 @@ async def test_the_version_is_the_status_and_the_timestamp_together(
         with pytest.raises(EditingJobStale):
             await repository.update(queued, stale)
 
-        reloaded = await repository.get(queued.job_id)
+        reloaded = await repository.get(queued.job_id, OWNER)
         assert reloaded == running
         assert reloaded.failure_code is None
     finally:
@@ -1274,7 +1394,7 @@ async def test_a_scheduler_holding_a_queued_snapshot_cannot_fail_a_running_rende
         timeline_id = TimelineId.new()
         await store_scene(database, project_id, timeline_id)
         queued = make_job(EditingJobId.new(), project_id, timeline_id)
-        await repository.save(queued)
+        await repository.save(queued, OWNER)
 
         running = queued.start(UPDATED_AT + timedelta(seconds=1))
         await repository.update(queued, running)
@@ -1289,7 +1409,7 @@ async def test_a_scheduler_holding_a_queued_snapshot_cannot_fail_a_running_rende
         finished = running.succeed(artifact, UPDATED_AT + timedelta(seconds=3))
         await repository.update(running, finished)
 
-        reloaded = await repository.get(queued.job_id)
+        reloaded = await repository.get(queued.job_id, OWNER)
         assert reloaded == finished
         assert reloaded.status is EditingJobStatus.SUCCEEDED
         assert reloaded.output_artifact_id == artifact
@@ -1400,7 +1520,7 @@ async def test_a_stale_snapshot_cannot_undo_a_render_that_already_finished(
         timeline_id = TimelineId.new()
         await store_scene(database, project_id, timeline_id)
         queued = make_job(EditingJobId.new(), project_id, timeline_id)
-        await repository.save(queued)
+        await repository.save(queued, OWNER)
         cancelling = queued.request_cancel(UPDATED_AT + timedelta(seconds=1))
         await repository.update(queued, cancelling)
 
@@ -1417,7 +1537,7 @@ async def test_a_stale_snapshot_cannot_undo_a_render_that_already_finished(
         with pytest.raises(EditingJobStale):
             await repository.update(cancelling, abandoned)
 
-        reloaded = await repository.get(queued.job_id)
+        reloaded = await repository.get(queued.job_id, OWNER)
         assert reloaded == finished
         assert reloaded.status is EditingJobStatus.SUCCEEDED
         assert reloaded.output_artifact_id == artifact
@@ -1449,7 +1569,7 @@ async def test_a_job_cannot_be_pushed_back_into_the_queue_by_an_update(
         timeline_id = TimelineId.new()
         await store_scene(database, project_id, timeline_id)
         job = make_job(EditingJobId.new(), project_id, timeline_id)
-        await repository.save(job)
+        await repository.save(job, OWNER)
         running = job.start(UPDATED_AT + timedelta(seconds=1))
         await repository.update(job, running)
 
@@ -1463,7 +1583,7 @@ async def test_a_job_cannot_be_pushed_back_into_the_queue_by_an_update(
                     updated_at=UPDATED_AT + timedelta(seconds=2),
                 ),
             )
-        assert (await repository.get(job.job_id)).status is EditingJobStatus.RUNNING
+        assert (await repository.get(job.job_id, OWNER)).status is EditingJobStatus.RUNNING
     finally:
         await reset_data(database)
         await database.close()
@@ -1540,7 +1660,7 @@ async def test_rows_the_domain_would_refuse_are_refused_at_hydration(
         await insert_row(database, job_id, project_id.uuid, timeline_id.uuid, **columns)
 
         with pytest.raises(InvalidEditingJobModel):
-            await repository.get(forged_identifier(job_id))
+            await repository.get(forged_identifier(job_id), OWNER)
     finally:
         await reset_data(database)
         await database.close()
@@ -1618,7 +1738,7 @@ async def test_a_timeline_whose_identifier_is_not_v4_is_refused_at_hydration(
         await insert_row(database, job_id.uuid, project_id.uuid, nil_uuid)
 
         with pytest.raises(InvalidEditingJobModel):
-            await repository.get(job_id)
+            await repository.get(job_id, OWNER)
     finally:
         await reset_data(database)
         await database.close()
@@ -1646,11 +1766,11 @@ async def test_wrong_credentials_are_refused_without_leaking_the_identity(
         repository = SqlAlchemyEditingJobRepository(database)
         job = make_job(EditingJobId.new(), EditingProjectId.new(), TimelineId.new())
         with pytest.raises(EditingJobPersistenceUnavailable) as saved:
-            await repository.save(job)
+            await repository.save(job, OWNER)
         with pytest.raises(EditingJobPersistenceUnavailable) as updated:
             await repository.update(job, job.start(UPDATED_AT + timedelta(seconds=1)))
         with pytest.raises(EditingJobPersistenceUnavailable) as loaded:
-            await repository.get(job.job_id)
+            await repository.get(job.job_id, OWNER)
         for captured in (saved, updated, loaded):
             rendered = "".join(traceback.format_exception(captured.value))
             assert role not in rendered
@@ -1671,9 +1791,12 @@ async def test_the_repository_refuses_arguments_before_it_reaches_the_database(
     try:
         repository = SqlAlchemyEditingJobRepository(database)
         with pytest.raises(EditingJobDataRejected):
-            await repository.get(cast(EditingJobId, EditingJobId.new().uuid))
+            await repository.get(
+                cast(EditingJobId, EditingJobId.new().uuid),
+                OWNER,
+            )
         with pytest.raises(EditingJobDataRejected):
-            await repository.save(cast(EditingJob, object()))
+            await repository.save(cast(EditingJob, object()), OWNER)
         with pytest.raises(EditingJobDataRejected):
             await repository.update(
                 make_job(EditingJobId.new(), EditingProjectId.new(), TimelineId.new()),
@@ -1790,16 +1913,22 @@ async def test_migration_creates_the_declared_shape_and_drops_it(
                 list(constraint.columns.keys()),
             )
         assert declared_constraints == EXPECTED_TABLE_CONSTRAINTS
-        assert [
-            element.target_fullname
+        declared_foreign_key_targets = {
+            str(constraint.name): [element.target_fullname for element in constraint.elements]
             for constraint in editing_jobs.constraints
             if isinstance(constraint, ForeignKeyConstraint)
-            for element in constraint.elements
-        ] == [
-            "timelines.timeline_id",
-            "timelines.revision",
-            "timelines.project_id",
-        ]
+        }
+        assert declared_foreign_key_targets == {
+            FOREIGN_KEY_NAME: [
+                "timelines.timeline_id",
+                "timelines.revision",
+                "timelines.project_id",
+            ],
+            PROJECT_OWNER_FOREIGN_KEY_NAME: [
+                "editing_projects.project_id",
+                "editing_projects.installation_id",
+            ],
+        }
         # And the index, which is **not** a constraint and therefore absent from
         # everything above. Its predicate is compared with the literal bound in,
         # because the default rendering hides `'queued'` behind a parameter and

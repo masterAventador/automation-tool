@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Final, Never, cast
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import and_, desc, insert, or_, select, update
 from sqlalchemy.engine import CursorResult, RowMapping
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -26,6 +26,7 @@ from automation_tool.control_plane.domain import (
     EditingJobStateMachine,
     EditingJobStatus,
     EditingProjectId,
+    InstallationId,
     InvalidEditingJobModel,
     InvalidResourceId,
     TimelineId,
@@ -61,6 +62,7 @@ _FOREIGN_KEY_VIOLATION: Final = "23503"
 # something wrong.
 _PRIMARY_KEY: Final = "pk_editing_jobs"
 _QUEUED_INDEX: Final = "uq_editing_jobs_queued_timeline_revision"
+_TIMELINE_FOREIGN_KEY: Final = "fk_editing_jobs_timeline_revision"
 
 # The row split into what an update may rewrite and what it may not. `update`
 # writes only the mutable half, which is what makes the identity columns and
@@ -70,9 +72,9 @@ _QUEUED_INDEX: Final = "uq_editing_jobs_queued_timeline_revision"
 # originally wrote every column was to stop a field added to the domain from
 # being stored on insert and then silently dropped by every update after it --
 # a real failure, recorded on `materials`. A named split keeps that guarantee
-# without the cost: a test asserts these two sets partition both
-# `_column_values` and the table's own columns, so a new field cannot be added
-# without being classified as one or the other.
+# without the cost: a test asserts these two sets partition `_column_values`,
+# and that `_insert_values` adds exactly the installation owner required by the
+# table. A new field cannot be added without being classified.
 _IDENTITY_COLUMNS: Final = frozenset(
     {"job_id", "project_id", "timeline_id", "timeline_revision", "created_at"}
 )
@@ -85,10 +87,10 @@ def _refuse_integrity_violation(error: IntegrityError) -> Never:
     A duplicate `job_id` means this job is registered. A second queued render of
     one revision means the work is already asked for -- a different message and
     a different next move, even though PostgreSQL reports both under `23505`, so
-    the constraint name is the only thing separating them. A foreign key
-    violation means the timeline revision the job names is not stored, under
-    that project, with that number; only one foreign key exists on this table,
-    so the code alone identifies it.
+    the constraint name is the only thing separating them. The timeline foreign
+    key says the named revision is absent. The project-owner foreign key is a
+    different invariant and falls through to rejected data; treating every
+    `23503` as a missing timeline would guess incorrectly.
 
     None of the three improves on a retry, which is what keeps all of them away
     from `EditingJobPersistenceUnavailable`. Anything else -- a NOT NULL
@@ -112,10 +114,14 @@ def _refuse_integrity_violation(error: IntegrityError) -> Never:
     to degrade.
     """
     sqlstate = getattr(error.orig, "sqlstate", None)
-    if sqlstate == _FOREIGN_KEY_VIOLATION:
+    constraint = getattr(
+        getattr(error.orig, "__cause__", None),
+        "constraint_name",
+        None,
+    )
+    if sqlstate == _FOREIGN_KEY_VIOLATION and constraint == _TIMELINE_FOREIGN_KEY:
         raise EditingJobTimelineRevisionMissing from None
     if sqlstate == _UNIQUE_VIOLATION:
-        constraint = getattr(getattr(error.orig, "__cause__", None), "constraint_name", None)
         if constraint == _PRIMARY_KEY:
             raise EditingJobAlreadyRegistered from None
         if constraint == _QUEUED_INDEX:
@@ -205,6 +211,14 @@ def _mutable_values(job: EditingJob) -> dict[str, object]:
     return {name: value for name, value in _column_values(job).items() if name in _MUTABLE_COLUMNS}
 
 
+def _insert_values(job: EditingJob, installation_id: InstallationId) -> dict[str, object]:
+    """The complete immutable identity plus the domain row used by INSERT."""
+    return {
+        **_column_values(job),
+        "installation_id": installation_id.uuid,
+    }
+
+
 class SqlAlchemyEditingJobRepository:
     """Editing job rows, which unlike the other three tables change over time."""
 
@@ -213,7 +227,11 @@ class SqlAlchemyEditingJobRepository:
             raise EditingJobPersistenceUnavailable
         self._database = database
 
-    async def save(self, job: EditingJob) -> None:
+    async def save(
+        self,
+        job: EditingJob,
+        installation_id: InstallationId,
+    ) -> None:
         """Insert one job, leaving any existing row untouched.
 
         There is no lookup before the insert -- not for the identifier, not for
@@ -228,9 +246,9 @@ class SqlAlchemyEditingJobRepository:
         covered it would report a broken serialiser as an unavailable database
         -- telling the caller to retry something no retry can fix.
         """
-        if not isinstance(job, EditingJob):
+        if not isinstance(job, EditingJob) or not isinstance(installation_id, InstallationId):
             raise EditingJobDataRejected
-        values = _column_values(job)
+        values = _insert_values(job, installation_id)
         try:
             async with self._database.session() as session:
                 await session.execute(insert(editing_jobs).values(**values))
@@ -376,28 +394,83 @@ class SqlAlchemyEditingJobRepository:
             raise EditingJobNotFound
         raise EditingJobStale
 
-    async def get(self, job_id: EditingJobId) -> EditingJob:
-        if not isinstance(job_id, EditingJobId):
+    async def get(
+        self,
+        job_id: EditingJobId,
+        installation_id: InstallationId,
+    ) -> EditingJob:
+        if not isinstance(job_id, EditingJobId) or not isinstance(installation_id, InstallationId):
             raise EditingJobDataRejected
-        row = await self._row(job_id)
+        row = await self._owned_row(job_id, installation_id)
         if row is None:
             raise EditingJobNotFound
         return _hydrate(row)
 
-    async def _row(self, job_id: EditingJobId) -> RowMapping | None:
-        """Read at most one row, with hydration deliberately left to the caller.
+    async def list_page_by_project(
+        self,
+        *,
+        installation_id: InstallationId,
+        project_id: EditingProjectId,
+        before_updated_at: datetime | None,
+        before_job_id: EditingJobId | None,
+        limit: int,
+    ) -> tuple[EditingJob, ...]:
+        if (
+            not isinstance(installation_id, InstallationId)
+            or not isinstance(project_id, EditingProjectId)
+            or type(limit) is not int
+            or not 1 <= limit <= 101
+            or (before_updated_at is None) != (before_job_id is None)
+        ):
+            raise EditingJobDataRejected
+        statement = select(editing_jobs).where(
+            editing_jobs.c.installation_id == installation_id.uuid,
+            editing_jobs.c.project_id == project_id.uuid,
+        )
+        if before_updated_at is not None and before_job_id is not None:
+            if (
+                not isinstance(before_updated_at, datetime)
+                or before_updated_at.tzinfo is None
+                or before_updated_at.utcoffset() != UTC.utcoffset(before_updated_at)
+                or not isinstance(before_job_id, EditingJobId)
+            ):
+                raise EditingJobDataRejected
+            statement = statement.where(
+                or_(
+                    editing_jobs.c.updated_at < before_updated_at,
+                    and_(
+                        editing_jobs.c.updated_at == before_updated_at,
+                        editing_jobs.c.job_id < before_job_id.uuid,
+                    ),
+                )
+            )
+        statement = statement.order_by(
+            desc(editing_jobs.c.updated_at),
+            desc(editing_jobs.c.job_id),
+        ).limit(limit)
+        try:
+            async with self._database.session() as session:
+                rows = (await session.execute(statement)).mappings().all()
+        except _CONNECTION_FAILURES:
+            raise EditingJobPersistenceUnavailable from None
+        except Exception:
+            raise EditingJobPersistenceUnavailable from None
+        return tuple(_hydrate(row) for row in rows)
 
-        Hydrating in here would put `EditingJob.__post_init__` inside the `try`,
-        where the catch-all tail would swallow a domain rejection and report it
-        as an unavailable database -- turning "this stored row is broken" into
-        "try again later", which is both wrong and unfixable by retrying.
-        """
+    async def _owned_row(
+        self,
+        job_id: EditingJobId,
+        installation_id: InstallationId,
+    ) -> RowMapping | None:
         try:
             async with self._database.session() as session:
                 return (
                     (
                         await session.execute(
-                            select(editing_jobs).where(editing_jobs.c.job_id == job_id.uuid)
+                            select(editing_jobs).where(
+                                editing_jobs.c.job_id == job_id.uuid,
+                                editing_jobs.c.installation_id == installation_id.uuid,
+                            )
                         )
                     )
                     .mappings()

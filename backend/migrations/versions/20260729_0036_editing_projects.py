@@ -82,6 +82,11 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("project_id", name="pk_editing_projects"),
+        sa.UniqueConstraint(
+            "project_id",
+            "installation_id",
+            name="uq_editing_projects_project_installation",
+        ),
     )
     op.create_index(
         "ix_editing_projects_installation_created_project",

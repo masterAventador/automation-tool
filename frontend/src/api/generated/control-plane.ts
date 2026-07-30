@@ -208,6 +208,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/editing-jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Editing Job */
+        get: operations["getEditingJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/editing-materials": {
         parameters: {
             query?: never;
@@ -289,6 +306,24 @@ export interface paths {
         get: operations["getEditingProject"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/editing-projects/{project_id}/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Editing Jobs */
+        get: operations["listEditingJobs"];
+        put?: never;
+        /** Submit Editing Job */
+        post: operations["submitEditingJob"];
         delete?: never;
         options?: never;
         head?: never;
@@ -868,6 +903,58 @@ export interface components {
             /** Strokepx */
             strokePx: number;
         };
+        /**
+         * EditingJobFailureCode
+         * @description Why a render stopped, grouped by what the user can do about it.
+         * @enum {string}
+         */
+        EditingJobFailureCode: "invalid_timeline" | "material_unavailable" | "material_unsupported" | "font_unavailable" | "render_failed" | "resource_exhausted" | "permission_denied" | "worker_lost";
+        /** EditingJobListResponse */
+        EditingJobListResponse: {
+            /** Items */
+            items: components["schemas"]["EditingJobResponse"][];
+            /** Nextcursor */
+            nextCursor: string | null;
+        };
+        /** EditingJobResponse */
+        EditingJobResponse: {
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            failureCode: components["schemas"]["EditingJobFailureCode"] | null;
+            /** Jobid */
+            jobId: string;
+            /** Outputartifactid */
+            outputArtifactId: string | null;
+            /** Projectid */
+            projectId: string;
+            status: components["schemas"]["EditingJobStatus"];
+            /** Timelineid */
+            timelineId: string;
+            /** Timelinerevision */
+            timelineRevision: number;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /**
+         * EditingJobStatus
+         * @description Where one render is in its life.
+         *
+         *     Six states, deliberately. There is no PAUSED — a 5-55 second local
+         *     render has no pause story. There is no OUTCOME_UNCERTAIN either: that
+         *     state exists for platform side effects nobody can re-read, whereas the
+         *     output file here is ours to inspect, and a half-written mp4 is simply
+         *     a failure to delete.
+         * @enum {string}
+         */
+        EditingJobStatus: "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled";
+        /** EditingJobSubmitRequest */
+        EditingJobSubmitRequest: Record<string, never>;
         /** EditingMaterialCreateRequest */
         EditingMaterialCreateRequest: {
             /** Aidescription */
@@ -1917,6 +2004,37 @@ export interface operations {
             };
         };
     };
+    getEditingJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditingJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     findEditingMaterialByDigest: {
         parameters: {
             query: {
@@ -2130,6 +2248,84 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EditingProjectResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listEditingJobs: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditingJobListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submitEditingJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditingJobSubmitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditingJobResponse"];
+                };
+            };
+            /** @description Editing job conflicts with stored work */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Validation Error */

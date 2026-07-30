@@ -19,6 +19,12 @@ from automation_tool.control_plane.api.device_credentials import (
 from automation_tool.control_plane.api.device_sessions import (
     router as device_session_router,
 )
+from automation_tool.control_plane.api.editing_jobs import (
+    detail_router as editing_job_detail_router,
+)
+from automation_tool.control_plane.api.editing_jobs import (
+    project_router as editing_job_project_router,
+)
 from automation_tool.control_plane.api.editing_materials import (
     router as editing_material_router,
 )
@@ -65,6 +71,7 @@ from automation_tool.control_plane.application.action_execution_orchestration im
 from automation_tool.control_plane.application.desktop_updates import DesktopUpdateCatalog
 from automation_tool.control_plane.application.device_credentials import DeviceCredentialService
 from automation_tool.control_plane.application.device_sessions import DeviceSessionService
+from automation_tool.control_plane.application.editing_jobs import EditingJobService
 from automation_tool.control_plane.application.editing_projects import EditingProjectService
 from automation_tool.control_plane.application.executor_connection_registry import (
     ExecutorConnectionRegistry,
@@ -120,6 +127,9 @@ from automation_tool.control_plane.bootstrap.device_credentials import (
 )
 from automation_tool.control_plane.bootstrap.device_sessions import (
     device_session_service as build_device_session_service,
+)
+from automation_tool.control_plane.bootstrap.editing_jobs import (
+    editing_job_service as build_editing_job_service,
 )
 from automation_tool.control_plane.bootstrap.editing_materials import (
     material_service as build_material_service,
@@ -216,7 +226,7 @@ async def control_plane_lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app(
     *,
-    database: DatabaseLifecycle | None | _FromEnvironment = _FROM_ENVIRONMENT,
+    database: DatabaseLifecycle | _FromEnvironment | None = _FROM_ENVIRONMENT,
     account_session_service: AccountSessionService | None = None,
     account_installation_binding_service: AccountInstallationBindingService | None = None,
     account_device_service: AccountDeviceService | None = None,
@@ -230,6 +240,7 @@ def create_app(
     editing_project_service: EditingProjectService | None = None,
     material_service: MaterialService | None = None,
     timeline_service: TimelineService | None = None,
+    editing_job_service: EditingJobService | None = None,
     task_creation_service: TaskCreationService | None = None,
     task_query_service: TaskQueryService | None = None,
     task_command_delivery_service: TaskCommandDeliveryService | None = None,
@@ -269,6 +280,7 @@ def create_app(
     resolved_editing_project_service = editing_project_service
     resolved_material_service = material_service
     resolved_timeline_service = timeline_service
+    resolved_editing_job_service = editing_job_service
     resolved_task_creation_service = task_creation_service
     resolved_task_query_service = task_query_service
     resolved_task_command_delivery_service = task_command_delivery_service
@@ -346,6 +358,8 @@ def create_app(
         resolved_material_service = build_material_service(resolved_database)
     if resolved_timeline_service is None and isinstance(resolved_database, Database):
         resolved_timeline_service = build_timeline_service(resolved_database)
+    if resolved_editing_job_service is None and isinstance(resolved_database, Database):
+        resolved_editing_job_service = build_editing_job_service(resolved_database)
     if resolved_task_creation_service is None and isinstance(resolved_database, Database):
         resolved_task_creation_service = build_task_creation_service(resolved_database)
     if resolved_task_query_service is None and isinstance(resolved_database, Database):
@@ -422,6 +436,7 @@ def create_app(
     app.state.editing_project_service = resolved_editing_project_service
     app.state.material_service = resolved_material_service
     app.state.timeline_service = resolved_timeline_service
+    app.state.editing_job_service = resolved_editing_job_service
     app.state.task_creation_service = resolved_task_creation_service
     app.state.task_query_service = resolved_task_query_service
     app.state.task_command_delivery_service = resolved_task_command_delivery_service
@@ -457,6 +472,8 @@ def create_app(
     app.include_router(editing_project_router)
     app.include_router(editing_material_router)
     app.include_router(editing_timeline_router)
+    app.include_router(editing_job_project_router)
+    app.include_router(editing_job_detail_router)
     app.include_router(task_event_stream_router)
     app.include_router(task_control_router)
     app.include_router(task_target_preview_router)

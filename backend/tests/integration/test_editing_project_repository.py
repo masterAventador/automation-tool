@@ -74,6 +74,7 @@ EXPECTED_COLUMNS = {
 EXPECTED_CONSTRAINTS = {
     "pk_editing_projects",
     "fk_editing_projects_installation",
+    "uq_editing_projects_project_installation",
 }
 EXPECTED_INDEXES = {"ix_editing_projects_installation_created_project"}
 OWNER = InstallationId.parse("00000000-0000-4000-8000-000000000001")

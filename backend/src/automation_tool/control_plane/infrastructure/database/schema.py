@@ -2364,6 +2364,11 @@ editing_projects = Table(
         ondelete="RESTRICT",
     ),
     PrimaryKeyConstraint("project_id", name="pk_editing_projects"),
+    UniqueConstraint(
+        "project_id",
+        "installation_id",
+        name="uq_editing_projects_project_installation",
+    ),
 )
 
 Index(
@@ -2502,6 +2507,7 @@ editing_jobs = Table(
     # every read of a job needs its project without a join -- and it is exactly
     # why the two have to be made to agree; see the foreign key below.
     Column("project_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
     Column("timeline_id", UUID(as_uuid=True), nullable=False),
     Column("timeline_revision", Integer(), nullable=False),
     # Wide enough for every member of the two enumerations with room to spare.
@@ -2519,6 +2525,11 @@ editing_jobs = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     PrimaryKeyConstraint("job_id", name="pk_editing_jobs"),
+    ForeignKeyConstraint(
+        ["project_id", "installation_id"],
+        ["editing_projects.project_id", "editing_projects.installation_id"],
+        name="fk_editing_jobs_project_owner",
+    ),
     # One key holding two rules that no domain object can hold, because no
     # aggregate here references another: that the revision a job names really
     # exists, and that the project it claims is the project that revision
@@ -2555,6 +2566,14 @@ Index(
     editing_jobs.c.timeline_revision,
     unique=True,
     postgresql_where=editing_jobs.c.status == "queued",
+)
+
+Index(
+    "ix_editing_jobs_installation_project_updated_job",
+    editing_jobs.c.installation_id,
+    editing_jobs.c.project_id,
+    editing_jobs.c.updated_at,
+    editing_jobs.c.job_id,
 )
 
 __all__ = [

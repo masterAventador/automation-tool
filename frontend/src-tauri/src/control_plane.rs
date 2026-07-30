@@ -69,6 +69,9 @@ enum ControlPlaneOperation {
     GetEditingProject,
     GetEditingProjectTimeline,
     SaveEditingProjectTimeline,
+    ListEditingJobs,
+    SubmitEditingJob,
+    GetEditingJob,
     CreateTask,
     StartTaskDiscovery,
     GetTaskTargetPreview,
@@ -104,6 +107,8 @@ impl ControlPlaneOperation {
             | Self::ListEditingProjects
             | Self::GetEditingProject
             | Self::GetEditingProjectTimeline
+            | Self::ListEditingJobs
+            | Self::GetEditingJob
             | Self::GetTaskTargetPreview
             | Self::ListTasks
             | Self::GetTask
@@ -119,6 +124,7 @@ impl ControlPlaneOperation {
             | Self::PrepareDouyinPlatformSessionLogout
             | Self::RegisterEditingMaterial
             | Self::CreateEditingProject
+            | Self::SubmitEditingJob
             | Self::CreateTask
             | Self::StartTaskDiscovery
             | Self::ConfirmTaskTargetPreview
@@ -173,6 +179,10 @@ impl ControlPlaneOperation {
             Self::GetEditingProjectTimeline | Self::SaveEditingProjectTimeline => {
                 "/api/v1/editing-projects/{project_id}/timeline"
             }
+            Self::ListEditingJobs | Self::SubmitEditingJob => {
+                "/api/v1/editing-projects/{project_id}/jobs"
+            }
+            Self::GetEditingJob => "/api/v1/editing-jobs/{job_id}",
             Self::CreateTask => "/api/v1/tasks",
             Self::StartTaskDiscovery => "/api/v1/tasks/{task_id}/discoveries",
             Self::GetTaskTargetPreview => "/api/v1/tasks/{task_id}/target-preview",
@@ -213,6 +223,8 @@ impl ControlPlaneOperation {
             | Self::GetEditingProject
             | Self::GetEditingProjectTimeline
             | Self::SaveEditingProjectTimeline
+            | Self::ListEditingJobs
+            | Self::GetEditingJob
             | Self::GetTaskTargetPreview
             | Self::ReplaceTaskTargetExclusions
             | Self::PrepareDouyinPlatformSessionLogout
@@ -231,6 +243,7 @@ impl ControlPlaneOperation {
             | Self::ExchangeDeviceSession
             | Self::RegisterEditingMaterial
             | Self::CreateEditingProject
+            | Self::SubmitEditingJob
             | Self::CreateTask
             | Self::LoginAccountSession
             | Self::RefreshAccountSession => 201,
@@ -1962,6 +1975,18 @@ fn validate_response_metadata(
                 operation,
                 ControlPlaneOperation::ExchangeDeviceSession
                     | ControlPlaneOperation::GetCurrentInstallationAccess
+                    | ControlPlaneOperation::FindEditingMaterialByDigest
+                    | ControlPlaneOperation::RegisterEditingMaterial
+                    | ControlPlaneOperation::GetEditingMaterial
+                    | ControlPlaneOperation::UpdateEditingMaterialDescription
+                    | ControlPlaneOperation::ListEditingProjects
+                    | ControlPlaneOperation::CreateEditingProject
+                    | ControlPlaneOperation::GetEditingProject
+                    | ControlPlaneOperation::GetEditingProjectTimeline
+                    | ControlPlaneOperation::SaveEditingProjectTimeline
+                    | ControlPlaneOperation::ListEditingJobs
+                    | ControlPlaneOperation::SubmitEditingJob
+                    | ControlPlaneOperation::GetEditingJob
                     | ControlPlaneOperation::CreateTask
                     | ControlPlaneOperation::StartTaskDiscovery
                     | ControlPlaneOperation::ListTasks
@@ -4104,6 +4129,24 @@ mod tests {
                 200,
             ),
             (
+                ControlPlaneOperation::ListEditingJobs,
+                "GET",
+                "/api/v1/editing-projects/{project_id}/jobs",
+                200,
+            ),
+            (
+                ControlPlaneOperation::SubmitEditingJob,
+                "POST",
+                "/api/v1/editing-projects/{project_id}/jobs",
+                201,
+            ),
+            (
+                ControlPlaneOperation::GetEditingJob,
+                "GET",
+                "/api/v1/editing-jobs/{job_id}",
+                200,
+            ),
+            (
                 ControlPlaneOperation::CreateTask,
                 "POST",
                 "/api/v1/tasks",
@@ -4317,6 +4360,9 @@ mod tests {
                 ControlPlaneOperation::SaveEditingProjectTimeline,
                 "saveEditingProjectTimeline",
             ),
+            (ControlPlaneOperation::ListEditingJobs, "listEditingJobs"),
+            (ControlPlaneOperation::SubmitEditingJob, "submitEditingJob"),
+            (ControlPlaneOperation::GetEditingJob, "getEditingJob"),
             (ControlPlaneOperation::CreateTask, "createTask"),
             (
                 ControlPlaneOperation::StartTaskDiscovery,
