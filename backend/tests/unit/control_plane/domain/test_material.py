@@ -213,6 +213,69 @@ def test_speech_material_carries_segments_and_transcript() -> None:
     assert material.speech_segments_ms == ((500, 3_000), (4_000, 9_000))
 
 
+def test_speech_material_requires_a_non_empty_transcript() -> None:
+    with pytest.raises(InvalidMaterialModel):
+        _video(
+            has_audio=True,
+            has_speech=True,
+            speech_segments_ms=((500, 3_000),),
+            speech_transcript=None,
+        )
+    with pytest.raises(InvalidMaterialModel):
+        _video(
+            has_audio=True,
+            has_speech=True,
+            speech_segments_ms=((500, 3_000),),
+            speech_transcript="",
+        )
+
+
+def test_speech_analysis_moves_as_one_triplet_and_preserves_every_other_fact() -> None:
+    material = _video(
+        has_audio=True,
+        audio_loudness_lufs=-14.5,
+        ai_description="用户能看懂的素材描述",
+        ai_tags=("户外", "露营"),
+        shot_boundaries_ms=(0, 3_200, 8_000),
+        described_at=datetime(2026, 7, 31, tzinfo=UTC),
+    )
+
+    changed = material.with_speech_analysis(
+        has_speech=True,
+        speech_segments_ms=((500, 3_000), (4_000, 9_000)),
+        speech_transcript="第一句。\n第二句。",
+    )
+
+    assert changed.has_speech is True
+    assert changed.speech_segments_ms == ((500, 3_000), (4_000, 9_000))
+    assert changed.speech_transcript == "第一句。\n第二句。"
+    for field in (
+        "material_id",
+        "kind",
+        "duration_ms",
+        "width",
+        "height",
+        "content_digest",
+        "has_audio",
+        "audio_loudness_lufs",
+        "shot_boundaries_ms",
+        "ai_description",
+        "ai_tags",
+        "description_source",
+        "described_at",
+    ):
+        assert getattr(changed, field) == getattr(material, field)
+
+    cleared = changed.with_speech_analysis(
+        has_speech=False,
+        speech_segments_ms=(),
+        speech_transcript=None,
+    )
+    assert cleared.has_speech is False
+    assert cleared.speech_segments_ms == ()
+    assert cleared.speech_transcript is None
+
+
 def test_speech_segments_must_be_ordered_and_disjoint() -> None:
     with pytest.raises(InvalidMaterialModel):
         _video(has_audio=True, has_speech=True, speech_segments_ms=((4_000, 9_000), (500, 3_000)))

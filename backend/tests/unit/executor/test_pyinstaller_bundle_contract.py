@@ -131,7 +131,9 @@ def test_executor_spec_collects_only_the_onnxruntime_inference_boundary() -> Non
     assert 'collect_dynamic_libs("onnxruntime")' in source
     assert 'collect_data_files("onnxruntime", includes=["LICENSE"])' in source
     assert 'onnxruntime_hiddenimports = ["onnxruntime"]' in source
-    assert 'executor_hiddenimports = ["automation_tool.executor.silero_vad"]' in source
+    assert "automation_tool.executor.silero_vad" in source
+    assert "automation_tool.executor.material_speech_pipeline" in source
+    assert "automation_tool.executor.material_speech_transcription" in source
 
 
 def test_executor_spec_packages_the_closed_authoring_refusal_contract() -> None:

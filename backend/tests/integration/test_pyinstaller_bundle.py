@@ -151,3 +151,5 @@ def test_pyinstaller_onedir_bundle_contains_locked_runtimes_and_starts_without_p
     assert "onnxruntime" in analysis_text.lower()
     assert "automation_tool.executor.browser_runtime" in analysis_text
     assert "automation_tool.executor.silero_vad" in analysis_text
+    assert "automation_tool.executor.material_speech_pipeline" in analysis_text
+    assert "automation_tool.executor.material_speech_transcription" in analysis_text

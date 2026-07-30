@@ -159,6 +159,16 @@ def _understanding_values(material: Material) -> dict[str, object]:
     }
 
 
+def _speech_analysis_values(material: Material) -> dict[str, object]:
+    """The three columns produced by one complete local speech pass."""
+
+    return {
+        "has_speech": material.has_speech,
+        "speech_segments_ms": [list(segment) for segment in material.speech_segments_ms],
+        "speech_transcript": material.speech_transcript,
+    }
+
+
 class SqlAlchemyMaterialRepository:
     """Write-once material rows, apart from guarded understanding fields."""
 
@@ -320,6 +330,37 @@ class SqlAlchemyMaterialRepository:
             values=_understanding_values(material),
             protect_user=True,
         )
+
+    async def update_speech_analysis(
+        self,
+        material: Material,
+        installation_id: InstallationId,
+    ) -> None:
+        """Atomically rewrite only the three speech-analysis columns."""
+
+        if not isinstance(material, Material) or not isinstance(installation_id, InstallationId):
+            raise MaterialDataRejected
+        condition = and_(
+            materials.c.material_id == material.material_id.uuid,
+            materials.c.installation_id == installation_id.uuid,
+        )
+        try:
+            async with self._database.session() as session:
+                result = cast(
+                    "CursorResult[Any]",
+                    await session.execute(
+                        update(materials)
+                        .where(condition)
+                        .values(**_speech_analysis_values(material))
+                    ),
+                )
+                matched = result.rowcount != 0
+        except _CONNECTION_FAILURES:
+            raise MaterialPersistenceUnavailable from None
+        except Exception:
+            raise MaterialPersistenceUnavailable from None
+        if not matched:
+            raise MaterialNotFound
 
     async def _update_understanding_fields(
         self,

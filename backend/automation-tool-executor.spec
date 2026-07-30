@@ -45,7 +45,11 @@ onnxruntime_datas = collect_data_files("onnxruntime", includes=["LICENSE"])
 onnxruntime_binaries = collect_dynamic_libs("onnxruntime")
 onnxruntime_hiddenimports = ["onnxruntime"]
 onnxruntime_metadata = copy_metadata("onnxruntime")
-executor_hiddenimports = ["automation_tool.executor.silero_vad"]
+executor_hiddenimports = [
+    "automation_tool.executor.silero_vad",
+    "automation_tool.executor.material_speech_pipeline",
+    "automation_tool.executor.material_speech_transcription",
+]
 
 # LE-14's local speech gate may never download a model at runtime. Fetch and
 # verify the one pinned model before Analysis, then package those exact bytes

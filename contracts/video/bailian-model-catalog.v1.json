@@ -4,12 +4,14 @@
   "provider_label": "阿里百炼",
   "api_mode": "openai_compatible",
   "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  "verified_at": "2026-07-23",
+  "verified_at": "2026-07-31",
   "sources": [
     "https://help.aliyun.com/zh/model-studio/deepseek-api",
     "https://help.aliyun.com/zh/model-studio/glm",
     "https://help.aliyun.com/zh/model-studio/text-generation-model",
-    "https://help.aliyun.com/zh/model-studio/vision/"
+    "https://help.aliyun.com/zh/model-studio/vision/",
+    "https://help.aliyun.com/zh/model-studio/qwen-asr-api-reference",
+    "https://help.aliyun.com/zh/model-studio/asr-model/"
   ],
   "purposes": [
     {
@@ -48,6 +50,19 @@
         ".aliyuncs.com"
       ],
       "notes": "TTS 不在 OpenAI 兼容端点上（实测 /audio/speech 返回 404），所以本用途自带 base_url 与 api_mode；服务返回的是有签名会过期的对象存储链接且 scheme 是 http，取用前必须升级为 https 并校验 host 落在 audio_host_suffixes 内。"
+    },
+    {
+      "id": "speech_recognition",
+      "label": "素材语音识别服务",
+      "description": "只接收本机从素材抽取并分批封装的 WAV 音轨字节；不会获得素材路径、视频文件、浏览器或发布平台权限。",
+      "api_mode": "openai_compatible",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "default_model_id": "qwen3-asr-flash-2026-02-10",
+      "allowed_model_ids": [
+        "qwen3-asr-flash-2026-02-10"
+      ],
+      "max_audio_duration_seconds": 180,
+      "max_wav_bytes": 6291456
     }
   ],
   "models": [
@@ -90,6 +105,15 @@
       "text": false,
       "image_input": false,
       "recommended_for": "分镜旁白语音合成"
+    },
+    {
+      "id": "qwen3-asr-flash-2026-02-10",
+      "label": "千问 3 ASR Flash（2026-02-10 快照）",
+      "stability": "dated_snapshot",
+      "text": false,
+      "image_input": false,
+      "audio_input": true,
+      "recommended_for": "素材音轨的非实时语音识别"
     }
   ],
   "connection_test": {

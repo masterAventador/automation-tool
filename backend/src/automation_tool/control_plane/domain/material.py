@@ -196,7 +196,7 @@ class Material:
             return
         if not 1 <= len(self.speech_segments_ms) <= MAX_SPEECH_SEGMENTS:
             _reject()
-        _validate_text(self.speech_transcript, maximum=MAX_TRANSCRIPT_CHARACTERS, optional=True)
+        _validate_text(self.speech_transcript, maximum=MAX_TRANSCRIPT_CHARACTERS)
         previous_end = 0
         for segment in self.speech_segments_ms:
             if (
@@ -301,4 +301,20 @@ class Material:
             ai_tags=(),
             described_at=None,
             description_source=DescriptionSource.USER,
+        )
+
+    def with_speech_analysis(
+        self,
+        *,
+        has_speech: bool,
+        speech_segments_ms: tuple[tuple[int, int], ...],
+        speech_transcript: str | None,
+    ) -> Material:
+        """Move the complete local-VAD and ASR result as one domain change."""
+
+        return replace(
+            self,
+            has_speech=has_speech,
+            speech_segments_ms=speech_segments_ms,
+            speech_transcript=speech_transcript,
         )

@@ -128,6 +128,12 @@ class MaterialRepository(Protocol):
         installation_id: InstallationId,
     ) -> None: ...
 
+    async def update_speech_analysis(
+        self,
+        material: Material,
+        installation_id: InstallationId,
+    ) -> None: ...
+
 
 class MaterialService:
     """Installation-scoped material registration, lookup and understanding writes."""
@@ -228,6 +234,30 @@ class MaterialService:
         if source is DescriptionSource.AI and stored.description_source is DescriptionSource.USER:
             raise MaterialDescriptionProtected
         return stored
+
+    async def update_speech_analysis(
+        self,
+        *,
+        installation_id: InstallationId,
+        material_id: str,
+        has_speech: bool,
+        speech_segments_ms: tuple[tuple[int, int], ...],
+        speech_transcript: str | None,
+    ) -> Material:
+        """Atomically replace the complete path-free speech-analysis result."""
+
+        owner = self._require_installation(installation_id)
+        current = await self.get(
+            installation_id=owner,
+            material_id=material_id,
+        )
+        changed = current.with_speech_analysis(
+            has_speech=has_speech,
+            speech_segments_ms=speech_segments_ms,
+            speech_transcript=speech_transcript,
+        )
+        await self._repository.update_speech_analysis(changed, owner)
+        return await self._repository.get(changed.material_id, owner)
 
 
 __all__ = [

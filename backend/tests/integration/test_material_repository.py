@@ -824,6 +824,63 @@ async def test_update_understanding_ignores_unrelated_probing_facts(
 
 
 @pytest.mark.asyncio
+async def test_speech_writeback_updates_exactly_three_columns_and_rejects_a_missing_row(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyMaterialRepository(database)
+    try:
+        await reset_data(database)
+        material_id = MaterialId.new()
+        original = make_material(material_id)
+        await repository.save(original, OWNER)
+
+        disagreeing = Material(
+            material_id=material_id,
+            kind=MaterialKind.AUDIO,
+            duration_ms=60_000,
+            width=None,
+            height=None,
+            content_digest=DIGEST_TWO,
+            has_audio=True,
+            audio_loudness_lufs=-23.0,
+            has_speech=True,
+            speech_segments_ms=((500, 3_000),),
+            speech_transcript="新的音轨转写",
+            shot_boundaries_ms=(),
+            ai_description=None,
+            ai_tags=(),
+            description_source=DescriptionSource.AI,
+            described_at=None,
+        )
+
+        await repository.update_speech_analysis(disagreeing, OWNER)
+
+        assert await stored_row(database, material_id.uuid) == row_values(
+            material_id.uuid,
+            has_speech=True,
+            speech_segments_ms=[[500, 3_000]],
+            speech_transcript="新的音轨转写",
+        )
+        assert await repository.get(material_id, OWNER) == original.with_speech_analysis(
+            has_speech=True,
+            speech_segments_ms=((500, 3_000),),
+            speech_transcript="新的音轨转写",
+        )
+
+        with pytest.raises(MaterialNotFound):
+            await repository.update_speech_analysis(
+                make_material(MaterialId.new()),
+                OWNER,
+            )
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
 async def test_the_longest_values_the_domain_accepts_still_fit_the_columns(
     postgresql_url: str,
     alembic_runner: AlembicRunner,
