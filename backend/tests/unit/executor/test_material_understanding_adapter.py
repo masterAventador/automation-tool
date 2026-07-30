@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import inspect
 import json
 import os
@@ -266,6 +267,58 @@ def test_model_response_is_bounded_before_json_parsing(
         )
 
     assert read_sizes == [262_145]
+
+
+def test_truncated_http_response_is_fixed_and_redacted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _TruncatedResponse:
+        def __enter__(self) -> _TruncatedResponse:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _size: int = -1) -> bytes:
+            raise http.client.IncompleteRead(
+                f"private response {API_KEY}".encode(),
+                128,
+            )
+
+    def open_request(
+        _request: urllib.request.Request,
+        *,
+        timeout: float,
+    ) -> _TruncatedResponse:
+        assert timeout == 12.5
+        return _TruncatedResponse()
+
+    monkeypatch.setattr(urllib.request, "urlopen", open_request)
+
+    with pytest.raises(
+        MaterialUnderstandingRejected,
+        match="material understanding request rejected",
+    ) as captured:
+        _adapter().understand(
+            (
+                MaterialUnderstandingFrame(
+                    timestamp_ms=0,
+                    is_scene_cut=True,
+                    jpeg_bytes=b"\xff\xd8\xff\xd9",
+                ),
+            ),
+            options=MaterialUnderstandingOptions(),
+        )
+
+    assert captured.value.__context__ is None
+    formatted = "".join(
+        traceback.format_exception(
+            type(captured.value),
+            captured.value,
+            captured.value.__traceback__,
+        )
+    )
+    assert API_KEY not in formatted
 
 
 def test_public_types_do_not_leak_provider_names() -> None:

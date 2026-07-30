@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import re
 import urllib.request
@@ -275,6 +276,7 @@ class BailianMaterialUnderstandingAdapter:
                 finish_reason=choice["finish_reason"],
             )
         except (
+            http.client.HTTPException,
             OSError,
             UnicodeError,
             json.JSONDecodeError,
