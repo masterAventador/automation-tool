@@ -2,23 +2,11 @@
   "version": "motion-catalog-standalone-render-exclusions.v1",
   "decidedAt": "2026-07-30",
   "evidence": "docs/development/PC-21.md §18.6; docs/development/PC-24.md; docs/development/BM-13.md; docs/development/BM-14.md",
-  "total": 4,
+  "total": 1,
   "items": {
     "lower-third-bild": {
       "class": "static-by-design-overlay",
       "reason": "字幕条叠加层，时间轴唯一事件是终点隐藏自己，[0,8s) 全程静止即正确形态；产品里作为叠加轨道与运动内容合成"
-    },
-    "vfx-shatter": {
-      "class": "experimental-api-dependency",
-      "reason": "自带 drawElementImage 特性检测但另一路径裸调（534/581 行），依赖实验性 Chromium API；上游代码缺陷"
-    },
-    "vfx-liquid-background": {
-      "class": "frozen-render-pipeline",
-      "reason": "时间轴 15 个 tween、GL 上下文存活，但 seek 四点与真实时间三拍全部同帧；断点在零件内部布线，已收窄未定位；上游内容缺陷"
-    },
-    "vfx-portal": {
-      "class": "frozen-render-pipeline",
-      "reason": "同 vfx-liquid-background"
     }
   }
 }

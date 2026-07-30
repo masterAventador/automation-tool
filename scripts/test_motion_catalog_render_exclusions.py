@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """独立渲染豁免清单的卫生门禁。
 
-BM-16 的逐项 sweep 允许一张带原因的豁免清单（4 个目录项渲染不出来的根因
-全部在内容/上游侧，PC-21 §18.6 逐类定性）。豁免机制的通病是腐烂成万能
+BM-16 的逐项 sweep 允许一张带原因的豁免清单（现在只剩 1 个按设计静止的
+叠加项，PC-21 §18.6 逐类定性）。豁免机制的通病是腐烂成万能
 通行证——往里加个名字就能绕过（§9.1 的教训）。这里守三条：
 
 1. 清单里的每一项必须真实存在于目录清单——死条目会让清单越攒越松；
@@ -86,6 +86,14 @@ class RenderExclusionTests(unittest.TestCase):
             "code-snippet-visual-studio-light",
         }
         self.assertEqual(sorted(materialized & self.exclusions["items"].keys()), [])
+
+    def test_repaired_vfx_items_cannot_stay_excluded(self) -> None:
+        repaired = {
+            "vfx-liquid-background",
+            "vfx-portal",
+            "vfx-shatter",
+        }
+        self.assertEqual(sorted(repaired & self.exclusions["items"].keys()), [])
 
 
 if __name__ == "__main__":

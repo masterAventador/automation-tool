@@ -142,6 +142,15 @@ def test_release_lock_contract() -> None:
         literals = {rule["literal"] for rule in by_name[name]["replacements"]}
         assert any("<template " in literal for literal in literals), name
         assert any("</template>" in literal for literal in literals), name
+    vfx_items = {
+        "vfx-liquid-background",
+        "vfx-portal",
+        "vfx-shatter",
+    }
+    assert vfx_items <= rewrite_names
+    for name in vfx_items:
+        rules = by_name[name]["replacements"]
+        assert len(rules) >= 2, f"{name} must close every diagnosed content defect"
 
 
 def test_runtime_data_is_inlined_only_in_the_release_tree() -> None:

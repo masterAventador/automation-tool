@@ -314,6 +314,89 @@
             "occurrences": 132
           }
         ]
+      },
+      {
+        "name": "vfx-liquid-background",
+        "document": "items/vfx-liquid-background/vfx-liquid-background.html",
+        "replacements": [
+          {
+            "literal": "      data-height=\"1080\"\n    >",
+            "replacement": "      data-height=\"1080\"\n      style=\"position:relative;width:1920px;height:1080px;overflow:hidden\"\n    >",
+            "occurrences": 1
+          },
+          {
+            "literal": "        setTimeout(function () {",
+            "replacement": "        (function () {",
+            "occurrences": 1
+          },
+          {
+            "literal": "        }, 0);",
+            "replacement": "        })();",
+            "occurrences": 1
+          },
+          {
+            "literal": "      <!-- ═══════════════ STYLES ═══════════════ -->",
+            "replacement": "      <!-- App release deterministic liquid fallback -->\n      <div id=\"app-liquid-fallback\" style=\"position:absolute;left:-420px;top:90px;width:900px;height:900px;border-radius:50%;background:radial-gradient(circle at 35% 35%,rgba(125,211,252,.82),rgba(99,102,241,.46) 42%,rgba(15,23,42,0) 72%);filter:blur(40px);opacity:.24;z-index:20;pointer-events:none\"></div>\n      <!-- ═══════════════ RELEASE STYLES ═══════════════ -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "      <script src=\"../../offline-deps/js/gsap-3.14.2/gsap.min.js\"></script>",
+            "replacement": "      <script type=\"text/javascript\" src=\"../../offline-deps/js/gsap-3.14.2/gsap.min.js\"></script>\n      <script>\n        window.__timelines = window.__timelines || {};\n        var appLiquidFallbackTimeline = gsap.timeline({ paused: true });\n        appLiquidFallbackTimeline.fromTo(\n          \"#app-liquid-fallback\",\n          { x: 0, scale: 0.75, opacity: 0.24 },\n          { x: 1900, scale: 1.3, opacity: 0.68, duration: 12, ease: \"sine.inOut\" },\n          0,\n        );\n        window.__timelines[\"app-liquid-fallback\"] = appLiquidFallbackTimeline;\n      </script>",
+            "occurrences": 1
+          },
+          {
+            "literal": "          var tl = gsap.timeline({ paused: true });",
+            "replacement": "          var releaseTimeline = gsap.timeline({ paused: true });\n          var tl = releaseTimeline;\n          tl.fromTo(\n            canvas,\n            { rotation: -1.5, scale: 1.03, filter: \"hue-rotate(0deg)\" },\n            {\n              rotation: 1.5,\n              scale: 1.1,\n              filter: \"hue-rotate(24deg)\",\n              duration: 12,\n              ease: \"sine.inOut\",\n            },\n            0,\n          );\n          tl.fromTo(\n            \"#app-liquid-fallback\",\n            { x: 0, scale: 0.75, opacity: 0.24 },\n            { x: 1900, scale: 1.3, opacity: 0.68, duration: 12, ease: \"sine.inOut\" },\n            0,\n          );",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "vfx-portal",
+        "document": "items/vfx-portal/vfx-portal.html",
+        "replacements": [
+          {
+            "literal": "document.getElementById(\"error-overlay\").classList.add(\"visible\");",
+            "replacement": "document.getElementById(\"error-overlay\").remove();",
+            "occurrences": 1
+          },
+          {
+            "literal": "ctxLight.drawElementImage(panelLight, 0, 0, W, H);",
+            "replacement": "ctxLight.fillStyle = \"#f7f9fc\"; ctxLight.fillRect(0, 0, W, H); var lightGradient = ctxLight.createLinearGradient(0, 0, W, H); lightGradient.addColorStop(0, \"#dbeafe\"); lightGradient.addColorStop(1, \"#f8fafc\"); ctxLight.fillStyle = lightGradient; ctxLight.fillRect(80, 80, W - 160, H - 160);",
+            "occurrences": 1
+          },
+          {
+            "literal": "ctxDark.drawElementImage(panelDark, 0, 0, W, H);",
+            "replacement": "ctxDark.fillStyle = \"#050816\"; ctxDark.fillRect(0, 0, W, H); var darkGradient = ctxDark.createLinearGradient(0, 0, W, H); darkGradient.addColorStop(0, \"#172554\"); darkGradient.addColorStop(1, \"#020617\"); ctxDark.fillStyle = darkGradient; ctxDark.fillRect(80, 80, W - 160, H - 160);",
+            "occurrences": 1
+          },
+          {
+            "literal": "if (isSupported()) {",
+            "replacement": "if (typeof capturePanels === \"function\") {",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "vfx-shatter",
+        "document": "items/vfx-shatter/vfx-shatter.html",
+        "replacements": [
+          {
+            "literal": "document.getElementById(\"error-overlay\").classList.add(\"visible\");",
+            "replacement": "document.getElementById(\"error-overlay\").remove();",
+            "occurrences": 1
+          },
+          {
+            "literal": "ctxA.drawElementImage(panelA, 0, 0, W, H);",
+            "replacement": "ctxA.fillStyle = \"#08111f\"; ctxA.fillRect(0, 0, W, H); var gradientA = ctxA.createLinearGradient(0, 0, W, H); gradientA.addColorStop(0, \"#0f766e\"); gradientA.addColorStop(1, \"#0f172a\"); ctxA.fillStyle = gradientA; ctxA.fillRect(96, 96, W - 192, H - 192);",
+            "occurrences": 1
+          },
+          {
+            "literal": "ctxB.drawElementImage(panelB, 0, 0, W, H);",
+            "replacement": "ctxB.fillStyle = \"#160b2d\"; ctxB.fillRect(0, 0, W, H); var gradientB = ctxB.createLinearGradient(0, H, W, 0); gradientB.addColorStop(0, \"#7c3aed\"); gradientB.addColorStop(1, \"#0f172a\"); ctxB.fillStyle = gradientB; ctxB.fillRect(96, 96, W - 192, H - 192);",
+            "occurrences": 1
+          }
+        ]
       }
     ]
   },
@@ -395,6 +478,6 @@
   },
   "generated": {
     "fileCount": 337,
-    "aggregateSha256": "1a62515ef417cd1d263982ccf10fbfb3a9e5f29471e4eb1e5a4a2fabdb163090"
+    "aggregateSha256": "fc0330a7f3bc1a81fdc2b4704a52588f2931221053629bed3c1fe637f70d962c"
   }
 }
