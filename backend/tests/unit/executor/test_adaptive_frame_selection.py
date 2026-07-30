@@ -96,6 +96,17 @@ def test_scene_cut_sampling_follows_time_not_dense_candidate_indices() -> None:
     assert selected_supplements == ()
 
 
+def test_scene_cut_sampling_assigns_all_time_targets_globally() -> None:
+    selected_scenes, selected_supplements = adaptive_frame_extraction._select_candidate_timestamps(
+        (0, 232, 5_721, 8_892, 11_752, 14_845, 14_999),
+        (),
+        duration_ms=15_000,
+    )
+
+    assert selected_scenes == (0, 232, 5_721, 8_892, 11_752, 14_999)
+    assert selected_supplements == ()
+
+
 def test_four_hour_single_scene_is_capped_before_supplement_seek(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -219,23 +219,65 @@ def _uniformly_sample(timestamps: tuple[int, ...], limit: int) -> tuple[int, ...
         )
         return (timestamps[midpoint_index],)
 
+    selected_indices = _globally_uniform_indices(timestamps, limit)
+    return tuple(timestamps[index] for index in selected_indices)
+
+
+def _globally_uniform_indices(timestamps: tuple[int, ...], limit: int) -> tuple[int, ...]:
+    if limit == 2:
+        return (0, len(timestamps) - 1)
+
     target_denominator = limit - 1
     time_span = timestamps[-1] - timestamps[0]
-    selected = [timestamps[0]]
-    previous_index = 0
+    previous_costs: list[int | None] = [None] * len(timestamps)
+    previous_costs[0] = 0
+    parent_rows: list[list[int]] = []
+
     for position in range(1, limit - 1):
         target_numerator = timestamps[0] * target_denominator + time_span * position
-        selected_index = _nearest_timestamp_index(
-            timestamps,
-            first_index=previous_index + 1,
-            last_index=len(timestamps) - limit + position,
-            target_numerator=target_numerator,
-            target_denominator=target_denominator,
-        )
-        selected.append(timestamps[selected_index])
-        previous_index = selected_index
-    selected.append(timestamps[-1])
-    return tuple(selected)
+        current_costs: list[int | None] = [None] * len(timestamps)
+        parents = [-1] * len(timestamps)
+        best_previous_cost: int | None = None
+        best_previous_index = -1
+
+        for candidate_index in range(position, len(timestamps) - limit + position + 1):
+            previous_index = candidate_index - 1
+            previous_cost = previous_costs[previous_index]
+            if previous_cost is not None and (
+                best_previous_cost is None or previous_cost < best_previous_cost
+            ):
+                best_previous_cost = previous_cost
+                best_previous_index = previous_index
+            if best_previous_cost is None:
+                continue
+            distance = abs(
+                timestamps[candidate_index] * target_denominator - target_numerator
+            )
+            current_costs[candidate_index] = best_previous_cost + distance
+            parents[candidate_index] = best_previous_index
+
+        previous_costs = current_costs
+        parent_rows.append(parents)
+
+    final_internal_index = -1
+    final_cost: int | None = None
+    for candidate_index in range(limit - 2, len(timestamps) - 1):
+        candidate_cost = previous_costs[candidate_index]
+        if candidate_cost is not None and (
+            final_cost is None or candidate_cost < final_cost
+        ):
+            final_cost = candidate_cost
+            final_internal_index = candidate_index
+    assert final_internal_index >= 0
+
+    selected_indices = [len(timestamps) - 1, final_internal_index]
+    for parents in reversed(parent_rows[1:]):
+        parent_index = parents[selected_indices[-1]]
+        assert parent_index >= 0
+        selected_indices.append(parent_index)
+    selected_indices.append(0)
+    selected_indices.reverse()
+    return tuple(selected_indices)
 
 
 def _nearest_timestamp_index(
