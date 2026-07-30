@@ -27,18 +27,36 @@ class Le13AcceptanceFailure(RuntimeError):
 
 def read_bailian_api_key(secret_path: Path) -> str:
     """Read one explicitly selected private credential document."""
+    descriptor: int | None = None
     try:
-        metadata = secret_path.lstat()
+        flags = os.O_RDONLY
+        flags |= getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(secret_path, flags)
+        metadata = os.fstat(descriptor)
         if (
             not stat.S_ISREG(metadata.st_mode)
-            or stat.S_ISLNK(metadata.st_mode)
             or metadata.st_size > _MAX_SECRET_BYTES
             or (os.name != "nt" and stat.S_IMODE(metadata.st_mode) != 0o600)
         ):
             raise Le13AcceptanceFailure("LE-13 model credential is unavailable")
-        document = json.loads(secret_path.read_text(encoding="utf-8"))
+        chunks: list[bytes] = []
+        remaining = _MAX_SECRET_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(descriptor, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw_document = b"".join(chunks)
+        if len(raw_document) > _MAX_SECRET_BYTES:
+            raise Le13AcceptanceFailure("LE-13 model credential is unavailable")
+        document = json.loads(raw_document.decode("utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
         raise Le13AcceptanceFailure("LE-13 model credential is unavailable") from None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
     api_key = document.get("apiKey") if isinstance(document, dict) else None
     if (
         not isinstance(document, dict)
