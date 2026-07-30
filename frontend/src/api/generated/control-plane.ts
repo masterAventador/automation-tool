@@ -208,6 +208,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/editing-projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Editing Projects */
+        get: operations["listEditingProjects"];
+        put?: never;
+        /** Create Editing Project */
+        post: operations["createEditingProject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/editing-projects/{project_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Editing Project */
+        get: operations["getEditingProject"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -726,6 +761,54 @@ export interface components {
          * @enum {string}
          */
         DouyinSearchExposureAction: "browse" | "comment" | "direct_message";
+        /** EditingCaptionStyle */
+        EditingCaptionStyle: {
+            /** Fontkey */
+            fontKey: string;
+            /** Fontpx */
+            fontPx: number;
+            /** Linespacing */
+            lineSpacing: number;
+            /** Strokepx */
+            strokePx: number;
+        };
+        /** EditingOutputSpec */
+        EditingOutputSpec: {
+            /** Fps */
+            fps: number;
+            /** Height */
+            height: number;
+            /** Width */
+            width: number;
+        };
+        /** EditingProjectCreateRequest */
+        EditingProjectCreateRequest: {
+            captionStyle: components["schemas"]["EditingCaptionStyle"];
+            output: components["schemas"]["EditingOutputSpec"];
+            /** Title */
+            title: string;
+        };
+        /** EditingProjectListResponse */
+        EditingProjectListResponse: {
+            /** Items */
+            items: components["schemas"]["EditingProjectResponse"][];
+            /** Nextcursor */
+            nextCursor: string | null;
+        };
+        /** EditingProjectResponse */
+        EditingProjectResponse: {
+            captionStyle: components["schemas"]["EditingCaptionStyle"];
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            output: components["schemas"]["EditingOutputSpec"];
+            /** Projectid */
+            projectId: string;
+            /** Title */
+            title: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1525,6 +1608,102 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeviceSessionExchangeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listEditingProjects: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditingProjectListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createEditingProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditingProjectCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditingProjectResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getEditingProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditingProjectResponse"];
                 };
             };
             /** @description Validation Error */
