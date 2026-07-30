@@ -338,7 +338,7 @@ const shellModelServiceGateway: ModelServiceGateway = {
     return {
       provider: "bailian",
       providerLabel: "阿里百炼",
-      catalogVerifiedAt: "2026-07-23",
+      catalogVerifiedAt: "2026-07-31",
       script: { purpose: "script", configured: false, modelId: "qwen3.7-max-2026-06-08" },
       videoCreative: {
         purpose: "video_creative",

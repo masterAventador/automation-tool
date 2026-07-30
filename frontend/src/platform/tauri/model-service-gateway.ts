@@ -92,7 +92,7 @@ function parseSnapshot(value: unknown): ModelServiceSnapshot {
     !isExactRecord(value, SNAPSHOT_KEYS) ||
     value.provider !== "bailian" ||
     value.providerLabel !== "阿里百炼" ||
-    value.catalogVerifiedAt !== "2026-07-23" ||
+    value.catalogVerifiedAt !== "2026-07-31" ||
     typeof value.sameCredential !== "boolean"
   ) {
     throw protocolMismatch();
@@ -105,7 +105,7 @@ function parseSnapshot(value: unknown): ModelServiceSnapshot {
   return {
     provider: "bailian",
     providerLabel: "阿里百炼",
-    catalogVerifiedAt: "2026-07-23",
+    catalogVerifiedAt: "2026-07-31",
     script,
     videoCreative,
     sameCredential: value.sameCredential,

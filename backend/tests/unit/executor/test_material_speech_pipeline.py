@@ -306,16 +306,103 @@ def test_audio_is_split_at_180_seconds_and_only_windows_with_speech_are_built(
     with pcm.open("wb") as stream:
         stream.truncate(pcm_bytes)
 
-    batches = pipeline._speech_audio_batches(
-        pcm,
-        pcm_bytes=pcm_bytes,
-        duration_ms=361_000,
-        segments=((1_000, 2_000), (360_100, 360_900)),
+    batches = tuple(
+        pipeline._speech_audio_batches(
+            pcm,
+            pcm_bytes=pcm_bytes,
+            duration_ms=361_000,
+            segments=((1_000, 2_000), (360_100, 360_900)),
+        )
     )
 
     assert [batch.duration_ms for batch in batches] == [180_000, 1_000]
     assert all(len(batch.wav_bytes) <= pipeline.MAX_ASR_WAV_BYTES for batch in batches)
     assert all(batch.wav_bytes.startswith(b"RIFF") for batch in batches)
+
+
+def test_audio_batches_are_rendered_lazily_instead_of_accumulated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pcm = tmp_path / "long-audio.pcm"
+    pcm_bytes = 361_000 * pipeline.PCM_BYTES_PER_MILLISECOND
+    with pcm.open("wb") as stream:
+        stream.truncate(pcm_bytes)
+    rendered_payload_sizes: list[int] = []
+
+    class LightweightBatch:
+        def __init__(self, *, wav_bytes: bytes, duration_ms: int) -> None:
+            self.wav_bytes = wav_bytes
+            self.duration_ms = duration_ms
+
+    def render(payload: bytes) -> bytes:
+        rendered_payload_sizes.append(len(payload))
+        return b"bounded-wav"
+
+    monkeypatch.setattr(pipeline, "_pcm_wav", render)
+    monkeypatch.setattr(pipeline, "SpeechAudioBatch", LightweightBatch)
+
+    batches = pipeline._speech_audio_batches(
+        pcm,
+        pcm_bytes=pcm_bytes,
+        duration_ms=361_000,
+        segments=((1_000, 2_000), (180_100, 180_900), (360_100, 360_900)),
+    )
+
+    assert rendered_payload_sizes == []
+    iterator = iter(batches)
+    assert next(iterator).duration_ms == 180_000
+    assert len(rendered_payload_sizes) == 1
+    assert next(iterator).duration_ms == 180_000
+    assert len(rendered_payload_sizes) == 2
+    assert next(iterator).duration_ms == 1_000
+    assert len(rendered_payload_sizes) == 3
+    with pytest.raises(StopIteration):
+        next(iterator)
+
+
+def test_transcription_limit_stops_before_a_third_asr_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "bounded-transcript-source.mp4"
+    source.write_bytes(PRIVATE_VIDEO_BYTES)
+    source, approved = approve_source(source)
+    monkeypatch.setattr(pipeline.subprocess, "Popen", FinishedExtraction)
+    wav = pipeline._pcm_wav(b"\0\0" * 16)
+    batch = SpeechAudioBatch(wav_bytes=wav, duration_ms=1)
+    monkeypatch.setattr(
+        pipeline,
+        "_speech_audio_batches",
+        lambda *_args, **_kwargs: (item for item in (batch, batch, batch)),
+    )
+
+    class GrowingTranscriptAsr:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def transcribe(self, audio: SpeechAudioBatch) -> str:
+            assert audio is batch
+            self.calls += 1
+            if self.calls == 1:
+                return "甲" * 60_000
+            if self.calls == 2:
+                return "乙" * 50_000
+            raise AssertionError("the transcript limit must stop further requests")
+
+    asr = GrowingTranscriptAsr()
+    analyzer = LocalAudibleSpeechAnalyzer(
+        tools=_tools(tmp_path),
+        source=source,
+        approved=approved,
+        vad_factory=lambda: SequencedVad([0.9] * 10 + [0.0] * 10),
+        asr_adapter=asr,
+    )
+
+    with pytest.raises(MaterialSpeechRejected):
+        analyzer.analyze(_facts())
+
+    assert asr.calls == 2
 
 
 def test_a_linked_pcm_output_is_rejected_before_vad_reads_it(tmp_path: Path) -> None:

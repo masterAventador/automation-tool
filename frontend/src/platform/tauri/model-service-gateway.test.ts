@@ -10,7 +10,7 @@ import { TauriModelServiceGateway } from "./model-service-gateway";
 const emptySnapshot = {
   provider: "bailian",
   providerLabel: "阿里百炼",
-  catalogVerifiedAt: "2026-07-23",
+  catalogVerifiedAt: "2026-07-31",
   script: {
     purpose: "script",
     configured: false,

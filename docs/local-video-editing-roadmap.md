@@ -67,7 +67,7 @@
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
 | LE-13 | 素材理解 | 抽帧送百炼多模态，产出描述、标签与镜头时间区间并写回 Material；**关闭深度思考**（`enable_thinking=false`，作为配置项非硬编码，见设计文档 §4.5）；超时/拒答/空描述/token 超限的失败矩阵；真实模型调用验收。T1～T4、Codex Review finding 修复与真实纵向复验全部完成，证据见 `docs/development/LE-13.md` | LE-08 | ✅ 已完成 |
-| LE-14 | 人声检测与转写 | 三级漏斗：`silencedetect` 判有无声音 → Silero VAD（本地 ONNX，约 2 MB）判是人声还是纯环境音 → 仅对人声素材调百炼语音识别转写（只传音轨不传视频，避免为筛选步骤打包 140 MB+ 的本地 Whisper）。产出 `has_speech`、`speech_segments_ms`、`speech_transcript` 写回 Material；**onnxruntime 与 VAD 模型必须进安装包并有出厂门禁核对**；纯音乐误判人声、人声判成环境音、转写为空、方言/嘈杂环境、ASR 超时、路人背景说话被当主体的失败矩阵。T1 已完成并通过 Codex Review；T2 已完成真实模型推理、摘要缓存、权利/许可证登记及 macOS/Windows 出厂门禁，首轮 Codex Review 的双架构 wheel、包体积、最低系统版本与摘要校验后重开路径四项 finding 均已按 RED→GREEN 修复，补正提交最终复审无 finding；T3 开工中，T4～T5 待继续，证据见 `docs/development/LE-14.md` | LE-07 | 🚧 实现中 |
+| LE-14 | 人声检测与转写 | 三级漏斗：`silencedetect` 判有无声音 → Silero VAD（本地 ONNX，约 2 MB）判是人声还是纯环境音 → 仅对人声素材调百炼语音识别转写（只传音轨不传视频，避免为筛选步骤打包 140 MB+ 的本地 Whisper）。产出 `has_speech`、`speech_segments_ms`、`speech_transcript` 写回 Material；**onnxruntime 与 VAD 模型必须进安装包并有出厂门禁核对**；纯音乐误判人声、人声判成环境音、转写为空、方言/嘈杂环境、ASR 超时、路人背景说话被当主体的失败矩阵。T1 已完成并通过 Codex Review；T2 已完成真实模型推理、摘要缓存、权利/许可证登记及 macOS/Windows 出厂门禁，首轮 Codex Review 的双架构 wheel、包体积、最低系统版本与摘要校验后重开路径四项 finding 均已按 RED→GREEN 修复，补正提交最终复审无 finding；T3 已完成有界音轨抽取、只传 WAV 的百炼 ASR 与 Material 三列原子写回，唯一一次 Codex Review 的目录日期漂移、伪 WAV 和长音频常驻内存三项 finding 均已按 RED→GREEN 修复；T4～T5 待继续，证据见 `docs/development/LE-14.md` | LE-07 | 🚧 实现中 |
 | LE-15 | 文案分句与旁白合成 | 一句话经百炼文本模型产出脚本分句（**关闭深度思考**，见设计文档 §4.5）；TTS 合成每句并取真实音频时长；支持用户上传录音替代（转写后对齐句子，复用 LE-14 的 ASR） | LE-06,LE-14 | ⬜ 未开始 |
 | LE-16 | 语义匹配与片段选择 | 句子与素材描述语义匹配（有转写的素材把转写文本一并纳入匹配依据；**关闭深度思考**，见设计文档 §4.5）；在选中素材的镜头区间内挑最贴片段产出 in/out 点；**有人声素材按"自带旁白片段"编排：时长由原声内容决定、独立占段、用原声与转写字幕、不配 TTS**；文案句子只分配给无人声素材；素材不足、单条过短、匹配全低于阈值、全部素材均有人声的处理；产出 Timeline 草稿。**LE-07 交接的硬约束**：探测报出的 duration 取自容器头，**不保证时长内每一帧都存在**——实测 faststart 截断件（半个下载）报出的是完整时长，截到 25% 仍报 60000 ms 而实际只剩 268/1500 帧，且它不产生任何拒绝码、按码分支看不见；挑 in/out 点不得默认「时长内帧完备」。依据见 `docs/development/LE-07.md` Q2 | LE-13,LE-15 | ⬜ 未开始 |
 
@@ -106,9 +106,10 @@
 
 ## 5. 当前下一步
 
-**LE-14 人声检测与转写 T3 Codex Review。** T2 已收口；T3 的有界音轨抽取、VAD
-聚合、百炼 ASR Adapter、三列原子写回、真实随包 FFmpeg 与冻结包归档证据均已完成，
-实现检查点提交推送后执行 Codex Review，结论返回前不进入 T4。
+**LE-14 人声检测与转写 T4。** T1～T3 已收口；T3 唯一一次 Codex Review 的共享目录
+日期漂移、伪 WAV 和长音频常驻内存三项 finding 已修复。T4 先把纯音乐误判、环境音、
+转写为空、方言/嘈杂环境、ASR 超时和背景路人说话六类结果语义写入 LE-14.md，再逐条
+建立故障注入或固定真实夹具的 RED。
 
 ## 7. 已知问题：用户可见文案门禁当前为红
 

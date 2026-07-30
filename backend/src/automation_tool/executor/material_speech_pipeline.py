@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 import time
 import wave
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -199,24 +199,33 @@ class LocalAudibleSpeechAnalyzer:
             )
             if not segments:
                 return MaterialSpeechAnalysis(False, (), None)
-            transcripts = tuple(
-                self.asr_adapter.transcribe(batch)
-                for batch in _speech_audio_batches(
-                    pcm_path,
-                    pcm_bytes=pcm_bytes,
-                    duration_ms=facts.duration_ms,
-                    segments=segments,
-                    approved=approved_pcm,
-                )
+            transcripts: list[str] = []
+            transcript_characters = 0
+            batches = _speech_audio_batches(
+                pcm_path,
+                pcm_bytes=pcm_bytes,
+                duration_ms=facts.duration_ms,
+                segments=segments,
+                approved=approved_pcm,
             )
-            if not transcripts or any(
-                type(transcript) is not str or not transcript or transcript != transcript.strip()
-                for transcript in transcripts
-            ):
+            try:
+                for batch in batches:
+                    transcript = self.asr_adapter.transcribe(batch)
+                    if (
+                        type(transcript) is not str
+                        or not transcript
+                        or transcript != transcript.strip()
+                    ):
+                        _reject()
+                    transcript_characters += len(transcript) + int(bool(transcripts))
+                    if transcript_characters > MAX_TRANSCRIPT_CHARACTERS:
+                        _reject()
+                    transcripts.append(transcript)
+            finally:
+                batches.close()
+            if not transcripts:
                 _reject()
             transcript = "\n".join(transcripts)
-            if len(transcript) > MAX_TRANSCRIPT_CHARACTERS:
-                _reject()
             return MaterialSpeechAnalysis(True, segments, transcript)
         finally:
             with suppress(OSError):
@@ -489,13 +498,14 @@ def _speech_audio_batches(
     duration_ms: int,
     segments: tuple[tuple[int, int], ...],
     approved: os.stat_result | None = None,
-) -> tuple[SpeechAudioBatch, ...]:
+) -> Generator[SpeechAudioBatch, None, None]:
     total_duration_ms = min(
         duration_ms,
         math.ceil(pcm_bytes / PCM_BYTES_PER_SAMPLE * 1_000 / SAMPLE_RATE_HZ),
     )
-    batches: list[SpeechAudioBatch] = []
+    yielded = False
     descriptor: int | None = None
+    before: os.stat_result | None = None
     try:
         descriptor, before = _open_stable_pcm(pcm_path, approved=approved)
         for start_ms in range(0, total_duration_ms, MAX_ASR_BATCH_DURATION_MS):
@@ -512,26 +522,27 @@ def _speech_audio_batches(
             if len(payload) != end_byte - start_byte:
                 _reject()
             wav_bytes = _pcm_wav(payload)
-            batches.append(
-                SpeechAudioBatch(
-                    wav_bytes=wav_bytes,
-                    duration_ms=math.ceil(
-                        len(payload) / PCM_BYTES_PER_SAMPLE * 1_000 / SAMPLE_RATE_HZ
-                    ),
-                )
+            yielded = True
+            yield SpeechAudioBatch(
+                wav_bytes=wav_bytes,
+                duration_ms=math.ceil(
+                    len(payload) / PCM_BYTES_PER_SAMPLE * 1_000 / SAMPLE_RATE_HZ
+                ),
             )
-        _require_stable_pcm(pcm_path, descriptor, before)
+        if not yielded:
+            _reject()
     except MaterialSpeechRejected:
         raise
     except OSError:
         _reject()
     finally:
         if descriptor is not None:
-            with suppress(OSError):
-                os.close(descriptor)
-    if not batches:
-        _reject()
-    return tuple(batches)
+            try:
+                if before is not None:
+                    _require_stable_pcm(pcm_path, descriptor, before)
+            finally:
+                with suppress(OSError):
+                    os.close(descriptor)
 
 
 def _open_stable_pcm(
