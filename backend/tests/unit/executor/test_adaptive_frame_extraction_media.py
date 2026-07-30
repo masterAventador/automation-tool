@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterator
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,7 @@ def scene_media(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     single_scene = root / "single scene.mp4"
     long_scene = root / "sixty second gradual scene.mp4"
     nonzero_start = root / "nonzero start.mp4"
+    ntsc_boundary = root / "ntsc just over eight seconds.mp4"
     _encode(
         tools.ffmpeg_path,
         "-f",
@@ -124,11 +126,26 @@ def scene_media(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         "1.6",
         os.fspath(nonzero_start),
     )
+    _encode(
+        tools.ffmpeg_path,
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=black:s=160x90:r=30000/1001",
+        "-frames:v",
+        "240",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        os.fspath(ntsc_boundary),
+    )
     return {
         "hard_cuts": hard_cuts,
         "single_scene": single_scene,
         "long_scene": long_scene,
         "nonzero_start": nonzero_start,
+        "ntsc_boundary": ntsc_boundary,
     }
 
 
@@ -284,6 +301,63 @@ def test_supplement_timestamps_are_relative_to_material_with_nonzero_start_pts(
 
     assert isinstance(result, tuple)
     assert tuple(frame.timestamp_ms for frame in result) == (0, 8_000)
+
+
+def test_missing_tail_frame_at_an_ntsc_duration_boundary_is_not_bad_media(
+    scene_media: dict[str, Path],
+) -> None:
+    source, approved = approve_source(scene_media["ntsc_boundary"])
+
+    result = extract_adaptive_frame_candidates(
+        _packaged_tools(),
+        source,
+        approved,
+        duration_ms=8_008,
+    )
+
+    assert isinstance(result, tuple)
+    assert tuple(frame.timestamp_ms for frame in result) == (0,)
+
+
+def test_non_tail_supplement_failure_still_rejects_the_material(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ffprobe = tmp_path / "ffprobe"
+    ffmpeg = tmp_path / "ffmpeg"
+    for tool in (ffprobe, ffmpeg):
+        tool.write_text("#!/bin/sh\nexit 0\n", encoding="ascii")
+        tool.chmod(0o700)
+    tools = PackagedMediaTools(ffprobe_path=ffprobe, ffmpeg_path=ffmpeg)
+    source = tmp_path / "damaged.mp4"
+    source.write_bytes(b"media")
+    source, approved = approve_source(source)
+    outputs: Iterator[BoundedFfmpegOutput | AdaptiveFrameRejection] = iter(
+        (
+            BoundedFfmpegOutput(files=(("scene-000000000000.jpg", b"scene"),)),
+            AdaptiveFrameRejection.UNDECODABLE,
+        )
+    )
+
+    def fail_before_the_tail(
+        *_args: Any, **_kwargs: Any
+    ) -> BoundedFfmpegOutput | AdaptiveFrameRejection:
+        return next(outputs)
+
+    monkeypatch.setattr(
+        adaptive_frame_extraction,
+        "_run_bounded_ffmpeg",
+        fail_before_the_tail,
+    )
+
+    result = extract_adaptive_frame_candidates(
+        tools,
+        source,
+        approved,
+        duration_ms=16_001,
+    )
+
+    assert result is AdaptiveFrameRejection.UNDECODABLE
 
 
 def test_two_seek_targets_that_land_on_one_actual_frame_are_deduplicated(

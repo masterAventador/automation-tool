@@ -143,10 +143,21 @@ def extract_adaptive_frame_candidates(
         except MaterialProbeRejected:
             return AdaptiveFrameRejection.SOURCE_UNAVAILABLE
         if isinstance(output, AdaptiveFrameRejection):
+            # The scene pass immediately above decoded the unchanged source through
+            # EOF. Some containers nevertheless state a duration just beyond their
+            # last frame PTS, so only the final planned seek may legitimately find
+            # no frame; an earlier seek failure still rejects the material.
+            if (
+                output is AdaptiveFrameRejection.UNDECODABLE
+                and timestamp_ms == supplement_timestamps[-1]
+            ):
+                break
             return output
         frame = _parse_supplement_frame(output)
         if isinstance(frame, AdaptiveFrameRejection):
             return frame
+        if frame is None:
+            break
         supplements.append(frame)
         remaining_bytes -= len(frame.jpeg_bytes)
 
@@ -214,7 +225,9 @@ def _supplement_ffmpeg_argv(
 
 def _parse_supplement_frame(
     output: BoundedFfmpegOutput,
-) -> ExtractedFrame | AdaptiveFrameRejection:
+) -> ExtractedFrame | AdaptiveFrameRejection | None:
+    if not output.files:
+        return None
     if len(output.files) != 1:
         return AdaptiveFrameRejection.UNDECODABLE
     name, content = output.files[0]
