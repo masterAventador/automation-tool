@@ -135,6 +135,7 @@ def test_every_executor_spec_materializes_safe_internal_pyinstaller_symlinks() -
     spec_paths = (
         SPEC_PATH,
         BACKEND_ROOT / "tests/fixtures/automation-tool-executor-b515.spec",
+        BACKEND_ROOT / "tests/fixtures/automation-tool-executor-d610.spec",
         BACKEND_ROOT / "tests/fixtures/automation-tool-executor-h816f.spec",
     )
 

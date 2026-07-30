@@ -10,13 +10,10 @@ import secrets
 import shutil
 import subprocess
 import sys
-import threading
+import tempfile
 import time
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from io import StringIO
 from pathlib import Path
-from uuid import uuid4
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from desktop_e2e_prerequisites import (
@@ -26,7 +23,14 @@ from desktop_e2e_prerequisites import (
     startup_gate_environment,
     terminate_app_process_tree,
 )
-from run_i2_13_acceptance import post_json, require_port_closed
+from run_e4_07_acceptance import build_signed_executor
+from run_e4_14_acceptance import (
+    assert_no_executor_process,
+    executor_entrypoint,
+    install_executor_package,
+    terminate_executor_processes,
+)
+from run_i2_13_acceptance import require_port_closed
 from run_t3_06_acceptance import (
     BACKEND_ROOT,
     FRONTEND_ROOT,
@@ -54,65 +58,19 @@ from automation_tool.control_plane.infrastructure.database import (
     task_targets,
     tasks,
 )
-from automation_tool.executor import (
-    ExecutorBootstrap,
-    ExecutorCommandProcessor,
-    ExecutorProcessReporter,
-    LocalExecutorProcess,
-    LocalSessionAuthenticator,
-    RuntimeMetadata,
-)
-from automation_tool.executor.discovery_operation import (
-    DouyinDiscoveryExecutionResult,
-    DouyinDiscoveryOperationState,
-)
-from automation_tool.executor.ledger import ExecutorLedger
-from automation_tool.protocol import (
-    MAX_EXECUTOR_MESSAGE_BYTES,
-    DouyinCandidate,
-    DouyinCandidateSource,
-    DouyinCandidateSummary,
-    DouyinDiscoveryCommandPayload,
-)
+from automation_tool.protocol import MAX_EXECUTOR_MESSAGE_BYTES
 
 TAURI_CONFIG = FRONTEND_ROOT / "src-tauri" / "tauri.task-discovery-e2e.conf.json"
+EXECUTOR_SPEC = (
+    BACKEND_ROOT / "tests" / "fixtures" / "automation-tool-executor-d610.spec"
+)
 CONTROL_PLANE_PORT = reserve_control_plane_port()
 APP_IDENTIFIER = "com.aventador.automationtool.d610acceptance"
 ENVIRONMENT_ID = "d610-acceptance"
+EXECUTOR_BUILD_ID = "d6-10-controlled-discovery"
 TASK_KEY = "task:discovery:tauri-acceptance"
 DEVICE_CREDENTIAL_FILE = "device-credential-v1"
 BUSY_SIGNAL_FILE = "h8-16b-busy-observed"
-
-
-class DeterministicDiscoveryOperation:
-    """Inject deterministic read-only candidates after D6-04..D6-07 browser acceptance."""
-
-    def run(
-        self,
-        payload: DouyinDiscoveryCommandPayload,
-        *,
-        cancellation_requested: Callable[[], bool],
-    ) -> DouyinDiscoveryExecutionResult:
-        if cancellation_requested():
-            raise RuntimeError("D6-10 acceptance was unexpectedly cancelled")
-        candidates = tuple(
-            DouyinCandidate(
-                platform_target_id=f"acceptance-author-{index}",
-                summary=DouyinCandidateSummary(
-                    display_name=f"验收目标 {index}",
-                    public_handle=f"acceptance_{index}",
-                ),
-                source=DouyinCandidateSource.GENERAL_SEARCH_AUTHOR,
-                page_revision=payload.page_revision,
-            )
-            for index in (1, 2)
-        )
-        return DouyinDiscoveryExecutionResult(
-            state=DouyinDiscoveryOperationState.COMPLETED,
-            evidence="candidates_extracted",
-            page_revision=payload.page_revision,
-            candidates=candidates,
-        )
 
 
 def require_control_plane_port_available() -> None:
@@ -162,7 +120,12 @@ def signed_bootstrap() -> tuple[str, str]:
     return token, public_key
 
 
-def isolated_environment(database_port: int) -> tuple[dict[str, str], str]:
+def isolated_environment(
+    database_port: int,
+    *,
+    busy_signal: Path,
+    observations: Path,
+) -> tuple[dict[str, str], str]:
     environment = {
         key: value
         for key, value in os.environ.items()
@@ -189,6 +152,8 @@ def isolated_environment(database_port: int) -> tuple[dict[str, str], str]:
             "AUTOMATION_TOOL_DEMO_BOOTSTRAP_PUBLIC_KEY": bootstrap_public_key,
             "AUTOMATION_TOOL_D610_BOOTSTRAP_TOKEN": bootstrap_token,
             "AUTOMATION_TOOL_D610_ENVIRONMENT_ID": ENVIRONMENT_ID,
+            "AUTOMATION_TOOL_D610_BUSY_SIGNAL": os.fspath(busy_signal),
+            "AUTOMATION_TOOL_D610_OBSERVATIONS": os.fspath(observations),
         }
     )
     return (
@@ -201,7 +166,7 @@ async def wait_for_app_task(
     database_url: str,
     private_app_data: Path,
     app_process: subprocess.Popen[bytes],
-) -> tuple[InstallationId, TaskId, str]:
+) -> tuple[InstallationId, TaskId]:
     engine = create_async_engine(database_url)
     deadline = time.monotonic() + 120
     try:
@@ -226,7 +191,9 @@ async def wait_for_app_task(
                     raise RuntimeError(
                         "D6-10 App credential vault is unreadable"
                     ) from error
-                return InstallationId.parse(row[0]), TaskId.parse(row[1]), credential
+                if not credential:
+                    raise RuntimeError("D6-10 App credential vault is empty")
+                return InstallationId.parse(row[0]), TaskId.parse(row[1])
             if time.monotonic() >= deadline:
                 raise RuntimeError("D6-10 hidden App did not create its Task in time")
             await asyncio.sleep(0.05)
@@ -348,94 +315,30 @@ async def report_platform_gate_state(
     print(f"[D6-10] commands={[dict(row) for row in commands]}")
 
 
-def wait_for_busy_signal(
-    signal_path: Path,
-    app_process: subprocess.Popen[bytes],
+def verify_controlled_executor(
+    observations: Path,
+    busy_signal: Path,
 ) -> None:
-    deadline = time.monotonic() + 120
-    while not signal_path.is_file():
-        if app_process.poll() is not None:
-            raise RuntimeError("H8-16B hidden App exited before observing Installation busy")
-        if time.monotonic() >= deadline:
-            raise RuntimeError("H8-16B hidden App did not observe Installation busy in time")
-        time.sleep(0.05)
-    if signal_path.read_bytes() != b"observed":
-        raise RuntimeError("H8-16B hidden App busy observation signal is invalid")
-    signal_path.unlink()
-
-
-def executor_session(credential: str) -> str:
-    exchanged = post_json(
-        CONTROL_PLANE_PORT,
-        "/api/v1/device-sessions",
-        credential,
-        payload={"capability": DeviceSessionCapability.EXECUTOR_CONNECT.value},
-        expected_status=201,
-    )
-    session_token = exchanged.get("sessionToken")
-    if not isinstance(session_token, str):
-        raise RuntimeError("D6-10 Executor Session exchange omitted its opaque token")
-    return session_token
-
-
-def start_executor(
-    *,
-    private_app_data: Path,
-    installation_id: InstallationId,
-    session_token: str,
-    state_directory_name: str = "d6-10-executor-state",
-    thread_name: str = "d6-10-formal-executor",
-) -> tuple[threading.Event, threading.Thread, list[BaseException]]:
-    executor_id = str(uuid4())
-    state_directory = private_app_data / state_directory_name
-    ledger = ExecutorLedger(
-        state_directory=state_directory,
-        installation_id=str(installation_id),
-        executor_id=executor_id,
-    )
-    processor = ExecutorCommandProcessor(
-        ledger=ledger,
-        installation_id=str(installation_id),
-        executor_id=executor_id,
-        discovery_operation=DeterministicDiscoveryOperation(),
-    )
-    local_session_token = secrets.token_hex(32)
-    bootstrap = ExecutorBootstrap.model_validate(
-        {
-            "bootstrap_version": "1",
-            "websocket_url": (
-                f"ws://127.0.0.1:{CONTROL_PLANE_PORT}/api/v1/executors/connect"
-            ),
-            "local_session_token": local_session_token,
-            "session_token": session_token,
-            "installation_id": str(installation_id),
-            "executor_id": executor_id,
-            "heartbeat_interval_seconds": 1,
-            "state_directory": str(state_directory),
-        }
-    )
-    authenticator = LocalSessionAuthenticator(bootstrap.local_session_token)
-    reporter = ExecutorProcessReporter(StringIO(), authenticator)
-    process = LocalExecutorProcess(
-        bootstrap=bootstrap,
-        metadata=RuntimeMetadata.detect(),
-        reporter=reporter,
-        command_processor=processor,
-    )
-    stop = threading.Event()
-    failures: list[BaseException] = []
-
-    def run() -> None:
-        try:
-            process.run(stop)
-        except BaseException as error:
-            failures.append(error)
-        finally:
-            authenticator.close()
-
-    thread = threading.Thread(target=run, name=thread_name, daemon=True)
-    thread.start()
-    return stop, thread, failures
+    if not observations.is_file():
+        raise RuntimeError("D6-10 controlled Executor observations are missing")
+    try:
+        events = [
+            json.loads(line).get("event")
+            for line in observations.read_text(encoding="ascii").splitlines()
+        ]
+    except (OSError, UnicodeError, json.JSONDecodeError, AttributeError) as error:
+        raise RuntimeError(
+            "D6-10 controlled Executor observations are invalid"
+        ) from error
+    if events != [
+        "discovery_waiting_for_busy_ui",
+        "busy_ui_observed",
+        "discovery_completed",
+    ]:
+        raise RuntimeError("D6-10 controlled Executor timeline is invalid")
+    if busy_signal.exists():
+        raise RuntimeError("D6-10 controlled Executor did not consume the busy UI signal")
+    print(f"[D6-10] Controlled Executor timeline: {' -> '.join(events)}")
 
 
 async def verify_database_state(
@@ -596,6 +499,10 @@ async def verify_database_state(
         capability not in allowed for capability in capabilities
     ):
         raise RuntimeError("D6-10 used an unexpected Session capability")
+    print(
+        "[D6-10] Database facts: first=awaiting_confirmation/revision-3, "
+        "competing=draft, attempts=1, targets=2, executor.connect=1"
+    )
 
 
 def main() -> None:
@@ -604,146 +511,141 @@ def main() -> None:
     private_app_data = app_data_directory()
     if private_app_data.exists():
         raise RuntimeError("Refusing to reuse an existing D6-10 App data directory")
-    prepare_startup_gate(private_app_data)
+    prepare_startup_gate(private_app_data, executor_package=False)
 
     project_name = f"automation-tool-d610-{os.getpid()}"
     database_port = unused_loopback_port()
-    environment, database_url = isolated_environment(database_port)
     compose = compose_command(project_name)
     server: subprocess.Popen[bytes] | None = None
     app_process: subprocess.Popen[bytes] | None = None
-    executor_stop: threading.Event | None = None
-    executor_thread: threading.Thread | None = None
-    executor_failures: list[BaseException] = []
-    cleanup_error: RuntimeError | None = None
+    package_entrypoint: Path | None = None
 
-    try:
-        print("[D6-10] Starting isolated PostgreSQL")
-        subprocess.run(
-            [*compose, "up", "--detach", "--wait", "postgres-test"],
-            check=True,
-            cwd=REPOSITORY_ROOT,
-            env=environment,
-        )
-        print("[D6-10] Applying the production Alembic migration chain")
-        subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"],
-            check=True,
-            cwd=BACKEND_ROOT,
-            env=environment,
-        )
-        print("[D6-10] Starting the real Uvicorn boundary in the background")
-        server = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "uvicorn",
-                "automation_tool.control_plane:create_app",
-                "--factory",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                str(CONTROL_PLANE_PORT),
-                "--ws-max-size",
-                str(MAX_EXECUTOR_MESSAGE_BYTES),
-                "--ws",
-                "websockets-sansio",
-                "--no-access-log",
-            ],
-            cwd=BACKEND_ROOT,
-            env=environment,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        wait_for_control_plane()
-        print("[D6-10] Running the real Tauri App with visible=false")
-        # The wdio child buffers its reporter output until the run ends, and
-        # every failure path below kills the child before that happens — which
-        # is how a timeout here used to leave zero trace of how far the spec
-        # got. The output lands in a file so the failure paths can print it.
-        app_output = private_app_data.parent / "d6-10-app-output.log"
-        app_output_sink = app_output.open("wb")
-        app_process = subprocess.Popen(
-            ["pnpm", "test:task-discovery-tauri"],
-            cwd=FRONTEND_ROOT,
-            env=environment,
-            start_new_session=True,
-            stdout=app_output_sink,
-            stderr=app_output_sink,
+    with tempfile.TemporaryDirectory(prefix=f"{project_name}-") as temporary:
+        workspace = Path(temporary)
+        busy_signal = private_app_data / BUSY_SIGNAL_FILE
+        observations = workspace / "controlled-executor-observations.jsonl"
+        app_output = workspace / "app-output.log"
+        environment, database_url = isolated_environment(
+            database_port,
+            busy_signal=busy_signal,
+            observations=observations,
         )
         try:
-            installation_id, task_id, credential = asyncio.run(
-                wait_for_app_task(database_url, private_app_data, app_process)
+            print("[D6-10] Building the controlled real signed PyInstaller Executor")
+            package_source = build_signed_executor(
+                workspace,
+                build_id=EXECUTOR_BUILD_ID,
+                spec_path=EXECUTOR_SPEC,
             )
-            asyncio.run(seed_healthy_platform(database_url, installation_id))
-            try:
-                wait_for_busy_signal(private_app_data / BUSY_SIGNAL_FILE, app_process)
-            except RuntimeError:
-                asyncio.run(report_platform_gate_state(database_url, installation_id))
-                raise
-            executor_stop, executor_thread, executor_failures = start_executor(
-                private_app_data=private_app_data,
-                installation_id=installation_id,
-                session_token=executor_session(credential),
+            package_root = install_executor_package(package_source)
+            package_entrypoint = executor_entrypoint(package_root)
+
+            print("[D6-10] Starting isolated PostgreSQL")
+            subprocess.run(
+                [*compose, "up", "--detach", "--wait", "postgres-test"],
+                check=True,
+                cwd=REPOSITORY_ROOT,
+                env=environment,
+            )
+            print("[D6-10] Applying the production Alembic migration chain")
+            subprocess.run(
+                [sys.executable, "-m", "alembic", "upgrade", "head"],
+                check=True,
+                cwd=BACKEND_ROOT,
+                env=environment,
+            )
+            print("[D6-10] Starting the real Uvicorn boundary in the background")
+            server = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "uvicorn",
+                    "automation_tool.control_plane:create_app",
+                    "--factory",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    str(CONTROL_PLANE_PORT),
+                    "--ws-max-size",
+                    str(MAX_EXECUTOR_MESSAGE_BYTES),
+                    "--ws",
+                    "websockets-sansio",
+                    "--no-access-log",
+                ],
+                cwd=BACKEND_ROOT,
+                env=environment,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            wait_for_control_plane()
+            print("[D6-10] Running the real Tauri App with visible=false")
+            # The wdio child buffers its reporter output until the run ends, and
+            # every failure path below kills the child before that happens. Keep
+            # its output in this private workspace so every failure can print a
+            # bounded diagnostic without leaving an App Support residue.
+            app_output_sink = app_output.open("wb")
+            app_process = subprocess.Popen(
+                ["pnpm", "test:task-discovery-tauri"],
+                cwd=FRONTEND_ROOT,
+                env=environment,
+                start_new_session=True,
+                stdout=app_output_sink,
+                stderr=app_output_sink,
             )
             try:
-                app_exit = app_process.wait(timeout=180)
-            except subprocess.TimeoutExpired as error:
-                raise RuntimeError(
-                    "D6-10 hidden App acceptance did not finish"
-                ) from error
-            if app_exit != 0:
-                asyncio.run(report_platform_gate_state(database_url, installation_id))
-                asyncio.run(verify_database_state(database_url, installation_id, task_id))
-                raise RuntimeError(
-                    "D6-10 hidden App acceptance failed after the database converged"
+                installation_id, task_id = asyncio.run(
+                    wait_for_app_task(database_url, private_app_data, app_process)
                 )
-        except BaseException:
-            app_output_sink.flush()
-            print("[D6-10] App output tail (last 60 lines):")
-            for line in app_output.read_text(errors="replace").splitlines()[-60:]:
-                print(f"    {line}")
-            raise
+                asyncio.run(seed_healthy_platform(database_url, installation_id))
+                try:
+                    app_exit = app_process.wait(timeout=180)
+                except subprocess.TimeoutExpired as error:
+                    raise RuntimeError(
+                        "D6-10 hidden App acceptance did not finish"
+                    ) from error
+                if app_exit != 0:
+                    asyncio.run(
+                        report_platform_gate_state(database_url, installation_id)
+                    )
+                    raise RuntimeError("D6-10 hidden App acceptance failed")
+            except BaseException:
+                app_output_sink.flush()
+                print("[D6-10] App output tail (last 60 lines):")
+                for line in app_output.read_text(errors="replace").splitlines()[-60:]:
+                    print(f"    {line}")
+                raise
+            finally:
+                app_output_sink.close()
+            app_process = None
+            verify_app_private_data(private_app_data)
+            verify_controlled_executor(observations, busy_signal)
+            asyncio.run(verify_database_state(database_url, installation_id, task_id))
+            assert_no_executor_process(package_entrypoint)
+            print("[D6-10] Hidden-App busy-to-convergence acceptance passed")
         finally:
-            app_output_sink.close()
-        app_process = None
-        verify_app_private_data(private_app_data)
-        asyncio.run(verify_database_state(database_url, installation_id, task_id))
-        print("[D6-10] Hidden-App discovery convergence acceptance passed")
-    finally:
-        if executor_stop is not None:
-            executor_stop.set()
-        if executor_thread is not None:
-            executor_thread.join(timeout=10)
-            if executor_thread.is_alive():
-                cleanup_error = RuntimeError("D6-10 formal Executor did not stop")
-            elif executor_failures:
-                cleanup_error = RuntimeError("D6-10 formal Executor failed")
-        if app_process is not None:
-            terminate_app_process_tree(app_process)
-        if server is not None and server.poll() is None:
-            server.terminate()
-            try:
-                server.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                server.kill()
-                server.wait(timeout=5)
-        subprocess.run(
-            [*compose, "down", "--volumes", "--remove-orphans"],
-            check=False,
-            cwd=REPOSITORY_ROOT,
-            env=environment,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        if private_app_data.exists():
-            shutil.rmtree(private_app_data)
-        require_port_closed(CONTROL_PLANE_PORT)
-        require_port_closed(database_port)
-        if cleanup_error is not None:
-            if executor_failures:
-                raise cleanup_error from executor_failures[0]
-            raise cleanup_error
+            if app_process is not None:
+                terminate_app_process_tree(app_process)
+            if package_entrypoint is not None:
+                terminate_executor_processes(package_entrypoint)
+            if server is not None and server.poll() is None:
+                server.terminate()
+                try:
+                    server.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    server.kill()
+                    server.wait(timeout=5)
+            subprocess.run(
+                [*compose, "down", "--volumes", "--remove-orphans"],
+                check=False,
+                cwd=REPOSITORY_ROOT,
+                env=environment,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if private_app_data.exists():
+                shutil.rmtree(private_app_data)
+            require_port_closed(CONTROL_PLANE_PORT)
+            require_port_closed(database_port)
 
 
 if __name__ == "__main__":
