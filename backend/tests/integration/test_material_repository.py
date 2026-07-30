@@ -428,14 +428,19 @@ async def test_scoped_materials_are_owned_isolated_and_unique_per_installation(
         assert await repository.find_by_digest(DIGEST_TWO, owner) is None
 
         protected = owned.with_user_description("用户自己的描述")
-        await repository.update_description(protected, owner)
+        await repository.update_user_description(protected, owner)
         with pytest.raises(MaterialDescriptionProtected):
-            await repository.update_description(
-                owned.with_ai_description("模型不能覆盖", ("拒绝",), LATER),
+            await repository.update_ai_understanding(
+                owned.with_ai_understanding(
+                    "模型不能覆盖",
+                    ("拒绝",),
+                    (0, 30_000),
+                    LATER,
+                ),
                 owner,
             )
         with pytest.raises(MaterialNotFound):
-            await repository.update_description(
+            await repository.update_user_description(
                 foreign.with_user_description("越权修改"),
                 owner,
             )
@@ -563,7 +568,7 @@ async def test_find_by_digest_answers_both_ways(
 
 
 @pytest.mark.asyncio
-async def test_update_description_rewrites_four_columns_and_no_others(
+async def test_ai_understanding_rewrites_five_columns_and_no_others(
     postgresql_url: str,
     alembic_runner: AlembicRunner,
 ) -> None:
@@ -590,10 +595,16 @@ async def test_update_description_rewrites_four_columns_and_no_others(
         await repository.save(material, OWNER)
 
         # The AI direction, on a row the model still owns.
-        rewritten = material.with_ai_description("模型看到的描述", ("夜景", "延时"), LATER)
-        await repository.update_description(rewritten, OWNER)
+        rewritten = material.with_ai_understanding(
+            "模型看到的描述",
+            ("夜景", "延时"),
+            (0, 8_000, 24_000),
+            LATER,
+        )
+        await repository.update_ai_understanding(rewritten, OWNER)
         assert await stored_row(database, material_id.uuid) == row_values(
             material_id.uuid,
+            shot_boundaries_ms=[0, 8_000, 24_000],
             ai_description="模型看到的描述",
             ai_tags=["夜景", "延时"],
             description_source="ai",
@@ -603,9 +614,10 @@ async def test_update_description_rewrites_four_columns_and_no_others(
 
         # And the user direction, which is terminal for this field.
         written_by_user = rewritten.with_user_description("我自己写的描述")
-        await repository.update_description(written_by_user, OWNER)
+        await repository.update_user_description(written_by_user, OWNER)
         assert await stored_row(database, material_id.uuid) == row_values(
             material_id.uuid,
+            shot_boundaries_ms=[0, 8_000, 24_000],
             ai_description="我自己写的描述",
             ai_tags=[],
             description_source="user",
@@ -614,7 +626,10 @@ async def test_update_description_rewrites_four_columns_and_no_others(
         assert await repository.get(material_id, OWNER) == written_by_user
 
         with pytest.raises(MaterialNotFound):
-            await repository.update_description(make_material(MaterialId.new()), OWNER)
+            await repository.update_ai_understanding(
+                make_material(MaterialId.new()),
+                OWNER,
+            )
     finally:
         await reset_data(database)
         await database.close()
@@ -625,7 +640,7 @@ async def test_a_stale_snapshot_cannot_walk_an_ai_description_over_the_users(
     postgresql_url: str,
     alembic_runner: AlembicRunner,
 ) -> None:
-    """`with_ai_description` guards a snapshot; only the table guards the row.
+    """`with_ai_understanding` guards a snapshot; only the table guards the row.
 
     Every step below uses the sanctioned method. Nobody constructs a `Material`
     from parts and nobody calls `replace`, so the AST guard has nothing to say
@@ -652,23 +667,29 @@ async def test_a_stale_snapshot_cannot_walk_an_ai_description_over_the_users(
 
         # Meanwhile the user writes their own description, through the method
         # that exists to make that stick.
-        await repository.update_description(
+        await repository.update_user_description(
             stale.with_user_description("用户自己写的描述"),
             OWNER,
         )
 
         # The describe pass now finishes. Its snapshot still says `ai`, so
-        # `with_ai_description` hands back a rewritten material rather than
+        # `with_ai_understanding` hands back a rewritten material rather than
         # returning `self` -- the domain guard cannot see the row that changed.
-        overwrite = stale.with_ai_description("模型后写的描述", ("夜景",), LATER)
+        overwrite = stale.with_ai_understanding(
+            "模型后写的描述",
+            ("夜景",),
+            (0, 10_000, 40_000),
+            LATER,
+        )
         assert overwrite.description_source is DescriptionSource.AI
 
         with pytest.raises(MaterialDescriptionProtected) as captured:
-            await repository.update_description(overwrite, OWNER)
+            await repository.update_ai_understanding(overwrite, OWNER)
 
         # The user's words survive, and so does their claim on the field.
         assert await stored_row(database, material_id.uuid) == row_values(
             material_id.uuid,
+            shot_boundaries_ms=[0, 3_200, 15_000],
             ai_description="用户自己写的描述",
             ai_tags=[],
             description_source="user",
@@ -714,12 +735,12 @@ async def test_the_user_may_keep_rewriting_their_own_description(
         material = make_material(material_id)
         await repository.save(material, OWNER)
 
-        await repository.update_description(
+        await repository.update_user_description(
             material.with_user_description("第一次写的"),
             OWNER,
         )
         stored = await repository.get(material_id, OWNER)
-        await repository.update_description(
+        await repository.update_user_description(
             stored.with_user_description("改了一遍"),
             OWNER,
         )
@@ -729,28 +750,31 @@ async def test_the_user_may_keep_rewriting_their_own_description(
         # And a row that is not there is still "not found" rather than
         # "protected", on both branches of the predicate.
         with pytest.raises(MaterialNotFound):
-            await repository.update_description(
+            await repository.update_user_description(
                 make_material(MaterialId.new()).with_user_description("给不存在的素材"),
                 OWNER,
             )
         with pytest.raises(MaterialNotFound):
-            await repository.update_description(make_material(MaterialId.new()), OWNER)
+            await repository.update_ai_understanding(
+                make_material(MaterialId.new()),
+                OWNER,
+            )
     finally:
         await reset_data(database)
         await database.close()
 
 
 @pytest.mark.asyncio
-async def test_update_description_ignores_the_probing_facts_it_is_handed(
+async def test_update_understanding_ignores_unrelated_probing_facts(
     postgresql_url: str,
     alembic_runner: AlembicRunner,
 ) -> None:
     """The controlled part of "controlled update" needs a material that disagrees.
 
     The test above hands over an object whose other fields already match the
-    stored row, so an UPDATE writing all sixteen columns would produce exactly
-    the same row and pass. Verified by mutation: switching the statement to the
-    full column set left that test green.
+        stored row, so an UPDATE writing all sixteen columns would produce exactly
+        the same row and pass. The shot boundaries deliberately differ because
+        they are now one of the five fields this operation is expected to move.
 
     A material carrying the same identifier and different probing facts is what
     tells the two apart. It is not a hypothetical shape either -- an object
@@ -784,10 +808,11 @@ async def test_update_description_ignores_the_probing_facts_it_is_handed(
             description_source=DescriptionSource.AI,
             described_at=LATER,
         )
-        await repository.update_description(disagreeing, OWNER)
+        await repository.update_ai_understanding(disagreeing, OWNER)
 
         assert await stored_row(database, material_id.uuid) == row_values(
             material_id.uuid,
+            shot_boundaries_ms=[],
             ai_description="模型看到的描述",
             ai_tags=["夜景"],
             description_source="ai",
@@ -1050,7 +1075,7 @@ async def test_wrong_credentials_are_refused_without_leaking_the_identity(
         with pytest.raises(MaterialPersistenceUnavailable) as found:
             await repository.find_by_digest(DIGEST_ONE, OWNER)
         with pytest.raises(MaterialPersistenceUnavailable) as updated:
-            await repository.update_description(material, OWNER)
+            await repository.update_ai_understanding(material, OWNER)
         for captured in (loaded, saved, found, updated):
             rendered = "".join(traceback.format_exception(captured.value))
             assert role not in rendered

@@ -69,16 +69,11 @@ class MaterialDescriptionProtected(_MaterialPersistenceFailure):
     2. **Do not fold it into `MaterialNotFound`.** That one means the material
        is gone, so stop. This one means the material is fine and this one field
        is no longer yours to write.
-    3. **The absence of this exception does not mean the description was
-       stored.** `Material.with_ai_description` returns the material *unchanged*
-       when the snapshot already says `USER`, and persisting that unchanged
-       object succeeds -- correctly, since the user is rewriting their own
-       field. So the same underlying fact ("the user owns this") reaches the
-       caller two different ways: as this exception when the snapshot was stale,
-       and as a silent success when it was current. A caller that infers "no
-       exception, therefore my description was written" will count a discarded
-       description as a stored one. Compare what came back, or check
-       `description_source`, rather than reading success as proof of a write.
+    3. **Discard the complete understanding result.** Description, tags,
+       timestamp and shot boundaries come from one model response. A current
+       `USER` snapshot is refused before persistence; a stale AI snapshot is
+       refused by the SQL predicate. Neither path may keep the new shot
+       boundaries while discarding only the model text.
 
     The window between loading a `Material` and writing its description spans a
     model call, so this is a real interleaving rather than a theoretical one --
@@ -121,7 +116,13 @@ class MaterialRepository(Protocol):
         installation_id: InstallationId,
     ) -> Material | None: ...
 
-    async def update_description(
+    async def update_user_description(
+        self,
+        material: Material,
+        installation_id: InstallationId,
+    ) -> None: ...
+
+    async def update_ai_understanding(
         self,
         material: Material,
         installation_id: InstallationId,
@@ -129,7 +130,7 @@ class MaterialRepository(Protocol):
 
 
 class MaterialService:
-    """Installation-scoped material registration, lookup and description writes."""
+    """Installation-scoped material registration, lookup and understanding writes."""
 
     def __init__(self, *, repository: MaterialRepository) -> None:
         self._repository = repository
@@ -184,7 +185,7 @@ class MaterialService:
             raise MaterialNotFound
         return material
 
-    async def update_description(
+    async def update_understanding(
         self,
         *,
         installation_id: InstallationId,
@@ -192,6 +193,7 @@ class MaterialService:
         source: DescriptionSource,
         description: str,
         tags: tuple[str, ...],
+        shot_boundaries_ms: tuple[int, ...] | None,
         described_at: datetime | None,
     ) -> Material:
         owner = self._require_installation(installation_id)
@@ -202,16 +204,26 @@ class MaterialService:
             material_id=material_id,
         )
         if source is DescriptionSource.USER:
-            if tags or described_at is not None:
+            if tags or shot_boundaries_ms is not None or described_at is not None:
                 raise InvalidMaterialQuery
             changed = current.with_user_description(description)
+            await self._repository.update_user_description(changed, owner)
         else:
-            if described_at is None:
+            if (
+                described_at is None
+                or not isinstance(shot_boundaries_ms, tuple)
+                or not shot_boundaries_ms
+            ):
                 raise InvalidMaterialQuery
             if current.description_source is DescriptionSource.USER:
                 raise MaterialDescriptionProtected
-            changed = current.with_ai_description(description, tags, described_at)
-        await self._repository.update_description(changed, owner)
+            changed = current.with_ai_understanding(
+                description,
+                tags,
+                shot_boundaries_ms,
+                described_at,
+            )
+            await self._repository.update_ai_understanding(changed, owner)
         stored = await self._repository.get(changed.material_id, owner)
         if source is DescriptionSource.AI and stored.description_source is DescriptionSource.USER:
             raise MaterialDescriptionProtected

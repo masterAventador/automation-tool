@@ -167,6 +167,11 @@ class AiMaterialDescriptionRequest(BaseModel):
         strict=True,
     )
     tags: list[str] = Field(max_length=MAX_TAGS)
+    shot_boundaries_ms: list[StrictInt] = Field(
+        alias="shotBoundariesMs",
+        min_length=1,
+        max_length=MAX_SHOT_BOUNDARIES,
+    )
     described_at: StrictAwareDatetime = Field(alias="describedAt")
 
 
@@ -327,17 +332,20 @@ async def update_editing_material_description(
         if isinstance(payload, UserMaterialDescriptionRequest):
             source = DescriptionSource.USER
             tags: tuple[str, ...] = ()
+            shot_boundaries_ms = None
             described_at = None
         else:
             source = DescriptionSource.AI
             tags = tuple(payload.tags)
+            shot_boundaries_ms = tuple(payload.shot_boundaries_ms)
             described_at = payload.described_at
-        material = await service.update_description(
+        material = await service.update_understanding(
             installation_id=installation_id,
             material_id=material_id,
             source=source,
             description=payload.description,
             tags=tags,
+            shot_boundaries_ms=shot_boundaries_ms,
             described_at=described_at,
         )
     except (InvalidMaterialModel, InvalidMaterialQuery):

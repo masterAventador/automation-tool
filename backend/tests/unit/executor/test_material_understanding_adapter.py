@@ -138,6 +138,8 @@ def test_request_body_follows_the_thinking_configuration(
     assert private_path not in encoded
     assert "timestamp_ms=0" in encoded
     assert "is_scene_cut=true" in encoded
+    assert "startMs" in encoded
+    assert "endMs" in encoded
     image_part = body["messages"][1]["content"][2]
     assert image_part == {
         "type": "image_url",

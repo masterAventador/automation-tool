@@ -195,6 +195,15 @@
             "title": "Description",
             "type": "string"
           },
+          "shotBoundariesMs": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 4096,
+            "minItems": 1,
+            "title": "Shotboundariesms",
+            "type": "array"
+          },
           "source": {
             "const": "ai",
             "title": "Source",
@@ -213,6 +222,7 @@
           "source",
           "description",
           "tags",
+          "shotBoundariesMs",
           "describedAt"
         ],
         "title": "AiMaterialDescriptionRequest",

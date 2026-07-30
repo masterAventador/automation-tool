@@ -216,7 +216,12 @@ def test_repository_has_one_required_installation_scoped_api() -> None:
         "content_digest",
         "installation_id",
     ]
-    assert list(inspect.signature(repository_type.update_description).parameters) == [
+    assert list(inspect.signature(repository_type.update_user_description).parameters) == [
+        "self",
+        "material",
+        "installation_id",
+    ]
+    assert list(inspect.signature(repository_type.update_ai_understanding).parameters) == [
         "self",
         "material",
         "installation_id",
@@ -224,7 +229,7 @@ def test_repository_has_one_required_installation_scoped_api() -> None:
     assert not hasattr(repository_type, "save_for_installation")
     assert not hasattr(repository_type, "get_for_installation")
     assert not hasattr(repository_type, "find_by_digest_for_installation")
-    assert not hasattr(repository_type, "update_description_for_installation")
+    assert not hasattr(repository_type, "update_description")
     assert materials.c.installation_id.nullable is False
 
 
@@ -238,7 +243,7 @@ async def test_repository_refuses_foreign_argument_types() -> None:
         with pytest.raises(MaterialDataRejected):
             await repository.save(cast(Material, object()), installation_id)
         with pytest.raises(MaterialDataRejected):
-            await repository.update_description(cast(Material, object()), installation_id)
+            await repository.update_ai_understanding(cast(Material, object()), installation_id)
         # A bare UUID and a sibling identifier carry exactly the value the column
         # would accept, so the type has to be checked before the statement is
         # built rather than left to the database.
@@ -269,7 +274,7 @@ async def test_repository_refuses_foreign_argument_types() -> None:
                 cast(InstallationId, object()),
             )
         with pytest.raises(MaterialDataRejected):
-            await repository.update_description(
+            await repository.update_ai_understanding(
                 material,
                 cast(InstallationId, object()),
             )
@@ -298,7 +303,7 @@ async def test_an_unreachable_database_is_refused_without_leaking_the_connection
         with pytest.raises(MaterialPersistenceUnavailable) as found:
             await repository.find_by_digest(DIGEST, installation_id)
         with pytest.raises(MaterialPersistenceUnavailable) as updated:
-            await repository.update_description(material, installation_id)
+            await repository.update_ai_understanding(material, installation_id)
         for captured in (loaded, saved, found, updated):
             rendered = "".join(traceback.format_exception(captured.value))
             for token in LEAKED_TOKENS:
@@ -343,7 +348,7 @@ async def test_a_database_error_is_refused_without_leaking_its_message() -> None
         with pytest.raises(MaterialPersistenceUnavailable) as found:
             await repository.find_by_digest(DIGEST, installation_id)
         with pytest.raises(MaterialPersistenceUnavailable) as updated:
-            await repository.update_description(material, installation_id)
+            await repository.update_ai_understanding(material, installation_id)
         for captured in (loaded, saved, found, updated):
             assert "le05_leaked_database_failure" not in "".join(
                 traceback.format_exception(captured.value)
@@ -391,7 +396,7 @@ async def test_an_authentication_failure_is_refused_without_leaking_the_role() -
         with pytest.raises(MaterialPersistenceUnavailable) as found:
             await repository.find_by_digest(DIGEST, installation_id)
         with pytest.raises(MaterialPersistenceUnavailable) as updated:
-            await repository.update_description(material, installation_id)
+            await repository.update_ai_understanding(material, installation_id)
         for captured in (loaded, saved, found, updated):
             rendered = "".join(traceback.format_exception(captured.value))
             assert "le05_leaked_user" not in rendered
@@ -517,10 +522,10 @@ async def test_updating_a_description_that_matched_no_row_is_not_found() -> None
         installation_id = InstallationId.new()
         object.__setattr__(database, "_sessions", StubSessions(None, rowcount=0))
         with pytest.raises(MaterialNotFound):
-            await repository.update_description(make_material(), installation_id)
+            await repository.update_ai_understanding(make_material(), installation_id)
 
         object.__setattr__(database, "_sessions", StubSessions(None, rowcount=1))
-        await repository.update_description(make_material(), installation_id)
+        await repository.update_ai_understanding(make_material(), installation_id)
     finally:
         await database.close()
 
@@ -553,7 +558,7 @@ async def test_a_row_the_predicate_refused_is_told_apart_from_a_row_that_is_gone
             StubSessions(hydration_row(description_source="user"), rowcount=0),
         )
         with pytest.raises(MaterialDescriptionProtected):
-            await repository.update_description(make_material(), InstallationId.new())
+            await repository.update_ai_understanding(make_material(), InstallationId.new())
     finally:
         await database.close()
 
@@ -572,7 +577,7 @@ async def test_a_user_written_description_is_not_sent_through_the_predicate() ->
     try:
         repository = repository_module.SqlAlchemyMaterialRepository(database)
         object.__setattr__(database, "_sessions", StubSessions(None, rowcount=1))
-        await repository.update_description(
+        await repository.update_user_description(
             make_material().with_user_description("用户写的"),
             InstallationId.new(),
         )

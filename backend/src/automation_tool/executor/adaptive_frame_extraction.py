@@ -110,6 +110,14 @@ class _OutputWorkspace:
             )
         return os.open(self._current_path() / filename, flags, 0o600)
 
+    def open_read_only(self, filename: str) -> int:
+        flags = os.O_RDONLY
+        flags |= cast(int, getattr(os, "O_BINARY", 0))
+        flags |= cast(int, getattr(os, "O_NOFOLLOW", 0))
+        if self.directory_descriptor is not None:
+            return os.open(filename, flags, dir_fd=self.directory_descriptor)
+        return os.open(self._current_path() / filename, flags)
+
     def stat_frame(self, filename: str) -> os.stat_result:
         if self.directory_descriptor is not None:
             return os.stat(
@@ -170,6 +178,114 @@ def extract_adaptive_frames(
     finally:
         with suppress(OSError):
             workspace.close()
+
+
+def read_adaptive_frame_artifacts(
+    output_directory: Path,
+    artifacts: tuple[AdaptiveFrameArtifact, ...],
+    *,
+    duration_ms: int,
+) -> tuple[ExtractedFrame, ...] | AdaptiveFrameRejection:
+    """Reopen one LE-08 batch without trusting its path-shaped metadata."""
+    if (
+        not isinstance(output_directory, Path)
+        or not isinstance(artifacts, tuple)
+        or not 1 <= len(artifacts) <= 60
+        or type(duration_ms) is not int
+        or not 1 <= duration_ms <= 14_400_000
+    ):
+        return AdaptiveFrameRejection.WORKSPACE_UNUSABLE
+    workspace = _open_output_workspace(output_directory)
+    if workspace is None:
+        return AdaptiveFrameRejection.WORKSPACE_UNUSABLE
+    frames: list[ExtractedFrame] = []
+    total_bytes = 0
+    previous_timestamp = -1
+    try:
+        for index, artifact in enumerate(artifacts, start=1):
+            expected_filename = (
+                f"{_FINAL_OUTPUT_PREFIX}{index:0{_FINAL_OUTPUT_DIGITS}d}{_FINAL_OUTPUT_SUFFIX}"
+            )
+            if (
+                not isinstance(artifact, AdaptiveFrameArtifact)
+                or artifact.filename != expected_filename
+                or type(artifact.timestamp_ms) is not int
+                or not previous_timestamp < artifact.timestamp_ms < duration_ms
+                or type(artifact.is_scene_cut) is not bool
+                or type(artifact.byte_size) is not int
+                or artifact.byte_size < 4
+            ):
+                return AdaptiveFrameRejection.WORKSPACE_UNUSABLE
+            total_bytes += artifact.byte_size
+            if total_bytes > _SCENE_OUTPUT_LIMIT_BYTES:
+                return AdaptiveFrameRejection.OUTPUT_LIMIT_EXCEEDED
+            workspace.revalidate_path()
+            payload = _read_final_frame(workspace, artifact)
+            workspace.revalidate_path()
+            if payload is None:
+                return AdaptiveFrameRejection.WORKSPACE_UNUSABLE
+            frames.append(
+                ExtractedFrame(
+                    timestamp_ms=artifact.timestamp_ms,
+                    is_scene_cut=artifact.is_scene_cut,
+                    jpeg_bytes=payload,
+                )
+            )
+            previous_timestamp = artifact.timestamp_ms
+        return tuple(frames)
+    except (OSError, TypeError, ValueError):
+        return AdaptiveFrameRejection.WORKSPACE_UNUSABLE
+    finally:
+        with suppress(OSError):
+            workspace.close()
+
+
+def _read_final_frame(
+    workspace: _OutputWorkspace,
+    artifact: AdaptiveFrameArtifact,
+) -> bytes | None:
+    descriptor: int | None = None
+    try:
+        descriptor = workspace.open_read_only(artifact.filename)
+        before = os.fstat(descriptor)
+        _validate_written_frame(before, artifact.byte_size)
+        remaining = artifact.byte_size
+        chunks: list[bytes] = []
+        while remaining:
+            chunk = os.read(descriptor, min(remaining, 1024 * 1024))
+            if not chunk:
+                return None
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            return None
+        after = os.fstat(descriptor)
+        if _frame_stat_identity(before) != _frame_stat_identity(after):
+            return None
+        current = workspace.stat_frame(artifact.filename)
+        _validate_written_frame(current, artifact.byte_size)
+        if _frame_stat_identity(after) != _frame_stat_identity(current):
+            return None
+        payload = b"".join(chunks)
+        if not payload.startswith(b"\xff\xd8") or not payload.endswith(b"\xff\xd9"):
+            return None
+        return payload
+    finally:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+
+
+def _frame_stat_identity(metadata: os.stat_result) -> tuple[int, ...]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_nlink,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
 
 
 def extract_scene_frames(

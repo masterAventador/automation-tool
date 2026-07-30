@@ -83,7 +83,7 @@ def _hydrate(row: RowMapping) -> Material:
 
     This is the one place in the codebase outside `material.py` that is allowed
     to build a `Material` from parts, and a structural test enforces that by
-    name -- everything else has to go through `with_ai_description` or
+    name -- everything else has to go through `with_ai_understanding` or
     `with_user_description`, so that a describe pass cannot overwrite what a
     person wrote. Reconstituting a stored row is not that operation.
 
@@ -142,12 +142,7 @@ def _column_values(material: Material) -> dict[str, object]:
 
 
 def _description_values(material: Material) -> dict[str, object]:
-    """The four columns a describe pass is allowed to move, and no others.
-
-    Shared with `update_description` so that "which columns are the description"
-    is written once: a fifth column added to one and not the other would be
-    stored on insert and silently dropped on every update after it.
-    """
+    """The four columns a user description write is allowed to move."""
     return {
         "ai_description": material.ai_description,
         "ai_tags": list(material.ai_tags),
@@ -156,8 +151,16 @@ def _description_values(material: Material) -> dict[str, object]:
     }
 
 
+def _understanding_values(material: Material) -> dict[str, object]:
+    """The complete AI result, persisted by one guarded UPDATE."""
+    return {
+        **_description_values(material),
+        "shot_boundaries_ms": list(material.shot_boundaries_ms),
+    }
+
+
 class SqlAlchemyMaterialRepository:
-    """Write-once material rows, apart from the four description columns."""
+    """Write-once material rows, apart from guarded understanding fields."""
 
     def __init__(self, database: Database) -> None:
         if not isinstance(database, Database):
@@ -240,14 +243,33 @@ class SqlAlchemyMaterialRepository:
         )
         return None if row is None else _hydrate(row)
 
-    async def update_description(
+    async def update_user_description(
         self,
         material: Material,
         installation_id: InstallationId,
     ) -> None:
-        """Rewrite the four description columns, unless a person owns them.
+        """Rewrite only the four description columns for a person."""
+        if (
+            not isinstance(material, Material)
+            or material.description_source is not DescriptionSource.USER
+            or not isinstance(installation_id, InstallationId)
+        ):
+            raise MaterialDataRejected
+        await self._update_understanding_fields(
+            material,
+            installation_id,
+            values=_description_values(material),
+            protect_user=False,
+        )
 
-        `Material.with_ai_description` returns the material unchanged when the
+    async def update_ai_understanding(
+        self,
+        material: Material,
+        installation_id: InstallationId,
+    ) -> None:
+        """Atomically rewrite the complete AI result unless a person owns it.
+
+        `Material.with_ai_understanding` returns the material unchanged when the
         description came from the user -- but it decides that from the snapshot
         in the caller's hand, and a snapshot goes stale. Load a material while
         its description is still the model's, let the user write theirs, and the
@@ -260,11 +282,6 @@ class SqlAlchemyMaterialRepository:
         row and then deciding has the identical defect one level down, where two
         describe passes both read `ai` and both proceed. Only the database sees
         one statement at a time.
-
-        The predicate is attached for an AI-sourced write and left off for a
-        user-sourced one -- a person rewriting their own description must always
-        be allowed, and applying the guard to every update is the obvious way to
-        over-fix this.
 
         `rowcount == 0` then has two meanings, and the follow-up read is a
         best-effort attempt to say which. It is **not** the second half of the
@@ -287,18 +304,37 @@ class SqlAlchemyMaterialRepository:
         stop retrying a material that exists, and leave LE-06 answering 404
         where 409 is correct.
 
-        There is no `IntegrityError` clause, unlike `save`: none of these four
+        There is no `IntegrityError` clause, unlike `save`: none of these five
         columns carries a constraint that an UPDATE could violate.
         `SQLAlchemyError` would catch one anyway if that ever stopped being true.
         """
-        if not isinstance(material, Material) or not isinstance(installation_id, InstallationId):
+        if (
+            not isinstance(material, Material)
+            or material.description_source is not DescriptionSource.AI
+            or not isinstance(installation_id, InstallationId)
+        ):
             raise MaterialDataRejected
+        await self._update_understanding_fields(
+            material,
+            installation_id,
+            values=_understanding_values(material),
+            protect_user=True,
+        )
+
+    async def _update_understanding_fields(
+        self,
+        material: Material,
+        installation_id: InstallationId,
+        *,
+        values: dict[str, object],
+        protect_user: bool,
+    ) -> None:
         condition = and_(
             materials.c.material_id == material.material_id.uuid,
             materials.c.installation_id == installation_id.uuid,
         )
-        statement = update(materials).where(condition).values(**_description_values(material))
-        if material.description_source is DescriptionSource.AI:
+        statement = update(materials).where(condition).values(**values)
+        if protect_user:
             statement = statement.where(
                 materials.c.description_source != DescriptionSource.USER.value
             )
@@ -325,7 +361,9 @@ class SqlAlchemyMaterialRepository:
             return
         if stored is None:
             raise MaterialNotFound
-        raise MaterialDescriptionProtected
+        if protect_user:
+            raise MaterialDescriptionProtected
+        raise MaterialPersistenceUnavailable
 
     async def _row(self, condition: ColumnElement[bool]) -> RowMapping | None:
         """Read at most one row, with hydration deliberately left to the caller.

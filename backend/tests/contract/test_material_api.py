@@ -105,7 +105,17 @@ class MemoryMaterialRepository:
             None,
         )
 
-    async def update_description(
+    async def update_user_description(
+        self,
+        material: Material,
+        installation_id: InstallationId,
+    ) -> None:
+        if self.failure is not None:
+            raise self.failure
+        await self.get(material.material_id, installation_id)
+        self.materials[material.material_id] = (installation_id, material)
+
+    async def update_ai_understanding(
         self,
         material: Material,
         installation_id: InstallationId,
@@ -113,10 +123,7 @@ class MemoryMaterialRepository:
         if self.failure is not None:
             raise self.failure
         stored = await self.get(material.material_id, installation_id)
-        if (
-            material.description_source is DescriptionSource.AI
-            and stored.description_source is DescriptionSource.USER
-        ):
+        if stored.description_source is DescriptionSource.USER:
             raise MaterialDescriptionProtected
         self.materials[material.material_id] = (installation_id, material)
 
@@ -273,6 +280,7 @@ def test_user_description_roundtrip_permanently_protects_against_ai() -> None:
             "source": "ai",
             "description": "模型试图覆盖",
             "tags": ["不应写入"],
+            "shotBoundariesMs": [0, 12_000, 30_000],
             "describedAt": "2026-07-30T09:10:11.654321Z",
         },
     )
@@ -282,6 +290,7 @@ def test_user_description_roundtrip_permanently_protects_against_ai() -> None:
     stored = next(iter(repository.materials.values()))[1]
     assert stored.ai_description == "用户自己写的露营记录"
     assert stored.description_source is DescriptionSource.USER
+    assert stored.shot_boundaries_ms == (0, 3_200, 15_000)
     assert "模型试图覆盖" not in repr(stored)
 
 
@@ -296,6 +305,7 @@ def test_ai_description_roundtrip_returns_the_actual_stored_snapshot() -> None:
             "source": "ai",
             "description": "模型更新后的露营描述",
             "tags": ["更新", "露营"],
+            "shotBoundariesMs": [0, 8_000, 27_000],
             "describedAt": "2026-07-30T09:10:11.654321Z",
         },
     )
@@ -303,6 +313,7 @@ def test_ai_description_roundtrip_returns_the_actual_stored_snapshot() -> None:
     assert ai_write.status_code == 200
     assert ai_write.json()["aiDescription"] == "模型更新后的露营描述"
     assert ai_write.json()["aiTags"] == ["更新", "露营"]
+    assert ai_write.json()["shotBoundariesMs"] == [0, 8_000, 27_000]
     assert ai_write.json()["descriptionSource"] == "ai"
     assert ai_write.json()["describedAt"] == "2026-07-30T09:10:11.654321Z"
 
@@ -394,6 +405,16 @@ def test_invalid_description_union_and_queries_fail_closed() -> None:
         client.put(
             f"/api/v1/editing-materials/{MATERIAL_ID}/description",
             json={"source": "ai", "description": "模型文本"},
+        ),
+        client.put(
+            f"/api/v1/editing-materials/{MATERIAL_ID}/description",
+            json={
+                "source": "ai",
+                "description": "模型文本",
+                "tags": [],
+                "shotBoundariesMs": [],
+                "describedAt": "2026-07-30T09:10:11.654321Z",
+            },
         ),
         client.put(
             f"/api/v1/editing-materials/{MATERIAL_ID}/description",
@@ -551,30 +572,33 @@ async def test_service_rejects_foreign_types_before_the_repository() -> None:
             content_digest="not-a-digest",
         )
     with pytest.raises(InvalidMaterialQuery):
-        await service.update_description(
+        await service.update_understanding(
             installation_id=INSTALLATION_ID,
             material_id=MATERIAL_ID,
             source=foreign,  # type: ignore[arg-type]
             description="不会写入",
             tags=(),
+            shot_boundaries_ms=None,
             described_at=None,
         )
     with pytest.raises(InvalidMaterialQuery):
-        await service.update_description(
+        await service.update_understanding(
             installation_id=INSTALLATION_ID,
             material_id=MATERIAL_ID,
             source=DescriptionSource.USER,
             description="不会写入",
             tags=("user 不接受标签",),
+            shot_boundaries_ms=None,
             described_at=None,
         )
     with pytest.raises(InvalidMaterialQuery):
-        await service.update_description(
+        await service.update_understanding(
             installation_id=INSTALLATION_ID,
             material_id=MATERIAL_ID,
             source=DescriptionSource.AI,
             description="不会写入",
             tags=(),
+            shot_boundaries_ms=(),
             described_at=None,
         )
 
@@ -582,14 +606,15 @@ async def test_service_rejects_foreign_types_before_the_repository() -> None:
 @pytest.mark.asyncio
 async def test_service_detects_a_user_write_that_wins_before_the_return_read() -> None:
     class ConcurrentUserRepository(MemoryMaterialRepository):
-        async def update_description(
+        async def update_ai_understanding(
             self,
             material: Material,
             installation_id: InstallationId,
         ) -> None:
+            stored = await self.get(material.material_id, installation_id)
             self.materials[material.material_id] = (
                 installation_id,
-                material.with_user_description("并发写入的用户描述"),
+                stored.with_user_description("并发写入的用户描述"),
             )
 
     repository = ConcurrentUserRepository()
@@ -598,15 +623,21 @@ async def test_service_detects_a_user_write_that_wins_before_the_return_read() -
     service = MaterialService(repository=repository)
 
     with pytest.raises(MaterialDescriptionProtected):
-        await service.update_description(
+        await service.update_understanding(
             installation_id=INSTALLATION_ID,
             material_id=MATERIAL_ID,
             source=DescriptionSource.AI,
             description="模型稍早写入的描述",
             tags=("模型",),
+            shot_boundaries_ms=(0, 8_000),
             described_at=NOW,
         )
     assert repository.materials[material.material_id][1].ai_description == "并发写入的用户描述"
+    assert repository.materials[material.material_id][1].shot_boundaries_ms == (
+        0,
+        3_200,
+        15_000,
+    )
 
 
 def test_application_factory_wires_the_real_repository() -> None:

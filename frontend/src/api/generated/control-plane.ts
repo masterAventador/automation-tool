@@ -790,6 +790,8 @@ export interface components {
             describedAt: string;
             /** Description */
             description: string;
+            /** Shotboundariesms */
+            shotBoundariesMs: number[];
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}

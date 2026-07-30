@@ -260,18 +260,20 @@ class Material:
         if self.description_source is DescriptionSource.USER and self.ai_tags:
             _reject()
 
-    def with_ai_description(
+    def with_ai_understanding(
         self,
         description: str,
         tags: tuple[str, ...],
+        shot_boundaries_ms: tuple[int, ...],
         described_at: datetime,
     ) -> Material:
-        """Record what the model saw — unless a person has already written it.
+        """Record the model's complete understanding unless a person owns it.
 
         Returns self unchanged when the description came from the user. The
         check lives here rather than in the caller because every future
-        describe pass would otherwise have to remember it, and one that forgets
-        silently destroys the user's edit.
+        understanding pass would otherwise have to remember it. Description,
+        tags, timestamp and shot boundaries move together so callers cannot
+        persist a torn model result.
         """
         if self.description_source is DescriptionSource.USER:
             return self
@@ -279,6 +281,7 @@ class Material:
             self,
             ai_description=description,
             ai_tags=tags,
+            shot_boundaries_ms=shot_boundaries_ms,
             described_at=described_at,
             description_source=DescriptionSource.AI,
         )
@@ -287,7 +290,7 @@ class Material:
         """Record what a person typed, and mark the field theirs from now on.
 
         This irreversibly drops any existing `ai_tags`: `description_source`
-        becomes `USER`, a terminal state, so `with_ai_description` will never
+        becomes `USER`, a terminal state, so `with_ai_understanding` will never
         run again to regenerate them. The dropped tags described the text
         that just got replaced, so keeping them would misattribute stale
         classification data to the new, human-written description.

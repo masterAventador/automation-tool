@@ -1,6 +1,6 @@
 """`Material`'s description protection must not be reachable around the side.
 
-`Material.with_ai_description` returns `self` unchanged when a person already
+`Material.with_ai_understanding` returns `self` unchanged when a person already
 wrote the description. That rule lives in one method precisely so that no future
 describe pass has to remember it -- and one that forgets destroys a user's own
 words with model output, silently and irreversibly.
@@ -420,8 +420,8 @@ def touch(record, status):
     return replace(record, status=status)
 """,
     "the-methods-the-rule-exists-to-funnel-callers-into": """
-def describe(existing, text, tags, at):
-    return existing.with_ai_description(text, tags, at)
+def describe(existing, text, tags, boundaries, at):
+    return existing.with_ai_understanding(text, tags, boundaries, at)
 """,
 }
 

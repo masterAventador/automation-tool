@@ -310,18 +310,56 @@ def test_a_fresh_material_has_no_description() -> None:
 
 def test_ai_description_is_written_onto_an_undescribed_material() -> None:
     stamped = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
-    material = _video().with_ai_description("室内一个人在喝水", ("室内", "人物"), stamped)
+    material = _video().with_ai_understanding(
+        "室内一个人在喝水",
+        ("室内", "人物"),
+        (),
+        stamped,
+    )
     assert material.ai_description == "室内一个人在喝水"
     assert material.ai_tags == ("室内", "人物")
     assert material.described_at == stamped
     assert material.description_source is DescriptionSource.AI
 
 
+def test_ai_understanding_moves_description_and_shot_boundaries_together() -> None:
+    stamped = datetime(2026, 7, 28, 10, 30, tzinfo=UTC)
+
+    material = _video(shot_boundaries_ms=(0, 4_000)).with_ai_understanding(
+        "模型重新理解后的说明",
+        ("室内", "转场"),
+        (0, 6_000, 12_000),
+        stamped,
+    )
+
+    assert material.ai_description == "模型重新理解后的说明"
+    assert material.ai_tags == ("室内", "转场")
+    assert material.shot_boundaries_ms == (0, 6_000, 12_000)
+    assert material.described_at == stamped
+    assert material.description_source is DescriptionSource.AI
+
+
+def test_user_owned_description_rejects_the_entire_ai_understanding() -> None:
+    stamped = datetime(2026, 7, 28, 10, 30, tzinfo=UTC)
+    edited = _video(shot_boundaries_ms=(0, 4_000)).with_user_description("用户写的说明")
+
+    unchanged = edited.with_ai_understanding(
+        "模型试图覆盖",
+        ("不应写入",),
+        (0, 8_000),
+        stamped,
+    )
+
+    assert unchanged is edited
+    assert unchanged.ai_description == "用户写的说明"
+    assert unchanged.shot_boundaries_ms == (0, 4_000)
+
+
 def test_ai_may_redescribe_material_it_described_itself() -> None:
     first = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
     second = datetime(2026, 7, 28, 11, 0, tzinfo=UTC)
-    material = _video().with_ai_description("第一版", ("旧",), first)
-    updated = material.with_ai_description("第二版", ("新",), second)
+    material = _video().with_ai_understanding("第一版", ("旧",), (), first)
+    updated = material.with_ai_understanding("第二版", ("新",), (), second)
     assert updated.ai_description == "第二版"
     assert updated.described_at == second
 
@@ -335,7 +373,7 @@ def test_user_description_switches_the_source() -> None:
 def test_ai_cannot_overwrite_a_user_written_description() -> None:
     stamped = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
     edited = _video().with_user_description("我自己写的说明")
-    unchanged = edited.with_ai_description("AI 想改成这样", ("模型",), stamped)
+    unchanged = edited.with_ai_understanding("AI 想改成这样", ("模型",), (0,), stamped)
     assert unchanged is edited
     assert unchanged.ai_description == "我自己写的说明"
     assert unchanged.description_source is DescriptionSource.USER
@@ -350,20 +388,20 @@ def test_user_may_rewrite_their_own_description() -> None:
 
 def test_described_at_must_be_timezone_aware() -> None:
     with pytest.raises(InvalidMaterialModel):
-        _video().with_ai_description("说明", (), datetime(2026, 7, 28, 10, 0))
+        _video().with_ai_understanding("说明", (), (), datetime(2026, 7, 28, 10, 0))
 
 
 @pytest.mark.parametrize("tags", [("",), (" 前后有空格 ",), ("x" * (MAX_TAG_CHARACTERS + 1),)])
 def test_tags_are_validated(tags: tuple[str, ...]) -> None:
     stamped = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
     with pytest.raises(InvalidMaterialModel):
-        _video().with_ai_description("说明", tags, stamped)
+        _video().with_ai_understanding("说明", tags, (), stamped)
 
 
 def test_tags_must_be_unique() -> None:
     stamped = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
     with pytest.raises(InvalidMaterialModel):
-        _video().with_ai_description("说明", ("室内", "室内"), stamped)
+        _video().with_ai_understanding("说明", ("室内", "室内"), (), stamped)
 
 
 def test_ai_description_without_a_timestamp_is_rejected() -> None:
@@ -383,7 +421,7 @@ def test_user_description_must_not_carry_an_ai_timestamp() -> None:
 
 def test_user_description_clears_any_existing_ai_tags() -> None:
     stamped = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
-    described = _video().with_ai_description("说明", ("室内", "人物"), stamped)
+    described = _video().with_ai_understanding("说明", ("室内", "人物"), (), stamped)
     edited = described.with_user_description("我自己写的说明")
     assert edited.ai_tags == ()
 
