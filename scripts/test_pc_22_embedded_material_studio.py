@@ -31,6 +31,7 @@ def forbid(text: str, marker: str, source: Path) -> None:
 
 
 def main() -> int:
+    executed_checks = 0
     rust = RUST.read_text(encoding="utf-8")
     commands = COMMANDS.read_text(encoding="utf-8")
     studio = STUDIO.read_text(encoding="utf-8")
@@ -48,8 +49,10 @@ def main() -> int:
         "automation-tool-im05-probe-ready",
     ):
         require(rust, marker, RUST)
+        executed_checks += 1
     for marker in ("WebviewWindowBuilder", "WindowEvent", "WINDOW_THEME", ".set_focus()"):
         forbid(rust, marker, RUST)
+        executed_checks += 1
 
     for command in (
         "open_material_video_studio",
@@ -58,12 +61,14 @@ def main() -> int:
     ):
         require(commands, command, COMMANDS)
         require(gateway, command, GATEWAY)
+        executed_checks += 2
     for acceptance_command in (
         "exercise_material_video_studio_for_acceptance",
         "inspect_material_video_studio_exercise_for_acceptance",
         "inspect_material_video_studio_cleanup_for_acceptance",
     ):
         require(commands, acceptance_command, COMMANDS)
+        executed_checks += 1
 
     for dead_branch in (
         "OPEN_ERRORS",
@@ -77,12 +82,15 @@ def main() -> int:
         "独立完整界面",
     ):
         forbid(studio, dead_branch, STUDIO)
+        executed_checks += 1
 
     require(studio, 'aria-label="智能素材成片完整制作界面"', STUDIO)
     require(spec, "openMaterialVideoStudio", SPEC)
     require(spec, "browser.tauri.listWindows()", SPEC)
+    executed_checks += 3
 
     print("PC-22 embedded material studio contract passed")
+    print(f"executed checks: {executed_checks}")
     return 0
 
 

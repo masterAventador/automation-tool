@@ -23,7 +23,8 @@ from desktop_e2e_prerequisites import (
     startup_gate_environment,
     terminate_app_process_tree,
 )
-from run_d6_10_acceptance import executor_session, seed_healthy_platform, start_executor
+from d6_preview_executor import executor_session, start_executor
+from run_d6_10_acceptance import seed_healthy_platform
 from run_i2_13_acceptance import require_port_closed
 from run_t3_06_acceptance import (
     BACKEND_ROOT,
@@ -337,9 +338,13 @@ def main() -> None:
         )
         asyncio.run(seed_healthy_platform(database_url, installation_id))
         executor_stop, executor_thread, executor_failures = start_executor(
+            control_plane_port=CONTROL_PLANE_PORT,
             private_app_data=private_app_data,
             installation_id=installation_id,
-            session_token=executor_session(credential),
+            session_token=executor_session(
+                control_plane_port=CONTROL_PLANE_PORT,
+                credential=credential,
+            ),
         )
         try:
             app_exit = app_process.wait(timeout=180)
