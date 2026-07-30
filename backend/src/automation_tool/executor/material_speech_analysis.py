@@ -6,7 +6,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Final, NoReturn, Protocol, runtime_checkable
 
-from automation_tool.executor.material_probe import MaterialFacts
+from automation_tool.executor.material_probe import MAX_MATERIAL_DURATION_MS, MaterialFacts
 
 MAX_SPEECH_SEGMENTS: Final = 4_096
 MAX_TRANSCRIPT_CHARACTERS: Final = 100_000
@@ -88,6 +88,13 @@ def analyze_material_speech(
     if (
         type(facts) is not MaterialFacts
         or type(facts.has_audio) is not bool
+        or (
+            facts.duration_ms is not None
+            and (
+                type(facts.duration_ms) is not int
+                or not 1 <= facts.duration_ms <= MAX_MATERIAL_DURATION_MS
+            )
+        )
         or not isinstance(audible_analyzer_factory, AudibleSpeechAnalyzerFactory)
     ):
         _reject()

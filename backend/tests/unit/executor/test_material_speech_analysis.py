@@ -6,7 +6,11 @@ from dataclasses import replace
 
 import pytest
 
-from automation_tool.executor.material_probe import MaterialFacts, ProbedMaterialKind
+from automation_tool.executor.material_probe import (
+    MAX_MATERIAL_DURATION_MS,
+    MaterialFacts,
+    ProbedMaterialKind,
+)
 from automation_tool.executor.material_speech_analysis import (
     MaterialSpeechAnalysis,
     MaterialSpeechRejected,
@@ -93,7 +97,14 @@ def test_an_audible_material_enters_the_lower_funnel_once() -> None:
     [
         None,
         object(),
-        replace(_facts(has_audio=True), has_audio=1),
+        replace(_facts(has_audio=True), has_audio=1),  # type: ignore[arg-type]
+        replace(_facts(has_audio=True), duration_ms="9000"),  # type: ignore[arg-type]
+        replace(_facts(has_audio=True), duration_ms=True),
+        replace(_facts(has_audio=True), duration_ms=0),
+        replace(
+            _facts(has_audio=True),
+            duration_ms=MAX_MATERIAL_DURATION_MS + 1,
+        ),
     ],
 )
 def test_invalid_probe_facts_are_rejected_before_the_lower_funnel(
