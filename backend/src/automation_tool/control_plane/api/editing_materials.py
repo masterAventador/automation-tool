@@ -53,10 +53,7 @@ _RFC3339_DATETIME_PATTERN = re.compile(
 
 def _require_datetime_wire_string(value: object) -> object:
     """Keep the JSON boundary equal to OpenAPI's RFC 3339 date-time string."""
-    if (
-        not isinstance(value, str)
-        or _RFC3339_DATETIME_PATTERN.fullmatch(value) is None
-    ):
+    if not isinstance(value, str) or _RFC3339_DATETIME_PATTERN.fullmatch(value) is None:
         raise ValueError("Date-time input must be an RFC 3339 string")
     return value
 
