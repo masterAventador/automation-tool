@@ -114,9 +114,13 @@ def extract_adaptive_frame_candidates(
     remaining_bytes = _SCENE_OUTPUT_LIMIT_BYTES - sum(
         len(frame.jpeg_bytes) for frame in scene_frames
     )
+    final_scene_start_ms = scene_frames[-1].timestamp_ms
     deadline = time.monotonic() + _SCENE_TIMEOUT_SECONDS
     supplements: list[ExtractedFrame] = []
     for timestamp_ms in supplement_timestamps:
+        is_tail_target = (
+            timestamp_ms == supplement_timestamps[-1] and timestamp_ms > final_scene_start_ms
+        )
         remaining_seconds = deadline - time.monotonic()
         if remaining_seconds <= 0:
             return AdaptiveFrameRejection.TIMED_OUT
@@ -147,17 +151,16 @@ def extract_adaptive_frame_candidates(
             # EOF. Some containers nevertheless state a duration just beyond their
             # last frame PTS, so only the final planned seek may legitimately find
             # no frame; an earlier seek failure still rejects the material.
-            if (
-                output is AdaptiveFrameRejection.UNDECODABLE
-                and timestamp_ms == supplement_timestamps[-1]
-            ):
+            if output is AdaptiveFrameRejection.UNDECODABLE and is_tail_target:
                 break
             return output
         frame = _parse_supplement_frame(output)
         if isinstance(frame, AdaptiveFrameRejection):
             return frame
         if frame is None:
-            break
+            if is_tail_target:
+                break
+            return AdaptiveFrameRejection.UNDECODABLE
         supplements.append(frame)
         remaining_bytes -= len(frame.jpeg_bytes)
 

@@ -334,7 +334,12 @@ def test_non_tail_supplement_failure_still_rejects_the_material(
     source, approved = approve_source(source)
     outputs: Iterator[BoundedFfmpegOutput | AdaptiveFrameRejection] = iter(
         (
-            BoundedFfmpegOutput(files=(("scene-000000000000.jpg", b"scene"),)),
+            BoundedFfmpegOutput(
+                files=(
+                    ("scene-000000000000.jpg", b"scene"),
+                    ("scene-000000010000.jpg", b"later-scene"),
+                )
+            ),
             AdaptiveFrameRejection.UNDECODABLE,
         )
     )
@@ -348,6 +353,45 @@ def test_non_tail_supplement_failure_still_rejects_the_material(
         adaptive_frame_extraction,
         "_run_bounded_ffmpeg",
         fail_before_the_tail,
+    )
+
+    result = extract_adaptive_frame_candidates(
+        tools,
+        source,
+        approved,
+        duration_ms=11_000,
+    )
+
+    assert result is AdaptiveFrameRejection.UNDECODABLE
+
+
+def test_non_tail_empty_supplement_output_still_rejects_the_material(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ffprobe = tmp_path / "ffprobe"
+    ffmpeg = tmp_path / "ffmpeg"
+    for tool in (ffprobe, ffmpeg):
+        tool.write_text("#!/bin/sh\nexit 0\n", encoding="ascii")
+        tool.chmod(0o700)
+    tools = PackagedMediaTools(ffprobe_path=ffprobe, ffmpeg_path=ffmpeg)
+    source = tmp_path / "damaged.mp4"
+    source.write_bytes(b"media")
+    source, approved = approve_source(source)
+    outputs = iter(
+        (
+            BoundedFfmpegOutput(files=(("scene-000000000000.jpg", b"scene"),)),
+            BoundedFfmpegOutput(files=()),
+        )
+    )
+
+    def return_empty_before_the_tail(*_args: Any, **_kwargs: Any) -> BoundedFfmpegOutput:
+        return next(outputs)
+
+    monkeypatch.setattr(
+        adaptive_frame_extraction,
+        "_run_bounded_ffmpeg",
+        return_empty_before_the_tail,
     )
 
     result = extract_adaptive_frame_candidates(
