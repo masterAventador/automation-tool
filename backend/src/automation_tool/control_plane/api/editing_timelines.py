@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt
 from automation_tool.control_plane.api.editing_errors import translate_editing_error
 from automation_tool.control_plane.api.errors import (
     AppError,
+    ErrorEnvelope,
     TimelineRevisionConflictDetails,
 )
 from automation_tool.control_plane.api.installation_access import (
@@ -51,7 +52,7 @@ router = APIRouter(
 
 
 class EditingTimelineTransition(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid")
 
     kind: TransitionKind
     duration_ms: StrictInt = Field(
@@ -65,7 +66,7 @@ class EditingTimelineTransition(BaseModel):
 
 
 class EditingTimelineClip(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid")
 
     clip_id: str = Field(alias="clipId", min_length=1, max_length=64, strict=True)
     start_ms: StrictInt = Field(alias="startMs", ge=0, le=MAX_TIMELINE_DURATION_MS)
@@ -118,7 +119,7 @@ class EditingTimelineClip(BaseModel):
 
 
 class EditingTimelineTrack(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid")
 
     track_id: str = Field(alias="trackId", min_length=1, max_length=64, strict=True)
     kind: TimelineTrackKind
@@ -136,7 +137,7 @@ class EditingTimelineTrack(BaseModel):
 
 
 class EditingTimelineSaveRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid")
 
     duration_ms: StrictInt = Field(
         alias="durationMs",
@@ -150,7 +151,7 @@ class EditingTimelineSaveRequest(BaseModel):
 
 
 class EditingTimelineResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid")
 
     timeline_id: str = Field(alias="timelineId")
     project_id: str = Field(alias="projectId")
@@ -258,6 +259,12 @@ async def get_editing_project_timeline(
     response_model=EditingTimelineResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="saveEditingProjectTimeline",
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "description": "Timeline revision conflict",
+            "model": ErrorEnvelope,
+        }
+    },
 )
 async def save_editing_project_timeline(
     project_id: str,
@@ -271,13 +278,17 @@ async def save_editing_project_timeline(
 ) -> EditingTimelineResponse:
     response.headers["cache-control"] = "no-store"
     try:
+        tracks = tuple(track.to_domain() for track in payload.tracks)
+    except (InvalidResourceId, InvalidTimelineModel):
+        raise _validation_error() from None
+    try:
         timeline = await service.save(
             project_id=project_id,
             installation_id=installation_id,
             duration_ms=payload.duration_ms,
-            tracks=tuple(track.to_domain() for track in payload.tracks),
+            tracks=tracks,
         )
-    except (InvalidResourceId, InvalidTimelineModel, InvalidTimelineQuery):
+    except InvalidTimelineQuery:
         raise _validation_error() from None
     except TimelineRevisionConflict as error:
         raise AppError(

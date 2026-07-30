@@ -840,6 +840,41 @@ async def test_a_missing_revision_is_not_found_and_a_present_one_hydrates() -> N
 
 
 @pytest.mark.asyncio
+async def test_latest_revision_resolves_the_project_identity_before_revisions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    statements: list[object] = []
+
+    async def capture_row(
+        _repository: repository_module.SqlAlchemyTimelineRepository,
+        statement: object,
+    ) -> None:
+        statements.append(statement)
+        return None
+
+    monkeypatch.setattr(
+        repository_module.SqlAlchemyTimelineRepository,
+        "_row",
+        capture_row,
+    )
+    database = unreachable_database()
+    try:
+        repository = repository_module.SqlAlchemyTimelineRepository(database)
+
+        assert await repository.latest_revision(EditingProjectId.new(), OWNER) is None
+
+        assert len(statements) == 1
+        sql = " ".join(str(statements[0]).split())
+        assert (
+            "JOIN editing_project_timelines ON "
+            "timelines.timeline_id = editing_project_timelines.timeline_id"
+        ) in sql
+        assert "editing_project_timelines.project_id =" in sql
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
 async def test_an_identity_claim_loser_distinguishes_each_database_state() -> None:
     database = unreachable_database()
     try:

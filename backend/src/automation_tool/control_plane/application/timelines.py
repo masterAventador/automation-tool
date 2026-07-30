@@ -29,6 +29,7 @@ from automation_tool.control_plane.domain import (
     EditingProjectId,
     InstallationId,
     InvalidResourceId,
+    InvalidTimelineModel,
     Timeline,
     TimelineId,
     TimelineTrack,
@@ -170,14 +171,17 @@ class TimelineService:
             parsed_project_id,
             installation_id,
         )
-        timeline = Timeline(
-            timeline_id=TimelineId.new() if latest is None else latest.timeline_id,
-            project_id=parsed_project_id,
-            revision=1 if latest is None else latest.revision + 1,
-            duration_ms=duration_ms,
-            tracks=tracks,
-            created_at=self._clock(),
-        )
+        try:
+            timeline = Timeline(
+                timeline_id=TimelineId.new() if latest is None else latest.timeline_id,
+                project_id=parsed_project_id,
+                revision=1 if latest is None else latest.revision + 1,
+                duration_ms=duration_ms,
+                tracks=tracks,
+                created_at=self._clock(),
+            )
+        except InvalidTimelineModel:
+            raise InvalidTimelineQuery from None
         try:
             await self._repository.save(timeline, installation_id)
         except TimelineRevisionAlreadyStored:

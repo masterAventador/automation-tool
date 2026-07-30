@@ -1104,6 +1104,20 @@
         "title": "EditingTimelineTransition",
         "type": "object"
       },
+      "ErrorEnvelope": {
+        "additionalProperties": false,
+        "description": "Stable top-level shape for every Control Plane error.",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/PublicError"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ErrorEnvelope",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1400,6 +1414,68 @@
         ],
         "title": "PlatformSessionState",
         "type": "string"
+      },
+      "PublicError": {
+        "additionalProperties": false,
+        "description": "The only error details allowed to cross the API boundary.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicErrorDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "requestId": {
+            "title": "Requestid",
+            "type": "string"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "retryable",
+          "requestId"
+        ],
+        "title": "PublicError",
+        "type": "object"
+      },
+      "PublicErrorDetails": {
+        "additionalProperties": false,
+        "description": "The complete public context for a timeline revision conflict.",
+        "properties": {
+          "currentRevision": {
+            "minimum": 1.0,
+            "title": "Currentrevision",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "timeline_revision_conflict.v1",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "currentRevision"
+        ],
+        "title": "TimelineRevisionConflictDetails",
+        "type": "object"
       },
       "RegistrationChallengeRequest": {
         "additionalProperties": false,
@@ -3353,6 +3429,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Timeline revision conflict"
           },
           "422": {
             "content": {

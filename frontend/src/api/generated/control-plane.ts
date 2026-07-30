@@ -1036,6 +1036,13 @@ export interface components {
             durationMs: number;
             kind: components["schemas"]["TransitionKind"];
         };
+        /**
+         * ErrorEnvelope
+         * @description Stable top-level shape for every Control Plane error.
+         */
+        ErrorEnvelope: {
+            error: components["schemas"]["PublicError"];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1171,6 +1178,34 @@ export interface components {
          * @enum {string}
          */
         PlatformSessionState: "healthy" | "expired" | "missing" | "risk" | "unknown";
+        /**
+         * PublicError
+         * @description The only error details allowed to cross the API boundary.
+         */
+        PublicError: {
+            /** Code */
+            code: string;
+            details?: components["schemas"]["PublicErrorDetails"] | null;
+            /** Message */
+            message: string;
+            /** Requestid */
+            requestId: string;
+            /** Retryable */
+            retryable: boolean;
+        };
+        /**
+         * TimelineRevisionConflictDetails
+         * @description The complete public context for a timeline revision conflict.
+         */
+        PublicErrorDetails: {
+            /** Currentrevision */
+            currentRevision: number;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "timeline_revision_conflict.v1";
+        };
         /** RegistrationChallengeRequest */
         RegistrationChallengeRequest: {
             /** Devicepublickey */
@@ -2161,6 +2196,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EditingTimelineResponse"];
+                };
+            };
+            /** @description Timeline revision conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Validation Error */

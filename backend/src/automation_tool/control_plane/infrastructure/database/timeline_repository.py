@@ -448,11 +448,15 @@ class SqlAlchemyTimelineRepository:
         row = await self._row(
             select(timelines)
             .join(
+                editing_project_timelines,
+                timelines.c.timeline_id == editing_project_timelines.c.timeline_id,
+            )
+            .join(
                 editing_projects,
-                timelines.c.project_id == editing_projects.c.project_id,
+                editing_project_timelines.c.project_id == editing_projects.c.project_id,
             )
             .where(
-                timelines.c.project_id == project_id.uuid,
+                editing_project_timelines.c.project_id == project_id.uuid,
                 editing_projects.c.installation_id == installation_id.uuid,
             )
             .order_by(timelines.c.revision.desc())

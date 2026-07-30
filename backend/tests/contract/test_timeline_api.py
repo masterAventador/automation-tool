@@ -26,6 +26,7 @@ from automation_tool.control_plane.application.timelines import (
 from automation_tool.control_plane.domain import (
     EditingProjectId,
     InstallationId,
+    InvalidTimelineModel,
     Timeline,
     TimelineId,
 )
@@ -142,8 +143,10 @@ def assert_error(
     assert response.status_code == status_code
     payload = response.json()
     assert set(payload) == {"error"}
-    assert payload["error"]["code"] == code
-    return payload["error"]
+    error = payload["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == code
+    return cast("dict[str, object]", error)
 
 
 def test_openapi_exposes_latest_get_and_next_revision_put_only() -> None:
@@ -155,6 +158,14 @@ def test_openapi_exposes_latest_get_and_next_revision_put_only() -> None:
     assert timeline["put"]["operationId"] == "saveEditingProjectTimeline"
     assert timeline["get"]["security"] == [{"AppSession": []}]
     assert timeline["put"]["security"] == [{"AppSession": []}]
+    assert timeline["put"]["responses"]["409"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ErrorEnvelope"
+    }
+    conflict_details = schema["components"]["schemas"]["PublicErrorDetails"]
+    assert conflict_details["additionalProperties"] is False
+    assert conflict_details["required"] == ["kind", "currentRevision"]
+    assert conflict_details["properties"]["kind"]["const"] == "timeline_revision_conflict.v1"
+    assert conflict_details["properties"]["currentRevision"]["minimum"] == 1
 
 
 def test_route_reports_when_the_timeline_service_is_not_wired() -> None:
@@ -298,6 +309,30 @@ def test_conflict_without_a_committed_current_revision_fails_closed() -> None:
     assert "details" not in error
 
 
+def test_a_bad_stored_timeline_stays_an_internal_failure_on_put() -> None:
+    class BadStoredTimelineRepository(MemoryTimelineRepository):
+        async def latest_revision(
+            self,
+            project_id: EditingProjectId,
+            installation_id: InstallationId,
+        ) -> Timeline | None:
+            raise InvalidTimelineModel
+
+    repository = BadStoredTimelineRepository()
+    service = TimelineService(repository=repository, clock=lambda: NOW)
+    app = create_app(database=None, timeline_service=service)
+    app.dependency_overrides[require_current_installation_access] = lambda: INSTALLATION_ID
+
+    response = TestClient(app, raise_server_exceptions=False).put(
+        f"/api/v1/editing-projects/{PROJECT_ID}/timeline",
+        json=VALID_DRAFT,
+    )
+
+    error = assert_error(response, status_code=500, code="internal")
+    assert set(error) == {"code", "message", "retryable", "requestId"}
+    assert "Timeline model is invalid" not in response.text
+
+
 def test_missing_foreign_and_empty_timeline_states_do_not_cross_owners() -> None:
     client, repository = timeline_client()
 
@@ -344,7 +379,30 @@ def test_missing_foreign_and_empty_timeline_states_do_not_cross_owners() -> None
         {**VALID_DRAFT, "revision": 9},
         {**VALID_DRAFT, "createdAt": "2026-07-30T00:00:00Z"},
         {**VALID_DRAFT, "durationMs": True},
+        {"duration_ms": 1_000, "tracks": VALID_DRAFT["tracks"]},
         {**VALID_DRAFT, "private": "must-not-cross-boundary"},
+        {
+            "durationMs": 1_000,
+            "tracks": [
+                {
+                    "trackId": "captions",
+                    "kind": "caption",
+                    "clips": [
+                        {
+                            "clipId": "caption-one",
+                            "startMs": 0,
+                            "durationMs": 1_000,
+                            "sourceMaterialId": None,
+                            "sourceInMs": None,
+                            "sourceOutMs": None,
+                            "text": "没有画面轨道",
+                            "gainDb": None,
+                            "transitionIn": None,
+                        }
+                    ],
+                }
+            ],
+        },
         {
             **VALID_DRAFT,
             "tracks": [
