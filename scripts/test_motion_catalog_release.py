@@ -116,11 +116,32 @@ def test_release_lock_contract() -> None:
     }
     assert sum(len(entry["references"]) for entry in runtime_items) == 7
     content_rewrites = lock["contentRewrites"]["items"]
-    assert {entry["name"] for entry in content_rewrites} == {
+    rewrite_names = {entry["name"] for entry in content_rewrites}
+    assert {
         "liquid-glass-notification",
         "liquid-glass-widgets",
         "texture-mask-text",
+    } <= rewrite_names
+    template_items = {
+        "code-snippet-dark-2026",
+        "code-snippet-dark-modern",
+        "code-snippet-dark-plus",
+        "code-snippet-high-contrast",
+        "code-snippet-high-contrast-light",
+        "code-snippet-light-2026",
+        "code-snippet-light-modern",
+        "code-snippet-light-plus",
+        "code-snippet-monokai",
+        "code-snippet-solarized-light",
+        "code-snippet-visual-studio-dark",
+        "code-snippet-visual-studio-light",
     }
+    assert template_items <= rewrite_names
+    by_name = {entry["name"]: entry for entry in content_rewrites}
+    for name in template_items:
+        literals = {rule["literal"] for rule in by_name[name]["replacements"]}
+        assert any("<template " in literal for literal in literals), name
+        assert any("</template>" in literal for literal in literals), name
 
 
 def test_runtime_data_is_inlined_only_in_the_release_tree() -> None:

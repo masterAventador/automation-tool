@@ -91,6 +91,198 @@
   "contentRewrites": {
     "items": [
       {
+        "name": "code-snippet-dark-2026",
+        "document": "items/code-snippet-dark-2026/code-snippet-dark-2026.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-dark-2026-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-dark-modern",
+        "document": "items/code-snippet-dark-modern/code-snippet-dark-modern.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-dark-modern-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-dark-plus",
+        "document": "items/code-snippet-dark-plus/code-snippet-dark-plus.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-dark-plus-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-high-contrast",
+        "document": "items/code-snippet-high-contrast/code-snippet-high-contrast.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-high-contrast-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-high-contrast-light",
+        "document": "items/code-snippet-high-contrast-light/code-snippet-high-contrast-light.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-high-contrast-light-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-light-2026",
+        "document": "items/code-snippet-light-2026/code-snippet-light-2026.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-light-2026-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-light-modern",
+        "document": "items/code-snippet-light-modern/code-snippet-light-modern.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-light-modern-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-light-plus",
+        "document": "items/code-snippet-light-plus/code-snippet-light-plus.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-light-plus-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-monokai",
+        "document": "items/code-snippet-monokai/code-snippet-monokai.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-monokai-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-solarized-light",
+        "document": "items/code-snippet-solarized-light/code-snippet-solarized-light.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-solarized-light-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-visual-studio-dark",
+        "document": "items/code-snippet-visual-studio-dark/code-snippet-visual-studio-dark.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-visual-studio-dark-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "name": "code-snippet-visual-studio-light",
+        "document": "items/code-snippet-visual-studio-light/code-snippet-visual-studio-light.html",
+        "replacements": [
+          {
+            "literal": "<template id=\"代码编辑器-visual-studio-light-template\">",
+            "replacement": "<!-- App release materializes this catalog template. -->",
+            "occurrences": 1
+          },
+          {
+            "literal": "</template>",
+            "replacement": "<!-- App release materialized catalog template end. -->",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
         "name": "liquid-glass-notification",
         "document": "items/liquid-glass-notification/liquid-glass-notification.html",
         "replacements": [
@@ -203,6 +395,6 @@
   },
   "generated": {
     "fileCount": 337,
-    "aggregateSha256": "010c53a8e026ea1fc43e42be182b6a1539bb21254ff31b58fd087fcdab8831ed"
+    "aggregateSha256": "1a62515ef417cd1d263982ccf10fbfb3a9e5f29471e4eb1e5a4a2fabdb163090"
   }
 }

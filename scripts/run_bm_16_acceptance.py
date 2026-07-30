@@ -235,7 +235,7 @@ def run_item_render_sweep(
     catalog_dimensions = {
         entry["name"]: entry.get("dimensions") for entry in catalog_items
     }
-    # 16 个尚不能独立渲染的项根因全部在内容/上游侧（PC-21 §18.6 逐类定性），按
+    # 4 个尚不能独立渲染的项根因全部在内容/上游侧（PC-21 §18.6 逐类定性），按
     # 带原因的豁免清单跳过——清单卫生由 test_motion_catalog_render_exclusions
     # 守着（真实存在、类别封闭、理由非空），不是无声截断：跳过逐项打印，
     # 收尾核对「渲染 + 豁免 = 134」。内容修好一项就从清单划掉一项。
