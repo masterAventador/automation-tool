@@ -488,7 +488,12 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def main() -> int:
-    architecture = require_windows()
+    try:
+        architecture = require_windows()
+    except RuntimeError as error:
+        raise AcceptanceFailed(
+            "PC-16 Windows package acceptance requires native Windows x86_64"
+        ) from error
     require_non_elevated_process()
     if architecture != "x86_64":
         raise AcceptanceFailed("PC-16 Windows package acceptance requires x86_64")

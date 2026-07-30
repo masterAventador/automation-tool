@@ -33,6 +33,18 @@ def record(relative: str, data: bytes) -> dict[str, object]:
 
 
 class WindowsRunnerWiringTests(unittest.TestCase):
+    def test_non_windows_preflight_uses_pc16_vocabulary_without_a_traceback(self) -> None:
+        with patch.object(
+            acceptance,
+            "require_windows",
+            side_effect=RuntimeError("P9-04 acceptance requires Windows"),
+        ):
+            with self.assertRaisesRegex(
+                acceptance.AcceptanceFailed,
+                "PC-16 Windows package acceptance requires native Windows x86_64",
+            ):
+                acceptance.main()
+
     def test_one_command_reaches_the_native_windows_runner(self) -> None:
         package = json.loads(PACKAGE.read_text(encoding="utf-8"))
         self.assertEqual(
