@@ -6,14 +6,16 @@
 
 ## 0. 现状定格(接手第一件事:核对这一节)
 
-- 工作分支 **`smart-edit`**,HEAD `27fa185`(LE-07 整线合并节点),已推送 origin;
+- 工作分支 **`smart-edit`**;代码合流基线是 `27fa185`(LE-07 整线合并节点),本交接
+  文档提交是 `2b4ee1a`,两者都已推送 origin。**不要把基线号当成接手时的 HEAD**:
+  每次恢复先用 `git rev-parse HEAD origin/smart-edit` 取真值并核对两者相等;
 - 台账唯一事实源:`docs/local-video-editing-roadmap.md`。当前 24 任务 = ✅4(LE-01~04)
   + 🔍3(LE-05/07/09)+ ⬜17。`scripts/check_local_editing_roadmap_counts.py` 守计数,
   **每次改台账后必须跑**;
 - 每个任务的证据台账在 `docs/development/<任务ID>.md`(LE-05/07/09 的收口节里有给
   后续任务的交接,拆解里会点名引用);
-- 工作树:`wt/smart-edit` 是主线;`wt/le-07-probe` 已合并、干净,可以
-  `git worktree remove wt/le-07-probe` 清掉(先确认无人在里面工作);
+- 工作树:`wt/smart-edit` 是主线;`wt/le-07-probe` 已合并并从 worktree 列表移除,
+  `le-07-probe` 分支仍可保留作历史指针,不要重复执行清理;
 - **合并回 main 的时机与全 App 全量测试须先与用户对齐**(2026-07-30 时点用户在另一
   会话修全 App 的既有 bug,明确指示各任务只跑波及范围)。
 
@@ -57,28 +59,52 @@
 `AppError(status_code, code, message, retryable)` + `ErrorEnvelope`,路由注册看
 `api/__init__.py`,样板看 `workbench.py`/`tasks.py`。
 
+**首期消费面已经定清,不要再按"CRUD"三个字扩 scope**:`frontend/src/features/
+video-editing/video-editing-gateway.ts` 只有六个操作——项目列表/创建、时间轴读取/保存、
+作业列表/提交。项目是 write-once,首期**不做更新/删除**;为列表补仓储查询属于 LE-06,
+不是把项目仓储改成可变。开工时把本段与下面两项【先定】原样写进 `LE-06.md`,再写 RED。
+
 - **T1 错误映射层**:写一个单点转换(应用层持久化异常 → AppError)。词汇:四个应用
   模块(`application/editing_projects|materials|timelines|editing_jobs.py`)子类数
   **4/5/5/7**;`timelines` 的两个专有失败**类名不按前缀猜,打开文件抄真名**(LE-05
   交接明说第一版猜错过)。映射基线:AlreadyRegistered/Stale/RevisionAlreadyQueued/
   DescriptionProtected→409、NotFound→404、Unavailable→503(retryable=true)、
-  DataRejected→500 族(库内的行域层拒收=服务端持久态损坏,**不是**调用方错误)、
-  TimelineRevisionMissing→409。红:**词汇守卫**——动态发现四模块全部
-  `_*PersistenceFailure` 子类,存在未映射的类即红(照 LE-05 的动态发现先例);
-- **T2 项目路由**:CRUD + `OutputSpec`(画幅/帧率/字幕样式基线,LE-04 已在域层承
-  载)。域校验拒绝→422。红:非法画幅、缺字段、不存在 project 404;
+  DataRejected→500、`TimelineProjectMissing` / `EditingJobTimelineRevisionMissing`
+  →409。这里的 `DataRejected` 是**仓储
+  调用方写错类型/状态或未知数据库约束**这类服务端缺陷;坏的既有数据库行实际抛
+  `InvalidEditingProjectModel` / `InvalidMaterialModel` / `InvalidTimelineModel` /
+  `InvalidEditingJobModel`,同样收成不泄漏细节的 500。客户端请求或域模型校验必须在
+  进仓储前答 422,不要把两层混成一个异常。红:**词汇守卫**——动态发现四模块全部
+  `_*PersistenceFailure` 子类,存在未映射的类即红;另用坏行验收四个 `Invalid*Model`
+  都走统一 `ErrorEnvelope` 500,不把存量值带进响应;
+- **T2 项目路由**:创建、按 id 查询、分页列表 + `OutputSpec`(画幅/帧率/字幕样式
+  基线,LE-04 已在域层承载),**不做 update/delete**。给项目仓储补 `list_page`
+  (真实 PostgreSQL 红测试先行),固定 `created_at DESC, project_id DESC`,游标同时
+  携带两列,不得只按不唯一时间排序。域校验拒绝→422。红:非法画幅、缺字段、不存在
+  project 404、同创建时刻跨页不重不漏;
 - **T3 素材路由**:登记与查询。**本机路径不过 API 边界**(§7;`Material` 域对象本
   就无路径字段,路径只活在执行器侧 `MaterialPathRegistry`)。AI 描述保护:
   `MaterialDescriptionProtected`→409。红:请求体里出现路径形状字段被拒、描述保护
   往返;
 - **T4 时间轴路由**:保存与修订。revision 冲突→409 **且响应带当前 revision**(前端
-  要靠它重拉)。仓储 `update(previous, changed)` 双参 CAS 约定照 LE-05.md 交接;
-  Stale→重读重试、NotFound→404、DataRejected→500,三个答案动作各不同,别合并;
-- **T5 任务路由 + 契约测试收口**:提交与查询;`RevisionAlreadyQueued`→409。
+  要靠它重拉)。Timeline 是 write-once,只有 `save/get/latest_revision`,**这里没有
+  `update(previous, changed)`、没有 `Stale`**。`ErrorEnvelope` 当前无处放版本号;
+  【先定】并采用的契约是给 `PublicError` 增加可选、严格校验的 `details` 判别联合,
+  首个成员为 `{kind:"timeline_revision_conflict.v1", currentRevision:int>=1}`;其它错误
+  不带 `details`,不得把版本塞进 message。冲突后的 `currentRevision` 是再次读取到的
+  最新修订,允许比撞冲突的修订更新。**另一个开工前【先定】**:现有库没有守住"一个项目
+  只有一个 timeline_id";必须先在 `LE-06.md` 选择并写下数据库可强制的身份方案,再写
+  RED。禁止用"先查没有 → 随机造 timeline_id → insert"冒充保证——两个并发首存会各自
+  成功,之后 `getTimeline(projectId)` 没有唯一答案;
+- **T5 任务路由 + 契约测试收口**:提交、按 id 查询、按项目分页列表;
+  `RevisionAlreadyQueued`→409。给作业仓储补 `list_page_by_project`,固定
+  `updated_at DESC, job_id DESC`,游标同时携带两列。**双参 CAS 只属于
+  `EditingJob.update(previous, changed)`**,不属于 T4;LE-06 不新增任意状态 PATCH,
+  Worker 状态写回由 LE-12 消费该 CAS。T1 仍须完整映射 `Stale`→409,保证以后接线不靠
+  catch-all 猜语义。
   **契约测试真实起服务**:uvicorn 起真端口(先查占用,用 automation-tool 专属端口
   段)+ 真实 PostgreSQL,走 HTTP 断言——进程内 TestClient 只能当分层证据(生产同
-  路径原则)。查询分页:`updated_at` **不唯一**(CAS 的接受条件含相等),排序必须带
-  tiebreaker(如 job_id)。收口:LE-06.md 写全线证据,台账 LE-06 行判状态(REST 面
+  路径原则)。收口:LE-06.md 写全线证据,台账 LE-06 行判状态(REST 面
   无正式 App 用户路径,顶格 `🔍 待验收`,补验收依赖 LE-17)。
 
 ### LE-08 自适应抽帧
