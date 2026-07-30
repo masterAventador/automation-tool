@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import partial
 from pathlib import Path
+from typing import cast
 
 from automation_tool.executor.material_probe import (
     MaterialProbeRejected,
@@ -26,7 +27,8 @@ _OUTPUT_POLL_SECONDS = 0.02
 _PROCESS_REAP_SECONDS = 5.0
 _SCRATCH_PREFIX = "automation-tool-frame-extraction-"
 _WORKSPACE_PROBE_NAME = ".workspace-write-probe"
-_SCENE_FILTER = "settb=1/1000,select='eq(n,0)+gt(scene,0.1)'"
+_JPEG_SCALE_FILTER = "scale=w='min(768,iw)':h='min(768,ih)':force_original_aspect_ratio=decrease"
+_SCENE_FILTER = f"settb=1/1000,select='eq(n,0)+gt(scene,0.1)',{_JPEG_SCALE_FILTER}"
 _SCENE_OUTPUT_PATTERN = "scene-%012d.jpg"
 _SCENE_OUTPUT_PREFIX = "scene-"
 _SCENE_OUTPUT_SUFFIX = ".jpg"
@@ -40,6 +42,9 @@ _SHORT_FRAME_LIMIT_DURATION_MS = 15_000
 _MEDIUM_FRAME_LIMIT_DURATION_MS = 60_000
 _LONG_FRAME_LIMIT_DURATION_MS = 300_000
 _EXTRA_LONG_FRAME_LIMIT_DURATION_MS = 1_200_000
+_FINAL_OUTPUT_PREFIX = "frame-"
+_FINAL_OUTPUT_SUFFIX = ".jpg"
+_FINAL_OUTPUT_DIGITS = 6
 
 
 class AdaptiveFrameRejection(StrEnum):
@@ -67,6 +72,43 @@ class ExtractedFrame:
     timestamp_ms: int
     is_scene_cut: bool
     jpeg_bytes: bytes = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class AdaptiveFrameArtifact:
+    """Path-free metadata for one final JPEG in the caller-owned workspace."""
+
+    filename: str
+    timestamp_ms: int
+    is_scene_cut: bool
+    byte_size: int
+
+
+def extract_adaptive_frames(
+    tools: PackagedMediaTools,
+    source: Path,
+    approved: os.stat_result,
+    output_directory: Path,
+    *,
+    duration_ms: int,
+) -> tuple[AdaptiveFrameArtifact, ...] | AdaptiveFrameRejection:
+    """Extract, resize and persist final JPEGs under controlled names."""
+    workspace_identity = _output_workspace_identity(output_directory)
+    if workspace_identity is None:
+        return AdaptiveFrameRejection.WORKSPACE_UNUSABLE
+    candidates = extract_adaptive_frame_candidates(
+        tools,
+        source,
+        approved,
+        duration_ms=duration_ms,
+    )
+    if isinstance(candidates, AdaptiveFrameRejection):
+        return candidates
+    return _write_final_frames(
+        output_directory,
+        workspace_identity,
+        candidates,
+    )
 
 
 def extract_scene_frames(
@@ -251,9 +293,7 @@ def _globally_uniform_indices(timestamps: tuple[int, ...], limit: int) -> tuple[
                 best_previous_index = previous_index
             if best_previous_cost < 0:
                 continue
-            distance = abs(
-                timestamps[candidate_index] * target_denominator - target_numerator
-            )
+            distance = abs(timestamps[candidate_index] * target_denominator - target_numerator)
             current_costs[candidate_index] = best_previous_cost + distance
             parents[candidate_index] = best_previous_index
 
@@ -334,7 +374,7 @@ def _supplement_ffmpeg_argv(
         "-map",
         "0:v:0",
         "-vf",
-        "settb=1/1000",
+        f"settb=1/1000,{_JPEG_SCALE_FILTER}",
         "-frames:v",
         "1",
         "-fps_mode",
@@ -395,6 +435,8 @@ def _scene_ffmpeg_argv(ffmpeg: Path, source: Path, workspace: Path) -> list[str]
         "1",
         "-q:v",
         "2",
+        "-pix_fmt",
+        "yuvj420p",
         os.fspath(workspace / _SCENE_OUTPUT_PATTERN),
     ]
 
@@ -432,6 +474,130 @@ def _timestamp_from_name(name: str, *, prefix: str, suffix: str) -> int | None:
     if len(digits) != _SCENE_TIMESTAMP_DIGITS or not digits.isascii() or not digits.isdigit():
         return None
     return int(digits)
+
+
+def _output_workspace_identity(output_directory: Path) -> tuple[int, int] | None:
+    try:
+        metadata = output_directory.lstat()
+    except (OSError, ValueError, TypeError):
+        return None
+    if not stat.S_ISDIR(metadata.st_mode) or _is_reparse_point(metadata):
+        return None
+    return metadata.st_dev, metadata.st_ino
+
+
+def _write_final_frames(
+    output_directory: Path,
+    workspace_identity: tuple[int, int],
+    candidates: tuple[ExtractedFrame, ...],
+) -> tuple[AdaptiveFrameArtifact, ...] | AdaptiveFrameRejection:
+    created: list[Path] = []
+    artifacts: list[AdaptiveFrameArtifact] = []
+    try:
+        for index, candidate in enumerate(candidates, start=1):
+            _require_output_workspace(output_directory, workspace_identity)
+            filename = (
+                f"{_FINAL_OUTPUT_PREFIX}{index:0{_FINAL_OUTPUT_DIGITS}d}{_FINAL_OUTPUT_SUFFIX}"
+            )
+            path = output_directory / filename
+            _write_exclusive_frame(path, candidate.jpeg_bytes)
+            created.append(path)
+            artifacts.append(
+                AdaptiveFrameArtifact(
+                    filename=filename,
+                    timestamp_ms=candidate.timestamp_ms,
+                    is_scene_cut=candidate.is_scene_cut,
+                    byte_size=len(candidate.jpeg_bytes),
+                )
+            )
+        _fsync_output_directory(output_directory)
+        _require_output_workspace(output_directory, workspace_identity)
+        for path, artifact in zip(created, artifacts, strict=True):
+            _require_written_frame(path, artifact.byte_size)
+        return tuple(artifacts)
+    except OSError:
+        if _output_workspace_identity(output_directory) == workspace_identity:
+            for path in reversed(created):
+                with suppress(OSError):
+                    path.unlink()
+            with suppress(OSError):
+                _fsync_output_directory(output_directory)
+        return AdaptiveFrameRejection.WORKSPACE_UNUSABLE
+
+
+def _require_output_workspace(
+    output_directory: Path,
+    expected_identity: tuple[int, int],
+) -> None:
+    if _output_workspace_identity(output_directory) != expected_identity:
+        raise OSError("output workspace changed")
+
+
+def _write_exclusive_frame(path: Path, payload: bytes) -> None:
+    descriptor: int | None = None
+    created = False
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        flags |= cast(int, getattr(os, "O_BINARY", 0))
+        flags |= cast(int, getattr(os, "O_NOFOLLOW", 0))
+        descriptor = os.open(path, flags, 0o600)
+        created = True
+        if os.name != "nt":  # pragma: no branch - native platform split
+            os.fchmod(descriptor, 0o600)
+        view = memoryview(payload)
+        written = 0
+        while written < len(view):
+            count = os.write(descriptor, view[written:])
+            if count <= 0:
+                raise OSError("short frame write")
+            written += count
+        os.fsync(descriptor)
+        _validate_written_frame(os.fstat(descriptor), len(payload))
+    except Exception:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
+            descriptor = None
+        if created:
+            with suppress(OSError):
+                path.unlink()
+        raise
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _require_written_frame(path: Path, expected_size: int) -> None:
+    metadata = path.lstat()
+    _validate_written_frame(metadata, expected_size)
+
+
+def _validate_written_frame(metadata: os.stat_result, expected_size: int) -> None:
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or _is_reparse_point(metadata)
+        or metadata.st_nlink != 1
+        or metadata.st_size != expected_size
+        or (os.name != "nt" and stat.S_IMODE(metadata.st_mode) != 0o600)
+    ):
+        raise OSError("final frame changed")
+
+
+def _fsync_output_directory(output_directory: Path) -> None:
+    if os.name == "nt":
+        return
+    flags = os.O_RDONLY | cast(int, getattr(os, "O_DIRECTORY", 0))
+    descriptor = os.open(output_directory, flags)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _is_reparse_point(metadata: os.stat_result) -> bool:
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    attributes = getattr(metadata, "st_file_attributes", 0)
+    return stat.S_ISLNK(metadata.st_mode) or bool(reparse_flag and attributes & reparse_flag)
 
 
 def _run_bounded_ffmpeg(

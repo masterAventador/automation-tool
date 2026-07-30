@@ -32,7 +32,10 @@ from automation_tool.executor.material_probe import (  # noqa: E402
 )
 
 _PACKAGED_TOOL_SUBDIRECTORY = "media-toolchain/bin"
-_SCENE_FILTER = "settb=1/1000,select='eq(n,0)+gt(scene,0.1)'"
+_SCENE_FILTER = (
+    "settb=1/1000,select='eq(n,0)+gt(scene,0.1)',"
+    "scale=w='min(768,iw)':h='min(768,ih)':force_original_aspect_ratio=decrease"
+)
 
 
 def _packaged_tools() -> PackagedMediaTools:
