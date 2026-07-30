@@ -72,5 +72,6 @@ def test_customer_demo_has_no_anonymous_business_write_operation() -> None:
         "resumeTask",
         "saveEditingProjectTimeline",
         "startTaskDiscovery",
+        "submitEditingJob",
         "updateEditingMaterialDescription",
     }
