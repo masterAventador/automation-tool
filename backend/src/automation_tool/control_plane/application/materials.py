@@ -75,10 +75,10 @@ class MaterialDescriptionProtected(_MaterialPersistenceFailure):
        refused by the SQL predicate. Neither path may keep the new shot
        boundaries while discarding only the model text.
 
-    The window between loading a `Material` and writing its description spans a
-    model call, so this is a real interleaving rather than a theoretical one --
-    though on the current single-user, single-device product it takes a user
-    editing that exact material during that exact call to produce it.
+    A caller may hold a snapshot from before the model call, and even the
+    shorter load-to-UPDATE window inside `MaterialService` can race a user edit.
+    The database predicate is required for both cases; this is not merely a
+    theoretical interleaving.
     """
 
     message = "Material description is owned by the user"
