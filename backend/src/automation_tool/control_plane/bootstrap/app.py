@@ -25,6 +25,9 @@ from automation_tool.control_plane.api.editing_materials import (
 from automation_tool.control_plane.api.editing_projects import (
     router as editing_project_router,
 )
+from automation_tool.control_plane.api.editing_timelines import (
+    router as editing_timeline_router,
+)
 from automation_tool.control_plane.api.errors import (
     install_request_context,
     register_error_handlers,
@@ -94,6 +97,7 @@ from automation_tool.control_plane.application.task_target_results import (
     TaskTargetResultService,
 )
 from automation_tool.control_plane.application.tasks import TaskCreationService
+from automation_tool.control_plane.application.timelines import TimelineService
 from automation_tool.control_plane.application.workbench_metrics import WorkbenchMetricsService
 from automation_tool.control_plane.bootstrap.account_devices import (
     account_device_service as build_account_device_service,
@@ -122,6 +126,9 @@ from automation_tool.control_plane.bootstrap.editing_materials import (
 )
 from automation_tool.control_plane.bootstrap.editing_projects import (
     editing_project_service as build_editing_project_service,
+)
+from automation_tool.control_plane.bootstrap.editing_timelines import (
+    timeline_service as build_timeline_service,
 )
 from automation_tool.control_plane.bootstrap.local_provisioning import (
     LocalRegistrationBootstrap,
@@ -222,6 +229,7 @@ def create_app(
     platform_session_health_service: PlatformSessionHealthService | None = None,
     editing_project_service: EditingProjectService | None = None,
     material_service: MaterialService | None = None,
+    timeline_service: TimelineService | None = None,
     task_creation_service: TaskCreationService | None = None,
     task_query_service: TaskQueryService | None = None,
     task_command_delivery_service: TaskCommandDeliveryService | None = None,
@@ -260,6 +268,7 @@ def create_app(
     resolved_platform_session_health_service = platform_session_health_service
     resolved_editing_project_service = editing_project_service
     resolved_material_service = material_service
+    resolved_timeline_service = timeline_service
     resolved_task_creation_service = task_creation_service
     resolved_task_query_service = task_query_service
     resolved_task_command_delivery_service = task_command_delivery_service
@@ -335,6 +344,8 @@ def create_app(
         resolved_editing_project_service = build_editing_project_service(resolved_database)
     if resolved_material_service is None and isinstance(resolved_database, Database):
         resolved_material_service = build_material_service(resolved_database)
+    if resolved_timeline_service is None and isinstance(resolved_database, Database):
+        resolved_timeline_service = build_timeline_service(resolved_database)
     if resolved_task_creation_service is None and isinstance(resolved_database, Database):
         resolved_task_creation_service = build_task_creation_service(resolved_database)
     if resolved_task_query_service is None and isinstance(resolved_database, Database):
@@ -410,6 +421,7 @@ def create_app(
     app.state.platform_session_health_service = resolved_platform_session_health_service
     app.state.editing_project_service = resolved_editing_project_service
     app.state.material_service = resolved_material_service
+    app.state.timeline_service = resolved_timeline_service
     app.state.task_creation_service = resolved_task_creation_service
     app.state.task_query_service = resolved_task_query_service
     app.state.task_command_delivery_service = resolved_task_command_delivery_service
@@ -444,6 +456,7 @@ def create_app(
     app.include_router(platform_session_router)
     app.include_router(editing_project_router)
     app.include_router(editing_material_router)
+    app.include_router(editing_timeline_router)
     app.include_router(task_event_stream_router)
     app.include_router(task_control_router)
     app.include_router(task_target_preview_router)

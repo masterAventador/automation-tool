@@ -6,7 +6,8 @@ from dataclasses import fields
 from datetime import datetime
 from typing import Any, Final, Never, cast
 
-from sqlalchemy import Select, insert, select
+from sqlalchemy import Select, insert, literal, select
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -19,6 +20,7 @@ from automation_tool.control_plane.application.timelines import (
 )
 from automation_tool.control_plane.domain import (
     EditingProjectId,
+    InstallationId,
     InvalidResourceId,
     InvalidTimelineModel,
     MaterialId,
@@ -32,7 +34,7 @@ from automation_tool.control_plane.domain import (
 )
 
 from .hydration import enumeration_member, normalise_timestamp
-from .schema import timelines
+from .schema import editing_project_timelines, editing_projects, timelines
 from .session import Database
 
 # A refused or timed-out connection surfaces as an `OSError`, not a
@@ -51,13 +53,8 @@ from .session import Database
 # not this module's behaviour.
 _CONNECTION_FAILURES = (OSError, SQLAlchemyError)
 
-# PostgreSQL's SQLSTATE for the two violations this table can produce. Both
-# arrive as one `IntegrityError`, so this is the only thing that tells them
-# apart; matching on the constraint name in the driver's message would work too
-# but would tie the translation to a string that also carries the offending key
-# values, and those must not travel.
-_UNIQUE_VIOLATION: Final = "23505"
-_FOREIGN_KEY_VIOLATION: Final = "23503"
+_REVISION_CONSTRAINT: Final = "pk_timelines"
+_PROJECT_CONSTRAINT: Final = "fk_editing_project_timelines_project"
 
 # The keys a stored document is allowed to have, at each of the three levels.
 # Read off the dataclasses rather than written out, so that a field added to the
@@ -71,25 +68,23 @@ _TRANSITION_KEYS: Final = frozenset(field.name for field in fields(TimelineTrans
 def _refuse_integrity_violation(error: IntegrityError) -> Never:
     """Turn one exception class into the three answers a caller can act on.
 
-    A duplicate `(timeline_id, revision)` means this revision is stored and a
-    revision is write-once, so the caller has to choose another one. A foreign
-    key violation means the *project* the timeline names is not there, which is
-    a different resource, a different thing to fix, and 404 rather than 409 one
-    layer up. Neither improves on a retry, which is what keeps both away from
-    `TimelinePersistenceUnavailable`.
-
-    Anything else -- a NOT NULL violation is `23502`, a CHECK is `23514` --
-    cannot come from this table as it stands, but "the database refused this
-    row" is still what happened, and `TimelineDataRejected` is the answer that
-    says so without inviting a retry. `error.orig` can be `None`, so the lookup
-    goes through `getattr` rather than reaching for the attribute: an
-    `AttributeError` raised from in here would be neither the domain's error nor
-    one of this module's.
+    SQLSTATE alone is no longer enough: both the revision key and the identity
+    table's two unique constraints are `23505`, but only `pk_timelines` means a
+    caller should choose another revision. A server-generated timeline-id
+    collision is an internal data rejection, not an ordinary edit conflict.
+    The driver exposes the constraint name separately from its DETAIL message,
+    so dispatch does not need to parse or propagate private key values.
     """
-    sqlstate = getattr(error.orig, "sqlstate", None)
-    if sqlstate == _UNIQUE_VIOLATION:
+    constraint_name = getattr(error.orig, "constraint_name", None)
+    if constraint_name is None:
+        constraint_name = getattr(
+            getattr(error.orig, "__cause__", None),
+            "constraint_name",
+            None,
+        )
+    if constraint_name == _REVISION_CONSTRAINT:
         raise TimelineRevisionAlreadyStored from None
-    if sqlstate == _FOREIGN_KEY_VIOLATION:
+    if constraint_name == _PROJECT_CONSTRAINT:
         raise TimelineProjectMissing from None
     raise TimelineDataRejected from None
 
@@ -286,14 +281,19 @@ class SqlAlchemyTimelineRepository:
             raise TimelinePersistenceUnavailable
         self._database = database
 
-    async def save(self, timeline: Timeline) -> None:
-        """Insert one revision, leaving any existing row untouched.
+    async def save(
+        self,
+        timeline: Timeline,
+        installation_id: InstallationId,
+    ) -> None:
+        """Claim one project's lineage and insert one immutable revision.
 
-        There is no lookup before the insert -- not for the revision and not for
-        the project. That would let two callers both find nothing and both
-        proceed, which is the same defect one level down. The primary key and
-        the foreign key are what refuse the second one, and they refuse it
-        whoever is racing.
+        The identity claim is one owner-filtered ``INSERT ... SELECT`` with
+        ``ON CONFLICT DO NOTHING``. PostgreSQL serializes two concurrent first
+        claims on the project primary key; the loser then reads the committed
+        identity and reports a revision conflict. The claim and revision insert
+        share this transaction, so nobody can observe an identity without its
+        first revision.
 
         The row is built *before* the `try`, for the same reason `_row` hydrates
         after its own: building it is not database work, and a catch-all that
@@ -303,12 +303,68 @@ class SqlAlchemyTimelineRepository:
         from an already-validated timeline; keeping the statement outside costs
         one line and stops a field added later from quietly landing inside.
         """
-        if not isinstance(timeline, Timeline):
+        if not isinstance(timeline, Timeline) or not isinstance(
+            installation_id,
+            InstallationId,
+        ):
             raise TimelineDataRejected
         values = _column_values(timeline)
+        claim_identity = (
+            postgresql_insert(editing_project_timelines)
+            .from_select(
+                ["project_id", "timeline_id"],
+                select(
+                    editing_projects.c.project_id,
+                    literal(timeline.timeline_id.uuid),
+                ).where(
+                    editing_projects.c.project_id == timeline.project_id.uuid,
+                    editing_projects.c.installation_id == installation_id.uuid,
+                ),
+            )
+            .on_conflict_do_nothing()
+            .returning(editing_project_timelines.c.timeline_id)
+        )
         try:
             async with self._database.session() as session:
+                claimed = (await session.execute(claim_identity)).scalar_one_or_none()
+                if claimed is None:
+                    identity = (
+                        (
+                            await session.execute(
+                                select(
+                                    editing_projects.c.project_id,
+                                    editing_project_timelines.c.timeline_id,
+                                )
+                                .outerjoin(
+                                    editing_project_timelines,
+                                    editing_project_timelines.c.project_id
+                                    == editing_projects.c.project_id,
+                                )
+                                .where(
+                                    editing_projects.c.project_id == timeline.project_id.uuid,
+                                    editing_projects.c.installation_id == installation_id.uuid,
+                                )
+                            )
+                        )
+                        .mappings()
+                        .one_or_none()
+                    )
+                    if identity is None:
+                        raise TimelineProjectMissing
+                    existing_timeline_id = identity["timeline_id"]
+                    if existing_timeline_id is None:
+                        # The project exists and has no identity, so the failed
+                        # claim collided on a server-generated timeline id.
+                        raise TimelineDataRejected
+                    if existing_timeline_id != timeline.timeline_id.uuid:
+                        raise TimelineRevisionAlreadyStored
                 await session.execute(insert(timelines).values(**values))
+        except (
+            TimelineDataRejected,
+            TimelineProjectMissing,
+            TimelineRevisionAlreadyStored,
+        ):
+            raise
         except IntegrityError as error:
             _refuse_integrity_violation(error)
         except _CONNECTION_FAILURES:
@@ -331,7 +387,12 @@ class SqlAlchemyTimelineRepository:
             # reach the caller verbatim. The same tail guards `_row`.
             raise TimelinePersistenceUnavailable from None
 
-    async def get(self, timeline_id: TimelineId, revision: int) -> Timeline:
+    async def get(
+        self,
+        timeline_id: TimelineId,
+        revision: int,
+        installation_id: InstallationId,
+    ) -> Timeline:
         """One exact revision, or `TimelineNotFound`.
 
         `revision` is checked with `type(...) is not int` rather than
@@ -341,20 +402,34 @@ class SqlAlchemyTimelineRepository:
         domain owns that, and a revision below 1 correctly finds nothing --
         exactly as a well-formed revision nobody stored does.
         """
-        if not isinstance(timeline_id, TimelineId) or type(revision) is not int:
+        if (
+            not isinstance(timeline_id, TimelineId)
+            or type(revision) is not int
+            or not isinstance(installation_id, InstallationId)
+        ):
             raise TimelineDataRejected
         row = await self._row(
-            select(timelines).where(
+            select(timelines)
+            .join(
+                editing_projects,
+                timelines.c.project_id == editing_projects.c.project_id,
+            )
+            .where(
                 timelines.c.timeline_id == timeline_id.uuid,
                 timelines.c.revision == revision,
+                editing_projects.c.installation_id == installation_id.uuid,
             )
         )
         if row is None:
             raise TimelineNotFound
         return _hydrate(row)
 
-    async def latest_revision(self, timeline_id: TimelineId) -> Timeline | None:
-        """The highest revision of one timeline, or `None` if it has none yet.
+    async def latest_revision(
+        self,
+        project_id: EditingProjectId,
+        installation_id: InstallationId,
+    ) -> Timeline | None:
+        """The highest revision of one owned project's timeline, if it has one.
 
         `None` is an answer rather than a failure -- "this timeline has no
         revisions" is a thing a caller needs to be able to act on, and raising
@@ -365,11 +440,21 @@ class SqlAlchemyTimelineRepository:
         cost more with every revision stored, and it would be the same shape of
         mistake as looking a row up before inserting it.
         """
-        if not isinstance(timeline_id, TimelineId):
+        if not isinstance(project_id, EditingProjectId) or not isinstance(
+            installation_id,
+            InstallationId,
+        ):
             raise TimelineDataRejected
         row = await self._row(
             select(timelines)
-            .where(timelines.c.timeline_id == timeline_id.uuid)
+            .join(
+                editing_projects,
+                timelines.c.project_id == editing_projects.c.project_id,
+            )
+            .where(
+                timelines.c.project_id == project_id.uuid,
+                editing_projects.c.installation_id == installation_id.uuid,
+            )
             .order_by(timelines.c.revision.desc())
             .limit(1)
         )

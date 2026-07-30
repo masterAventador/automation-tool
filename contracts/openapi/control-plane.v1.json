@@ -877,6 +877,233 @@
         "title": "EditingProjectResponse",
         "type": "object"
       },
+      "EditingTimelineClip": {
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Clipid",
+            "type": "string"
+          },
+          "durationMs": {
+            "maximum": 600000.0,
+            "minimum": 1.0,
+            "title": "Durationms",
+            "type": "integer"
+          },
+          "gainDb": {
+            "anyOf": [
+              {
+                "maximum": 12.0,
+                "minimum": -60.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gaindb"
+          },
+          "sourceInMs": {
+            "anyOf": [
+              {
+                "maximum": 14400000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceinms"
+          },
+          "sourceMaterialId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcematerialid"
+          },
+          "sourceOutMs": {
+            "anyOf": [
+              {
+                "maximum": 14400000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceoutms"
+          },
+          "startMs": {
+            "maximum": 600000.0,
+            "minimum": 0.0,
+            "title": "Startms",
+            "type": "integer"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "transitionIn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditingTimelineTransition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "clipId",
+          "startMs",
+          "durationMs",
+          "sourceMaterialId",
+          "sourceInMs",
+          "sourceOutMs",
+          "text",
+          "gainDb",
+          "transitionIn"
+        ],
+        "title": "EditingTimelineClip",
+        "type": "object"
+      },
+      "EditingTimelineResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "durationMs": {
+            "title": "Durationms",
+            "type": "integer"
+          },
+          "projectId": {
+            "title": "Projectid",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "timelineId": {
+            "title": "Timelineid",
+            "type": "string"
+          },
+          "tracks": {
+            "items": {
+              "$ref": "#/components/schemas/EditingTimelineTrack"
+            },
+            "title": "Tracks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "timelineId",
+          "projectId",
+          "revision",
+          "durationMs",
+          "tracks",
+          "createdAt"
+        ],
+        "title": "EditingTimelineResponse",
+        "type": "object"
+      },
+      "EditingTimelineSaveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "durationMs": {
+            "maximum": 600000.0,
+            "minimum": 100.0,
+            "title": "Durationms",
+            "type": "integer"
+          },
+          "tracks": {
+            "items": {
+              "$ref": "#/components/schemas/EditingTimelineTrack"
+            },
+            "maxItems": 5,
+            "minItems": 1,
+            "title": "Tracks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "durationMs",
+          "tracks"
+        ],
+        "title": "EditingTimelineSaveRequest",
+        "type": "object"
+      },
+      "EditingTimelineTrack": {
+        "additionalProperties": false,
+        "properties": {
+          "clips": {
+            "items": {
+              "$ref": "#/components/schemas/EditingTimelineClip"
+            },
+            "maxItems": 512,
+            "minItems": 1,
+            "title": "Clips",
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TimelineTrackKind"
+          },
+          "trackId": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Trackid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trackId",
+          "kind",
+          "clips"
+        ],
+        "title": "EditingTimelineTrack",
+        "type": "object"
+      },
+      "EditingTimelineTransition": {
+        "additionalProperties": false,
+        "properties": {
+          "durationMs": {
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Durationms",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TransitionKind"
+          }
+        },
+        "required": [
+          "kind",
+          "durationMs"
+        ],
+        "title": "EditingTimelineTransition",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1917,6 +2144,28 @@
           "outcome_uncertain"
         ],
         "title": "TaskTargetResultStatus",
+        "type": "string"
+      },
+      "TimelineTrackKind": {
+        "description": "One lane of the film. The three audio lanes mix differently.\n\n`NARRATION` drives the ducking sidechain, `AMBIENT` and `MUSIC` get\nducked by it — one `AUDIO` lane could not say which was which.",
+        "enum": [
+          "visual",
+          "narration",
+          "ambient",
+          "music",
+          "caption"
+        ],
+        "title": "TimelineTrackKind",
+        "type": "string"
+      },
+      "TransitionKind": {
+        "description": "How one visual clip gives way to the next.\n\nA hard cut is the absence of a transition — `transition_in=None` — so\nthere is deliberately no `CUT` member: two spellings of one state is\nhow they drift apart.",
+        "enum": [
+          "fade",
+          "dissolve",
+          "wipe"
+        ],
+        "title": "TransitionKind",
         "type": "string"
       },
       "UserMaterialDescriptionRequest": {
@@ -3022,6 +3271,108 @@
         "summary": "Get Editing Project",
         "tags": [
           "editing-projects"
+        ]
+      }
+    },
+    "/api/v1/editing-projects/{project_id}/timeline": {
+      "get": {
+        "operationId": "getEditingProjectTimeline",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingTimelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Get Editing Project Timeline",
+        "tags": [
+          "editing-timelines"
+        ]
+      },
+      "put": {
+        "operationId": "saveEditingProjectTimeline",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditingTimelineSaveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingTimelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Save Editing Project Timeline",
+        "tags": [
+          "editing-timelines"
         ]
       }
     },

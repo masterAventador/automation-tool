@@ -295,6 +295,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/editing-projects/{project_id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Editing Project Timeline */
+        get: operations["getEditingProjectTimeline"];
+        /** Save Editing Project Timeline */
+        put: operations["saveEditingProjectTimeline"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -959,6 +977,65 @@ export interface components {
             /** Title */
             title: string;
         };
+        /** EditingTimelineClip */
+        EditingTimelineClip: {
+            /** Clipid */
+            clipId: string;
+            /** Durationms */
+            durationMs: number;
+            /** Gaindb */
+            gainDb: number | null;
+            /** Sourceinms */
+            sourceInMs: number | null;
+            /** Sourcematerialid */
+            sourceMaterialId: string | null;
+            /** Sourceoutms */
+            sourceOutMs: number | null;
+            /** Startms */
+            startMs: number;
+            /** Text */
+            text: string | null;
+            transitionIn: components["schemas"]["EditingTimelineTransition"] | null;
+        };
+        /** EditingTimelineResponse */
+        EditingTimelineResponse: {
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Durationms */
+            durationMs: number;
+            /** Projectid */
+            projectId: string;
+            /** Revision */
+            revision: number;
+            /** Timelineid */
+            timelineId: string;
+            /** Tracks */
+            tracks: components["schemas"]["EditingTimelineTrack"][];
+        };
+        /** EditingTimelineSaveRequest */
+        EditingTimelineSaveRequest: {
+            /** Durationms */
+            durationMs: number;
+            /** Tracks */
+            tracks: components["schemas"]["EditingTimelineTrack"][];
+        };
+        /** EditingTimelineTrack */
+        EditingTimelineTrack: {
+            /** Clips */
+            clips: components["schemas"]["EditingTimelineClip"][];
+            kind: components["schemas"]["TimelineTrackKind"];
+            /** Trackid */
+            trackId: string;
+        };
+        /** EditingTimelineTransition */
+        EditingTimelineTransition: {
+            /** Durationms */
+            durationMs: number;
+            kind: components["schemas"]["TransitionKind"];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1355,6 +1432,25 @@ export interface components {
          * @enum {string}
          */
         TaskTargetResultStatus: "pending" | "running" | "succeeded" | "skipped" | "failed" | "outcome_uncertain";
+        /**
+         * TimelineTrackKind
+         * @description One lane of the film. The three audio lanes mix differently.
+         *
+         *     `NARRATION` drives the ducking sidechain, `AMBIENT` and `MUSIC` get
+         *     ducked by it — one `AUDIO` lane could not say which was which.
+         * @enum {string}
+         */
+        TimelineTrackKind: "visual" | "narration" | "ambient" | "music" | "caption";
+        /**
+         * TransitionKind
+         * @description How one visual clip gives way to the next.
+         *
+         *     A hard cut is the absence of a transition — `transition_in=None` — so
+         *     there is deliberately no `CUT` member: two spellings of one state is
+         *     how they drift apart.
+         * @enum {string}
+         */
+        TransitionKind: "fade" | "dissolve" | "wipe";
         /** UserMaterialDescriptionRequest */
         UserMaterialDescriptionRequest: {
             /** Description */
@@ -1999,6 +2095,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EditingProjectResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getEditingProjectTimeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditingTimelineResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    saveEditingProjectTimeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditingTimelineSaveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditingTimelineResponse"];
                 };
             };
             /** @description Validation Error */

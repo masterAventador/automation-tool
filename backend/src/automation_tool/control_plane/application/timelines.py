@@ -21,6 +21,19 @@ not travel.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import datetime
+from typing import Protocol
+
+from automation_tool.control_plane.domain import (
+    EditingProjectId,
+    InstallationId,
+    InvalidResourceId,
+    Timeline,
+    TimelineId,
+    TimelineTrack,
+)
+
 
 class _TimelinePersistenceFailure(RuntimeError):
     message = "Timeline persistence failed"
@@ -73,10 +86,119 @@ class TimelinePersistenceUnavailable(_TimelinePersistenceFailure):
     message = "Timeline persistence is unavailable"
 
 
+class InvalidTimelineQuery(ValueError):
+    def __init__(self) -> None:
+        super().__init__("Timeline query is invalid")
+
+
+class TimelineRevisionConflict(RuntimeError):
+    """A safe service-level conflict carrying only the latest revision number."""
+
+    def __init__(self, current_revision: int) -> None:
+        if type(current_revision) is not int or current_revision < 1:
+            raise ValueError("Timeline conflict revision is invalid")
+        super().__init__("Timeline revision conflicts")
+        self.current_revision = current_revision
+
+
+class TimelineRepository(Protocol):
+    async def save(
+        self,
+        timeline: Timeline,
+        installation_id: InstallationId,
+    ) -> None: ...
+
+    async def get(
+        self,
+        timeline_id: TimelineId,
+        revision: int,
+        installation_id: InstallationId,
+    ) -> Timeline: ...
+
+    async def latest_revision(
+        self,
+        project_id: EditingProjectId,
+        installation_id: InstallationId,
+    ) -> Timeline | None: ...
+
+
+class TimelineService:
+    def __init__(
+        self,
+        *,
+        repository: TimelineRepository,
+        clock: Callable[[], datetime],
+    ) -> None:
+        self._repository = repository
+        self._clock = clock
+
+    @staticmethod
+    def _project_id(value: str) -> EditingProjectId:
+        try:
+            return EditingProjectId.parse(value)
+        except InvalidResourceId:
+            raise InvalidTimelineQuery from None
+
+    async def get(
+        self,
+        *,
+        project_id: str,
+        installation_id: InstallationId,
+    ) -> Timeline:
+        if not isinstance(installation_id, InstallationId):
+            raise InvalidTimelineQuery
+        latest = await self._repository.latest_revision(
+            self._project_id(project_id),
+            installation_id,
+        )
+        if latest is None:
+            raise TimelineNotFound
+        return latest
+
+    async def save(
+        self,
+        *,
+        project_id: str,
+        installation_id: InstallationId,
+        duration_ms: int,
+        tracks: tuple[TimelineTrack, ...],
+    ) -> Timeline:
+        if not isinstance(installation_id, InstallationId):
+            raise InvalidTimelineQuery
+        parsed_project_id = self._project_id(project_id)
+        latest = await self._repository.latest_revision(
+            parsed_project_id,
+            installation_id,
+        )
+        timeline = Timeline(
+            timeline_id=TimelineId.new() if latest is None else latest.timeline_id,
+            project_id=parsed_project_id,
+            revision=1 if latest is None else latest.revision + 1,
+            duration_ms=duration_ms,
+            tracks=tracks,
+            created_at=self._clock(),
+        )
+        try:
+            await self._repository.save(timeline, installation_id)
+        except TimelineRevisionAlreadyStored:
+            current = await self._repository.latest_revision(
+                parsed_project_id,
+                installation_id,
+            )
+            if current is None:
+                raise TimelinePersistenceUnavailable from None
+            raise TimelineRevisionConflict(current.revision) from None
+        return timeline
+
+
 __all__ = [
+    "InvalidTimelineQuery",
     "TimelineDataRejected",
     "TimelineNotFound",
     "TimelinePersistenceUnavailable",
     "TimelineProjectMissing",
+    "TimelineRepository",
     "TimelineRevisionAlreadyStored",
+    "TimelineRevisionConflict",
+    "TimelineService",
 ]

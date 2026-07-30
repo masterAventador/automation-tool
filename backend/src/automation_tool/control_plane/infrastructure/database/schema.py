@@ -2430,6 +2430,31 @@ Index(
     materials.c.material_id,
 )
 
+editing_project_timelines = Table(
+    "editing_project_timelines",
+    metadata,
+    Column("project_id", UUID(as_uuid=True), nullable=False),
+    Column("timeline_id", UUID(as_uuid=True), nullable=False),
+    PrimaryKeyConstraint("project_id", name="pk_editing_project_timelines"),
+    ForeignKeyConstraint(
+        ["project_id"],
+        ["editing_projects.project_id"],
+        name="fk_editing_project_timelines_project",
+    ),
+    UniqueConstraint(
+        "timeline_id",
+        name="uq_editing_project_timelines_timeline",
+    ),
+    # PostgreSQL requires the exact referenced column set to be unique. The
+    # project primary key already makes this pair unique, but the pair itself
+    # is the target that lets each revision prove both halves of its lineage.
+    UniqueConstraint(
+        "project_id",
+        "timeline_id",
+        name="uq_editing_project_timelines_project_timeline",
+    ),
+)
+
 timelines = Table(
     "timelines",
     metadata,
@@ -2450,9 +2475,12 @@ timelines = Table(
     # same revision, whoever is racing.
     PrimaryKeyConstraint("timeline_id", "revision", name="pk_timelines"),
     ForeignKeyConstraint(
-        ["project_id"],
-        ["editing_projects.project_id"],
-        name="fk_timelines_project",
+        ["project_id", "timeline_id"],
+        [
+            "editing_project_timelines.project_id",
+            "editing_project_timelines.timeline_id",
+        ],
+        name="fk_timelines_project_timeline",
     ),
     # A superkey of the primary key, so it refuses nothing the primary key would
     # not have refused already. **Its only reason to exist is to be the target
@@ -2544,6 +2572,7 @@ __all__ = [
     "device_sessions",
     "douyin_search_exposure_definitions",
     "editing_jobs",
+    "editing_project_timelines",
     "editing_projects",
     "execution_attempts",
     "installation_registration_challenges",

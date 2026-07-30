@@ -1,11 +1,15 @@
 """Create timelines, the immutable-revision half of the editing library.
 
-Every row is one revision of one cut, and no row is ever updated. That is why
-the primary key is composite -- `(timeline_id, revision)` -- rather than a
-surrogate key with a version column: a revision is a snapshot, revisions of the
-same timeline coexist, and the second insert of a revision has to be refused
-rather than merged. The application does not look before it inserts; this key is
-what refuses a duplicate, and it refuses it whoever is racing.
+`editing_project_timelines` gives each project exactly one immutable timeline
+identity. `project_id` is the primary key and `timeline_id` is unique; the first
+save claims that identity in the same transaction that writes revision 1.
+Concurrent first saves therefore cannot create two lineages for one project.
+
+Every `timelines` row is one revision of that cut, and no row is ever updated.
+That is why the primary key is composite -- `(timeline_id, revision)` -- rather
+than a surrogate key with a version column: a revision is a snapshot, revisions
+of the same timeline coexist, and the second insert of a revision has to be
+refused rather than merged.
 
 `tracks` is one JSONB document holding a four-level tree: the timeline's tracks,
 each track's clips, and a clip's incoming transition. It is not split into clip
@@ -21,13 +25,14 @@ of those shapes is refused by `Timeline.__post_init__` when the row is hydrated,
 and the repository rebuilds the tree through the domain's own constructors
 without converting anything that is not already the right shape.
 
-Three constraints, and the third is the one most likely to be mistaken for
+The composite `fk_timelines_project_timeline` makes every revision name the
+identity claimed for its project. A plain project foreign key would prove only
+that the project exists while still allowing a second timeline id.
+
+The Timeline table also carries a superkey most likely to be mistaken for
 clutter:
 
 * `pk_timelines`, described above;
-* `fk_timelines_project`, so a timeline cannot name a project nobody stored.
-  No domain object holds a reference to another aggregate, so this is the only
-  place the relationship can be enforced at all;
 * `uq_timelines_revision_project` -- **a superkey of the primary key, which
   therefore refuses nothing the primary key had not already refused.** It is not
   redundant and it must not be dropped. It exists to be the *target* of the
@@ -70,6 +75,26 @@ depends_on: None = None
 
 def upgrade() -> None:
     op.create_table(
+        "editing_project_timelines",
+        sa.Column("project_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("timeline_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.PrimaryKeyConstraint("project_id", name="pk_editing_project_timelines"),
+        sa.ForeignKeyConstraint(
+            ["project_id"],
+            ["editing_projects.project_id"],
+            name="fk_editing_project_timelines_project",
+        ),
+        sa.UniqueConstraint(
+            "timeline_id",
+            name="uq_editing_project_timelines_timeline",
+        ),
+        sa.UniqueConstraint(
+            "project_id",
+            "timeline_id",
+            name="uq_editing_project_timelines_project_timeline",
+        ),
+    )
+    op.create_table(
         "timelines",
         sa.Column("timeline_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("revision", sa.Integer, nullable=False),
@@ -79,9 +104,12 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("timeline_id", "revision", name="pk_timelines"),
         sa.ForeignKeyConstraint(
-            ["project_id"],
-            ["editing_projects.project_id"],
-            name="fk_timelines_project",
+            ["project_id", "timeline_id"],
+            [
+                "editing_project_timelines.project_id",
+                "editing_project_timelines.timeline_id",
+            ],
+            name="fk_timelines_project_timeline",
         ),
         sa.UniqueConstraint(
             "timeline_id", "revision", "project_id", name="uq_timelines_revision_project"
@@ -91,3 +119,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("timelines")
+    op.drop_table("editing_project_timelines")

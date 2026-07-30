@@ -3,13 +3,13 @@
 import logging
 import re
 from collections.abc import Awaitable, Callable
-from typing import Final
+from typing import Final, Literal
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from starlette.exceptions import HTTPException
 from starlette.responses import Response
 
@@ -17,6 +17,18 @@ logger = logging.getLogger(__name__)
 
 REQUEST_ID_HEADER: Final = "x-request-id"
 _REQUEST_ID_PATTERN: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+
+
+class TimelineRevisionConflictDetails(BaseModel):
+    """The complete public context for a timeline revision conflict."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    kind: Literal["timeline_revision_conflict.v1"]
+    current_revision: StrictInt = Field(alias="currentRevision", ge=1)
+
+
+type PublicErrorDetails = TimelineRevisionConflictDetails
 
 
 class PublicError(BaseModel):
@@ -28,6 +40,7 @@ class PublicError(BaseModel):
     message: str
     retryable: bool
     request_id: str = Field(alias="requestId")
+    details: PublicErrorDetails | None = None
 
 
 class ErrorEnvelope(BaseModel):
@@ -48,12 +61,14 @@ class AppError(Exception):
         code: str,
         message: str,
         retryable: bool = False,
+        details: PublicErrorDetails | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.message = message
         self.retryable = retryable
+        self.details = details
 
 
 def _new_request_id() -> str:
@@ -76,6 +91,7 @@ def _error_response(
     code: str,
     message: str,
     retryable: bool = False,
+    details: PublicErrorDetails | None = None,
 ) -> JSONResponse:
     request_id = _request_id(request)
     envelope = ErrorEnvelope(
@@ -84,11 +100,12 @@ def _error_response(
             message=message,
             retryable=retryable,
             requestId=request_id,
+            details=details,
         )
     )
     return JSONResponse(
         status_code=status_code,
-        content=envelope.model_dump(mode="json", by_alias=True),
+        content=envelope.model_dump(mode="json", by_alias=True, exclude_none=True),
         headers={REQUEST_ID_HEADER: request_id, "cache-control": "no-store"},
     )
 
@@ -123,6 +140,7 @@ def register_error_handlers(app: FastAPI) -> None:
             code=error.code,
             message=error.message,
             retryable=error.retryable,
+            details=error.details,
         )
 
     @app.exception_handler(RequestValidationError)

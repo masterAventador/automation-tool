@@ -20,6 +20,7 @@ foreign key has no ON DELETE action and the other LE-05 integration files delete
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 import traceback
 from datetime import UTC, datetime
@@ -30,6 +31,7 @@ import pytest
 from alembic_head import HEAD_REVISION
 from conftest import AlembicRunner
 from sqlalchemy import ForeignKeyConstraint, delete, insert, select, text
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.schema import ColumnCollectionConstraint
@@ -68,6 +70,7 @@ from automation_tool.control_plane.domain.timeline import (
 )
 from automation_tool.control_plane.infrastructure.database import (
     Database,
+    editing_project_timelines,
     editing_projects,
     installations,
     timelines,
@@ -106,7 +109,17 @@ EXPECTED_COLUMNS = {
 EXPECTED_CONSTRAINTS = {
     "pk_timelines",
     "uq_timelines_revision_project",
-    "fk_timelines_project",
+    "fk_timelines_project_timeline",
+}
+EXPECTED_IDENTITY_COLUMNS = {
+    "project_id": ("uuid", "NO", None),
+    "timeline_id": ("uuid", "NO", None),
+}
+EXPECTED_IDENTITY_CONSTRAINTS = {
+    "pk_editing_project_timelines",
+    "fk_editing_project_timelines_project",
+    "uq_editing_project_timelines_timeline",
+    "uq_editing_project_timelines_project_timeline",
 }
 
 EXPECTED_TABLE_TYPES = {
@@ -126,7 +139,10 @@ EXPECTED_TABLE_TYPES = {
 # columns in this order.
 EXPECTED_TABLE_CONSTRAINTS = {
     "pk_timelines": ("PrimaryKeyConstraint", ["timeline_id", "revision"]),
-    "fk_timelines_project": ("ForeignKeyConstraint", ["project_id"]),
+    "fk_timelines_project_timeline": (
+        "ForeignKeyConstraint",
+        ["project_id", "timeline_id"],
+    ),
     "uq_timelines_revision_project": (
         "UniqueConstraint",
         ["timeline_id", "revision", "project_id"],
@@ -396,9 +412,10 @@ def row_values(timeline_id: UUID, project_id: UUID, **overrides: object) -> dict
 
 
 async def reset_data(database: Database) -> None:
-    """Timelines first: the foreign key has no ON DELETE action."""
+    """Revisions, identities, then projects: none cascades on delete."""
     async with database.session() as session:
         await session.execute(delete(timelines))
+        await session.execute(delete(editing_project_timelines))
         await session.execute(delete(editing_projects))
 
 
@@ -439,11 +456,30 @@ async def stored_row(database: Database, timeline_id: UUID, revision: int) -> di
 
 
 async def insert_row(
-    database: Database, timeline_id: UUID, project_id: UUID, **overrides: object
+    database: Database,
+    timeline_id: UUID,
+    project_id: UUID,
+    **overrides: object,
 ) -> None:
     async with database.session() as session:
         await session.execute(
+            postgresql_insert(editing_project_timelines)
+            .values(project_id=project_id, timeline_id=timeline_id)
+            .on_conflict_do_nothing()
+        )
+        await session.execute(
             insert(timelines).values(**row_values(timeline_id, project_id, **overrides))
+        )
+
+
+async def insert_unclaimed_row(
+    database: Database,
+    timeline_id: UUID,
+    project_id: UUID,
+) -> None:
+    async with database.session() as session:
+        await session.execute(
+            insert(timelines).values(**row_values(timeline_id, project_id))
         )
 
 
@@ -468,7 +504,7 @@ async def test_saved_timeline_lands_as_typed_columns_and_hydrates_back_equal(
         timeline_id = TimelineId.new()
         timeline = make_timeline(timeline_id, project_id)
 
-        await repository.save(timeline)
+        await repository.save(timeline, OWNER)
 
         row = await stored_row(database, timeline_id.uuid, 1)
         assert row == row_values(timeline_id.uuid, project_id.uuid)
@@ -496,7 +532,7 @@ async def test_saved_timeline_lands_as_typed_columns_and_hydrates_back_equal(
         assert isinstance(created_at, datetime)
         assert created_at.tzinfo is UTC
 
-        loaded = await repository.get(timeline_id, 1)
+        loaded = await repository.get(timeline_id, 1, OWNER)
         assert loaded == timeline
         # Equality alone would not catch this: a dataclass comparing two
         # hydrated objects agrees with itself whatever the container type. The
@@ -537,22 +573,22 @@ async def test_a_stored_revision_cannot_be_overwritten(
         timeline_id = TimelineId.new()
 
         with pytest.raises(TimelineNotFound):
-            await repository.get(timeline_id, 1)
+            await repository.get(timeline_id, 1, OWNER)
 
-        await repository.save(make_timeline(timeline_id, project_id))
+        await repository.save(make_timeline(timeline_id, project_id), OWNER)
         with pytest.raises(TimelineRevisionAlreadyStored):
-            await repository.save(make_timeline(timeline_id, project_id))
+            await repository.save(make_timeline(timeline_id, project_id), OWNER)
 
         assert await stored_row(database, timeline_id.uuid, 1) == row_values(
             timeline_id.uuid, project_id.uuid
         )
         # A different revision of the same timeline is an ordinary new row.
-        await repository.save(make_timeline(timeline_id, project_id, revision=2))
+        await repository.save(make_timeline(timeline_id, project_id, revision=2), OWNER)
         assert await stored_keys(database) == {(timeline_id.uuid, 1), (timeline_id.uuid, 2)}
         # ... and a revision nobody stored is still missing, so the composite
         # lookup is not ignoring half its argument.
         with pytest.raises(TimelineNotFound):
-            await repository.get(timeline_id, 3)
+            await repository.get(timeline_id, 3, OWNER)
     finally:
         await reset_data(database)
         await database.close()
@@ -587,24 +623,122 @@ async def test_the_primary_key_is_enforced_by_postgresql_itself(
         other_timeline = TimelineId.new()
         await insert_row(database, timeline_id.uuid, first_project.uuid)
 
-        # Same key, different project: only the primary key can refuse this,
-        # since the superkey's third column differs.
+        # The exact same revision is refused by the primary key.
         with pytest.raises(IntegrityError) as repeated:
-            await insert_row(database, timeline_id.uuid, second_project.uuid)
+            await insert_row(database, timeline_id.uuid, first_project.uuid)
         assert getattr(repeated.value.orig, "sqlstate", None) == "23505"
         assert "pk_timelines" in str(repeated.value.orig)
 
-        # One dimension moved each way, both of which must be accepted. This is
-        # what stops a constraint that is too broad -- one covering only
-        # `timeline_id`, say -- from passing the case above by refusing
-        # everything.
+        # One revision moved on the same lineage, and one wholly separate
+        # project-lineage pair: both must be accepted.
         await insert_row(database, timeline_id.uuid, first_project.uuid, revision=2)
-        await insert_row(database, other_timeline.uuid, first_project.uuid)
+        await insert_row(database, other_timeline.uuid, second_project.uuid)
         assert await stored_keys(database) == {
             (timeline_id.uuid, 1),
             (timeline_id.uuid, 2),
             (other_timeline.uuid, 1),
         }
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_one_project_and_one_timeline_id_can_form_only_one_identity(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    """Both halves of the one-to-one identity and its revision foreign key."""
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    try:
+        await reset_data(database)
+        first_project = EditingProjectId.new()
+        second_project = EditingProjectId.new()
+        first_timeline = TimelineId.new()
+        second_timeline = TimelineId.new()
+        await store_project(database, first_project)
+        await store_project(database, second_project)
+        async with database.session() as session:
+            await session.execute(
+                insert(editing_project_timelines).values(
+                    project_id=first_project.uuid,
+                    timeline_id=first_timeline.uuid,
+                )
+            )
+
+        with pytest.raises(IntegrityError) as second_lineage:
+            async with database.session() as session:
+                await session.execute(
+                    insert(editing_project_timelines).values(
+                        project_id=first_project.uuid,
+                        timeline_id=second_timeline.uuid,
+                    )
+                )
+        assert "pk_editing_project_timelines" in str(second_lineage.value.orig)
+
+        with pytest.raises(IntegrityError) as shared_identity:
+            async with database.session() as session:
+                await session.execute(
+                    insert(editing_project_timelines).values(
+                        project_id=second_project.uuid,
+                        timeline_id=first_timeline.uuid,
+                    )
+                )
+        assert "uq_editing_project_timelines_timeline" in str(shared_identity.value.orig)
+
+        with pytest.raises(IntegrityError) as unclaimed_revision:
+            await insert_unclaimed_row(
+                database,
+                second_timeline.uuid,
+                first_project.uuid,
+            )
+        assert "fk_timelines_project_timeline" in str(unclaimed_revision.value.orig)
+        assert await stored_keys(database) == set()
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_saves_commit_one_identity_and_one_revision(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyTimelineRepository(database)
+    try:
+        await reset_data(database)
+        project_id = EditingProjectId.new()
+        await store_project(database, project_id)
+        first = make_timeline(TimelineId.new(), project_id)
+        second = make_timeline(TimelineId.new(), project_id)
+        start = asyncio.Event()
+
+        async def save_after_start(timeline: Timeline) -> None:
+            await start.wait()
+            await repository.save(timeline, OWNER)
+
+        first_save = asyncio.create_task(save_after_start(first))
+        second_save = asyncio.create_task(save_after_start(second))
+        start.set()
+        outcomes = await asyncio.gather(first_save, second_save, return_exceptions=True)
+
+        assert sum(outcome is None for outcome in outcomes) == 1
+        conflicts = [
+            outcome for outcome in outcomes if isinstance(outcome, TimelineRevisionAlreadyStored)
+        ]
+        assert len(conflicts) == 1
+        async with database.session() as session:
+            identities = (await session.execute(select(editing_project_timelines))).all()
+            revisions = (await session.execute(select(timelines))).all()
+        assert len(identities) == 1
+        assert len(revisions) == 1
+        assert identities[0].project_id == project_id.uuid
+        assert revisions[0].project_id == project_id.uuid
+        assert revisions[0].timeline_id == identities[0].timeline_id
+        assert revisions[0].revision == 1
     finally:
         await reset_data(database)
         await database.close()
@@ -632,7 +766,7 @@ async def test_a_timeline_naming_a_project_nobody_stored_is_refused(
         timeline_id = TimelineId.new()
 
         with pytest.raises(TimelineProjectMissing) as refused:
-            await repository.save(make_timeline(timeline_id, absent_project))
+            await repository.save(make_timeline(timeline_id, absent_project), OWNER)
         # PostgreSQL's DETAIL line quotes the key it could not find, which is
         # the project identifier the caller handed over.
         rendered = "".join(traceback.format_exception(refused.value))
@@ -643,12 +777,12 @@ async def test_a_timeline_naming_a_project_nobody_stored_is_refused(
         with pytest.raises(IntegrityError) as injected:
             await insert_row(database, timeline_id.uuid, absent_project.uuid)
         assert getattr(injected.value.orig, "sqlstate", None) == "23503"
-        assert "fk_timelines_project" in str(injected.value.orig)
+        assert "fk_editing_project_timelines_project" in str(injected.value.orig)
 
         # The same timeline lands once the project it names exists, so the
         # refusal above was about the reference and nothing else.
         await store_project(database, absent_project)
-        await repository.save(make_timeline(timeline_id, absent_project))
+        await repository.save(make_timeline(timeline_id, absent_project), OWNER)
         assert await stored_keys(database) == {(timeline_id.uuid, 1)}
     finally:
         await reset_data(database)
@@ -744,31 +878,66 @@ async def test_latest_revision_takes_the_highest_and_ignores_other_timelines(
     try:
         await reset_data(database)
         project_id = EditingProjectId.new()
+        other_project = EditingProjectId.new()
         await store_project(database, project_id)
+        await store_project(database, other_project)
         timeline_id = TimelineId.new()
         other_timeline = TimelineId.new()
 
-        assert await repository.latest_revision(timeline_id) is None
+        assert await repository.latest_revision(project_id, OWNER) is None
 
         # Inserted out of order, so "the highest" cannot be confused with
         # "the last one written" or "the first one read".
-        await repository.save(make_timeline(timeline_id, project_id, revision=2))
-        await repository.save(make_timeline(timeline_id, project_id, revision=1))
-        await repository.save(make_timeline(timeline_id, project_id, revision=3))
-        await repository.save(make_timeline(other_timeline, project_id, revision=9))
+        await repository.save(make_timeline(timeline_id, project_id, revision=2), OWNER)
+        await repository.save(make_timeline(timeline_id, project_id, revision=1), OWNER)
+        await repository.save(make_timeline(timeline_id, project_id, revision=3), OWNER)
+        await repository.save(
+            make_timeline(other_timeline, other_project, revision=9),
+            OWNER,
+        )
 
-        latest = await repository.latest_revision(timeline_id)
+        latest = await repository.latest_revision(project_id, OWNER)
         assert latest is not None
         assert latest.revision == 3
         assert latest.timeline_id == timeline_id
         assert latest == make_timeline(timeline_id, project_id, revision=3)
 
-        other = await repository.latest_revision(other_timeline)
+        other = await repository.latest_revision(other_project, OWNER)
         assert other is not None
         assert other.revision == 9
         assert other.timeline_id == other_timeline
 
-        assert await repository.latest_revision(TimelineId.new()) is None
+        assert await repository.latest_revision(EditingProjectId.new(), OWNER) is None
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_reads_and_writes_are_scoped_to_the_project_owner(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyTimelineRepository(database)
+    try:
+        await reset_data(database)
+        project_id = EditingProjectId.new()
+        timeline_id = TimelineId.new()
+        other_owner = InstallationId.new()
+        await store_project(database, project_id)
+        await repository.save(make_timeline(timeline_id, project_id), OWNER)
+
+        with pytest.raises(TimelineNotFound):
+            await repository.get(timeline_id, 1, other_owner)
+        assert await repository.latest_revision(project_id, other_owner) is None
+        with pytest.raises(TimelineProjectMissing):
+            await repository.save(
+                make_timeline(timeline_id, project_id, revision=2),
+                other_owner,
+            )
+        assert await stored_keys(database) == {(timeline_id.uuid, 1)}
     finally:
         await reset_data(database)
         await database.close()
@@ -985,9 +1154,9 @@ async def test_rows_the_domain_would_refuse_are_refused_at_hydration(
         await insert_row(database, timeline_id.uuid, project_id.uuid, **overrides)
 
         with pytest.raises(InvalidTimelineModel):
-            await repository.get(timeline_id, revision)
+            await repository.get(timeline_id, revision, OWNER)
         with pytest.raises(InvalidTimelineModel):
-            await repository.latest_revision(timeline_id)
+            await repository.latest_revision(project_id, OWNER)
     finally:
         await reset_data(database)
         await database.close()
@@ -1045,8 +1214,8 @@ async def test_a_timeline_at_either_end_of_the_allowed_length_round_trips(
             created_at=CREATED_AT,
         )
 
-        await repository.save(timeline)
-        assert await repository.get(timeline_id, 1) == timeline
+        await repository.save(timeline, OWNER)
+        assert await repository.get(timeline_id, 1, OWNER) == timeline
     finally:
         await reset_data(database)
         await database.close()
@@ -1081,11 +1250,17 @@ async def test_a_revision_past_the_column_is_refused_rather_than_stored(
         timeline_id = TimelineId.new()
 
         # The largest revision the column holds is stored without complaint.
-        await repository.save(make_timeline(timeline_id, project_id, revision=2**31 - 1))
-        assert (await repository.get(timeline_id, 2**31 - 1)).revision == 2**31 - 1
+        await repository.save(
+            make_timeline(timeline_id, project_id, revision=2**31 - 1),
+            OWNER,
+        )
+        assert (await repository.get(timeline_id, 2**31 - 1, OWNER)).revision == 2**31 - 1
 
         with pytest.raises(TimelinePersistenceUnavailable) as refused:
-            await repository.save(make_timeline(TimelineId.new(), project_id, revision=2**31))
+            await repository.save(
+                make_timeline(timeline_id, project_id, revision=2**31),
+                OWNER,
+            )
         assert refused.value.__cause__ is None
         assert "int32" not in "".join(traceback.format_exception(refused.value))
     finally:
@@ -1111,9 +1286,9 @@ async def test_a_stored_identifier_of_the_wrong_uuid_version_is_refused(
         assert await stored_keys(database) == {(nil_uuid, 1)}
 
         with pytest.raises(InvalidTimelineModel):
-            await repository.get(forged_identifier(nil_uuid), 1)
+            await repository.get(forged_identifier(nil_uuid), 1, OWNER)
         with pytest.raises(InvalidTimelineModel):
-            await repository.latest_revision(forged_identifier(nil_uuid))
+            await repository.latest_revision(project_id, OWNER)
     finally:
         await reset_data(database)
         await database.close()
@@ -1152,11 +1327,11 @@ async def test_wrong_credentials_are_refused_without_leaking_the_identity(
         repository = SqlAlchemyTimelineRepository(database)
         timeline = make_timeline(TimelineId.new(), EditingProjectId.new())
         with pytest.raises(TimelinePersistenceUnavailable) as saved:
-            await repository.save(timeline)
+            await repository.save(timeline, OWNER)
         with pytest.raises(TimelinePersistenceUnavailable) as loaded:
-            await repository.get(timeline.timeline_id, 1)
+            await repository.get(timeline.timeline_id, 1, OWNER)
         with pytest.raises(TimelinePersistenceUnavailable) as latest:
-            await repository.latest_revision(timeline.timeline_id)
+            await repository.latest_revision(timeline.project_id, OWNER)
         for captured in (saved, loaded, latest):
             rendered = "".join(traceback.format_exception(captured.value))
             assert role not in rendered
@@ -1177,9 +1352,9 @@ async def test_the_repository_refuses_arguments_before_it_reaches_the_database(
     try:
         repository = SqlAlchemyTimelineRepository(database)
         with pytest.raises(TimelineDataRejected):
-            await repository.get(cast(TimelineId, TimelineId.new().uuid), 1)
+            await repository.get(cast(TimelineId, TimelineId.new().uuid), 1, OWNER)
         with pytest.raises(TimelineDataRejected):
-            await repository.get(TimelineId.new(), cast(int, "1"))
+            await repository.get(TimelineId.new(), cast(int, "1"), OWNER)
     finally:
         await database.close()
 
@@ -1220,8 +1395,37 @@ async def test_migration_creates_the_declared_shape_and_drops_it(
                     )
                 )
             )
+            identity_columns = {
+                cast(str, row["column_name"]): (
+                    cast(str, row["data_type"]),
+                    cast(str, row["is_nullable"]),
+                    row["character_maximum_length"],
+                )
+                for row in (
+                    await session.execute(
+                        text(
+                            "select column_name, data_type, is_nullable, "
+                            "character_maximum_length from information_schema.columns "
+                            "where table_schema = 'public' "
+                            "and table_name = 'editing_project_timelines'"
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            }
+            identity_constraints = set(
+                await session.scalars(
+                    text(
+                        "select conname from pg_constraint where conrelid = "
+                        "'public.editing_project_timelines'::regclass"
+                    )
+                )
+            )
         assert revision == HEAD_REVISION
         assert columns == EXPECTED_COLUMNS
+        assert identity_columns == EXPECTED_IDENTITY_COLUMNS
+        assert identity_constraints >= EXPECTED_IDENTITY_CONSTRAINTS
         # `>=` rather than `==`, which is one-directional: it catches a
         # constraint this file expects and the database lacks, and **not** a
         # constraint the database has and `schema.py` has never heard of -- the
@@ -1274,12 +1478,19 @@ async def test_migration_creates_the_declared_shape_and_drops_it(
             for constraint in timelines.constraints
             if isinstance(constraint, ForeignKeyConstraint)
             for element in constraint.elements
-        ] == ["editing_projects.project_id"]
+        ] == [
+            "editing_project_timelines.project_id",
+            "editing_project_timelines.timeline_id",
+        ]
 
         alembic_runner(postgresql_url, "downgrade", PREVIOUS_REVISION)
         async with database.session() as session:
             removed = await session.scalar(text("select to_regclass('public.timelines')"))
+            removed_identity = await session.scalar(
+                text("select to_regclass('public.editing_project_timelines')")
+            )
         assert removed is None
+        assert removed_identity is None
     finally:
         alembic_runner(postgresql_url, "upgrade", "head")
         await database.close()

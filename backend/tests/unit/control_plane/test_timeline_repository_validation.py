@@ -44,6 +44,7 @@ from automation_tool.control_plane.application.timelines import (
 )
 from automation_tool.control_plane.domain import (
     EditingProjectId,
+    InstallationId,
     InvalidTimelineModel,
     MaterialId,
     TaskId,
@@ -78,6 +79,7 @@ LEAKED_TOKENS = (
 
 CREATED_AT = datetime(2026, 7, 29, 3, 21, 45, 123_456, tzinfo=UTC)
 SHANGHAI = timezone(timedelta(hours=8))
+OWNER = InstallationId.parse("00000000-0000-4000-8000-000000000001")
 
 # One material per clip that has a source, so a conversion handing back the same
 # identifier for every clip could not pass unnoticed.
@@ -119,8 +121,9 @@ class FailingSessions:
 class StubResult:
     """Just enough of a `Result` for `.mappings().one_or_none()`."""
 
-    def __init__(self, row: RowMapping | None) -> None:
+    def __init__(self, row: RowMapping | None, scalar: object = None) -> None:
         self._row = row
+        self._scalar = scalar
 
     def mappings(self) -> StubResult:
         return self
@@ -128,21 +131,26 @@ class StubResult:
     def one_or_none(self) -> RowMapping | None:
         return self._row
 
+    def scalar_one_or_none(self) -> object:
+        return self._scalar
+
 
 class StubSession:
-    def __init__(self, row: RowMapping | None) -> None:
+    def __init__(self, row: RowMapping | None, scalar: object = None) -> None:
         self._row = row
+        self._scalar = scalar
 
     async def execute(self, _statement: object) -> StubResult:
-        return StubResult(self._row)
+        return StubResult(self._row, self._scalar)
 
 
 class StubSessionScope:
-    def __init__(self, row: RowMapping | None) -> None:
+    def __init__(self, row: RowMapping | None, scalar: object = None) -> None:
         self._row = row
+        self._scalar = scalar
 
     async def __aenter__(self) -> StubSession:
-        return StubSession(self._row)
+        return StubSession(self._row, self._scalar)
 
     async def __aexit__(
         self,
@@ -154,11 +162,44 @@ class StubSessionScope:
 
 
 class StubSessions:
-    def __init__(self, row: RowMapping | None) -> None:
+    def __init__(self, row: RowMapping | None, scalar: object = None) -> None:
         self._row = row
+        self._scalar = scalar
 
     def begin(self) -> StubSessionScope:
-        return StubSessionScope(self._row)
+        return StubSessionScope(self._row, self._scalar)
+
+
+class ScriptedSession:
+    def __init__(self, results: list[StubResult]) -> None:
+        self._results = results
+
+    async def execute(self, _statement: object) -> StubResult:
+        return self._results.pop(0)
+
+
+class ScriptedSessionScope:
+    def __init__(self, results: list[StubResult]) -> None:
+        self._results = results
+
+    async def __aenter__(self) -> ScriptedSession:
+        return ScriptedSession(self._results)
+
+    async def __aexit__(
+        self,
+        _exception_type: object,
+        _exception: object,
+        _traceback: object,
+    ) -> None:
+        return None
+
+
+class ScriptedSessions:
+    def __init__(self, results: list[StubResult]) -> None:
+        self._results = results
+
+    def begin(self) -> ScriptedSessionScope:
+        return ScriptedSessionScope(self._results)
 
 
 def unreachable_database() -> Database:
@@ -474,19 +515,31 @@ async def test_repository_refuses_foreign_argument_types() -> None:
         repository = repository_module.SqlAlchemyTimelineRepository(database)
         timeline = make_timeline()
         with pytest.raises(TimelineDataRejected):
-            await repository.save(cast(Timeline, object()))
+            await repository.save(cast(Timeline, object()), OWNER)
         with pytest.raises(TimelineDataRejected):
-            await repository.get(cast(TimelineId, timeline.timeline_id.uuid), 1)
+            await repository.save(timeline, cast(InstallationId, object()))
         with pytest.raises(TimelineDataRejected):
-            await repository.get(cast(TimelineId, TaskId.new()), 1)
+            await repository.get(cast(TimelineId, timeline.timeline_id.uuid), 1, OWNER)
         with pytest.raises(TimelineDataRejected):
-            await repository.get(timeline.timeline_id, cast(int, "1"))
+            await repository.get(cast(TimelineId, TaskId.new()), 1, OWNER)
         with pytest.raises(TimelineDataRejected):
-            await repository.get(timeline.timeline_id, cast(int, True))
+            await repository.get(timeline.timeline_id, cast(int, "1"), OWNER)
         with pytest.raises(TimelineDataRejected):
-            await repository.latest_revision(cast(TimelineId, timeline.timeline_id.uuid))
+            await repository.get(timeline.timeline_id, cast(int, True), OWNER)
         with pytest.raises(TimelineDataRejected):
-            await repository.latest_revision(cast(TimelineId, TaskId.new()))
+            await repository.get(timeline.timeline_id, 1, cast(InstallationId, object()))
+        with pytest.raises(TimelineDataRejected):
+            await repository.latest_revision(
+                cast(EditingProjectId, timeline.project_id.uuid),
+                OWNER,
+            )
+        with pytest.raises(TimelineDataRejected):
+            await repository.latest_revision(cast(EditingProjectId, TaskId.new()), OWNER)
+        with pytest.raises(TimelineDataRejected):
+            await repository.latest_revision(
+                timeline.project_id,
+                cast(InstallationId, object()),
+            )
     finally:
         await database.close()
 
@@ -513,11 +566,11 @@ async def test_an_unreachable_database_is_refused_without_leaking_the_connection
         repository = repository_module.SqlAlchemyTimelineRepository(database)
         timeline = make_timeline()
         with pytest.raises(TimelinePersistenceUnavailable) as saved:
-            await repository.save(timeline)
+            await repository.save(timeline, OWNER)
         with pytest.raises(TimelinePersistenceUnavailable) as loaded:
-            await repository.get(timeline.timeline_id, 1)
+            await repository.get(timeline.timeline_id, 1, OWNER)
         with pytest.raises(TimelinePersistenceUnavailable) as latest:
-            await repository.latest_revision(timeline.timeline_id)
+            await repository.latest_revision(timeline.project_id, OWNER)
         for captured in (saved, loaded, latest):
             rendered = "".join(traceback.format_exception(captured.value))
             for token in LEAKED_TOKENS:
@@ -551,11 +604,11 @@ async def test_a_database_error_is_refused_without_leaking_its_message() -> None
         )
         timeline = make_timeline()
         with pytest.raises(TimelinePersistenceUnavailable) as saved:
-            await repository.save(timeline)
+            await repository.save(timeline, OWNER)
         with pytest.raises(TimelinePersistenceUnavailable) as loaded:
-            await repository.get(timeline.timeline_id, 1)
+            await repository.get(timeline.timeline_id, 1, OWNER)
         with pytest.raises(TimelinePersistenceUnavailable) as latest:
-            await repository.latest_revision(timeline.timeline_id)
+            await repository.latest_revision(timeline.project_id, OWNER)
         for captured in (saved, loaded, latest):
             rendered = "".join(traceback.format_exception(captured.value))
             assert "le05_leaked_database_failure" not in rendered
@@ -598,11 +651,11 @@ async def test_an_authentication_failure_is_refused_without_leaking_the_role() -
         object.__setattr__(database, "_sessions", FailingSessions(failure))
         timeline = make_timeline()
         with pytest.raises(TimelinePersistenceUnavailable) as saved:
-            await repository.save(timeline)
+            await repository.save(timeline, OWNER)
         with pytest.raises(TimelinePersistenceUnavailable) as loaded:
-            await repository.get(timeline.timeline_id, 1)
+            await repository.get(timeline.timeline_id, 1, OWNER)
         with pytest.raises(TimelinePersistenceUnavailable) as latest:
-            await repository.latest_revision(timeline.timeline_id)
+            await repository.latest_revision(timeline.project_id, OWNER)
         for captured in (saved, loaded, latest):
             rendered = "".join(traceback.format_exception(captured.value))
             assert "le05_leaked_user" not in rendered
@@ -611,12 +664,18 @@ async def test_an_authentication_failure_is_refused_without_leaking_the_role() -
         await database.close()
 
 
-def integrity_error(sqlstate: object, detail: str) -> IntegrityError:
-    """An `IntegrityError` carrying the `sqlstate` a real driver would set.
+def integrity_error(
+    constraint_name: object,
+    detail: str,
+    *,
+    sqlstate: object = "23505",
+    constraint_on_cause: bool = False,
+) -> IntegrityError:
+    """An `IntegrityError` carrying the fields a real driver would set.
 
     Measured shape: SQLAlchemy keeps the driver's exception on `.orig`, and the
-    asyncpg adapter puts PostgreSQL's five-character SQLSTATE on it. `23505` and
-    `23503` are the two this table can produce today.
+    asyncpg adapter exposes both PostgreSQL's five-character SQLSTATE and the
+    constraint name separately from its private DETAIL string.
     """
 
     class DriverError(Exception):
@@ -625,27 +684,55 @@ def integrity_error(sqlstate: object, detail: str) -> IntegrityError:
     original = DriverError(detail)
     if sqlstate is not None:
         original.sqlstate = sqlstate  # type: ignore[attr-defined]
+    if constraint_name is not None and not constraint_on_cause:
+        original.constraint_name = constraint_name  # type: ignore[attr-defined]
+    if constraint_name is not None and constraint_on_cause:
+        cause = DriverError(detail)
+        cause.constraint_name = constraint_name  # type: ignore[attr-defined]
+        original.__cause__ = cause
     return IntegrityError("insert into timelines", None, original)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("sqlstate", "expected"),
+    ("constraint_name", "sqlstate", "constraint_on_cause", "expected"),
     [
-        ("23505", TimelineRevisionAlreadyStored),
-        ("23503", TimelineProjectMissing),
-        # Anything else a constraint could raise -- NOT NULL is `23502`, CHECK is
-        # `23514`. Neither can come from this table today, and neither gets
-        # better on a retry, so the answer is the one that says "fix the data"
-        # rather than the one that says "try again later".
-        ("23502", TimelineDataRejected),
-        ("23514", TimelineDataRejected),
-        (None, TimelineDataRejected),
+        ("pk_timelines", "23505", True, TimelineRevisionAlreadyStored),
+        (
+            "fk_editing_project_timelines_project",
+            "23503",
+            False,
+            TimelineProjectMissing,
+        ),
+        (
+            "uq_editing_project_timelines_timeline",
+            "23505",
+            False,
+            TimelineDataRejected,
+        ),
+        (
+            "fk_timelines_project_timeline",
+            "23503",
+            False,
+            TimelineDataRejected,
+        ),
+        ("ck_unknown", "23514", False, TimelineDataRejected),
+        (None, None, False, TimelineDataRejected),
     ],
-    ids=["unique", "foreign-key", "not-null", "check", "no-sqlstate"],
+    ids=[
+        "revision-primary-key",
+        "project-foreign-key",
+        "identity-unique",
+        "identity-foreign-key",
+        "unknown-check",
+        "no-driver-fields",
+    ],
 )
 async def test_each_integrity_violation_gets_its_own_answer(
-    sqlstate: object, expected: type[Exception]
+    constraint_name: object,
+    sqlstate: object,
+    constraint_on_cause: bool,
+    expected: type[Exception],
 ) -> None:
     """One `IntegrityError` class, three things a caller has to do about it.
 
@@ -655,10 +742,9 @@ async def test_each_integrity_violation_gets_its_own_answer(
     LE-06 has to turn into 409 and 404 respectively. Retrying either one
     unchanged never succeeds, which is what separates both from "unavailable".
 
-    The SQLSTATE is the only thing that tells them apart: both arrive as
-    `IntegrityError` with the constraint name buried in a driver message that
-    must not be re-raised, because PostgreSQL's DETAIL line quotes the offending
-    key values.
+    SQLSTATE cannot tell revision and identity uniqueness apart: both are
+    `23505`. The driver's separate constraint-name field can, without parsing
+    or re-raising the DETAIL line that quotes the offending key values.
     """
     database = unreachable_database()
     try:
@@ -666,10 +752,17 @@ async def test_each_integrity_violation_gets_its_own_answer(
         object.__setattr__(
             database,
             "_sessions",
-            FailingSessions(integrity_error(sqlstate, "Key (le05-private-detail) ...")),
+            FailingSessions(
+                integrity_error(
+                    constraint_name,
+                    "Key (le05-private-detail) ...",
+                    sqlstate=sqlstate,
+                    constraint_on_cause=constraint_on_cause,
+                )
+            ),
         )
         with pytest.raises(expected) as captured:
-            await repository.save(make_timeline())
+            await repository.save(make_timeline(), OWNER)
         rendered = "".join(traceback.format_exception(captured.value))
         assert "le05-private-detail" not in rendered
         assert captured.value.__cause__ is None
@@ -696,7 +789,7 @@ async def test_an_integrity_error_without_a_driver_exception_is_still_refused() 
             FailingSessions(IntegrityError("insert into timelines", None, None)),  # type: ignore[arg-type]
         )
         with pytest.raises(TimelineDataRejected):
-            await repository.save(make_timeline())
+            await repository.save(make_timeline(), OWNER)
     finally:
         await database.close()
 
@@ -720,11 +813,16 @@ async def test_a_missing_revision_is_not_found_and_a_present_one_hydrates() -> N
 
         object.__setattr__(database, "_sessions", StubSessions(None))
         with pytest.raises(TimelineNotFound):
-            await repository.get(TimelineId.new(), 1)
-        assert await repository.latest_revision(TimelineId.new()) is None
-        await repository.save(make_timeline())
-
+            await repository.get(TimelineId.new(), 1, OWNER)
+        assert await repository.latest_revision(EditingProjectId.new(), OWNER) is None
         timeline = make_timeline()
+        object.__setattr__(
+            database,
+            "_sessions",
+            StubSessions(None, scalar=timeline.timeline_id.uuid),
+        )
+        await repository.save(timeline, OWNER)
+
         object.__setattr__(
             database,
             "_sessions",
@@ -735,8 +833,94 @@ async def test_a_missing_revision_is_not_found_and_a_present_one_hydrates() -> N
                 )
             ),
         )
-        assert await repository.get(timeline.timeline_id, 1) == timeline
-        assert await repository.latest_revision(timeline.timeline_id) == timeline
+        assert await repository.get(timeline.timeline_id, 1, OWNER) == timeline
+        assert await repository.latest_revision(timeline.project_id, OWNER) == timeline
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_an_identity_claim_loser_distinguishes_each_database_state() -> None:
+    database = unreachable_database()
+    try:
+        repository = repository_module.SqlAlchemyTimelineRepository(database)
+        timeline = make_timeline()
+
+        object.__setattr__(
+            database,
+            "_sessions",
+            ScriptedSessions(
+                [
+                    StubResult(None),
+                    StubResult(None),
+                ]
+            ),
+        )
+        with pytest.raises(TimelineProjectMissing):
+            await repository.save(timeline, OWNER)
+
+        object.__setattr__(
+            database,
+            "_sessions",
+            ScriptedSessions(
+                [
+                    StubResult(None),
+                    StubResult(
+                        cast(
+                            RowMapping,
+                            {
+                                "project_id": timeline.project_id.uuid,
+                                "timeline_id": None,
+                            },
+                        )
+                    ),
+                ]
+            ),
+        )
+        with pytest.raises(TimelineDataRejected):
+            await repository.save(timeline, OWNER)
+
+        object.__setattr__(
+            database,
+            "_sessions",
+            ScriptedSessions(
+                [
+                    StubResult(None),
+                    StubResult(
+                        cast(
+                            RowMapping,
+                            {
+                                "project_id": timeline.project_id.uuid,
+                                "timeline_id": TimelineId.new().uuid,
+                            },
+                        )
+                    ),
+                ]
+            ),
+        )
+        with pytest.raises(TimelineRevisionAlreadyStored):
+            await repository.save(timeline, OWNER)
+
+        object.__setattr__(
+            database,
+            "_sessions",
+            ScriptedSessions(
+                [
+                    StubResult(None),
+                    StubResult(
+                        cast(
+                            RowMapping,
+                            {
+                                "project_id": timeline.project_id.uuid,
+                                "timeline_id": timeline.timeline_id.uuid,
+                            },
+                        )
+                    ),
+                    StubResult(None),
+                ]
+            ),
+        )
+        await repository.save(timeline, OWNER)
     finally:
         await database.close()
 
@@ -777,7 +961,7 @@ async def test_a_serialisation_failure_is_not_reported_as_an_unavailable_databas
 
         monkeypatch.setattr(repository_module, "_column_values", explode)
         with pytest.raises(SerialiserFailure):
-            await repository.save(make_timeline())
+            await repository.save(make_timeline(), OWNER)
     finally:
         await database.close()
 

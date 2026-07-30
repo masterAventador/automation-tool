@@ -44,7 +44,6 @@ from sqlalchemy import (
     insert,
     select,
     text,
-    update,
 )
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
@@ -82,6 +81,7 @@ from automation_tool.control_plane.domain import (
 from automation_tool.control_plane.infrastructure.database import (
     Database,
     editing_jobs,
+    editing_project_timelines,
     editing_projects,
     installations,
     timelines,
@@ -249,10 +249,11 @@ def make_job(
 
 
 async def reset_data(database: Database) -> None:
-    """Jobs, then timelines, then projects: neither key has an ON DELETE action."""
+    """Jobs, revisions, identities, then projects: no key cascades."""
     async with database.session() as session:
         await session.execute(delete(editing_jobs))
         await session.execute(delete(timelines))
+        await session.execute(delete(editing_project_timelines))
         await session.execute(delete(editing_projects))
 
 
@@ -283,7 +284,8 @@ async def store_timeline(
 ) -> None:
     """Through T3's repository, for the same reason."""
     await SqlAlchemyTimelineRepository(database).save(
-        make_timeline(timeline_id, project_id, revision)
+        make_timeline(timeline_id, project_id, revision),
+        OWNER,
     )
 
 
@@ -1574,14 +1576,43 @@ async def test_a_timeline_whose_identifier_is_not_v4_is_refused_at_hydration(
     try:
         await reset_data(database)
         project_id = EditingProjectId.new()
-        timeline_id = TimelineId.new()
-        await store_scene(database, project_id, timeline_id)
+        await store_project(database, project_id)
         nil_uuid = UUID(int=0)
+        material_id = MaterialId.new()
         async with database.session() as session:
             await session.execute(
-                update(timelines)
-                .where(timelines.c.timeline_id == timeline_id.uuid)
-                .values(timeline_id=nil_uuid)
+                insert(editing_project_timelines).values(
+                    project_id=project_id.uuid,
+                    timeline_id=nil_uuid,
+                )
+            )
+            await session.execute(
+                insert(timelines).values(
+                    timeline_id=nil_uuid,
+                    revision=REVISION,
+                    project_id=project_id.uuid,
+                    duration_ms=TIMELINE_DURATION_MS,
+                    tracks=[
+                        {
+                            "track_id": "visual",
+                            "kind": "visual",
+                            "clips": [
+                                {
+                                    "clip_id": "v-one",
+                                    "start_ms": 0,
+                                    "duration_ms": TIMELINE_DURATION_MS,
+                                    "source_material_id": str(material_id),
+                                    "source_in_ms": None,
+                                    "source_out_ms": None,
+                                    "text": None,
+                                    "gain_db": None,
+                                    "transition_in": None,
+                                }
+                            ],
+                        }
+                    ],
+                    created_at=CREATED_AT,
+                )
             )
         job_id = EditingJobId.new()
         await insert_row(database, job_id.uuid, project_id.uuid, nil_uuid)

@@ -70,6 +70,7 @@ def test_customer_demo_has_no_anonymous_business_write_operation() -> None:
         "registerEditingMaterial",
         "replaceTaskTargetExclusions",
         "resumeTask",
+        "saveEditingProjectTimeline",
         "startTaskDiscovery",
         "updateEditingMaterialDescription",
     }
