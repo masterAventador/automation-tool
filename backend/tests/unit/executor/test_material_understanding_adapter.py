@@ -320,6 +320,74 @@ def test_explicit_model_refusal_cannot_be_hidden_by_valid_content(
     assert captured.value.__context__ is None
 
 
+def test_duplicate_refusal_keys_cannot_overwrite_an_explicit_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = _Response({})
+    response._body = (
+        b'{"id":"req-duplicate-refusal","choices":[{"finish_reason":"stop",'
+        b'"message":{"refusal":"private refusal","refusal":null,'
+        b'"content":"{\\"description\\":\\"looks valid\\"}"}}]}'
+    )
+
+    def open_request(
+        _request: urllib.request.Request,
+        *,
+        timeout: float,
+    ) -> _Response:
+        assert timeout == 12.5
+        return response
+
+    monkeypatch.setattr(material_understanding_module, "_open_request", open_request)
+
+    with pytest.raises(
+        MaterialUnderstandingRejected,
+        match="material understanding request rejected",
+    ) as captured:
+        _adapter().understand(
+            (
+                MaterialUnderstandingFrame(
+                    timestamp_ms=0,
+                    is_scene_cut=True,
+                    jpeg_bytes=b"\xff\xd8\xff\xd9",
+                ),
+            ),
+            options=MaterialUnderstandingOptions(),
+        )
+
+    assert captured.value.__context__ is None
+
+
+def test_deeply_nested_response_envelope_is_a_fixed_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = _Response({})
+    response._body = b'{"choices":' + b"[" * 10_000 + b"0" + b"]" * 10_000 + b"}"
+
+    monkeypatch.setattr(
+        material_understanding_module,
+        "_open_request",
+        lambda _request, *, timeout: response,
+    )
+
+    with pytest.raises(
+        MaterialUnderstandingRejected,
+        match="material understanding request rejected",
+    ) as captured:
+        _adapter().understand(
+            (
+                MaterialUnderstandingFrame(
+                    timestamp_ms=0,
+                    is_scene_cut=True,
+                    jpeg_bytes=b"\xff\xd8\xff\xd9",
+                ),
+            ),
+            options=MaterialUnderstandingOptions(),
+        )
+
+    assert captured.value.__context__ is None
+
+
 def test_invalid_model_message_shape_is_a_fixed_rejection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -498,8 +498,16 @@ class BailianMaterialUnderstandingAdapter:
                 and len(raw_response) != declared_response_bytes
             ):
                 _reject()
-            document = json.loads(raw_response.decode("utf-8"))
-            choice = document["choices"][0]
+            document = decode_bounded_json_object(
+                raw_response,
+                maximum_bytes=_MAX_RESPONSE_BYTES,
+            )
+            choices = document["choices"]
+            if not isinstance(choices, list) or not choices:
+                _reject()
+            choice = choices[0]
+            if not isinstance(choice, dict):
+                _reject()
             message = choice["message"]
             if not isinstance(message, dict):
                 _reject()
@@ -507,7 +515,7 @@ class BailianMaterialUnderstandingAdapter:
             if refusal is not None and refusal != "":
                 _reject()
             return MaterialUnderstandingReply(
-                request_id=document["id"],
+                request_id=cast(str, document["id"]),
                 content=message["content"],
                 finish_reason=choice["finish_reason"],
             )
@@ -518,6 +526,7 @@ class BailianMaterialUnderstandingAdapter:
             json.JSONDecodeError,
             KeyError,
             IndexError,
+            RecursionError,
             TypeError,
             ValueError,
         ):
