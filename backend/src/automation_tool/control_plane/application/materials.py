@@ -103,25 +103,25 @@ class InvalidMaterialQuery(ValueError):
 
 
 class MaterialRepository(Protocol):
-    async def save_for_installation(
+    async def save(
         self,
         material: Material,
         installation_id: InstallationId,
     ) -> None: ...
 
-    async def get_for_installation(
+    async def get(
         self,
         material_id: MaterialId,
         installation_id: InstallationId,
     ) -> Material: ...
 
-    async def find_by_digest_for_installation(
+    async def find_by_digest(
         self,
         content_digest: str,
         installation_id: InstallationId,
     ) -> Material | None: ...
 
-    async def update_description_for_installation(
+    async def update_description(
         self,
         material: Material,
         installation_id: InstallationId,
@@ -149,7 +149,7 @@ class MaterialService:
         owner = self._require_installation(installation_id)
         if not isinstance(material, Material):
             raise InvalidMaterialQuery
-        await self._repository.save_for_installation(material, owner)
+        await self._repository.save(material, owner)
         return material
 
     async def get(
@@ -165,7 +165,7 @@ class MaterialService:
             parsed_material_id = None
         if parsed_material_id is None:
             raise MaterialNotFound
-        return await self._repository.get_for_installation(parsed_material_id, owner)
+        return await self._repository.get(parsed_material_id, owner)
 
     async def find_by_digest(
         self,
@@ -176,7 +176,7 @@ class MaterialService:
         owner = self._require_installation(installation_id)
         if not isinstance(content_digest, str) or _SHA256_PATTERN.fullmatch(content_digest) is None:
             raise InvalidMaterialQuery
-        material = await self._repository.find_by_digest_for_installation(
+        material = await self._repository.find_by_digest(
             content_digest,
             owner,
         )
@@ -211,8 +211,8 @@ class MaterialService:
             if current.description_source is DescriptionSource.USER:
                 raise MaterialDescriptionProtected
             changed = current.with_ai_description(description, tags, described_at)
-        await self._repository.update_description_for_installation(changed, owner)
-        stored = await self._repository.get_for_installation(changed.material_id, owner)
+        await self._repository.update_description(changed, owner)
+        stored = await self._repository.get(changed.material_id, owner)
         if source is DescriptionSource.AI and stored.description_source is DescriptionSource.USER:
             raise MaterialDescriptionProtected
         return stored

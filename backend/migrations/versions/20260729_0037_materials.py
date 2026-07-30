@@ -26,9 +26,8 @@ their constraints were the only validation there was.
 Three things do belong in the schema, because no domain object can see both sides:
 
 * `pk_materials`, so a repeated identifier is refused rather than merged;
-* `fk_materials_installation`, so a REST-visible material belongs to a real
-  Installation while pre-REST internal rows retain a NULL namespace;
-* partial unique indexes, so the same file cannot be imported twice inside one
+* `fk_materials_installation`, so every material belongs to a real Installation;
+* a scoped unique index, so the same file cannot be imported twice inside one
   Installation while another Installation learns nothing from that digest.
   `Material` knows a digest's format and nothing about what else is stored, so
   the refusal has to be structural.
@@ -73,7 +72,7 @@ def upgrade() -> None:
         sa.Column(
             "installation_id",
             postgresql.UUID(as_uuid=True),
-            nullable=True,
+            nullable=False,
         ),
         sa.Column("kind", sa.String(length=16), nullable=False),
         sa.Column("duration_ms", sa.Integer, nullable=True),
@@ -99,18 +98,10 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("material_id", name="pk_materials"),
     )
     op.create_index(
-        "uq_materials_unscoped_content_digest",
-        "materials",
-        ["content_digest"],
-        unique=True,
-        postgresql_where=sa.text("installation_id IS NULL"),
-    )
-    op.create_index(
         "uq_materials_installation_content_digest",
         "materials",
         ["installation_id", "content_digest"],
         unique=True,
-        postgresql_where=sa.text("installation_id IS NOT NULL"),
     )
     op.create_index(
         "ix_materials_installation_material",

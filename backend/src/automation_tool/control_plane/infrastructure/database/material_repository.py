@@ -164,47 +164,12 @@ class SqlAlchemyMaterialRepository:
             raise MaterialPersistenceUnavailable
         self._database = database
 
-    async def save(self, material: Material) -> None:
-        """Insert one material, leaving any existing row untouched.
-
-        There is no lookup before the insert -- not for the identifier and not
-        for the digest. That would let two callers importing the same file both
-        find nothing and both proceed. The primary key and the unique index are
-        what refuse the second one, and they refuse it whoever is racing.
-        """
-        if not isinstance(material, Material):
-            raise MaterialDataRejected
-        try:
-            async with self._database.session() as session:
-                await session.execute(insert(materials).values(**_column_values(material)))
-        except IntegrityError:
-            raise MaterialAlreadyRegistered from None
-        except _CONNECTION_FAILURES:
-            raise MaterialPersistenceUnavailable from None
-        except Exception:
-            # Authentication and authorisation failures are neither of the
-            # above. Measured on asyncpg 0.31.0:
-            #
-            #   InvalidPasswordError -> InvalidAuthorizationSpecificationError
-            #     -> PostgresError -> PostgresMessage -> Exception
-            #   InsufficientPrivilegeError -> SyntaxOrAccessError -> PostgresError -> ...
-            #   InvalidCatalogNameError -> PostgresError -> ...
-            #   TooManyConnectionsError -> InsufficientResourcesError -> PostgresError -> ...
-            #
-            # Only the third sits directly under `PostgresError`; the others
-            # arrive through an intermediate class, which is why matching on any
-            # single named base would miss some of them. None of the four has
-            # `OSError` or `SQLAlchemyError` anywhere on its MRO, and their
-            # messages name the role and the database, so without this tail they
-            # reach the caller verbatim. The same tail guards every method here.
-            raise MaterialPersistenceUnavailable from None
-
-    async def save_for_installation(
+    async def save(
         self,
         material: Material,
         installation_id: InstallationId,
     ) -> None:
-        """Insert a material into one Installation's independent digest scope."""
+        """Insert one material into its Installation's independent digest scope."""
         if not isinstance(material, Material) or not isinstance(installation_id, InstallationId):
             raise MaterialDataRejected
         try:
@@ -232,15 +197,7 @@ class SqlAlchemyMaterialRepository:
         except Exception:
             raise MaterialPersistenceUnavailable from None
 
-    async def get(self, material_id: MaterialId) -> Material:
-        if not isinstance(material_id, MaterialId):
-            raise MaterialDataRejected
-        row = await self._row(materials.c.material_id == material_id.uuid)
-        if row is None:
-            raise MaterialNotFound
-        return _hydrate(row)
-
-    async def get_for_installation(
+    async def get(
         self,
         material_id: MaterialId,
         installation_id: InstallationId,
@@ -259,7 +216,11 @@ class SqlAlchemyMaterialRepository:
             raise MaterialNotFound
         return _hydrate(row)
 
-    async def find_by_digest(self, content_digest: str) -> Material | None:
+    async def find_by_digest(
+        self,
+        content_digest: str,
+        installation_id: InstallationId,
+    ) -> Material | None:
         """Answer whether this exact content is already stored.
 
         `None` means "not stored", which is why the argument's type is checked
@@ -269,21 +230,6 @@ class SqlAlchemyMaterialRepository:
         here -- a well-formed digest nobody has stored and a malformed one both
         correctly answer `None`.
         """
-        if not isinstance(content_digest, str):
-            raise MaterialDataRejected
-        row = await self._row(
-            and_(
-                materials.c.content_digest == content_digest,
-                materials.c.installation_id.is_(None),
-            )
-        )
-        return None if row is None else _hydrate(row)
-
-    async def find_by_digest_for_installation(
-        self,
-        content_digest: str,
-        installation_id: InstallationId,
-    ) -> Material | None:
         if not isinstance(content_digest, str) or not isinstance(installation_id, InstallationId):
             raise MaterialDataRejected
         row = await self._row(
@@ -294,7 +240,11 @@ class SqlAlchemyMaterialRepository:
         )
         return None if row is None else _hydrate(row)
 
-    async def update_description(self, material: Material) -> None:
+    async def update_description(
+        self,
+        material: Material,
+        installation_id: InstallationId,
+    ) -> None:
         """Rewrite the four description columns, unless a person owns them.
 
         `Material.with_ai_description` returns the material unchanged when the
@@ -341,40 +291,12 @@ class SqlAlchemyMaterialRepository:
         columns carries a constraint that an UPDATE could violate.
         `SQLAlchemyError` would catch one anyway if that ever stopped being true.
         """
-        await self._update_description(
-            material,
-            installation_id=None,
-            enforce_installation=False,
-        )
-
-    async def update_description_for_installation(
-        self,
-        material: Material,
-        installation_id: InstallationId,
-    ) -> None:
-        if not isinstance(installation_id, InstallationId):
+        if not isinstance(material, Material) or not isinstance(installation_id, InstallationId):
             raise MaterialDataRejected
-        await self._update_description(
-            material,
-            installation_id=installation_id,
-            enforce_installation=True,
+        condition = and_(
+            materials.c.material_id == material.material_id.uuid,
+            materials.c.installation_id == installation_id.uuid,
         )
-
-    async def _update_description(
-        self,
-        material: Material,
-        *,
-        installation_id: InstallationId | None,
-        enforce_installation: bool,
-    ) -> None:
-        if not isinstance(material, Material):
-            raise MaterialDataRejected
-        condition: ColumnElement[bool] = materials.c.material_id == material.material_id.uuid
-        if enforce_installation:
-            condition = and_(
-                condition,
-                materials.c.installation_id == cast(InstallationId, installation_id).uuid,
-            )
         statement = update(materials).where(condition).values(**_description_values(material))
         if material.description_source is DescriptionSource.AI:
             statement = statement.where(

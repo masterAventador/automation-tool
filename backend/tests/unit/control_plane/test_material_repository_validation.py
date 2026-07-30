@@ -8,6 +8,7 @@ Behaviour against a live PostgreSQL is in the integration suite.
 
 from __future__ import annotations
 
+import inspect
 import traceback
 from datetime import UTC, datetime, timedelta, timezone
 from typing import cast
@@ -38,7 +39,7 @@ from automation_tool.control_plane.domain import (
     MaterialKind,
     TaskId,
 )
-from automation_tool.control_plane.infrastructure.database import Database
+from automation_tool.control_plane.infrastructure.database import Database, materials
 from automation_tool.control_plane.infrastructure.database import (
     material_repository as repository_module,
 )
@@ -197,53 +198,78 @@ def test_repository_refuses_a_database_it_does_not_own() -> None:
         repository_module.SqlAlchemyMaterialRepository(cast(Database, object()))
 
 
+def test_repository_has_one_required_installation_scoped_api() -> None:
+    repository_type = repository_module.SqlAlchemyMaterialRepository
+
+    assert list(inspect.signature(repository_type.save).parameters) == [
+        "self",
+        "material",
+        "installation_id",
+    ]
+    assert list(inspect.signature(repository_type.get).parameters) == [
+        "self",
+        "material_id",
+        "installation_id",
+    ]
+    assert list(inspect.signature(repository_type.find_by_digest).parameters) == [
+        "self",
+        "content_digest",
+        "installation_id",
+    ]
+    assert list(inspect.signature(repository_type.update_description).parameters) == [
+        "self",
+        "material",
+        "installation_id",
+    ]
+    assert not hasattr(repository_type, "save_for_installation")
+    assert not hasattr(repository_type, "get_for_installation")
+    assert not hasattr(repository_type, "find_by_digest_for_installation")
+    assert not hasattr(repository_type, "update_description_for_installation")
+    assert materials.c.installation_id.nullable is False
+
+
 @pytest.mark.asyncio
 async def test_repository_refuses_foreign_argument_types() -> None:
     database = unreachable_database()
     try:
         repository = repository_module.SqlAlchemyMaterialRepository(database)
+        installation_id = InstallationId.new()
+        material = make_material()
         with pytest.raises(MaterialDataRejected):
-            await repository.save(cast(Material, object()))
+            await repository.save(cast(Material, object()), installation_id)
         with pytest.raises(MaterialDataRejected):
-            await repository.update_description(cast(Material, object()))
+            await repository.update_description(cast(Material, object()), installation_id)
         # A bare UUID and a sibling identifier carry exactly the value the column
         # would accept, so the type has to be checked before the statement is
         # built rather than left to the database.
         with pytest.raises(MaterialDataRejected):
-            await repository.get(cast(MaterialId, MaterialId.new().uuid))
+            await repository.get(cast(MaterialId, MaterialId.new().uuid), installation_id)
         with pytest.raises(MaterialDataRejected):
-            await repository.get(cast(MaterialId, TaskId.new()))
+            await repository.get(cast(MaterialId, TaskId.new()), installation_id)
         # `find_by_digest` takes text, and `bpchar` comparison silently ignores
         # trailing blanks, so a non-string argument must not reach the statement
         # and be compared as whatever the driver makes of it.
         with pytest.raises(MaterialDataRejected):
-            await repository.find_by_digest(cast(str, 12345))
+            await repository.find_by_digest(cast(str, 12345), installation_id)
         with pytest.raises(MaterialDataRejected):
-            await repository.find_by_digest(cast(str, None))
-        installation_id = InstallationId.new()
-        material = make_material()
+            await repository.find_by_digest(cast(str, None), installation_id)
         with pytest.raises(MaterialDataRejected):
-            await repository.save_for_installation(
-                cast(Material, object()),
-                installation_id,
-            )
-        with pytest.raises(MaterialDataRejected):
-            await repository.save_for_installation(
+            await repository.save(
                 material,
                 cast(InstallationId, object()),
             )
         with pytest.raises(MaterialDataRejected):
-            await repository.get_for_installation(
+            await repository.get(
                 material.material_id,
                 cast(InstallationId, object()),
             )
         with pytest.raises(MaterialDataRejected):
-            await repository.find_by_digest_for_installation(
+            await repository.find_by_digest(
                 DIGEST,
                 cast(InstallationId, object()),
             )
         with pytest.raises(MaterialDataRejected):
-            await repository.update_description_for_installation(
+            await repository.update_description(
                 material,
                 cast(InstallationId, object()),
             )
@@ -264,17 +290,16 @@ async def test_an_unreachable_database_is_refused_without_leaking_the_connection
     try:
         repository = repository_module.SqlAlchemyMaterialRepository(database)
         material = make_material()
+        installation_id = InstallationId.new()
         with pytest.raises(MaterialPersistenceUnavailable) as loaded:
-            await repository.get(material.material_id)
+            await repository.get(material.material_id, installation_id)
         with pytest.raises(MaterialPersistenceUnavailable) as saved:
-            await repository.save(material)
+            await repository.save(material, installation_id)
         with pytest.raises(MaterialPersistenceUnavailable) as found:
-            await repository.find_by_digest(DIGEST)
+            await repository.find_by_digest(DIGEST, installation_id)
         with pytest.raises(MaterialPersistenceUnavailable) as updated:
-            await repository.update_description(material)
-        with pytest.raises(MaterialPersistenceUnavailable) as scoped_saved:
-            await repository.save_for_installation(material, InstallationId.new())
-        for captured in (loaded, saved, found, updated, scoped_saved):
+            await repository.update_description(material, installation_id)
+        for captured in (loaded, saved, found, updated):
             rendered = "".join(traceback.format_exception(captured.value))
             for token in LEAKED_TOKENS:
                 assert token not in rendered
@@ -310,17 +335,16 @@ async def test_a_database_error_is_refused_without_leaking_its_message() -> None
             FailingSessions(SQLAlchemyError("le05_leaked_database_failure")),
         )
         material = make_material()
+        installation_id = InstallationId.new()
         with pytest.raises(MaterialPersistenceUnavailable) as loaded:
-            await repository.get(material.material_id)
+            await repository.get(material.material_id, installation_id)
         with pytest.raises(MaterialPersistenceUnavailable) as saved:
-            await repository.save(material)
+            await repository.save(material, installation_id)
         with pytest.raises(MaterialPersistenceUnavailable) as found:
-            await repository.find_by_digest(DIGEST)
+            await repository.find_by_digest(DIGEST, installation_id)
         with pytest.raises(MaterialPersistenceUnavailable) as updated:
-            await repository.update_description(material)
-        with pytest.raises(MaterialPersistenceUnavailable) as scoped_saved:
-            await repository.save_for_installation(material, InstallationId.new())
-        for captured in (loaded, saved, found, updated, scoped_saved):
+            await repository.update_description(material, installation_id)
+        for captured in (loaded, saved, found, updated):
             assert "le05_leaked_database_failure" not in "".join(
                 traceback.format_exception(captured.value)
             )
@@ -359,17 +383,16 @@ async def test_an_authentication_failure_is_refused_without_leaking_the_role() -
         assert asyncpg.exceptions.PostgresError in type(failure).__mro__
         object.__setattr__(database, "_sessions", FailingSessions(failure))
         material = make_material()
+        installation_id = InstallationId.new()
         with pytest.raises(MaterialPersistenceUnavailable) as loaded:
-            await repository.get(material.material_id)
+            await repository.get(material.material_id, installation_id)
         with pytest.raises(MaterialPersistenceUnavailable) as saved:
-            await repository.save(material)
+            await repository.save(material, installation_id)
         with pytest.raises(MaterialPersistenceUnavailable) as found:
-            await repository.find_by_digest(DIGEST)
+            await repository.find_by_digest(DIGEST, installation_id)
         with pytest.raises(MaterialPersistenceUnavailable) as updated:
-            await repository.update_description(material)
-        with pytest.raises(MaterialPersistenceUnavailable) as scoped_saved:
-            await repository.save_for_installation(material, InstallationId.new())
-        for captured in (loaded, saved, found, updated, scoped_saved):
+            await repository.update_description(material, installation_id)
+        for captured in (loaded, saved, found, updated):
             rendered = "".join(traceback.format_exception(captured.value))
             assert "le05_leaked_user" not in rendered
             assert captured.value.__cause__ is None
@@ -389,6 +412,10 @@ async def test_a_conflicting_insert_is_already_registered_and_says_no_more() -> 
     database = unreachable_database()
     try:
         repository = repository_module.SqlAlchemyMaterialRepository(database)
+        driver_error = Exception("Key (content_digest)=(le05-private-detail) already exists")
+        constraint_error = Exception()
+        constraint_error.constraint_name = "uq_materials_installation_content_digest"  # type: ignore[attr-defined]
+        driver_error.__cause__ = constraint_error
         object.__setattr__(
             database,
             "_sessions",
@@ -396,12 +423,12 @@ async def test_a_conflicting_insert_is_already_registered_and_says_no_more() -> 
                 IntegrityError(
                     "insert into materials",
                     None,
-                    Exception("Key (content_digest)=(le05-private-detail) already exists"),
+                    driver_error,
                 )
             ),
         )
         with pytest.raises(MaterialAlreadyRegistered) as captured:
-            await repository.save(make_material())
+            await repository.save(make_material(), InstallationId.new())
         rendered = "".join(traceback.format_exception(captured.value))
         assert "le05-private-detail" not in rendered
         assert captured.value.__cause__ is None
@@ -433,7 +460,7 @@ async def test_a_scoped_insert_only_calls_known_unique_constraints_a_duplicate()
         )
 
         with pytest.raises(MaterialDataRejected) as captured:
-            await repository.save_for_installation(
+            await repository.save(
                 make_material(),
                 InstallationId.new(),
             )
@@ -457,11 +484,12 @@ async def test_a_missing_row_is_not_found_and_a_present_row_hydrates() -> None:
     database = unreachable_database()
     try:
         repository = repository_module.SqlAlchemyMaterialRepository(database)
+        installation_id = InstallationId.new()
 
         object.__setattr__(database, "_sessions", StubSessions(None))
         with pytest.raises(MaterialNotFound):
-            await repository.get(MaterialId.new())
-        assert await repository.find_by_digest(DIGEST) is None
+            await repository.get(MaterialId.new(), installation_id)
+        assert await repository.find_by_digest(DIGEST, installation_id) is None
 
         material = make_material()
         object.__setattr__(
@@ -469,8 +497,8 @@ async def test_a_missing_row_is_not_found_and_a_present_row_hydrates() -> None:
             "_sessions",
             StubSessions(hydration_row(material_id=material.material_id.uuid)),
         )
-        assert await repository.get(material.material_id) == material
-        assert await repository.find_by_digest(DIGEST) == material
+        assert await repository.get(material.material_id, installation_id) == material
+        assert await repository.find_by_digest(DIGEST, installation_id) == material
     finally:
         await database.close()
 
@@ -486,12 +514,13 @@ async def test_updating_a_description_that_matched_no_row_is_not_found() -> None
     database = unreachable_database()
     try:
         repository = repository_module.SqlAlchemyMaterialRepository(database)
+        installation_id = InstallationId.new()
         object.__setattr__(database, "_sessions", StubSessions(None, rowcount=0))
         with pytest.raises(MaterialNotFound):
-            await repository.update_description(make_material())
+            await repository.update_description(make_material(), installation_id)
 
         object.__setattr__(database, "_sessions", StubSessions(None, rowcount=1))
-        await repository.update_description(make_material())
+        await repository.update_description(make_material(), installation_id)
     finally:
         await database.close()
 
@@ -524,7 +553,7 @@ async def test_a_row_the_predicate_refused_is_told_apart_from_a_row_that_is_gone
             StubSessions(hydration_row(description_source="user"), rowcount=0),
         )
         with pytest.raises(MaterialDescriptionProtected):
-            await repository.update_description(make_material())
+            await repository.update_description(make_material(), InstallationId.new())
     finally:
         await database.close()
 
@@ -543,7 +572,10 @@ async def test_a_user_written_description_is_not_sent_through_the_predicate() ->
     try:
         repository = repository_module.SqlAlchemyMaterialRepository(database)
         object.__setattr__(database, "_sessions", StubSessions(None, rowcount=1))
-        await repository.update_description(make_material().with_user_description("用户写的"))
+        await repository.update_description(
+            make_material().with_user_description("用户写的"),
+            InstallationId.new(),
+        )
     finally:
         await database.close()
 

@@ -60,7 +60,7 @@ class MemoryMaterialRepository:
         self.materials: dict[MaterialId, tuple[InstallationId, Material]] = {}
         self.failure: Exception | None = None
 
-    async def save_for_installation(
+    async def save(
         self,
         material: Material,
         installation_id: InstallationId,
@@ -74,7 +74,7 @@ class MemoryMaterialRepository:
             raise MaterialAlreadyRegistered
         self.materials[material.material_id] = (installation_id, material)
 
-    async def get_for_installation(
+    async def get(
         self,
         material_id: MaterialId,
         installation_id: InstallationId,
@@ -89,7 +89,7 @@ class MemoryMaterialRepository:
             raise MaterialNotFound
         return material
 
-    async def find_by_digest_for_installation(
+    async def find_by_digest(
         self,
         content_digest: str,
         installation_id: InstallationId,
@@ -105,14 +105,14 @@ class MemoryMaterialRepository:
             None,
         )
 
-    async def update_description_for_installation(
+    async def update_description(
         self,
         material: Material,
         installation_id: InstallationId,
     ) -> None:
         if self.failure is not None:
             raise self.failure
-        stored = await self.get_for_installation(material.material_id, installation_id)
+        stored = await self.get(material.material_id, installation_id)
         if (
             material.description_source is DescriptionSource.AI
             and stored.description_source is DescriptionSource.USER
@@ -582,7 +582,7 @@ async def test_service_rejects_foreign_types_before_the_repository() -> None:
 @pytest.mark.asyncio
 async def test_service_detects_a_user_write_that_wins_before_the_return_read() -> None:
     class ConcurrentUserRepository(MemoryMaterialRepository):
-        async def update_description_for_installation(
+        async def update_description(
             self,
             material: Material,
             installation_id: InstallationId,

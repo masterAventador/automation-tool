@@ -74,7 +74,7 @@ PREVIOUS_REVISION = "20260729_0036"
 # all, since NULL there is an ordinary value and not a broken row.
 EXPECTED_COLUMNS = {
     "material_id": ("uuid", "NO", None),
-    "installation_id": ("uuid", "YES", None),
+    "installation_id": ("uuid", "NO", None),
     "kind": ("character varying", "NO", 16),
     "duration_ms": ("integer", "YES", None),
     "width": ("integer", "YES", None),
@@ -93,10 +93,10 @@ EXPECTED_COLUMNS = {
 }
 EXPECTED_CONSTRAINTS = {"pk_materials", "fk_materials_installation"}
 EXPECTED_INDEXES = {
-    "uq_materials_unscoped_content_digest",
     "uq_materials_installation_content_digest",
     "ix_materials_installation_material",
 }
+OWNER = InstallationId.parse("00000000-0000-4000-8000-000000000001")
 
 # The SQLAlchemy type each column is declared with in `schema.py`. T1 compared
 # only names and widths and registered the rest as a known gap: pasting
@@ -175,7 +175,7 @@ def row_values(material_id: UUID, **overrides: object) -> dict[str, object]:
     """
     values: dict[str, object] = {
         "material_id": material_id,
-        "installation_id": None,
+        "installation_id": OWNER.uuid,
         "kind": "video",
         "duration_ms": 185_000,
         "width": 1920,
@@ -199,6 +199,16 @@ def row_values(material_id: UUID, **overrides: object) -> dict[str, object]:
 async def reset_data(database: Database) -> None:
     async with database.session() as session:
         await session.execute(delete(materials))
+        exists = await session.scalar(
+            select(installations.c.id).where(installations.c.id == OWNER.uuid)
+        )
+        if exists is None:
+            await session.execute(
+                insert(installations).values(
+                    id=OWNER.uuid,
+                    device_public_key=secrets.token_bytes(32),
+                )
+            )
 
 
 async def seed_installation(database: Database) -> InstallationId:
@@ -241,7 +251,7 @@ async def test_saved_material_lands_as_typed_columns_and_hydrates_back_equal(
         material_id = MaterialId.new()
         material = make_material(material_id)
 
-        await repository.save(material)
+        await repository.save(material, OWNER)
 
         row = await stored_row(database, material_id.uuid)
         assert row == row_values(material_id.uuid)
@@ -264,7 +274,7 @@ async def test_saved_material_lands_as_typed_columns_and_hydrates_back_equal(
         assert isinstance(described_at, datetime)
         assert described_at.tzinfo is UTC
 
-        loaded = await repository.get(material_id)
+        loaded = await repository.get(material_id, OWNER)
         assert loaded == material
         # Equality alone would not catch this: `((1200, 4800),) == [[1200, 4800]]`
         # is False, but a dataclass comparing two hydrated objects would agree
@@ -308,7 +318,7 @@ async def test_a_digest_shorter_than_the_column_is_blank_padded_and_then_refused
         stored = (await stored_row(database, material_id.uuid))["content_digest"]
         assert stored == "short" + " " * 59
         with pytest.raises(InvalidMaterialModel):
-            await repository.get(material_id)
+            await repository.get(material_id, OWNER)
     finally:
         await reset_data(database)
         await database.close()
@@ -333,13 +343,16 @@ async def test_a_missing_material_and_a_repeated_identifier_are_refused_differen
         material_id = MaterialId.new()
 
         with pytest.raises(MaterialNotFound):
-            await repository.get(material_id)
+            await repository.get(material_id, OWNER)
 
-        await repository.save(make_material(material_id))
+        await repository.save(make_material(material_id), OWNER)
         # The second material carries a different digest, so only the primary
         # key can be what refuses it.
         with pytest.raises(MaterialAlreadyRegistered):
-            await repository.save(make_material(material_id, content_digest=DIGEST_TWO))
+            await repository.save(
+                make_material(material_id, content_digest=DIGEST_TWO),
+                OWNER,
+            )
 
         # A rejected duplicate must not be an upsert in disguise.
         assert (await stored_row(database, material_id.uuid))["content_digest"] == DIGEST_ONE
@@ -366,10 +379,13 @@ async def test_a_second_material_with_the_same_digest_is_refused_without_leaking
     repository = SqlAlchemyMaterialRepository(database)
     try:
         await reset_data(database)
-        await repository.save(make_material(MaterialId.new()))
+        await repository.save(make_material(MaterialId.new()), OWNER)
 
         with pytest.raises(MaterialAlreadyRegistered) as captured:
-            await repository.save(make_material(MaterialId.new(), content_digest=DIGEST_ONE))
+            await repository.save(
+                make_material(MaterialId.new(), content_digest=DIGEST_ONE),
+                OWNER,
+            )
 
         rendered = "".join(traceback.format_exception(captured.value))
         assert DIGEST_ONE not in rendered
@@ -384,12 +400,10 @@ async def test_scoped_materials_are_owned_isolated_and_unique_per_installation(
     postgresql_url: str,
     alembic_runner: AlembicRunner,
 ) -> None:
-    """The REST repository namespace is structural in PostgreSQL.
+    """Material ownership is structural in PostgreSQL.
 
     The same local file can be imported on two devices, but those rows cannot
-    expose or overwrite each other's user-owned descriptions. Legacy unscoped
-    rows remain a separate namespace rather than becoming visible to either
-    Installation.
+    expose or overwrite each other's user-owned descriptions.
     """
     alembic_runner(postgresql_url, "upgrade", "head")
     database = Database.from_url(postgresql_url)
@@ -402,39 +416,33 @@ async def test_scoped_materials_are_owned_isolated_and_unique_per_installation(
         owner_ids = (owner, other)
         owned = make_material(MaterialId.new())
         foreign = make_material(MaterialId.new())
-        legacy = make_material(MaterialId.new(), content_digest=DIGEST_TWO)
 
-        await repository.save_for_installation(owned, owner)
-        await repository.save_for_installation(foreign, other)
-        await repository.save(legacy)
+        await repository.save(owned, owner)
+        await repository.save(foreign, other)
 
-        assert await repository.get_for_installation(owned.material_id, owner) == owned
+        assert await repository.get(owned.material_id, owner) == owned
         with pytest.raises(MaterialNotFound):
-            await repository.get_for_installation(foreign.material_id, owner)
-        assert await repository.find_by_digest_for_installation(DIGEST_ONE, owner) == owned
-        assert await repository.find_by_digest_for_installation(DIGEST_ONE, other) == foreign
-        assert await repository.find_by_digest_for_installation(DIGEST_TWO, owner) is None
-        assert await repository.find_by_digest(DIGEST_TWO) == legacy
-        assert await repository.find_by_digest(DIGEST_ONE) is None
+            await repository.get(foreign.material_id, owner)
+        assert await repository.find_by_digest(DIGEST_ONE, owner) == owned
+        assert await repository.find_by_digest(DIGEST_ONE, other) == foreign
+        assert await repository.find_by_digest(DIGEST_TWO, owner) is None
 
         protected = owned.with_user_description("用户自己的描述")
-        await repository.update_description_for_installation(protected, owner)
+        await repository.update_description(protected, owner)
         with pytest.raises(MaterialDescriptionProtected):
-            await repository.update_description_for_installation(
+            await repository.update_description(
                 owned.with_ai_description("模型不能覆盖", ("拒绝",), LATER),
                 owner,
             )
         with pytest.raises(MaterialNotFound):
-            await repository.update_description_for_installation(
+            await repository.update_description(
                 foreign.with_user_description("越权修改"),
                 owner,
             )
-        assert (
-            await repository.get_for_installation(owned.material_id, owner)
-        ).ai_description == "用户自己的描述"
+        assert (await repository.get(owned.material_id, owner)).ai_description == "用户自己的描述"
 
         with pytest.raises(MaterialAlreadyRegistered):
-            await repository.save_for_installation(
+            await repository.save(
                 make_material(MaterialId.new()),
                 owner,
             )
@@ -455,7 +463,6 @@ async def test_scoped_materials_are_owned_isolated_and_unique_per_installation(
         assert {(row["material_id"], row["installation_id"]) for row in rows} == {
             (owned.material_id.uuid, owner.uuid),
             (foreign.material_id.uuid, other.uuid),
-            (legacy.material_id.uuid, None),
         }
     finally:
         await reset_data(database)
@@ -483,11 +490,11 @@ async def test_both_unique_constraints_are_enforced_by_postgresql_itself(
     inserts never touch the repository, so what they prove is that the database
     -- not a Python branch -- refuses.
 
-        Each conflicting row moves exactly one of the two dimensions, so the pair
-        tells the primary key and the unscoped partial unique index apart: dropping
-        the primary key leaves the second case red and the first green, and dropping
-        the unique index does the reverse. The third row moves both and must be
-        accepted, which stops a too-broad rule passing by refusing everything.
+    Each conflicting row moves exactly one of the two dimensions, so the pair
+    tells the primary key and the Installation-scoped unique index apart: dropping
+    the primary key leaves the second case red and the first green, and dropping
+    the unique index does the reverse. The third row moves both and must be
+    accepted, which stops a too-broad rule passing by refusing everything.
     """
     alembic_runner(postgresql_url, "upgrade", "head")
     database = Database.from_url(postgresql_url)
@@ -508,7 +515,7 @@ async def test_both_unique_constraints_are_enforced_by_postgresql_itself(
         assert getattr(repeated_id.value.orig, "sqlstate", None) == "23505"
         assert "pk_materials" in str(repeated_id.value.orig)
         assert getattr(repeated_digest.value.orig, "sqlstate", None) == "23505"
-        assert "uq_materials_unscoped_content_digest" in str(repeated_digest.value.orig)
+        assert "uq_materials_installation_content_digest" in str(repeated_digest.value.orig)
 
         await insert_row(database, second_id.uuid, content_digest=DIGEST_TWO)
         assert await stored_material_ids(database) == {first_id.uuid, second_id.uuid}
@@ -540,16 +547,16 @@ async def test_find_by_digest_answers_both_ways(
     repository = SqlAlchemyMaterialRepository(database)
     try:
         await reset_data(database)
-        assert await repository.find_by_digest(DIGEST_ONE) is None
+        assert await repository.find_by_digest(DIGEST_ONE, OWNER) is None
 
         first = make_material(MaterialId.new(), content_digest=DIGEST_ONE)
         second = make_material(MaterialId.new(), content_digest=DIGEST_TWO)
-        await repository.save(first)
-        await repository.save(second)
+        await repository.save(first, OWNER)
+        await repository.save(second, OWNER)
 
-        assert await repository.find_by_digest(DIGEST_ONE) == first
-        assert await repository.find_by_digest(DIGEST_TWO) == second
-        assert await repository.find_by_digest("0" * 64) is None
+        assert await repository.find_by_digest(DIGEST_ONE, OWNER) == first
+        assert await repository.find_by_digest(DIGEST_TWO, OWNER) == second
+        assert await repository.find_by_digest("0" * 64, OWNER) is None
     finally:
         await reset_data(database)
         await database.close()
@@ -580,11 +587,11 @@ async def test_update_description_rewrites_four_columns_and_no_others(
         await reset_data(database)
         material_id = MaterialId.new()
         material = make_material(material_id)
-        await repository.save(material)
+        await repository.save(material, OWNER)
 
         # The AI direction, on a row the model still owns.
         rewritten = material.with_ai_description("模型看到的描述", ("夜景", "延时"), LATER)
-        await repository.update_description(rewritten)
+        await repository.update_description(rewritten, OWNER)
         assert await stored_row(database, material_id.uuid) == row_values(
             material_id.uuid,
             ai_description="模型看到的描述",
@@ -592,11 +599,11 @@ async def test_update_description_rewrites_four_columns_and_no_others(
             description_source="ai",
             described_at=LATER,
         )
-        assert await repository.get(material_id) == rewritten
+        assert await repository.get(material_id, OWNER) == rewritten
 
         # And the user direction, which is terminal for this field.
         written_by_user = rewritten.with_user_description("我自己写的描述")
-        await repository.update_description(written_by_user)
+        await repository.update_description(written_by_user, OWNER)
         assert await stored_row(database, material_id.uuid) == row_values(
             material_id.uuid,
             ai_description="我自己写的描述",
@@ -604,10 +611,10 @@ async def test_update_description_rewrites_four_columns_and_no_others(
             description_source="user",
             described_at=None,
         )
-        assert await repository.get(material_id) == written_by_user
+        assert await repository.get(material_id, OWNER) == written_by_user
 
         with pytest.raises(MaterialNotFound):
-            await repository.update_description(make_material(MaterialId.new()))
+            await repository.update_description(make_material(MaterialId.new()), OWNER)
     finally:
         await reset_data(database)
         await database.close()
@@ -636,16 +643,19 @@ async def test_a_stale_snapshot_cannot_walk_an_ai_description_over_the_users(
     try:
         await reset_data(database)
         material_id = MaterialId.new()
-        await repository.save(make_material(material_id))
+        await repository.save(make_material(material_id), OWNER)
 
         # One flow loads the material and hands it to a describe pass that
         # keeps hold of it -- an ordinary thing for a queued background job.
-        stale = await repository.get(material_id)
+        stale = await repository.get(material_id, OWNER)
         assert stale.description_source is DescriptionSource.AI
 
         # Meanwhile the user writes their own description, through the method
         # that exists to make that stick.
-        await repository.update_description(stale.with_user_description("用户自己写的描述"))
+        await repository.update_description(
+            stale.with_user_description("用户自己写的描述"),
+            OWNER,
+        )
 
         # The describe pass now finishes. Its snapshot still says `ai`, so
         # `with_ai_description` hands back a rewritten material rather than
@@ -654,7 +664,7 @@ async def test_a_stale_snapshot_cannot_walk_an_ai_description_over_the_users(
         assert overwrite.description_source is DescriptionSource.AI
 
         with pytest.raises(MaterialDescriptionProtected) as captured:
-            await repository.update_description(overwrite)
+            await repository.update_description(overwrite, OWNER)
 
         # The user's words survive, and so does their claim on the field.
         assert await stored_row(database, material_id.uuid) == row_values(
@@ -664,7 +674,7 @@ async def test_a_stale_snapshot_cannot_walk_an_ai_description_over_the_users(
             description_source="user",
             described_at=None,
         )
-        loaded = await repository.get(material_id)
+        loaded = await repository.get(material_id, OWNER)
         assert loaded.ai_description == "用户自己写的描述"
         assert loaded.description_source is DescriptionSource.USER
         # Refusing is not the same as "the material is gone": LE-06 answers 409
@@ -702,22 +712,29 @@ async def test_the_user_may_keep_rewriting_their_own_description(
         await reset_data(database)
         material_id = MaterialId.new()
         material = make_material(material_id)
-        await repository.save(material)
+        await repository.save(material, OWNER)
 
-        await repository.update_description(material.with_user_description("第一次写的"))
-        stored = await repository.get(material_id)
-        await repository.update_description(stored.with_user_description("改了一遍"))
+        await repository.update_description(
+            material.with_user_description("第一次写的"),
+            OWNER,
+        )
+        stored = await repository.get(material_id, OWNER)
+        await repository.update_description(
+            stored.with_user_description("改了一遍"),
+            OWNER,
+        )
 
-        assert (await repository.get(material_id)).ai_description == "改了一遍"
+        assert (await repository.get(material_id, OWNER)).ai_description == "改了一遍"
 
         # And a row that is not there is still "not found" rather than
         # "protected", on both branches of the predicate.
         with pytest.raises(MaterialNotFound):
             await repository.update_description(
-                make_material(MaterialId.new()).with_user_description("给不存在的素材")
+                make_material(MaterialId.new()).with_user_description("给不存在的素材"),
+                OWNER,
             )
         with pytest.raises(MaterialNotFound):
-            await repository.update_description(make_material(MaterialId.new()))
+            await repository.update_description(make_material(MaterialId.new()), OWNER)
     finally:
         await reset_data(database)
         await database.close()
@@ -747,7 +764,7 @@ async def test_update_description_ignores_the_probing_facts_it_is_handed(
     try:
         await reset_data(database)
         material_id = MaterialId.new()
-        await repository.save(make_material(material_id))
+        await repository.save(make_material(material_id), OWNER)
 
         disagreeing = Material(
             material_id=material_id,
@@ -767,7 +784,7 @@ async def test_update_description_ignores_the_probing_facts_it_is_handed(
             description_source=DescriptionSource.AI,
             described_at=LATER,
         )
-        await repository.update_description(disagreeing)
+        await repository.update_description(disagreeing, OWNER)
 
         assert await stored_row(database, material_id.uuid) == row_values(
             material_id.uuid,
@@ -834,8 +851,8 @@ async def test_the_longest_values_the_domain_accepts_still_fit_the_columns(
             described_at=DESCRIBED_AT,
         )
 
-        await repository.save(material)
-        assert await repository.get(material_id) == material
+        await repository.save(material, OWNER)
+        assert await repository.get(material_id, OWNER) == material
         row = await stored_row(database, material_id.uuid)
         assert row["ai_description"] == longest_description
         assert row["speech_transcript"] == longest_transcript
@@ -921,7 +938,7 @@ async def test_rows_the_domain_would_refuse_are_refused_at_hydration(
         material_id = MaterialId.new()
         await insert_row(database, material_id.uuid, **overrides)
         with pytest.raises(InvalidMaterialModel):
-            await repository.get(material_id)
+            await repository.get(material_id, OWNER)
     finally:
         await reset_data(database)
         await database.close()
@@ -965,7 +982,7 @@ async def test_a_null_described_at_hydrates_as_none(
         material_id = MaterialId.new()
         await insert_row(database, material_id.uuid, **overrides)
 
-        loaded = await repository.get(material_id)
+        loaded = await repository.get(material_id, OWNER)
         assert loaded.described_at is None
         assert loaded.ai_description == overrides["ai_description"]
         assert loaded.description_source.value == overrides["description_source"]
@@ -990,9 +1007,9 @@ async def test_a_stored_identifier_of_the_wrong_uuid_version_is_refused(
         assert await stored_material_ids(database) == {nil_uuid}
 
         with pytest.raises(InvalidMaterialModel):
-            await repository.get(forged_identifier(nil_uuid))
+            await repository.get(forged_identifier(nil_uuid), OWNER)
         with pytest.raises(InvalidMaterialModel):
-            await repository.find_by_digest(DIGEST_ONE)
+            await repository.find_by_digest(DIGEST_ONE, OWNER)
     finally:
         await reset_data(database)
         await database.close()
@@ -1027,13 +1044,13 @@ async def test_wrong_credentials_are_refused_without_leaking_the_identity(
         repository = SqlAlchemyMaterialRepository(database)
         material = make_material(MaterialId.new())
         with pytest.raises(MaterialPersistenceUnavailable) as loaded:
-            await repository.get(material.material_id)
+            await repository.get(material.material_id, OWNER)
         with pytest.raises(MaterialPersistenceUnavailable) as saved:
-            await repository.save(material)
+            await repository.save(material, OWNER)
         with pytest.raises(MaterialPersistenceUnavailable) as found:
-            await repository.find_by_digest(DIGEST_ONE)
+            await repository.find_by_digest(DIGEST_ONE, OWNER)
         with pytest.raises(MaterialPersistenceUnavailable) as updated:
-            await repository.update_description(material)
+            await repository.update_description(material, OWNER)
         for captured in (loaded, saved, found, updated):
             rendered = "".join(traceback.format_exception(captured.value))
             assert role not in rendered

@@ -2392,9 +2392,7 @@ materials = Table(
     "materials",
     metadata,
     Column("material_id", UUID(as_uuid=True), nullable=False),
-    # NULL is the pre-REST/internal namespace retained for LE-05 callers.
-    # App-session routes always write an owner and only query their own scope.
-    Column("installation_id", UUID(as_uuid=True), nullable=True),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
     Column("kind", String(length=16), nullable=False),
     # Nullable because the domain says so, not because the value is optional
     # paperwork: an image has no duration and audio has no frame size, and both
@@ -2435,18 +2433,10 @@ materials = Table(
 )
 
 Index(
-    "uq_materials_unscoped_content_digest",
-    materials.c.content_digest,
-    unique=True,
-    postgresql_where=materials.c.installation_id.is_(None),
-)
-
-Index(
     "uq_materials_installation_content_digest",
     materials.c.installation_id,
     materials.c.content_digest,
     unique=True,
-    postgresql_where=materials.c.installation_id.is_not(None),
 )
 
 Index(
