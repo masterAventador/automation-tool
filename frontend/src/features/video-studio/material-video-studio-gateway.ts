@@ -3,6 +3,15 @@ export interface MaterialVideoStudioSnapshot {
   readonly modelId: "deepseek-v4-pro" | "glm-5.2" | "qwen3.7-max-2026-06-08";
 }
 
+/** Logical child-WebView geometry; it contains no private service address. */
+export interface MaterialVideoStudioView {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly visible: boolean;
+}
+
 export type MaterialRenderJobStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 export interface MaterialRenderJobSnapshot {
@@ -144,7 +153,9 @@ export class MaterialVideoStudioGatewayError extends Error {
 }
 
 export interface MaterialVideoStudioGateway {
-  open(): Promise<MaterialVideoStudioSnapshot>;
+  open(view: MaterialVideoStudioView): Promise<MaterialVideoStudioSnapshot>;
+  updateView(view: MaterialVideoStudioView): Promise<void>;
+  close(): Promise<void>;
   jobs(): Promise<readonly MaterialRenderJobSnapshot[]>;
   cancel(renderJobId: string): Promise<void>;
   deleteArtifact(artifactId: string): Promise<void>;

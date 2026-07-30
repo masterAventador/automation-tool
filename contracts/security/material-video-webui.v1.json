@@ -6,6 +6,8 @@
   "capabilityEntropyBytes": 32,
   "endpointTransport": "authenticated_worker_ready_event",
   "endpointOwner": "tauri_only",
+  "presentation": "child_webview_in_main_window",
+  "nativeWindowCount": 1,
   "reactReceivesEndpoint": false,
   "userVisibleLocalhostUrl": false,
   "newWindowsAllowed": false,
@@ -14,5 +16,6 @@
   "configurationRoot": "task_private_workspace",
   "storageRoot": "task_private_workspace",
   "upstreamSourceWritable": false,
+  "workerDescendantsStoppedWithEmbeddedSurface": true,
   "workerDescendantsStoppedWithAppWindow": true
 }

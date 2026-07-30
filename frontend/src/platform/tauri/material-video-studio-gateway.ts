@@ -6,6 +6,7 @@ import {
   type MaterialVideoStudioErrorCode,
   type MaterialVideoStudioGateway,
   type MaterialVideoStudioSnapshot,
+  type MaterialVideoStudioView,
   type MaterialRenderJobSnapshot,
   type MotionRenderJobSnapshot,
   type RenderedVideoArtifactPayload,
@@ -69,6 +70,24 @@ function parseSnapshot(value: unknown): MaterialVideoStudioSnapshot {
     state: "opened",
     modelId: value.modelId as MaterialVideoStudioSnapshot["modelId"],
   };
+}
+
+function validateView(view: MaterialVideoStudioView): void {
+  if (
+    !Number.isFinite(view.x) ||
+    !Number.isFinite(view.y) ||
+    !Number.isFinite(view.width) ||
+    !Number.isFinite(view.height) ||
+    Math.abs(view.x) > 8_192 ||
+    Math.abs(view.y) > 8_192 ||
+    view.width < 320 ||
+    view.width > 8_192 ||
+    view.height < 240 ||
+    view.height > 8_192 ||
+    typeof view.visible !== "boolean"
+  ) {
+    throw new MaterialVideoStudioGatewayError("protocol_mismatch", false);
+  }
 }
 
 function parseJob(value: unknown): MaterialRenderJobSnapshot {
@@ -189,13 +208,33 @@ function mapError(error: unknown): MaterialVideoStudioGatewayError {
 }
 
 export class TauriMaterialVideoStudioGateway implements MaterialVideoStudioGateway {
-  async open(): Promise<MaterialVideoStudioSnapshot> {
+  async open(view: MaterialVideoStudioView): Promise<MaterialVideoStudioSnapshot> {
+    validateView(view);
     try {
-      return parseSnapshot(await invoke("open_material_video_studio"));
+      return parseSnapshot(await invoke("open_material_video_studio", { view }));
     } catch (error) {
       if (error instanceof MaterialVideoStudioGatewayError) {
         throw error;
       }
+      throw mapError(error);
+    }
+  }
+
+  async updateView(view: MaterialVideoStudioView): Promise<void> {
+    validateView(view);
+    try {
+      await invoke("update_material_video_studio_view", { view });
+    } catch (error) {
+      if (error instanceof MaterialVideoStudioGatewayError) throw error;
+      throw mapError(error);
+    }
+  }
+
+  async close(): Promise<void> {
+    try {
+      await invoke("close_material_video_studio");
+    } catch (error) {
+      if (error instanceof MaterialVideoStudioGatewayError) throw error;
       throw mapError(error);
     }
   }

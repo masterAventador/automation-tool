@@ -22,9 +22,7 @@ describe("VF-06 production App video studio acceptance", () => {
     // stopped having.
     assert.equal(await studio.$("button=打开完整制作界面").isExisting(), false);
     await expect(studio).toHaveText(
-      expect.stringContaining(
-        "完整制作流程将直接嵌入当前 App，不会打开额外窗口。当前真实内嵌服务尚未接入。",
-      ),
+      expect.stringContaining("选择一种制作方式后，当前 App 会显示对应的制作工具。"),
     );
 
     const pages = [

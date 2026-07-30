@@ -18,19 +18,10 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::webview::NewWindowResponse;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{Manager, WebviewBuilder, WebviewUrl};
 
-const WINDOW_LABEL: &str = "material-video-studio";
-/// The appearance the embedded WebUI is given, rather than the one it picks.
-///
-/// It reads `prefers-color-scheme` once at boot and keeps that palette. On a
-/// desktop set to dark it therefore drew dark fields and near-white labels,
-/// which the product stylesheet then placed on a light page — the labels
-/// disappeared. Settling the appearance here leaves one palette for both
-/// sides, instead of a stylesheet that has to chase every widget colour and
-/// loses the race whenever upstream changes its markup.
-/// Declared alongside `colorScheme` in `material-video-studio-theme.v1.json`.
-const WINDOW_THEME: tauri::Theme = tauri::Theme::Light;
+const MAIN_WINDOW_LABEL: &str = "main";
+const WEBVIEW_LABEL: &str = "material-video-studio";
 const WORKER_VERSION: &str = "1.3.2";
 const INIT_SCRIPT: &str = include_str!("material_video_studio_init.js");
 const JOB_CHECKPOINT: &str = "material-render-job";
@@ -38,6 +29,106 @@ const OBSERVATION_FILE: &str = "material-render-job-observation.json";
 const CANCEL_FILE: &str = "material-render-job-cancel-request";
 const MAX_PROJECTED_JOBS: usize = 100;
 static ACTIVE_WORKSPACE: Mutex<Option<uuid::Uuid>> = Mutex::new(None);
+#[cfg(feature = "control-plane-e2e")]
+static ACCEPTANCE_RESULT: Mutex<Option<MaterialVideoStudioAcceptanceSnapshot>> = Mutex::new(None);
+
+#[cfg(feature = "control-plane-e2e")]
+const EMBEDDED_READINESS_SCRIPT: &str = r##"
+(() => {
+  const state = document.documentElement.getAttribute("data-automation-tool-studio-state");
+  if (state === "ready" || state === "failed") {
+    history.replaceState(
+      null,
+      "",
+      `${location.pathname}${location.search}#automation-tool-im05-probe-${state}`,
+    );
+  }
+})();
+"##;
+
+#[cfg(feature = "control-plane-e2e")]
+const EMBEDDED_ACCEPTANCE_SCRIPT: &str = r##"
+(() => {
+  const passed = "#automation-tool-im05-accepted";
+  const failed = (reason) => {
+    history.replaceState(null, "", `${location.pathname}${location.search}#automation-tool-im05-failed-${reason}`);
+  };
+  const deadline = Date.now() + 120000;
+  const waitForSettings = (subject) => {
+    const timer = setInterval(() => {
+      const body = document.body?.innerText || "";
+      if (body.includes("Pexels")) {
+        clearInterval(timer);
+        const modelTabs = Array.from(document.querySelectorAll("[role='tab']")).filter(
+          (node) => /大模型设置/.test(node.textContent || "") && getComputedStyle(node).display !== "none",
+        );
+        if (modelTabs.length || subject.value !== "用三十秒解释为什么雨后空气更清新") {
+          failed("interaction");
+        } else {
+          history.replaceState(null, "", `${location.pathname}${location.search}${passed}`);
+        }
+      } else if (Date.now() > deadline) {
+        clearInterval(timer);
+        failed("settings-timeout");
+      }
+    }, 250);
+  };
+  const timer = setInterval(() => {
+    const state = document.documentElement.getAttribute("data-automation-tool-studio-state");
+    if (state === "failed") {
+      clearInterval(timer);
+      failed("guard");
+      return;
+    }
+    if (state !== "ready") {
+      if (Date.now() > deadline) {
+        clearInterval(timer);
+        failed("ready-timeout");
+      }
+      return;
+    }
+    clearInterval(timer);
+    const body = document.body?.innerText || "";
+    const subject = document.querySelector("input[aria-label*='视频主题']");
+    const settings = document.querySelector("button[aria-label='制作服务设置']");
+    const externalLinks = Array.from(document.querySelectorAll("a[href]")).filter((anchor) => {
+      try {
+        const resolved = document.createElement("a");
+        resolved.href = anchor.getAttribute("href") || "";
+        return resolved.origin !== location.origin;
+      } catch {
+        return true;
+      }
+    });
+    const duplicateTaskManager = document.querySelector(".st-key-task_manager_entry");
+    const font = getComputedStyle(document.body).fontFamily;
+    if (
+      !subject ||
+      !settings ||
+      !/视频文案/.test(body) ||
+      !/生成视频/.test(body) ||
+      !/智能素材成片/.test(body) ||
+      /sk-im05-invalid-desktop-key/.test(body) ||
+      externalLinks.length !== 0 ||
+      !/PingFang SC|Microsoft YaHei|Inter/.test(font) ||
+      (duplicateTaskManager && getComputedStyle(duplicateTaskManager).display !== "none")
+    ) {
+      failed("structure");
+      return;
+    }
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!setter) {
+      failed("input");
+      return;
+    }
+    setter.call(subject, "用三十秒解释为什么雨后空气更清新");
+    subject.dispatchEvent(new Event("input", { bubbles: true }));
+    subject.dispatchEvent(new Event("change", { bubbles: true }));
+    settings.click();
+    waitForSettings(subject);
+  }, 250);
+})();
+"##;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -88,6 +179,60 @@ pub struct MaterialVideoStudioSnapshot {
     model_id: String,
 }
 
+/// Logical bounds owned by the product page, never by the private WebUI.
+///
+/// React sends only this rectangle.  The loopback port and capability path
+/// remain native-only and are used directly to construct the child WebView.
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MaterialVideoStudioView {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    visible: bool,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterialVideoStudioAcceptanceSnapshot {
+    state: &'static str,
+    failure: Option<String>,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterialVideoStudioCleanupSnapshot {
+    view_mounted: bool,
+    worker_stopped: bool,
+    active_workspace: bool,
+}
+
+impl MaterialVideoStudioView {
+    fn logical_geometry(
+        self,
+    ) -> Result<(tauri::LogicalPosition<f64>, tauri::LogicalSize<f64>), MaterialVideoStudioError>
+    {
+        let finite = [self.x, self.y, self.width, self.height]
+            .into_iter()
+            .all(f64::is_finite);
+        if !finite
+            || self.x.abs() > 8_192.0
+            || self.y.abs() > 8_192.0
+            || !(320.0..=8_192.0).contains(&self.width)
+            || !(240.0..=8_192.0).contains(&self.height)
+        {
+            return Err(view_unavailable());
+        }
+        Ok((
+            tauri::LogicalPosition::new(self.x, self.y),
+            tauri::LogicalSize::new(self.width, self.height),
+        ))
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MaterialVideoStudioErrorCode {
@@ -124,21 +269,30 @@ impl fmt::Display for MaterialVideoStudioError {
 
 impl std::error::Error for MaterialVideoStudioError {}
 
+struct StartedMaterialVideoService {
+    snapshot: MaterialVideoStudioSnapshot,
+    endpoint_url: url::Url,
+    allowed_port: u16,
+    allowed_path: String,
+    workspace_id: uuid::Uuid,
+}
+
 pub(crate) fn open(
     app: &tauri::AppHandle,
     orchestrator: &LocalVideoOrchestrator,
     settings: &ProductionModelServiceSettings,
     workspaces: &VideoJobWorkspaceStore,
+    view: MaterialVideoStudioView,
 ) -> Result<MaterialVideoStudioSnapshot, MaterialVideoStudioError> {
-    if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
+    view.logical_geometry()?;
+    if app.get_webview(WEBVIEW_LABEL).is_some() {
         let status = orchestrator
             .status(VideoWorkerKind::Python)
             .map_err(|_| process_unavailable())?;
         if status.state() != VideoWorkerState::Running || !status.web_ui_available() {
             return Err(process_unavailable());
         }
-        window.show().map_err(|_| view_unavailable())?;
-        window.set_focus().map_err(|_| view_unavailable())?;
+        update_embedded_view(app, view)?;
         return Ok(MaterialVideoStudioSnapshot {
             state: MaterialVideoStudioState::Opened,
             model_id: status
@@ -148,6 +302,24 @@ pub(crate) fn open(
         });
     }
 
+    let started = start_service(app, orchestrator, settings, workspaces)?;
+    if let Err(error) = mount_embedded_view(app, &started, view) {
+        let _ = set_active_workspace(None);
+        let _ = orchestrator.stop(VideoWorkerKind::Python);
+        if let Ok(workspace) = workspaces.open(started.workspace_id) {
+            cleanup_workspace(workspaces, &workspace);
+        }
+        return Err(error);
+    }
+    Ok(started.snapshot)
+}
+
+fn start_service(
+    app: &tauri::AppHandle,
+    orchestrator: &LocalVideoOrchestrator,
+    settings: &ProductionModelServiceSettings,
+    workspaces: &VideoJobWorkspaceStore,
+) -> Result<StartedMaterialVideoService, MaterialVideoStudioError> {
     let script_model = settings
         .material_video_script_model()
         .map_err(|_| configuration_required())?;
@@ -204,55 +376,239 @@ pub(crate) fn open(
             return Err(process_unavailable());
         }
     };
-    let allowed_port = endpoint.port();
-    let allowed_path = format!("/{}/", endpoint.path());
-    let builder = WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::External(endpoint_url))
-        .title("智能素材成片")
-        .inner_size(1180.0, 760.0)
-        .min_inner_size(960.0, 640.0)
-        .resizable(true)
-        .theme(Some(WINDOW_THEME))
-        .initialization_script(INIT_SCRIPT)
-        .devtools(false)
-        .on_navigation(move |url| {
-            url.scheme() == "http"
-                && url.host_str() == Some("127.0.0.1")
-                && url.port() == Some(allowed_port)
-                && (url.path() == allowed_path.trim_end_matches('/')
-                    || url.path().starts_with(&allowed_path))
+    Ok(StartedMaterialVideoService {
+        snapshot: MaterialVideoStudioSnapshot {
+            state: MaterialVideoStudioState::Opened,
+            model_id: status
+                .script_model_id()
+                .unwrap_or(model_id.as_str())
+                .to_owned(),
+        },
+        endpoint_url,
+        allowed_port: endpoint.port(),
+        allowed_path: format!("/{}/", endpoint.path()),
+        workspace_id: workspace.job_id(),
+    })
+}
+
+fn mount_embedded_view(
+    app: &tauri::AppHandle,
+    started: &StartedMaterialVideoService,
+    view: MaterialVideoStudioView,
+) -> Result<(), MaterialVideoStudioError> {
+    let (position, size) = view.logical_geometry()?;
+    let allowed_port = started.allowed_port;
+    let allowed_path = started.allowed_path.clone();
+    let builder = WebviewBuilder::new(
+        WEBVIEW_LABEL,
+        WebviewUrl::External(started.endpoint_url.clone()),
+    )
+    .initialization_script(INIT_SCRIPT)
+    .devtools(false)
+    .on_navigation(move |url| {
+        url.scheme() == "http"
+            && url.host_str() == Some("127.0.0.1")
+            && url.port() == Some(allowed_port)
+            && (url.path() == allowed_path.trim_end_matches('/')
+                || url.path().starts_with(&allowed_path))
+    })
+    .on_new_window(|_, _| NewWindowResponse::Deny)
+    .on_download(|_, _| false);
+    let window = app
+        .get_window(MAIN_WINDOW_LABEL)
+        .ok_or_else(view_unavailable)?;
+    let webview = window
+        .add_child(builder, position, size)
+        .map_err(|_| view_unavailable())?;
+    if view.visible {
+        webview.show().map_err(|_| view_unavailable())?;
+    } else {
+        webview.hide().map_err(|_| view_unavailable())?;
+    }
+    Ok(())
+}
+
+pub(crate) fn update_embedded_view(
+    app: &tauri::AppHandle,
+    view: MaterialVideoStudioView,
+) -> Result<(), MaterialVideoStudioError> {
+    let (position, size) = view.logical_geometry()?;
+    let webview = app
+        .get_webview(WEBVIEW_LABEL)
+        .ok_or_else(view_unavailable)?;
+    webview
+        .set_bounds(tauri::Rect {
+            position: tauri::Position::Logical(position),
+            size: tauri::Size::Logical(size),
         })
-        .on_new_window(|_, _| NewWindowResponse::Deny)
-        .on_download(|_, _| false);
-    let window = match builder.build() {
-        Ok(window) => window,
-        Err(_) => {
-            let _ = set_active_workspace(None);
-            let _ = orchestrator.stop(VideoWorkerKind::Python);
-            cleanup_workspace(workspaces, &workspace);
-            return Err(view_unavailable());
-        }
+        .map_err(|_| view_unavailable())?;
+    if view.visible {
+        webview.show().map_err(|_| view_unavailable())
+    } else {
+        webview.hide().map_err(|_| view_unavailable())
+    }
+}
+
+pub(crate) fn close_embedded_view(
+    app: &tauri::AppHandle,
+    orchestrator: &LocalVideoOrchestrator,
+    workspaces: &VideoJobWorkspaceStore,
+) -> Result<(), MaterialVideoStudioError> {
+    let view_failed = app
+        .get_webview(WEBVIEW_LABEL)
+        .is_some_and(|webview| webview.close().is_err());
+    let process_failed = orchestrator.stop(VideoWorkerKind::Python).is_err();
+    let workspace_id = active_workspace()?;
+    set_active_workspace(None)?;
+    if let Some(workspace_id) = workspace_id {
+        let workspace = workspaces.open(workspace_id).map_err(map_workspace_error)?;
+        workspaces
+            .finish(&workspace, VideoWorkspaceDisposition::Keep)
+            .map_err(map_workspace_error)?;
+    }
+    if view_failed {
+        Err(view_unavailable())
+    } else if process_failed {
+        Err(process_unavailable())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(feature = "control-plane-e2e")]
+pub(crate) fn exercise_embedded_view_for_acceptance(
+    app: tauri::AppHandle,
+) -> Result<MaterialVideoStudioAcceptanceSnapshot, MaterialVideoStudioError> {
+    let running = MaterialVideoStudioAcceptanceSnapshot {
+        state: "running",
+        failure: None,
     };
-    let cleanup_app = app.clone();
-    let job_id = workspace.job_id();
-    window.on_window_event(move |event| {
-        if matches!(event, WindowEvent::Destroyed) {
-            let _ = set_active_workspace(None);
-            if let Some(orchestrator) = cleanup_app.try_state::<LocalVideoOrchestrator>() {
-                let _ = orchestrator.stop(VideoWorkerKind::Python);
-            }
-            if let Some(workspaces) = cleanup_app.try_state::<VideoJobWorkspaceStore>() {
-                if let Ok(workspace) = workspaces.open(job_id) {
-                    let _ = workspaces.finish(&workspace, VideoWorkspaceDisposition::Keep);
-                }
-            }
+    *ACCEPTANCE_RESULT.lock().map_err(|_| view_unavailable())? = Some(running.clone());
+    tauri::async_runtime::spawn(async move {
+        let result = probe_embedded_view_for_acceptance(&app).await;
+        let orchestrator = app.state::<LocalVideoOrchestrator>();
+        let workspaces = app.state::<VideoJobWorkspaceStore>();
+        let cleanup = close_embedded_view(&app, &orchestrator, &workspaces);
+        let snapshot = match (result, cleanup) {
+            (Ok(snapshot), Ok(())) => snapshot,
+            (Err(_), _) => MaterialVideoStudioAcceptanceSnapshot {
+                state: "failed",
+                failure: Some("native_probe".to_owned()),
+            },
+            (Ok(_), Err(_)) => MaterialVideoStudioAcceptanceSnapshot {
+                state: "failed",
+                failure: Some("native_cleanup".to_owned()),
+            },
+        };
+        if let Ok(mut acceptance_result) = ACCEPTANCE_RESULT.lock() {
+            *acceptance_result = Some(snapshot);
         }
     });
-    Ok(MaterialVideoStudioSnapshot {
-        state: MaterialVideoStudioState::Opened,
-        model_id: status
-            .script_model_id()
-            .unwrap_or(model_id.as_str())
-            .to_owned(),
+    Ok(running)
+}
+
+#[cfg(feature = "control-plane-e2e")]
+pub(crate) fn inspect_embedded_view_exercise_for_acceptance(
+) -> Result<MaterialVideoStudioAcceptanceSnapshot, MaterialVideoStudioError> {
+    ACCEPTANCE_RESULT
+        .lock()
+        .map_err(|_| view_unavailable())?
+        .clone()
+        .ok_or_else(view_unavailable)
+}
+
+#[cfg(feature = "control-plane-e2e")]
+async fn probe_embedded_view_for_acceptance(
+    app: &tauri::AppHandle,
+) -> Result<MaterialVideoStudioAcceptanceSnapshot, MaterialVideoStudioError> {
+    let native_windows = app.webview_windows();
+    if native_windows.len() != 1 || !native_windows.contains_key(MAIN_WINDOW_LABEL) {
+        return Ok(MaterialVideoStudioAcceptanceSnapshot {
+            state: "failed",
+            failure: Some("native_window_count".to_owned()),
+        });
+    }
+    let mount_deadline = std::time::Instant::now() + Duration::from_secs(30);
+    let webview = loop {
+        if let Some(webview) = app.get_webview(WEBVIEW_LABEL) {
+            break webview;
+        }
+        if std::time::Instant::now() >= mount_deadline {
+            return Ok(MaterialVideoStudioAcceptanceSnapshot {
+                state: "failed",
+                failure: Some("view_mount_timeout".to_owned()),
+            });
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    let readiness_deadline = std::time::Instant::now() + Duration::from_secs(120);
+    loop {
+        webview
+            .eval(EMBEDDED_READINESS_SCRIPT)
+            .map_err(|_| view_unavailable())?;
+        let url = webview.url().map_err(|_| view_unavailable())?;
+        match url.fragment() {
+            Some("automation-tool-im05-probe-ready") => break,
+            Some("automation-tool-im05-probe-failed") => {
+                return Ok(MaterialVideoStudioAcceptanceSnapshot {
+                    state: "failed",
+                    failure: Some("guard".to_owned()),
+                });
+            }
+            _ if std::time::Instant::now() >= readiness_deadline => {
+                return Ok(MaterialVideoStudioAcceptanceSnapshot {
+                    state: "failed",
+                    failure: Some("ready_probe_timeout".to_owned()),
+                });
+            }
+            _ => tokio::time::sleep(Duration::from_millis(250)).await,
+        }
+    }
+    webview
+        .eval(EMBEDDED_ACCEPTANCE_SCRIPT)
+        .map_err(|_| view_unavailable())?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(125);
+    loop {
+        let url = webview.url().map_err(|_| view_unavailable())?;
+        match url.fragment() {
+            Some("automation-tool-im05-accepted") => {
+                return Ok(MaterialVideoStudioAcceptanceSnapshot {
+                    state: "passed",
+                    failure: None,
+                });
+            }
+            Some(fragment) if fragment.starts_with("automation-tool-im05-failed-") => {
+                return Ok(MaterialVideoStudioAcceptanceSnapshot {
+                    state: "failed",
+                    failure: fragment
+                        .strip_prefix("automation-tool-im05-failed-")
+                        .map(str::to_owned),
+                });
+            }
+            _ if std::time::Instant::now() >= deadline => {
+                return Ok(MaterialVideoStudioAcceptanceSnapshot {
+                    state: "failed",
+                    failure: Some("native_timeout".to_owned()),
+                });
+            }
+            _ => tokio::time::sleep(Duration::from_millis(250)).await,
+        }
+    }
+}
+
+#[cfg(feature = "control-plane-e2e")]
+pub(crate) fn cleanup_snapshot_for_acceptance(
+    app: &tauri::AppHandle,
+    orchestrator: &LocalVideoOrchestrator,
+) -> Result<MaterialVideoStudioCleanupSnapshot, MaterialVideoStudioError> {
+    Ok(MaterialVideoStudioCleanupSnapshot {
+        view_mounted: app.get_webview(WEBVIEW_LABEL).is_some(),
+        worker_stopped: orchestrator
+            .status(VideoWorkerKind::Python)
+            .map_err(|_| process_unavailable())?
+            .state()
+            == VideoWorkerState::Stopped,
+        active_workspace: active_workspace()?.is_some(),
     })
 }
 
@@ -641,7 +997,7 @@ const fn job_unavailable() -> MaterialVideoStudioError {
 
 #[cfg(test)]
 mod theme_tests {
-    use super::{INIT_SCRIPT, WINDOW_THEME};
+    use super::INIT_SCRIPT;
 
     /// Only the test reads the contract; the window carries a plain constant so
     /// the shipped binary does not haul a document around to look up one word.
@@ -655,7 +1011,8 @@ mod theme_tests {
     fn studio_window_forces_the_appearance_the_theme_contract_declares() {
         let contract: serde_json::Value = serde_json::from_str(THEME_CONTRACT).unwrap();
         assert_eq!(contract["colorScheme"], "light");
-        assert_eq!(WINDOW_THEME, tauri::Theme::Light);
+        assert!(INIT_SCRIPT.contains("color-scheme: light"));
+        assert!(INIT_SCRIPT.contains("prefers-color-scheme"));
     }
 
     #[test]
@@ -674,6 +1031,38 @@ mod theme_tests {
             );
         }
         assert!(!INIT_SCRIPT.contains(".st-key-open_settings_dialog_button,\n"));
+    }
+}
+
+#[cfg(test)]
+mod embedded_view_tests {
+    use super::*;
+
+    #[test]
+    fn logical_bounds_accept_a_visible_in_app_surface_and_reject_hostile_geometry() {
+        let bounds: MaterialVideoStudioView = serde_json::from_value(serde_json::json!({
+            "x": 40.0,
+            "y": 120.0,
+            "width": 900.0,
+            "height": 640.0,
+            "visible": true
+        }))
+        .unwrap();
+        let (position, size) = bounds.logical_geometry().unwrap();
+        assert_eq!(position, tauri::LogicalPosition::new(40.0, 120.0));
+        assert_eq!(size, tauri::LogicalSize::new(900.0, 640.0));
+
+        for value in [
+            serde_json::json!({"x": 0, "y": 0, "width": 0, "height": 640, "visible": true}),
+            serde_json::json!({"x": 0, "y": 0, "width": 900, "height": 20, "visible": true}),
+            serde_json::json!({"x": 9000, "y": 0, "width": 900, "height": 640, "visible": true}),
+        ] {
+            let rejected: MaterialVideoStudioView = serde_json::from_value(value).unwrap();
+            assert_eq!(
+                rejected.logical_geometry().unwrap_err().code(),
+                MaterialVideoStudioErrorCode::ViewUnavailable
+            );
+        }
     }
 }
 

@@ -314,11 +314,61 @@ async fn open_material_video_studio(
     orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
     settings: tauri::State<'_, model_service_settings::ProductionModelServiceSettings>,
     workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+    view: material_video_studio::MaterialVideoStudioView,
 ) -> Result<
     material_video_studio::MaterialVideoStudioSnapshot,
     material_video_studio::MaterialVideoStudioError,
 > {
-    material_video_studio::open(&app, &orchestrator, &settings, &workspaces)
+    material_video_studio::open(&app, &orchestrator, &settings, &workspaces, view)
+}
+
+#[tauri::command]
+fn update_material_video_studio_view(
+    app: tauri::AppHandle,
+    view: material_video_studio::MaterialVideoStudioView,
+) -> Result<(), material_video_studio::MaterialVideoStudioError> {
+    material_video_studio::update_embedded_view(&app, view)
+}
+
+#[tauri::command]
+fn close_material_video_studio(
+    app: tauri::AppHandle,
+    orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+) -> Result<(), material_video_studio::MaterialVideoStudioError> {
+    material_video_studio::close_embedded_view(&app, &orchestrator, &workspaces)
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+fn exercise_material_video_studio_for_acceptance(
+    app: tauri::AppHandle,
+) -> Result<
+    material_video_studio::MaterialVideoStudioAcceptanceSnapshot,
+    material_video_studio::MaterialVideoStudioError,
+> {
+    material_video_studio::exercise_embedded_view_for_acceptance(app)
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+fn inspect_material_video_studio_exercise_for_acceptance() -> Result<
+    material_video_studio::MaterialVideoStudioAcceptanceSnapshot,
+    material_video_studio::MaterialVideoStudioError,
+> {
+    material_video_studio::inspect_embedded_view_exercise_for_acceptance()
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+fn inspect_material_video_studio_cleanup_for_acceptance(
+    app: tauri::AppHandle,
+    orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
+) -> Result<
+    material_video_studio::MaterialVideoStudioCleanupSnapshot,
+    material_video_studio::MaterialVideoStudioError,
+> {
+    material_video_studio::cleanup_snapshot_for_acceptance(&app, &orchestrator)
 }
 
 #[tauri::command]
@@ -4637,6 +4687,8 @@ pub fn run() {
         clear_video_editing_service,
         test_video_editing_service_connection,
         open_material_video_studio,
+        update_material_video_studio_view,
+        close_material_video_studio,
         get_material_render_jobs,
         cancel_material_render_job,
         read_material_video_artifact,
@@ -4704,6 +4756,8 @@ pub fn run() {
         clear_video_editing_service,
         test_video_editing_service_connection,
         open_material_video_studio,
+        update_material_video_studio_view,
+        close_material_video_studio,
         get_material_render_jobs,
         cancel_material_render_job,
         read_material_video_artifact,
@@ -4802,6 +4856,11 @@ pub fn run() {
         clear_video_editing_service,
         test_video_editing_service_connection,
         open_material_video_studio,
+        update_material_video_studio_view,
+        close_material_video_studio,
+        exercise_material_video_studio_for_acceptance,
+        inspect_material_video_studio_exercise_for_acceptance,
+        inspect_material_video_studio_cleanup_for_acceptance,
         get_material_render_jobs,
         cancel_material_render_job,
         read_material_video_artifact,
@@ -4826,6 +4885,16 @@ pub fn run() {
             tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
         ) {
             app_logging::record(app_logging::DesktopLogEvent::AppShutdownStarted);
+            if let (Some(orchestrator), Some(workspaces)) = (
+                app_handle.try_state::<local_video_orchestrator::LocalVideoOrchestrator>(),
+                app_handle.try_state::<video_job_workspace::VideoJobWorkspaceStore>(),
+            ) {
+                let _ = material_video_studio::close_embedded_view(
+                    app_handle,
+                    &orchestrator,
+                    &workspaces,
+                );
+            }
             if let Some(platform) =
                 app_handle.try_state::<executor_platform::ExecutorPlatformService>()
             {

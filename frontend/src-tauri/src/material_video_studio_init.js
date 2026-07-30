@@ -3,6 +3,30 @@
 
   if (window.top !== window.self) return;
 
+  // A child WebView shares the native window instead of owning a second
+  // window whose Tauri theme can be forced.  Streamlit asks matchMedia during
+  // bootstrap and keeps that choice, so answer the two colour-scheme queries
+  // before any page script runs.  All other media queries retain the native
+  // object and behaviour.
+  const nativeMatchMedia = window.matchMedia.bind(window);
+  window.matchMedia = (query) => {
+    const result = nativeMatchMedia(query);
+    const normalized = String(query).replace(/\s+/g, "").toLowerCase();
+    if (
+      normalized !== "(prefers-color-scheme:dark)" &&
+      normalized !== "(prefers-color-scheme:light)"
+    ) {
+      return result;
+    }
+    return new Proxy(result, {
+      get(target, property) {
+        if (property === "matches") return normalized.endsWith(":light)");
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  };
+
   const PRODUCT_NAME = "智能素材成片";
   const SETTINGS_NAME = "制作服务设置";
   const ROOT_STATE = "data-automation-tool-studio-state";

@@ -290,6 +290,8 @@ describe("video studio watched from anywhere in the app", () => {
   ): MaterialVideoStudioGateway {
     return {
       open: vi.fn().mockRejectedValue(new Error("not reached")),
+      updateView: vi.fn().mockRejectedValue(new Error("not reached")),
+      close: vi.fn().mockResolvedValue(undefined),
       jobs: vi.fn().mockResolvedValue([]),
       cancel: vi.fn().mockRejectedValue(new Error("not reached")),
       deleteArtifact: vi.fn().mockRejectedValue(new Error("not reached")),
