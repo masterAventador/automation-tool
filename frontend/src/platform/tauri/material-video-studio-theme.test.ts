@@ -10,6 +10,23 @@ const initializationScript = readFileSync(
 );
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 320));
+const executeInitialization = (dom: JSDOM) => {
+  Object.defineProperty(dom.window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: (media: string): MediaQueryList => ({
+      matches: false,
+      media,
+      onchange: null,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      dispatchEvent: () => true,
+    }),
+  });
+  dom.window.eval(initializationScript);
+};
 const dispose = (dom: JSDOM) => {
   const windowWithDispose = dom.window as unknown as {
     __AUTOMATION_TOOL_MATERIAL_VIDEO_DISPOSE__: () => void;
@@ -63,7 +80,7 @@ const boot = (dom: JSDOM) => {
   Object.defineProperty(dom.window, "__AUTOMATION_TOOL_MATERIAL_VIDEO_GUARD_TIMEOUT_MS__", {
     value: 5,
   });
-  dom.window.eval(initializationScript);
+  executeInitialization(dom);
 };
 
 const styleOf = (dom: JSDOM, selector: string) => {
@@ -141,7 +158,7 @@ describe("material video studio product shell", () => {
       materialTabClicks += 1;
     });
 
-    dom.window.eval(initializationScript);
+    executeInitialization(dom);
     await settle();
 
     const document = dom.window.document;
@@ -179,7 +196,7 @@ describe("material video studio product shell", () => {
       value: 5,
     });
 
-    dom.window.eval(initializationScript);
+    executeInitialization(dom);
     await settle();
 
     expect(dom.window.document.documentElement.getAttribute("data-automation-tool-studio-state")).toBe("failed");

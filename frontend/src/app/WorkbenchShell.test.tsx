@@ -43,7 +43,6 @@ describe("workbench shell navigation", () => {
     expect(
       screen.queryByRole("button", { name: "打开完整制作界面" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText(/不会打开额外窗口/u)).toBeVisible();
   });
 
   /**

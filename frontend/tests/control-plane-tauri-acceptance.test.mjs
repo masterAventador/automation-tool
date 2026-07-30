@@ -58,7 +58,8 @@ test("the acceptance command exercises the production client without returning s
   assert.match(rustEntry, /ProductionDeviceIdentity/);
   assert.match(rustEntry, /ProductionDeviceCredentialVault/);
   assert.match(acceptanceSpec, /run_control_plane_acceptance/);
-  assert.match(acceptanceSpec, /RPA 运营工作台/);
+  assert.match(acceptanceSpec, /waitForStartup\(\)/);
+  assert.doesNotMatch(acceptanceSpec, /RPA 运营工作台/);
   assert.doesNotMatch(acceptanceSpec, /credential|sessionToken|bootstrapToken/i);
   assert.doesNotMatch(
     rustEntry,
