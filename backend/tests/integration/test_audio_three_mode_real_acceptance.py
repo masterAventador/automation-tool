@@ -34,6 +34,7 @@ TOOLCHAIN_ROOT_ENVIRONMENT = "AUTOMATION_TOOL_LE11_TOOLCHAIN_ROOT"
 SAMPLE_RATE = 48_000
 AMBIENT_FREQUENCY = 300
 NARRATION_FREQUENCY = 1000
+MEDIA_COMMAND_TIMEOUT_SECONDS = 30
 pytestmark = pytest.mark.skipif(
     TOOLCHAIN_ROOT_ENVIRONMENT not in os.environ,
     reason="requires the verified packaged media toolchain",
@@ -67,6 +68,7 @@ def _tone(tools: PackagedMediaTools, path: Path, frequency: int, duration: float
             os.fspath(path),
         ),
         check=True,
+        timeout=MEDIA_COMMAND_TIMEOUT_SECONDS,
     )
 
 
@@ -133,6 +135,7 @@ def _decode_left_channel(tools: PackagedMediaTools, output: Path) -> tuple[float
         ),
         check=True,
         capture_output=True,
+        timeout=MEDIA_COMMAND_TIMEOUT_SECONDS,
     )
     interleaved = tuple(value[0] for value in struct.iter_unpack("<f", decoded.stdout))
     return interleaved[0::2]
