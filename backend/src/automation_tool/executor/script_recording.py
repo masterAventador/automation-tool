@@ -241,6 +241,56 @@ def _slice_proves_sentence(
     return True
 
 
+def _bounded_extension_distances(
+    expected: str,
+    base_actual: str,
+    extension: str,
+    *,
+    maximum_distance: int,
+) -> tuple[int, ...]:
+    rejected_distance = maximum_distance + 1
+    previous = [rejected_distance] * (len(expected) + 1)
+    for expected_index in range(min(len(expected), maximum_distance) + 1):
+        previous[expected_index] = expected_index
+
+    def advance(actual_index: int, actual_character: str) -> list[int]:
+        current = [rejected_distance] * (len(expected) + 1)
+        if actual_index <= maximum_distance:
+            current[0] = actual_index
+        first_expected_index = max(1, actual_index - maximum_distance)
+        last_expected_index = min(len(expected), actual_index + maximum_distance)
+        for expected_index in range(first_expected_index, last_expected_index + 1):
+            current[expected_index] = min(
+                current[expected_index - 1] + 1,
+                previous[expected_index] + 1,
+                previous[expected_index - 1]
+                + int(expected[expected_index - 1] != actual_character),
+            )
+        return current
+
+    for actual_index, actual_character in enumerate(base_actual, start=1):
+        previous = advance(actual_index, actual_character)
+    distances = [previous[-1]]
+    for actual_index, actual_character in enumerate(
+        extension,
+        start=len(base_actual) + 1,
+    ):
+        previous = advance(actual_index, actual_character)
+        distances.append(previous[-1])
+    return tuple(distances)
+
+
+def _distance_is_within_alignment(
+    *,
+    expected_length: int,
+    actual_length: int,
+    distance: int,
+    maximum_distance: int,
+) -> bool:
+    allowed_errors = max(expected_length, actual_length) * _MAX_ALIGNMENT_ERROR_PERCENT // 100
+    return distance <= min(allowed_errors, maximum_distance)
+
+
 def _slice_preserves_adjacent_boundaries(
     normalized_sentences: tuple[str, ...],
     *,
@@ -257,6 +307,7 @@ def _slice_preserves_adjacent_boundaries(
     if previous_distance is None or following_distance is None:
         return False
     current_adjacent_distance = previous_distance + following_distance
+    plausible_boundaries: list[int] = []
     for boundary in range(1, len(actual)):
         previous_part = actual[:boundary]
         following_part = actual[boundary:]
@@ -269,23 +320,43 @@ def _slice_preserves_adjacent_boundaries(
         )
         if minimum_alternative_distance > current_adjacent_distance:
             continue
-        if not consume_work():
-            return False
-        alternative_previous_distance = _alignment_distance(
-            previous,
-            alternative_previous_actual,
+        plausible_boundaries.append(boundary)
+    if not plausible_boundaries:
+        return True
+    if not consume_work():
+        return False
+    alternative_previous_distances = _bounded_extension_distances(
+        previous,
+        previous_actual,
+        actual,
+        maximum_distance=current_adjacent_distance,
+    )
+    if not consume_work():
+        return False
+    alternative_following_distances = _bounded_extension_distances(
+        following[::-1],
+        following_actual[::-1],
+        actual[::-1],
+        maximum_distance=current_adjacent_distance,
+    )
+    for boundary in plausible_boundaries:
+        alternative_previous_distance = alternative_previous_distances[boundary]
+        alternative_previous_length = len(previous_actual) + boundary
+        if not _distance_is_within_alignment(
+            expected_length=len(previous),
+            actual_length=alternative_previous_length,
+            distance=alternative_previous_distance,
             maximum_distance=current_adjacent_distance,
-        )
-        if alternative_previous_distance is None:
+        ):
             continue
-        if not consume_work():
-            return False
-        alternative_following_distance = _alignment_distance(
-            following,
-            alternative_following_actual,
+        following_extension_length = len(actual) - boundary
+        alternative_following_distance = alternative_following_distances[following_extension_length]
+        if _distance_is_within_alignment(
+            expected_length=len(following),
+            actual_length=len(following_actual) + following_extension_length,
+            distance=alternative_following_distance,
             maximum_distance=current_adjacent_distance - alternative_previous_distance,
-        )
-        if alternative_following_distance is not None:
+        ):
             # A composition-shaped middle slice is only its own occurrence
             # when reallocating both borrowed pieces back to their adjacent
             # slices does not explain those slices at least as well. This also

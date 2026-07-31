@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 from typing import ClassVar
 
@@ -467,6 +467,21 @@ def test_long_overlapping_boundaries_do_not_repeat_edit_distance_per_character(
     )
     assert edit_distance_checks <= 32
 
+    edit_distance_checks = 0
+    sentence_length = 300
+    allowed_errors = sentence_length * 15 // 100
+    previous = "q" * (sentence_length - allowed_errors + 1) + "a" * (allowed_errors - 1)
+    middle = "a" * allowed_errors
+    following = "a" * (allowed_errors - 1) + "r" * (sentence_length - allowed_errors + 1)
+    previous_actual = previous
+    following_actual = following[:-allowed_errors] + "d" * allowed_errors
+
+    assert script_recording._sentences_align(
+        (previous, middle, following),
+        previous_actual + middle + following_actual,
+    )
+    assert edit_distance_checks <= 32
+
 
 def test_adjacent_boundary_proof_fails_closed_when_its_work_budget_is_exhausted() -> None:
     previous = "a" * 19 + "X"
@@ -492,45 +507,40 @@ def test_adjacent_boundary_proof_fails_closed_when_its_work_budget_is_exhausted(
     )
 
 
-def test_adjacent_boundary_proof_closes_uncertain_alternative_distances(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    previous = "a" * 19 + "X"
-    middle = "XY"
-    following = "Y" + "b" * 19
-    distances: Iterator[int | None] = iter((0, 1, None))
-    monkeypatch.setattr(
-        script_recording,
-        "_alignment_distance",
-        lambda *args, **kwargs: next(distances),
-    )
+def test_adjacent_boundary_proof_keeps_a_middle_with_no_better_reallocation() -> None:
+    previous = "a" * 17 + "bXX"
+    previous_actual = "c" + previous[1:]
+    middle = "XXY"
+    following = "Y" + "d" * 19
+
     assert script_recording._slice_preserves_adjacent_boundaries(
         (previous, middle, following),
         sentence_index=1,
-        previous_actual=previous,
+        previous_actual=previous_actual,
         actual=middle,
         following_actual=following[1:],
         consume_work=lambda: True,
     )
 
-    previous = "b" * 18 + "aa"
-    middle = "aaa"
-    following = "aa" + "c" * 18
-    distances = iter((0, 3, 1, None))
-    monkeypatch.setattr(
-        script_recording,
-        "_alignment_distance",
-        lambda *args, **kwargs: next(distances),
-    )
-    work_results = iter((True, True, False))
 
-    assert not script_recording._slice_preserves_adjacent_boundaries(
-        (previous, middle, following),
-        sentence_index=1,
-        previous_actual=previous,
-        actual=middle,
-        following_actual=following[2:],
-        consume_work=lambda: next(work_results),
+def test_incremental_boundary_distances_match_individual_bounded_distances() -> None:
+    expected = "abcdefghij"
+    base_actual = "abcxefghi"
+    extension = "jklm"
+    maximum_distance = 3
+
+    assert script_recording._bounded_extension_distances(
+        expected,
+        base_actual,
+        extension,
+        maximum_distance=maximum_distance,
+    ) == tuple(
+        script_recording._levenshtein_distance(
+            expected,
+            base_actual + extension[:extension_length],
+            maximum_distance=maximum_distance,
+        )
+        for extension_length in range(len(extension) + 1)
     )
 
 
