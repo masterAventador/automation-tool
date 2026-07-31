@@ -176,12 +176,44 @@ pub struct VideoWorkerLaunch {
     arguments: Vec<OsString>,
     isolated_environment: bool,
     environment: BTreeMap<&'static str, PathBuf>,
+    media_tools: Option<VideoWorkerMediaToolsConfiguration>,
     asset_root: PathBuf,
     expected_version: String,
     restart_policy: VideoWorkerRestartPolicy,
     script_model: Option<VideoWorkerScriptModelConfiguration>,
     render_browser: Option<VideoWorkerRenderBrowserConfiguration>,
     web_ui: bool,
+}
+
+/// The exact packaged FFmpeg pair a local-editing Worker may use.
+///
+/// Paths travel in the authenticated stdin bootstrap, never argv or the
+/// environment.  The Python receiver can therefore construct
+/// `PackagedMediaTools` without discovery, PATH lookup, or environment reads.
+#[derive(Clone)]
+pub struct VideoWorkerMediaToolsConfiguration {
+    ffmpeg_path: PathBuf,
+    ffprobe_path: PathBuf,
+}
+
+impl fmt::Debug for VideoWorkerMediaToolsConfiguration {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("VideoWorkerMediaToolsConfiguration(<redacted>)")
+    }
+}
+
+impl VideoWorkerMediaToolsConfiguration {
+    pub fn new(ffmpeg_path: PathBuf, ffprobe_path: PathBuf) -> Result<Self, VideoWorkerError> {
+        validate_executable_path(&ffmpeg_path)?;
+        validate_executable_path(&ffprobe_path)?;
+        if ffmpeg_path == ffprobe_path {
+            return Err(configuration_invalid());
+        }
+        Ok(Self {
+            ffmpeg_path,
+            ffprobe_path,
+        })
+    }
 }
 
 /// The single, already-verified embedded Chromium the render Worker may
@@ -526,6 +558,7 @@ impl VideoWorkerLaunch {
             arguments: Vec::new(),
             isolated_environment: false,
             environment: BTreeMap::new(),
+            media_tools: None,
             asset_root,
             expected_version,
             restart_policy,
@@ -592,6 +625,17 @@ impl VideoWorkerLaunch {
     pub fn with_script_model(mut self, configuration: VideoWorkerScriptModelConfiguration) -> Self {
         self.script_model = Some(configuration);
         self
+    }
+
+    pub fn with_media_tools(
+        mut self,
+        configuration: VideoWorkerMediaToolsConfiguration,
+    ) -> Result<Self, VideoWorkerError> {
+        if self.kind != VideoWorkerKind::Python || self.media_tools.is_some() {
+            return Err(configuration_invalid());
+        }
+        self.media_tools = Some(configuration);
+        Ok(self)
     }
 
     pub fn with_render_browser(
@@ -1229,10 +1273,19 @@ struct VideoWorkerBootstrapDocument<'a> {
     bootstrap_version: &'static str,
     enable_web_ui: bool,
     local_session_token: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    media_tools: Option<VideoWorkerMediaToolsBootstrap<'a>>,
     protocol_version: &'static str,
     render_browser: Option<VideoWorkerRenderBrowserBootstrap<'a>>,
     script_model: Option<VideoWorkerScriptModelBootstrap<'a>>,
     worker_kind: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VideoWorkerMediaToolsBootstrap<'a> {
+    ffmpeg_path: &'a str,
+    ffprobe_path: &'a str,
 }
 
 #[derive(Serialize)]
@@ -1472,11 +1525,25 @@ fn write_bootstrap(
             launch_timeout_seconds: configuration.launch_timeout.as_secs(),
         }),
     };
+    let media_tools = match launch.media_tools.as_ref() {
+        None => None,
+        Some(configuration) => Some(VideoWorkerMediaToolsBootstrap {
+            ffmpeg_path: configuration
+                .ffmpeg_path
+                .to_str()
+                .ok_or_else(configuration_invalid)?,
+            ffprobe_path: configuration
+                .ffprobe_path
+                .to_str()
+                .ok_or_else(configuration_invalid)?,
+        }),
+    };
     let document = VideoWorkerBootstrapDocument {
         asset_root,
         bootstrap_version: BOOTSTRAP_VERSION,
         enable_web_ui: launch.web_ui,
         local_session_token: &encoded,
+        media_tools,
         protocol_version: WORKER_PROTOCOL_VERSION,
         render_browser,
         script_model: launch.script_model.as_ref().map(|configuration| {

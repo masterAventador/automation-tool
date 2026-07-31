@@ -8,9 +8,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use automation_tool_desktop_lib::local_video_orchestrator::{
     LocalVideoOrchestrator, VideoWorkerErrorCode, VideoWorkerKind, VideoWorkerLaunch,
-    VideoWorkerRenderBrowserConfiguration, VideoWorkerRenderCanvas,
-    VideoWorkerRenderSandboxRequest, VideoWorkerRestartPolicy, VideoWorkerSourceWindow,
-    VideoWorkerState,
+    VideoWorkerMediaToolsConfiguration, VideoWorkerRenderBrowserConfiguration,
+    VideoWorkerRenderCanvas, VideoWorkerRenderSandboxRequest, VideoWorkerRestartPolicy,
+    VideoWorkerSourceWindow, VideoWorkerState,
 };
 use automation_tool_desktop_lib::motion_video_studio::{
     cancel_marker_file_name, TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR, TEMPLATE_CANVAS_HEIGHT,
@@ -161,6 +161,82 @@ fn orchestrator() -> LocalVideoOrchestrator {
     // load from being misread as a worker start timeout.
     LocalVideoOrchestrator::new(Duration::from_secs(10), Duration::from_secs(10))
         .expect("orchestrator")
+}
+
+#[test]
+fn verified_media_pair_travels_only_in_the_authenticated_bootstrap() {
+    let marker = std::env::temp_dir().join(format!(
+        "automation-tool-le12-media-tools-{}-{}",
+        std::process::id(),
+        TEMPORARY_WORKER_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+    ));
+    let marker_json = serde_json::to_string(&marker.to_string_lossy()).expect("marker path");
+    let worker = HEALTHY_WORKER.replace(
+        "bootstrap = json.loads(sys.stdin.readline())",
+        &format!(
+            "import pathlib\nbootstrap = json.loads(sys.stdin.readline())\npathlib.Path({marker_json}).write_text(json.dumps(bootstrap['mediaTools'], sort_keys=True))"
+        ),
+    );
+    let fixture = TemporaryWorker::new(&worker);
+    let ffmpeg = executable_fixture(&fixture.root, "ffmpeg");
+    let ffprobe = executable_fixture(&fixture.root, "ffprobe");
+    let media_tools = VideoWorkerMediaToolsConfiguration::new(ffmpeg.clone(), ffprobe.clone())
+        .expect("verified media tools");
+    assert_eq!(
+        format!("{media_tools:?}"),
+        "VideoWorkerMediaToolsConfiguration(<redacted>)"
+    );
+    let launch = fixture
+        .launch(VideoWorkerKind::Python)
+        .with_media_tools(media_tools)
+        .expect("attach media tools exactly once");
+    let orchestrator = orchestrator();
+    let status = orchestrator
+        .start(launch)
+        .expect("start media-aware worker");
+    orchestrator
+        .health(VideoWorkerKind::Python)
+        .expect("authenticated health");
+    orchestrator
+        .stop(VideoWorkerKind::Python)
+        .expect("stop worker");
+
+    let recorded: serde_json::Value =
+        serde_json::from_slice(&fs::read(&marker).expect("bootstrap marker")).unwrap();
+    assert_eq!(recorded["ffmpegPath"], ffmpeg.to_string_lossy().as_ref());
+    assert_eq!(recorded["ffprobePath"], ffprobe.to_string_lossy().as_ref());
+    assert!(!format!("{status:?}").contains(ffmpeg.to_string_lossy().as_ref()));
+    let _ = fs::remove_file(marker);
+}
+
+#[test]
+fn media_pair_rejects_aliases_and_duplicate_attachment() {
+    let fixture = TemporaryWorker::new(HEALTHY_WORKER);
+    let ffmpeg = executable_fixture(&fixture.root, "ffmpeg");
+    let ffprobe = executable_fixture(&fixture.root, "ffprobe");
+    let alias = VideoWorkerMediaToolsConfiguration::new(ffmpeg.clone(), ffmpeg.clone())
+        .expect_err("one executable cannot impersonate both tools");
+    assert_eq!(alias.code(), VideoWorkerErrorCode::ConfigurationInvalid);
+
+    let configuration =
+        VideoWorkerMediaToolsConfiguration::new(ffmpeg.clone(), ffprobe.clone()).unwrap();
+    let duplicate = fixture
+        .launch(VideoWorkerKind::Python)
+        .with_media_tools(configuration.clone())
+        .unwrap()
+        .with_media_tools(configuration)
+        .err()
+        .expect("bootstrap media pair is single-assignment");
+    assert_eq!(duplicate.code(), VideoWorkerErrorCode::ConfigurationInvalid);
+
+    let node_only = fixture
+        .launch(VideoWorkerKind::Node)
+        .with_media_tools(
+            VideoWorkerMediaToolsConfiguration::new(ffmpeg, ffprobe).expect("verified media tools"),
+        )
+        .err()
+        .expect("native media tools belong only to the Python editing Worker");
+    assert_eq!(node_only.code(), VideoWorkerErrorCode::ConfigurationInvalid);
 }
 
 fn wait_until_stopped(process_id: u32) {
