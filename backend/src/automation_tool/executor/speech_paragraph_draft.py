@@ -255,6 +255,8 @@ class NarrationMaterialBinding:
     sequence: int
     narration_relative_path: str
     material_id: UUID
+    kind: SegmentSelectionMaterialKind
+    duration_ms: int
 
     def __post_init__(self) -> None:
         if (
@@ -265,6 +267,9 @@ class NarrationMaterialBinding:
                 sequence=self.sequence,
             )
             or not is_canonical_local_editing_material_id(self.material_id)
+            or self.kind is not SegmentSelectionMaterialKind.AUDIO
+            or type(self.duration_ms) is not int
+            or not 1 <= self.duration_ms <= MAX_LOCAL_EDITING_MATERIAL_DURATION_MS
         ):
             _reject()
 
@@ -277,6 +282,8 @@ def _validated_narration_binding(
             sequence=binding.sequence,
             narration_relative_path=binding.narration_relative_path,
             material_id=binding.material_id,
+            kind=binding.kind,
+            duration_ms=binding.duration_ms,
         )
     except Exception:
         _reject()
@@ -602,6 +609,8 @@ def project_local_editing_timeline_draft(
 
     if (
         not isinstance(resolved, ResolvedSpeechAwareParagraphDraft)
+        or not isinstance(resolved.original_speech_paragraphs, tuple)
+        or not isinstance(resolved.narrated_paragraphs, tuple)
         or not isinstance(narration_materials, tuple)
         or not all(isinstance(binding, NarrationMaterialBinding) for binding in narration_materials)
     ):
@@ -623,6 +632,7 @@ def project_local_editing_timeline_draft(
             range(1, len(narrated) + 1)
         ) or any(
             binding.narration_relative_path != paragraph.narration_relative_path
+            or binding.duration_ms != paragraph.duration_ms
             for binding, paragraph in zip(bindings, narrated, strict=True)
         ):
             _reject()

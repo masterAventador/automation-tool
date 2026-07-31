@@ -36,6 +36,9 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.schema import ColumnCollectionConstraint
 
+from automation_tool.control_plane.application.local_editing_timeline import (
+    create_local_editing_timeline,
+)
 from automation_tool.control_plane.application.timelines import (
     TimelineDataRejected,
     TimelineNotFound,
@@ -80,6 +83,11 @@ from automation_tool.control_plane.infrastructure.database.editing_project_repos
 )
 from automation_tool.control_plane.infrastructure.database.timeline_repository import (
     SqlAlchemyTimelineRepository,
+)
+from automation_tool.protocol.local_editing import (
+    LocalEditingTimelineDraft,
+    LocalEditingTimelineParagraph,
+    LocalEditingTimelineParagraphKind,
 )
 
 # Carrying microseconds, so a timestamp column that silently truncates is caught.
@@ -478,9 +486,7 @@ async def insert_unclaimed_row(
     project_id: UUID,
 ) -> None:
     async with database.session() as session:
-        await session.execute(
-            insert(timelines).values(**row_values(timeline_id, project_id))
-        )
+        await session.execute(insert(timelines).values(**row_values(timeline_id, project_id)))
 
 
 async def stored_keys(database: Database) -> set[tuple[UUID, int]]:
@@ -547,6 +553,76 @@ async def test_saved_timeline_lands_as_typed_columns_and_hydrates_back_equal(
         assert loaded.tracks[2].clips[0].text == CAPTION_ONE
         assert type(loaded.tracks[1].clips[1].gain_db) is float
         assert loaded.created_at.tzinfo is UTC
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_local_editing_draft_round_trips_through_real_postgresql(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyTimelineRepository(database)
+    try:
+        await reset_data(database)
+        project_id = EditingProjectId.new()
+        await store_project(database, project_id)
+        timeline_id = TimelineId.new()
+        original_video = MaterialId.new()
+        narrated_image = MaterialId.new()
+        voiceover = MaterialId.new()
+        draft = LocalEditingTimelineDraft(
+            paragraphs=(
+                LocalEditingTimelineParagraph(
+                    sequence=1,
+                    kind=LocalEditingTimelineParagraphKind.ORIGINAL_SPEECH,
+                    visual_material_id=original_video.uuid,
+                    audio_material_id=original_video.uuid,
+                    duration_ms=100,
+                    visual_source_in_ms=50,
+                    visual_source_out_ms=150,
+                    caption_text="真实原声",
+                ),
+                LocalEditingTimelineParagraph(
+                    sequence=2,
+                    kind=LocalEditingTimelineParagraphKind.NARRATED,
+                    visual_material_id=narrated_image.uuid,
+                    audio_material_id=voiceover.uuid,
+                    duration_ms=200,
+                    visual_source_in_ms=None,
+                    visual_source_out_ms=None,
+                    caption_text="真实旁白",
+                ),
+            )
+        )
+        timeline = create_local_editing_timeline(
+            draft,
+            timeline_id=timeline_id,
+            project_id=project_id,
+            created_at=CREATED_AT,
+        )
+
+        await repository.save(timeline, OWNER)
+
+        loaded = await repository.get(timeline_id, 1, OWNER)
+        row = await stored_row(database, timeline_id.uuid, 1)
+        assert loaded == timeline
+        assert loaded.duration_ms == 300
+        assert tuple(track.kind for track in loaded.tracks) == (
+            TimelineTrackKind.VISUAL,
+            TimelineTrackKind.NARRATION,
+            TimelineTrackKind.AMBIENT,
+            TimelineTrackKind.CAPTION,
+        )
+        assert [track["kind"] for track in cast(list[dict[str, object]], row["tracks"])] == [
+            "visual",
+            "narration",
+            "ambient",
+            "caption",
+        ]
     finally:
         await reset_data(database)
         await database.close()

@@ -106,16 +106,15 @@
 
 ## 5. 当前下一步
 
-**LE-16 T1～T4 已完成；T5 实现、功能验收与 LE 收口门禁已绿，待最终 Review。**
+**LE-16 T1～T4 已完成；T5 首轮 Review 的两项 finding 已按 RED 修复，待修复提交复审。**
 T5 新增版本化无路径最终段落协议、Executor 旁白 AUDIO Material 绑定投影，以及只消费
-协议的 Control Plane Timeline 工厂。混合结果稳定先排素材输入顺序的原声段，再排脚本
-sequence 的旁白段；visual 连续无转场，原声只排 ambient、旁白只排 narration，caption
-逐段对齐，VIDEO 保留等长 in/out，IMAGE 保持 windowless。公开链路实际得到 1200ms 的
-四轨领域 Timeline，协议确认无 path 字段。相关覆盖合跑 139 条且四个生产模块语句/分支
-100%，受影响单元回归 417 条；LE 收口完整 integration 在完整权限下为 458 passed、
-8 skipped。1ms 间隙变异会被用例和真实领域构造器共同杀死。下一步提交并推送 T5 实现
-检查点，完成任务与 LE-16 模块最终 Review、finding 修复和复审后，把 LE-16 顶格更新为
-`🔍 待验收`，正式 App 纵向验收仍归 LE-19/LE-22/LE-23。
+协议的 Control Plane Timeline 工厂。首轮 Review 发现绑定没有证明 AUDIO kind/实测时长，
+以及投影会消费被篡改的 list 外层容器；修复后绑定要求 AUDIO、合法实测时长且与段落精确
+相等，投影在迭代前拒绝错误容器。公开链路仍得到 1200ms 的四轨领域 Timeline，协议无
+path 字段；真实 PostgreSQL 经正式仓储写入读回逐字段相等。相关覆盖合跑 143 条且四个
+生产模块语句/分支 100%，受影响单元回归 421 条；最终完整 integration 为 459 passed、
+8 skipped。下一步提交并推送 Review 修复，复审无 finding 后把 LE-16 顶格更新为
+`🔍 待验收`，随即进入 LE-10；正式 App 纵向验收仍归 LE-19/LE-22/LE-23。
 
 ## 7. 用户可见文案门禁现已恢复绿色
 

@@ -18,7 +18,10 @@ from automation_tool.executor.speech_paragraph_draft import (
     SpeechParagraphDraftRejected,
     project_local_editing_timeline_draft,
 )
-from automation_tool.protocol.local_editing import LocalEditingTimelineParagraphKind
+from automation_tool.protocol.local_editing import (
+    LocalEditingTimelineParagraphKind,
+    SegmentSelectionMaterialKind,
+)
 
 
 def _original(
@@ -64,11 +67,18 @@ def _selected(
     )
 
 
-def _binding(sequence: int, material_id: UUID | None = None) -> NarrationMaterialBinding:
+def _binding(
+    sequence: int,
+    material_id: UUID | None = None,
+    *,
+    duration_ms: int = 500,
+) -> NarrationMaterialBinding:
     return NarrationMaterialBinding(
         sequence=sequence,
         narration_relative_path=f"voiceover/sentence-{sequence:04d}.wav",
         material_id=material_id or uuid4(),
+        kind=SegmentSelectionMaterialKind.AUDIO,
+        duration_ms=duration_ms,
     )
 
 
@@ -89,8 +99,8 @@ def test_mixed_resolved_draft_projects_originals_then_narrated_without_paths() -
     result = project_local_editing_timeline_draft(
         resolved,
         narration_materials=(
-            _binding(1, first_voiceover),
-            _binding(2, second_voiceover),
+            _binding(1, first_voiceover, duration_ms=600),
+            _binding(2, second_voiceover, duration_ms=700),
         ),
     )
 
@@ -138,6 +148,58 @@ def test_narration_binding_is_canonical_local_metadata() -> None:
 
     assert binding.narration_relative_path == "voiceover/sentence-0001.wav"
     assert "/Users" not in repr(binding)
+
+
+@pytest.mark.parametrize(
+    "binding",
+    [
+        lambda: NarrationMaterialBinding(
+            sequence=1,
+            narration_relative_path="voiceover/sentence-0001.wav",
+            material_id=uuid4(),
+            kind=SegmentSelectionMaterialKind.VIDEO,
+            duration_ms=500,
+        ),
+        lambda: NarrationMaterialBinding(
+            sequence=1,
+            narration_relative_path="voiceover/sentence-0001.wav",
+            material_id=uuid4(),
+            kind=SegmentSelectionMaterialKind.AUDIO,
+            duration_ms=0,
+        ),
+    ],
+)
+def test_narration_binding_requires_audio_kind_and_measured_duration(
+    binding: Callable[[], NarrationMaterialBinding],
+) -> None:
+    with pytest.raises(SpeechParagraphDraftRejected):
+        binding()
+
+
+def test_projection_rejects_binding_duration_mismatch() -> None:
+    resolved = ResolvedSpeechAwareParagraphDraft(
+        original_speech_paragraphs=(),
+        narrated_paragraphs=(_selected(1, uuid4(), duration_ms=500),),
+    )
+
+    with pytest.raises(SpeechParagraphDraftRejected):
+        project_local_editing_timeline_draft(
+            resolved,
+            narration_materials=(_binding(1, duration_ms=499),),
+        )
+
+
+def test_projection_rejects_mutated_resolved_container_shape() -> None:
+    resolved = ResolvedSpeechAwareParagraphDraft(
+        original_speech_paragraphs=(_original(uuid4()),),
+        narrated_paragraphs=(),
+    )
+    object.__setattr__(
+        resolved, "original_speech_paragraphs", list(resolved.original_speech_paragraphs)
+    )
+
+    with pytest.raises(SpeechParagraphDraftRejected):
+        project_local_editing_timeline_draft(resolved, narration_materials=())
 
 
 def test_projection_rejects_missing_extra_or_wrong_binding_order() -> None:
