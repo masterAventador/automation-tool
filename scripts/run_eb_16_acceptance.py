@@ -245,18 +245,13 @@ def signature_details(path: Path) -> str:
 
 
 def verify_embedded_mach_o_signature(path: Path, expected_identifier: str) -> None:
-    """Verify one embedded Mach-O signature outside its enclosing bundle.
+    """Verify one embedded Developer ID signature in its enclosing bundle.
 
-    `codesign --verify` on a path inside a bundle always re-resolves to the
-    bundle, so the packaged code is checked by reading the embedded signature of
-    the Mach-O itself.
-
-    Chrome for Testing arrives ad-hoc/linker-signed and this used to assert
-    exactly that. It cannot any more, and the reason is the point of T44: an
-    ad-hoc signature is unnotarisable, so Gatekeeper offers the customer "Move
-    to Trash". The browser is now re-signed under our Developer ID before its
-    manifest is taken, and what this asserts is the property that replaced the
-    old one — our team, and a hardened runtime.
+    A formal signature seals the executable together with its Info.plist.
+    Copying only the Mach-O out of that bundle — the historical ad-hoc check —
+    necessarily makes `codesign` report a modified or missing plist. Original
+    path verification validates the complete signed context and its nested
+    code, while the details below pin the exact identifier, team and runtime.
     """
     rendered = signature_details(path)
     if f"Identifier={expected_identifier}" not in rendered:
@@ -268,37 +263,35 @@ def verify_embedded_mach_o_signature(path: Path, expected_identifier: str) -> No
         raise AcceptanceFailed("packaged browser was signed without a hardened runtime")
     if "adhoc" in rendered:
         raise AcceptanceFailed("packaged browser still carries an ad-hoc signature")
-    with tempfile.TemporaryDirectory(
-        prefix="automation-tool-eb16-signature-", dir="/private/tmp"
-    ) as raw:
-        detached = Path(raw) / "packaged-mach-o"
-        shutil.copy2(path, detached)
-        run_checked(["codesign", "--verify", "--strict", os.fspath(detached)])
+    run_checked(["codesign", "--verify", "--strict", os.fspath(path)])
 
 
 def verify_code_signatures(application: Path, target_id: str) -> None:
     announce("Verifying outer and inner code signatures on the built package")
-    run_checked(["codesign", "--verify", "--strict", os.fspath(application)])
+    run_checked(["codesign", "--verify", "--deep", "--strict", os.fspath(application)])
     rendered = signature_details(application)
+    identity = load_signing_identity()
     if (
         f"Identifier={APP_IDENTIFIER}" not in rendered
-        or "Signature=adhoc" not in rendered
-        or "TeamIdentifier=not set" not in rendered
-        or "Developer ID" in rendered
-        or "Apple Distribution" in rendered
+        or f"Authority={identity.certificate}" not in rendered
+        or f"TeamIdentifier={identity.team_id}" not in rendered
+        or "runtime" not in rendered
+        or "Signature=adhoc" in rendered
     ):
         raise AcceptanceFailed("EB-16 App signing boundary is inconsistent")
     executable = packaged_browser_executable(application, target_id)
-    verify_embedded_mach_o_signature(executable, "Google Chrome for Testing")
+    verify_embedded_mach_o_signature(executable, "com.google.chrome.for.testing")
     framework = (
         executable.parent.parent
         / "Frameworks/Google Chrome for Testing Framework.framework"
         / "Versions/Current/Google Chrome for Testing Framework"
     )
-    verify_embedded_mach_o_signature(framework, "Google Chrome for Testing Framework")
+    verify_embedded_mach_o_signature(
+        framework, "com.google.chrome.for.testing.framework"
+    )
     announce(
-        "Outer ad-hoc signature seals the final bundle and the packaged browser "
-        "keeps its upstream ad-hoc linker signature"
+        "App and packaged browser code are sealed by the release Developer ID "
+        "with the hardened runtime"
     )
 
 
@@ -323,9 +316,7 @@ def install_from_disk_image(
         source = one_directory(mount_point, ".app")
         install_root.mkdir(parents=True)
         destination = install_root / source.name
-        shutil.copytree(
-            source, destination, symlinks=True, copy_function=shutil.copy2
-        )
+        shutil.copytree(source, destination, symlinks=True, copy_function=shutil.copy2)
     finally:
         # Never raise from here: if `attach` itself failed, a failing `detach`
         # would replace the real reason for the failure.
@@ -654,7 +645,11 @@ def launch_installed_application(
 
 def run_launch_phase(installed: Path, work_directory: Path) -> dict[str, object]:
     from acceptance_postgres import managed_test_postgres
-    from run_h8_20_acceptance import require_port_closed, unused_loopback_port, wait_for_port
+    from run_h8_20_acceptance import (
+        require_port_closed,
+        unused_loopback_port,
+        wait_for_port,
+    )
 
     require_port_closed(LOCAL_CONTROL_PLANE_PORT)
     database_port = unused_loopback_port()
@@ -729,7 +724,9 @@ def uninstall_and_check_residue(installed: Path, install_root: Path) -> None:
     shutil.rmtree(installed)
     remaining = sorted(path.name for path in install_root.iterdir())
     if remaining:
-        raise AcceptanceFailed(f"uninstall left residue in the install root: {remaining}")
+        raise AcceptanceFailed(
+            f"uninstall left residue in the install root: {remaining}"
+        )
     require_no_process_matching(os.fspath(install_root))
 
 
@@ -743,11 +740,59 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def resolve_skip_build_configuration(build_directory: Path) -> Path:
+    """Reuse either an EB-16 build or the ordinary production release build.
+
+    The acceptance runner and the shipping command deliberately share the
+    assembler, but their historical configuration file names differ. Refusing
+    the ordinary release here would force an already notarised package through
+    two more Apple submissions merely to test installation, while accepting an
+    arbitrary JSON file would let the audit inspect a configuration unrelated
+    to the package.
+    """
+    acceptance_overlay = build_directory / "tauri.eb-16.generated.json"
+    if acceptance_overlay.is_file():
+        return effective_configuration(acceptance_overlay, build_directory)
+
+    release_overlay = build_directory / "tauri.release.generated.json"
+    release_effective = build_directory / "tauri.release.effective.json"
+    if release_overlay.is_file() and release_effective.is_file():
+        try:
+            overlay = json.loads(release_overlay.read_text(encoding="utf-8"))
+            effective = json.loads(release_effective.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise AcceptanceFailed(
+                "the production release configuration is unreadable"
+            ) from error
+        if not isinstance(overlay, dict) or not isinstance(effective, dict):
+            raise AcceptanceFailed(
+                "the production release configuration must be a JSON object"
+            )
+        return release_effective
+
+    raise AcceptanceFailed(
+        "no frozen EB-16 or production release configuration exists for --skip-build"
+    )
+
+
+def resolve_work_directory(path: Path) -> Path:
+    """Make every child tool see the same package path.
+
+    Python runs this driver from the repository root, while the Node package
+    auditors deliberately run from `frontend/`. Leaving a CLI-supplied relative
+    work directory unresolved therefore makes the two layers inspect different
+    paths.
+    """
+    if path.is_absolute():
+        return path
+    return (REPOSITORY_ROOT / path).resolve()
+
+
 def main() -> int:
     target_id, architecture = require_macos()
     arguments = parse_arguments()
     archive = arguments.archive or DEFAULT_ARCHIVES[target_id]
-    work_directory: Path = arguments.work_dir
+    work_directory = resolve_work_directory(arguments.work_dir)
     build_directory = work_directory / "build"
     cargo_target = work_directory / "cargo-target"
     install_root = work_directory / "installed"
@@ -791,7 +836,9 @@ def main() -> int:
         # built, in the driver whose whole subject is whether a clean machine
         # can run what it installed.
         announce("Staging the frozen catalog of animation parts")
-        motion_catalog = stage_motion_catalog(staging=build_directory / "catalog").parent
+        motion_catalog = stage_motion_catalog(
+            staging=build_directory / "catalog"
+        ).parent
         install_runtime_resources_and_sign(
             application, browser, target_id, video_runtime, motion_catalog, identity
         )
@@ -808,15 +855,14 @@ def main() -> int:
             encoding="utf-8"
         )
         environment = release_environment(cargo_target, public_key)
-        effective = effective_configuration(
-            build_directory / "tauri.eb-16.generated.json", build_directory
-        )
+        effective = resolve_skip_build_configuration(build_directory)
         audited_assets = require_frozen_distribution(
             build_directory / AUDITED_DISTRIBUTION_NAME
         )
         bundle_root = cargo_target / "release/bundle"
         application = one_directory(bundle_root / "macos", ".app")
         disk_image = one_file(bundle_root / "dmg", ".dmg")
+        require_distributable_release(disk_image)
 
     announce(f"Built application: {application}")
     announce(f"Built disk image: {disk_image} ({disk_image.stat().st_size} bytes)")
@@ -894,7 +940,7 @@ def main() -> int:
         encoding="utf-8",
     )
     announce(
-        "EB-16 acceptance passed: one ad-hoc signed "
+        "EB-16 acceptance passed: one Developer ID signed and notarised "
         f"{target_id} package with {report.browser_files} browser files "
         f"({report.browser_bytes} bytes), package {report.package_bytes} bytes, "
         f"disk image {disk_image.stat().st_size} bytes"

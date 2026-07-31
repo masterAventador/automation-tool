@@ -21,6 +21,8 @@ import shutil
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 import zipfile
 from pathlib import Path
 
@@ -45,6 +47,7 @@ from release_assembly import (  # noqa: E402
     require_packaged_browser,
     require_packaged_video_runtime,
 )
+import run_eb_16_acceptance as eb16  # noqa: E402
 
 STAGING_CONTRACT_PATH = ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
 TARGET_ID = "macos-arm64"
@@ -229,8 +232,140 @@ class AssemblerIsTheOnlyPathTests(unittest.TestCase):
                 self.assertIn('"--package-root"', source)
 
 
+class MacReleaseAcceptanceRunnerTests(unittest.TestCase):
+    """The installer runner must accept the same formal package that ships."""
+
+    def test_formal_developer_id_bundle_is_the_required_signature_boundary(
+        self,
+    ) -> None:
+        application = Path("/private/tmp/Automation Tool.app")
+        executable = (
+            application
+            / "Contents/Resources/embedded-browser/chrome-mac-arm64"
+            / "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+        )
+        identity = SimpleNamespace(
+            certificate="Developer ID Application: Example (TEAMID1234)",
+            team_id="TEAMID1234",
+        )
+        details = "\n".join(
+            (
+                "Identifier=com.aventador.automationtool",
+                "Authority=Developer ID Application: Example (TEAMID1234)",
+                "TeamIdentifier=TEAMID1234",
+                "flags=0x10000(runtime) hashes=13+7 location=embedded",
+            )
+        )
+        with (
+            mock.patch.object(eb16, "run_checked") as run_checked,
+            mock.patch.object(eb16, "signature_details", return_value=details),
+            mock.patch.object(
+                eb16, "packaged_browser_executable", return_value=executable
+            ),
+            mock.patch.object(eb16, "load_signing_identity", return_value=identity),
+            mock.patch.object(
+                eb16, "verify_embedded_mach_o_signature"
+            ) as verify_embedded,
+        ):
+            eb16.verify_code_signatures(application, TARGET_ID)
+
+        self.assertIn("--deep", run_checked.call_args.args[0])
+        verify_embedded.assert_has_calls(
+            (
+                mock.call(executable, "com.google.chrome.for.testing"),
+                mock.call(
+                    executable.parent.parent
+                    / "Frameworks/Google Chrome for Testing Framework.framework"
+                    / "Versions/Current/Google Chrome for Testing Framework",
+                    "com.google.chrome.for.testing.framework",
+                ),
+            )
+        )
+
+    def test_ad_hoc_outer_bundle_is_rejected_by_the_formal_runner(self) -> None:
+        application = Path("/private/tmp/Automation Tool.app")
+        details = "\n".join(
+            (
+                "Identifier=com.aventador.automationtool",
+                "Signature=adhoc",
+                "TeamIdentifier=not set",
+                "flags=0x2(adhoc)",
+            )
+        )
+        with (
+            mock.patch.object(eb16, "run_checked"),
+            mock.patch.object(eb16, "signature_details", return_value=details),
+            mock.patch.object(
+                eb16,
+                "packaged_browser_executable",
+                return_value=application / "Contents/MacOS/browser",
+            ),
+            mock.patch.object(eb16, "verify_embedded_mach_o_signature"),
+            mock.patch.object(
+                eb16,
+                "load_signing_identity",
+                return_value=SimpleNamespace(
+                    certificate="Developer ID Application: Example (TEAMID1234)",
+                    team_id="TEAMID1234",
+                ),
+            ),
+            self.assertRaises(eb16.AcceptanceFailed),
+        ):
+            eb16.verify_code_signatures(application, TARGET_ID)
+
+    def test_developer_id_browser_code_is_verified_in_its_bundle(self) -> None:
+        executable = Path("/private/tmp/Automation Tool.app/Contents/MacOS/browser")
+        details = "\n".join(
+            (
+                "Identifier=com.google.chrome.for.testing",
+                "Authority=Developer ID Application: Example (TEAMID1234)",
+                "TeamIdentifier=TEAMID1234",
+                "flags=0x10000(runtime)",
+            )
+        )
+        with (
+            mock.patch.object(eb16, "signature_details", return_value=details),
+            mock.patch.object(
+                eb16,
+                "load_signing_identity",
+                return_value=SimpleNamespace(
+                    certificate="Developer ID Application: Example (TEAMID1234)",
+                    team_id="TEAMID1234",
+                ),
+            ),
+            mock.patch.object(eb16, "run_checked") as run_checked,
+        ):
+            eb16.verify_embedded_mach_o_signature(
+                executable, "com.google.chrome.for.testing"
+            )
+
+        run_checked.assert_called_once_with(
+            ["codesign", "--verify", "--strict", str(executable)]
+        )
+
+    def test_skip_build_reuses_the_ordinary_production_release_configuration(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(prefix="eb16-release-config-") as temporary:
+            build = Path(temporary)
+            generated = build / "tauri.release.generated.json"
+            effective = build / "tauri.release.effective.json"
+            generated.write_text("{}\n", encoding="utf-8")
+            effective.write_text('{"bundle":{"active":true}}\n', encoding="utf-8")
+
+            resolved = eb16.resolve_skip_build_configuration(build)
+
+        self.assertEqual(resolved, effective)
+
+    def test_relative_work_directory_is_anchored_to_the_repository(self) -> None:
+        self.assertEqual(
+            eb16.resolve_work_directory(Path(".local/release")),
+            ROOT / ".local/release",
+        )
+
+
 class SingleResourceDeclarationTests(unittest.TestCase):
-    """The five release resources are declared once, not once per gate.
+    """The six release resources are declared once, not once per gate.
 
     Three video runtime resources shipped absent on 2026-07-26 while every gate
     stayed green. Each gate that could have caught it knew a different, hand
@@ -459,7 +594,9 @@ class VideoRuntimeReleaseGateTests(unittest.TestCase):
             )
 
     def test_a_rejected_install_leaves_nothing_behind(self) -> None:
-        (self.staging / "material-video-worker/automation-tool-material-video-worker").unlink()
+        (
+            self.staging / "material-video-worker/automation-tool-material-video-worker"
+        ).unlink()
         with self.assertRaises(ReleaseAssemblyRejected):
             install_video_runtime(
                 application=self.application, staging=self.staging, platform=PLATFORM
@@ -591,7 +728,10 @@ class SigningOrderTests(unittest.TestCase):
         version = framework / "Versions/149.0"
         _write_mach_o(version / "Chrome Framework")
         _write_mach_o(version / "Libraries/libEGL.dylib")
-        _write_mach_o(version / "Helpers/Chrome Helper (GPU).app/Contents/MacOS/Chrome Helper (GPU)")
+        _write_mach_o(
+            version
+            / "Helpers/Chrome Helper (GPU).app/Contents/MacOS/Chrome Helper (GPU)"
+        )
         (framework / "Versions/Current").symlink_to("149.0")
         (framework / "Chrome Framework").symlink_to("Versions/Current/Chrome Framework")
         self.framework = framework
@@ -735,9 +875,7 @@ class DistributionGateTests(unittest.TestCase):
         # This is the shape the mistake takes: a real Developer ID signature,
         # a submission that was accepted, and a ticket that never got stapled.
         with self.assertRaises(ReleaseAssemblyRejected):
-            self.gate(
-                "Example_0.1.0.dmg: accepted\nsource=Unnotarized Developer ID\n"
-            )
+            self.gate("Example_0.1.0.dmg: accepted\nsource=Unnotarized Developer ID\n")
 
     def test_an_ad_hoc_disk_image_is_refused(self) -> None:
         with self.assertRaises(ReleaseAssemblyRejected):
