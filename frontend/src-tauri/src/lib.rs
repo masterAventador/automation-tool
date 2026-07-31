@@ -679,6 +679,7 @@ pub fn motion_authoring_request(
         "aspectRatio": request.aspect_ratio(),
         "durationSeconds": request.duration_seconds(),
         "language": request.language(),
+        "catalogPartOverrides": request.catalog_part_overrides(),
         "modelThinking": request.model_thinking(),
         "brandAssets": [],
         "model": {

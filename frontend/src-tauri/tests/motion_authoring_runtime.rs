@@ -221,16 +221,89 @@ fn a_request_that_forgot_the_thinking_choice_is_refused_rather_than_defaulted() 
         "aspectRatio": "16:9",
         "durationSeconds": 12,
         "language": "zh",
+        "catalogPartOverrides": [],
         "modelThinking": false,
     });
     let parsed: MotionVideoBriefRequest = serde_json::from_value(complete.clone()).unwrap();
     assert!(!parsed.model_thinking(), "关掉的选择必须被解析出来");
+    assert!(parsed.catalog_part_overrides().is_empty());
+
+    let mut missing_parts = complete.clone();
+    missing_parts
+        .as_object_mut()
+        .unwrap()
+        .remove("catalogPartOverrides");
+    assert!(
+        serde_json::from_value::<MotionVideoBriefRequest>(missing_parts).is_err(),
+        "少了逐镜头覆盖字段必须拒绝，而不是悄悄当作没有选择"
+    );
 
     let mut missing = complete;
     missing.as_object_mut().unwrap().remove("modelThinking");
     assert!(
         serde_json::from_value::<MotionVideoBriefRequest>(missing).is_err(),
         "少了这个字段必须拒绝，而不是悄悄按默认值跑"
+    );
+}
+
+#[test]
+fn user_part_overrides_are_validated_and_reach_the_authoring_request() {
+    use automation_tool_desktop_lib::motion_authoring_request;
+
+    let request = MotionVideoBriefRequest::one_sentence_with_thinking_and_part_overrides(
+        "用蓝色商务风做一段本周销售增长说明".to_owned(),
+        "16:9".to_owned(),
+        20,
+        "zh".to_owned(),
+        true,
+        vec![Some("data-chart".to_owned()), None, None],
+    )
+    .unwrap();
+    assert_eq!(
+        request.catalog_part_overrides(),
+        &[Some("data-chart".to_owned()), None, None],
+    );
+
+    let root = TempDirectory::new();
+    let document = motion_authoring_request(
+        &root.0,
+        &root.0.join("catalog"),
+        &root.0.join("chromium/chrome"),
+        &root.0.join("media-toolchain/bin/ffprobe"),
+        &request,
+        "qwen3.7-max-2026-06-08",
+        "sk-not-a-real-key",
+    );
+    assert_eq!(
+        document["catalogPartOverrides"],
+        serde_json::json!(["data-chart", null, null]),
+    );
+
+    for invalid in [vec![Some("not-a-real-part".to_owned())], vec![None, None]] {
+        assert!(
+            MotionVideoBriefRequest::one_sentence_with_thinking_and_part_overrides(
+                "用蓝色商务风做一段本周销售增长说明".to_owned(),
+                "16:9".to_owned(),
+                20,
+                "zh".to_owned(),
+                true,
+                invalid,
+            )
+            .is_err(),
+            "未知零件或只有空槽的覆盖不得进入编排",
+        );
+    }
+    assert!(
+        MotionVideoBriefRequest::one_sentence_with_thinking_and_part_overrides(
+            "用蓝色商务风做一段本周销售增长说明".to_owned(),
+            "16:9".to_owned(),
+            12,
+            "zh".to_owned(),
+            true,
+            vec![Some("caption-kinetic-slam".to_owned()), None, None],
+        )
+        .is_err(),
+        "a catalogued part without a real film slot must not reach the Executor",
     );
 }
 

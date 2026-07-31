@@ -1,4 +1,5 @@
 import contract from "../../../../contracts/video/motion-catalog-ui.v1.json";
+import slotContract from "../../../../contracts/video/motion-part-slots.v1.json";
 import type { MotionVideoDraftRequest } from "./material-video-studio-gateway";
 
 export interface MotionPartOption {
@@ -20,9 +21,18 @@ interface MotionPartsContract {
   readonly items: readonly MotionPartOption[];
 }
 
+interface MotionPartSlotsContract {
+  readonly schemaVersion: number;
+  readonly id: string;
+  readonly policy: string;
+  readonly counts: { readonly parts: number };
+  readonly parts: readonly { readonly name: string }[];
+}
+
 function loadCatalog(): {
   readonly categories: readonly string[];
   readonly parts: readonly MotionPartOption[];
+  readonly selectablePartIds: ReadonlySet<string>;
 } {
   const payload = contract as MotionPartsContract;
   if (payload.counts.total !== 134 || payload.items.length !== 134) {
@@ -51,21 +61,40 @@ function loadCatalog(): {
     }
     names.add(item.displayTitle);
   }
-  return { categories: payload.categories, parts: payload.items };
+  const slots = slotContract as MotionPartSlotsContract;
+  const selectablePartIds = new Set(slots.parts.map((part) => part.name));
+  if (
+    slots.schemaVersion !== 1 ||
+    slots.id !== "motion-part-slots.v1" ||
+    slots.policy !== "fail_closed" ||
+    slots.counts.parts !== 37 ||
+    slots.parts.length !== 37 ||
+    selectablePartIds.size !== 37 ||
+    [...selectablePartIds].some((id) => !identifiers.has(id))
+  ) {
+    throw new Error("motion parts selectable set must match the 37 frozen film slots");
+  }
+  return {
+    categories: payload.categories,
+    parts: payload.items,
+    selectablePartIds,
+  };
 }
 
 const loaded = loadCatalog();
 
 export const MOTION_PARTS_CATEGORIES: readonly string[] = loaded.categories;
 export const MOTION_PARTS_CATALOG: readonly MotionPartOption[] = loaded.parts;
+export const MOTION_SELECTABLE_PART_IDS: ReadonlySet<string> =
+  loaded.selectablePartIds;
 
 /**
  * Whether the chosen creation path turns per-beat part selections into pixels.
  *
- * `browse_only` is a fact about the product, not a feature flag: nothing
- * between the submit request and the render worker carries a part id, so a
- * tick made in that state would be dropped without a trace. The catalog stays
- * readable either way; only the actions that imply an effect are withheld.
+ * `browse_only` is a fact about the fixed-template path, not a feature flag:
+ * its render request carries no part id. The one-sentence path consumes a
+ * per-shot override, while individual cards are enabled only when the frozen
+ * slot contract proves the real film assembler can build a shot from them.
  */
 export type MotionPartsUsage = "applies_to_output" | "browse_only";
 
@@ -269,7 +298,9 @@ export function recommendMotionPartsForBeat(
   const beatGrams = chineseBigrams(beatText);
   const beatTokens = new Set(beatText.toLowerCase().match(ASCII_TOKEN) ?? []);
 
-  const ranked = MOTION_PARTS_CATALOG.map((part) => {
+  const ranked = MOTION_PARTS_CATALOG.filter((part) =>
+    MOTION_SELECTABLE_PART_IDS.has(part.id),
+  ).map((part) => {
     let score = scores.get(part.category) ?? 0;
     for (const token of part.id.split("-")) {
       if (beatTokens.has(token)) score += ID_TOKEN_WEIGHT;

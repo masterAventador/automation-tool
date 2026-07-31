@@ -5,13 +5,13 @@ import { Alert, Button, Radio, Tag, Typography } from "antd";
 import {
   MOTION_PARTS_CATALOG,
   MOTION_PARTS_CATEGORIES,
+  MOTION_SELECTABLE_PART_IDS,
   recommendMotionPartsForBeat,
   type MotionPartOption,
   type MotionPartsUsage,
 } from "./motion-parts-catalog";
 
 const ALL_CATEGORIES = "全部分类";
-const MAX_PARTS_PER_BEAT = 16;
 
 // Shown whenever the chosen creation path cannot turn a tick into pixels. It
 // sits above the catalog rather than inside the explanatory paragraph because
@@ -25,6 +25,10 @@ const UNUSED_NOTICE_DESCRIPTION =
   "所以这里可以浏览了解有哪些零件，但暂时不能选用。";
 const UNUSED_PART_ACTION = "本次制作不使用";
 const UNUSED_BEAT_SUMMARY = "本次制作不使用零件";
+const OVERRIDE_NOTICE_DESCRIPTION =
+  "这些指定只用于下一次“一句话自动制作”：指定后，该镜头以你的选择为准；" +
+  "没有指定的镜头仍由模型自动选择。134 项都可浏览，其中已具备真实镜头装配条件的 " +
+  "37 项可以指定，其余会标为“当前仅供浏览”。下面“预览”里的固定模板手工制作不会使用这些指定。";
 
 export interface MotionPartsBeat {
   readonly title: string;
@@ -57,6 +61,8 @@ export function MotionPartsCatalog({
   );
 
   const activeSelection = selections[activeBeat] ?? [];
+  const selectedTitle = (selection: readonly string[]) =>
+    MOTION_PARTS_CATALOG.find((part) => part.id === selection[0])?.displayTitle;
 
   const replaceSelection = (
     beatIndex: number,
@@ -77,8 +83,7 @@ export function MotionPartsCatalog({
       );
       return;
     }
-    if (activeSelection.length >= MAX_PARTS_PER_BEAT) return;
-    replaceSelection(activeBeat, [...activeSelection, part.id]);
+    replaceSelection(activeBeat, [part.id]);
   };
 
   return (
@@ -91,12 +96,20 @@ export function MotionPartsCatalog({
           description={UNUSED_NOTICE_DESCRIPTION}
         />
       )}
+      {selectable ? (
+        <Alert
+          type="info"
+          showIcon
+          title="逐镜头覆盖自动选择"
+          description={OVERRIDE_NOTICE_DESCRIPTION}
+        />
+      ) : null}
       <section aria-label="分镜零件选用" role="region" className="motion-parts-overrides">
         <Typography.Title level={4}>分镜零件选用</Typography.Title>
         <Typography.Text type="secondary">
           动效零件与 12 套整体风格不同：整体风格决定画面的颜色与排版，零件是插入单个分镜的
           画面模块。
-          {selectable ? "自动制作会按分镜自动选用零件，这里可以逐段查看并手工覆盖。" : null}
+          {selectable ? "自动制作会按镜头自动选用零件，这里可以提前指定并覆盖。" : null}
         </Typography.Text>
         <Radio.Group
           disabled={!selectable}
@@ -105,7 +118,7 @@ export function MotionPartsCatalog({
         >
           {beats.map((beat, index) => (
             <Radio.Button key={beat.title || index} value={index}>
-              {`第 ${index + 1} 段`}
+              {`第 ${index + 1} 镜头`}
             </Radio.Button>
           ))}
         </Radio.Group>
@@ -114,20 +127,23 @@ export function MotionPartsCatalog({
             <li key={beat.title || index}>
               <Typography.Text>
                 {selectable
-                  ? `第 ${index + 1} 段：已选 ${(selections[index] ?? []).length} 项`
+                  ? selectedTitle(selections[index] ?? []) === undefined
+                    ? `第 ${index + 1} 镜头：由模型自动选择`
+                    : `第 ${index + 1} 镜头：已指定${selectedTitle(
+                        selections[index] ?? [],
+                      )}`
                   : `第 ${index + 1} 段：${UNUSED_BEAT_SUMMARY}`}
               </Typography.Text>
               <Button
                 size="small"
                 disabled={!selectable}
                 onClick={() =>
-                  replaceSelection(
-                    index,
+                  replaceSelection(index, [
                     recommendMotionPartsForBeat(
                       `${beat.title} ${beat.caption}`,
                       index,
-                    ),
-                  )
+                    )[0]!,
+                  ])
                 }
               >
                 自动推荐
@@ -153,6 +169,8 @@ export function MotionPartsCatalog({
         <ul className="motion-parts-grid">
           {visibleParts.map((part) => {
             const selected = activeSelection.includes(part.id);
+            const partSelectable =
+              selectable && MOTION_SELECTABLE_PART_IDS.has(part.id);
             return (
               <li key={part.id} className="motion-parts-card">
                 <div className="motion-parts-card-heading">
@@ -165,15 +183,17 @@ export function MotionPartsCatalog({
                 <Typography.Text type="secondary">{`来源：${part.provenanceLabel}`}</Typography.Text>
                 <Button
                   size="small"
-                  disabled={!selectable}
-                  type={selectable && !selected ? "primary" : "default"}
+                  disabled={!partSelectable}
+                  type={partSelectable && !selected ? "primary" : "default"}
                   onClick={() => togglePart(part)}
                 >
                   {!selectable
                     ? UNUSED_PART_ACTION
+                    : !partSelectable
+                      ? "当前仅供浏览"
                     : selected
-                      ? `从第 ${activeBeat + 1} 段移除`
-                      : `加入第 ${activeBeat + 1} 段`}
+                      ? `取消第 ${activeBeat + 1} 镜头的指定`
+                      : `指定给第 ${activeBeat + 1} 镜头`}
                 </Button>
               </li>
             );
