@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final, NoReturn
 from uuid import RFC_4122, UUID
 
 LOCAL_EDITING_SEGMENT_SELECTION_VERSION: Final = "local-editing.segment-selection.v1"
+LOCAL_EDITING_SPEECH_PARAGRAPH_VERSION: Final = "local-editing.speech-paragraph.v1"
 MAX_LOCAL_EDITING_MATERIAL_DURATION_MS: Final = 4 * 60 * 60 * 1_000
 MAX_LOCAL_EDITING_SHOT_BOUNDARIES: Final = 4_096
+MAX_LOCAL_EDITING_SPEECH_SEGMENTS: Final = 4_096
+MAX_LOCAL_EDITING_TRANSCRIPT_CHARACTERS: Final = 100_000
 MAX_LOCAL_EDITING_TIMELINE_DURATION_MS: Final = 600_000
 MAX_LOCAL_EDITING_SCRIPT_SENTENCES: Final = 128
 MAX_LOCAL_EDITING_SEMANTIC_MATERIALS: Final = 32
@@ -45,6 +49,78 @@ class SegmentSelectionMaterialKind(StrEnum):
     VIDEO = "video"
     IMAGE = "image"
     AUDIO = "audio"
+
+
+def _valid_local_editing_text(value: object, *, maximum: int) -> bool:
+    return (
+        type(value) is str
+        and bool(value)
+        and value == value.strip()
+        and len(value) <= maximum
+        and not any(
+            character not in {"\n", "\t"} and unicodedata.category(character).startswith("C")
+            for character in value
+        )
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class SpeechParagraphMaterial:
+    """Only path-free speech facts needed to partition paragraph drafting."""
+
+    material_id: UUID
+    kind: SegmentSelectionMaterialKind
+    duration_ms: int | None
+    has_speech: bool
+    speech_segments_ms: tuple[tuple[int, int], ...]
+    speech_transcript: str | None
+
+    def __post_init__(self) -> None:
+        if (
+            not is_canonical_local_editing_material_id(self.material_id)
+            or not isinstance(self.kind, SegmentSelectionMaterialKind)
+            or (self.kind is SegmentSelectionMaterialKind.IMAGE and self.duration_ms is not None)
+            or (
+                self.kind is not SegmentSelectionMaterialKind.IMAGE
+                and (
+                    type(self.duration_ms) is not int
+                    or not 1 <= self.duration_ms <= MAX_LOCAL_EDITING_MATERIAL_DURATION_MS
+                )
+            )
+            or type(self.has_speech) is not bool
+            or not isinstance(self.speech_segments_ms, tuple)
+        ):
+            _reject()
+        if not self.has_speech:
+            if self.speech_segments_ms or self.speech_transcript is not None:
+                _reject()
+            return
+        if (
+            self.kind is not SegmentSelectionMaterialKind.VIDEO
+            or type(self.duration_ms) is not int
+            or not 1 <= len(self.speech_segments_ms) <= MAX_LOCAL_EDITING_SPEECH_SEGMENTS
+            or not _valid_local_editing_text(
+                self.speech_transcript,
+                maximum=MAX_LOCAL_EDITING_TRANSCRIPT_CHARACTERS,
+            )
+        ):
+            _reject()
+        previous_end = 0
+        for segment in self.speech_segments_ms:
+            if (
+                not isinstance(segment, tuple)
+                or len(segment) != 2
+                or any(type(value) is not int for value in segment)
+            ):
+                _reject()
+            start, end = segment
+            if start < previous_end or end <= start or end > self.duration_ms:
+                _reject()
+            previous_end = end
+
+    @property
+    def version(self) -> str:
+        return LOCAL_EDITING_SPEECH_PARAGRAPH_VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,15 +226,19 @@ class SegmentSelectionSentenceMatches:
 __all__ = [
     "LOCAL_EDITING_SEGMENT_SELECTION_VERSION",
     "LOCAL_EDITING_SEMANTIC_SCORE_THRESHOLD",
+    "LOCAL_EDITING_SPEECH_PARAGRAPH_VERSION",
     "MAX_LOCAL_EDITING_MATERIAL_DURATION_MS",
     "MAX_LOCAL_EDITING_SCRIPT_SENTENCES",
     "MAX_LOCAL_EDITING_SEMANTIC_MATERIALS",
     "MAX_LOCAL_EDITING_SHOT_BOUNDARIES",
+    "MAX_LOCAL_EDITING_SPEECH_SEGMENTS",
     "MAX_LOCAL_EDITING_TIMELINE_DURATION_MS",
+    "MAX_LOCAL_EDITING_TRANSCRIPT_CHARACTERS",
     "LocalEditingProtocolRejected",
     "SegmentSelectionCandidateScore",
     "SegmentSelectionMaterial",
     "SegmentSelectionMaterialKind",
     "SegmentSelectionSentenceMatches",
+    "SpeechParagraphMaterial",
     "is_canonical_local_editing_material_id",
 ]
