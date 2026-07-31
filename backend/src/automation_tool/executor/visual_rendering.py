@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Never, cast
 from uuid import RFC_4122, UUID
 
+from automation_tool.executor.caption_overlay import VisualCaptionOverlaySet
 from automation_tool.executor.material_probe import (
     MAX_PATH_CHARACTERS,
     MaterialProbeRejected,
@@ -45,6 +46,7 @@ def _reject(code: VisualFrameGridRejection) -> Never:
 class VisualFilterGraphRejection(StrEnum):
     INVALID_PLAN = "invalid_plan"
     INVALID_BINDINGS = "invalid_bindings"
+    INVALID_CAPTIONS = "invalid_captions"
     INVALID_OUTPUT = "invalid_output"
     TOOL_UNAVAILABLE = "tool_unavailable"
 
@@ -280,6 +282,27 @@ _XFADE_TRANSITIONS = {
 }
 
 
+def _validated_caption_overlays(
+    overlays: VisualCaptionOverlaySet,
+) -> VisualCaptionOverlaySet:
+    if not isinstance(overlays, VisualCaptionOverlaySet):
+        _reject_filter_graph(VisualFilterGraphRejection.INVALID_CAPTIONS)
+    try:
+        return VisualCaptionOverlaySet(
+            project_id=overlays.project_id,
+            timeline_id=overlays.timeline_id,
+            timeline_revision=overlays.timeline_revision,
+            output_width=overlays.output_width,
+            output_height=overlays.output_height,
+            output_fps=overlays.output_fps,
+            duration_ms=overlays.duration_ms,
+            target_frames=overlays.target_frames,
+            captions=overlays.captions,
+        )
+    except Exception:
+        _reject_filter_graph(VisualFilterGraphRejection.INVALID_CAPTIONS)
+
+
 def _clip_filter(
     clip: VisualFrameGridClip,
     *,
@@ -314,6 +337,8 @@ def compile_visual_ffmpeg_command(
     plan: LocalEditingVisualRenderPlan,
     sources: tuple[VisualRenderSourceBinding, ...],
     output_path: Path,
+    *,
+    caption_overlays: VisualCaptionOverlaySet | None = None,
 ) -> VisualFfmpegCommand:
     """Compile one visual plan without invoking a shell or FFmpeg."""
 
@@ -376,6 +401,52 @@ def compile_visual_ffmpeg_command(
                     f"offset={_frame_seconds(clip.start_frame, frame_plan.output_fps)}"
                     f"[{next_label}]"
                 )
+            output_label = next_label
+
+    if caption_overlays is not None:
+        overlays = _validated_caption_overlays(caption_overlays)
+        if (
+            overlays.project_id != frame_plan.project_id
+            or overlays.timeline_id != frame_plan.timeline_id
+            or overlays.timeline_revision != frame_plan.timeline_revision
+            or overlays.output_width != frame_plan.output_width
+            or overlays.output_height != frame_plan.output_height
+            or overlays.output_fps != frame_plan.output_fps
+            or overlays.duration_ms != frame_plan.requested_duration_ms
+            or overlays.target_frames != frame_plan.target_frames
+        ):
+            _reject_filter_graph(VisualFilterGraphRejection.INVALID_CAPTIONS)
+        bottom_margin = (frame_plan.output_height * 8 + 50) // 100
+        first_caption_input = len(frame_plan.clips)
+        for input_index, caption in enumerate(
+            overlays.captions,
+            start=first_caption_input,
+        ):
+            input_argv.extend(
+                (
+                    "-loop",
+                    "1",
+                    "-framerate",
+                    str(frame_plan.output_fps),
+                    "-i",
+                    os.fspath(caption.source_path),
+                )
+            )
+            caption_label = f"c{caption.sequence}"
+            filter_parts.append(
+                f"[{input_index}:v:0]fps={frame_plan.output_fps},"
+                f"settb=1/{frame_plan.output_fps},"
+                f"trim=end_frame={frame_plan.target_frames},setpts=N,"
+                f"format=rgba[{caption_label}]"
+            )
+            next_label = f"outc{caption.sequence}"
+            filter_parts.append(
+                f"[{output_label}][{caption_label}]overlay="
+                "x=(main_w-overlay_w)/2:"
+                f"y=max(0\\,main_h-overlay_h-{bottom_margin}):"
+                f"enable=between(n\\,{caption.start_frame}\\,{caption.end_frame - 1}):"
+                f"eof_action=pass:repeatlast=0[{next_label}]"
+            )
             output_label = next_label
     filter_complex = ";".join(filter_parts)
     argv = (

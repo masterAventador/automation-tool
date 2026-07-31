@@ -10,6 +10,10 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from automation_tool.executor.caption_overlay import (
+    VisualCaptionOverlayBinding,
+    VisualCaptionOverlaySet,
+)
 from automation_tool.executor.material_probe import PackagedMediaTools
 from automation_tool.executor.visual_rendering import (
     VisualFfmpegCommand,
@@ -133,9 +137,13 @@ def test_mixed_video_image_hard_cut_compiles_one_path_safe_filter_graph(
         os.fspath(path) in result.filter_complex for path in (video.source_path, image.source_path)
     )
     assert result.target_frames == 9
-    assert result.argv[
-        result.argv.index("-an") : result.argv.index("-an") + 5
-    ] == ("-an", "-frames:v", "9", "-c:v", "libx264")
+    assert result.argv[result.argv.index("-an") : result.argv.index("-an") + 5] == (
+        "-an",
+        "-frames:v",
+        "9",
+        "-c:v",
+        "libx264",
+    )
     assert "veryfast" in result.argv
     assert "23" in result.argv
     assert "yuv420p" in result.argv
@@ -182,6 +190,232 @@ def test_single_clip_maps_normalized_label_without_concat(tmp_path: Path) -> Non
 
     assert "concat=" not in result.filter_complex
     assert result.argv[result.argv.index("-map") + 1] == "[v1]"
+
+
+def test_caption_pngs_overlay_in_absolute_frame_windows_and_keep_paths_out_of_graph(
+    tmp_path: Path,
+) -> None:
+    tools = _tools(tmp_path)
+    image_id = uuid4()
+    image = _source(tmp_path, image_id, SegmentSelectionMaterialKind.IMAGE, "still.png")
+    plan = _plan(
+        (_clip(1, image_id, image.kind, start_ms=0, duration_ms=1000),),
+        duration_ms=1000,
+    )
+    first_png = tmp_path / "caption-0001.png"
+    second_png = tmp_path / "caption-0002.png"
+    first_png.write_bytes(b"png")
+    second_png.write_bytes(b"png")
+    overlays = VisualCaptionOverlaySet(
+        project_id=plan.project_id,
+        timeline_id=plan.timeline_id,
+        timeline_revision=plan.timeline_revision,
+        output_width=plan.output_width,
+        output_height=plan.output_height,
+        output_fps=plan.output_fps,
+        duration_ms=plan.duration_ms,
+        target_frames=30,
+        captions=(
+            VisualCaptionOverlayBinding(1, 3, 12, first_png),
+            VisualCaptionOverlayBinding(2, 18, 27, second_png),
+        ),
+    )
+
+    result = compile_visual_ffmpeg_command(
+        tools,
+        plan,
+        (image,),
+        tmp_path / "result.mp4",
+        caption_overlays=overlays,
+    )
+
+    assert result.argv.count(os.fspath(first_png)) == 1
+    assert result.argv.count(os.fspath(second_png)) == 1
+    assert (
+        "[1:v:0]fps=30,settb=1/30,trim=end_frame=30,setpts=N,format=rgba[c1]"
+        in result.filter_complex
+    )
+    assert (
+        "[v1][c1]overlay=x=(main_w-overlay_w)/2:"
+        r"y=max(0\,main_h-overlay_h-102):enable=between(n\,3\,11):"
+        "eof_action=pass:repeatlast=0[outc1]"
+    ) in result.filter_complex
+    assert (
+        "[outc1][c2]overlay=x=(main_w-overlay_w)/2:"
+        r"y=max(0\,main_h-overlay_h-102):enable=between(n\,18\,26):"
+        "eof_action=pass:repeatlast=0[outc2]"
+    ) in result.filter_complex
+    assert os.fspath(first_png) not in result.filter_complex
+    assert os.fspath(second_png) not in result.filter_complex
+    assert result.argv[result.argv.index("-map") + 1] == "[outc2]"
+
+
+def test_caption_inputs_start_after_every_visual_clip_input(tmp_path: Path) -> None:
+    tools = _tools(tmp_path)
+    first_id = uuid4()
+    second_id = uuid4()
+    first = _source(tmp_path, first_id, SegmentSelectionMaterialKind.IMAGE, "first.png")
+    second = _source(tmp_path, second_id, SegmentSelectionMaterialKind.IMAGE, "second.png")
+    plan = _plan(
+        (
+            _clip(1, first_id, first.kind, start_ms=0, duration_ms=500),
+            _clip(2, second_id, second.kind, start_ms=500, duration_ms=500),
+        ),
+        duration_ms=1000,
+    )
+    png = tmp_path / "caption.png"
+    png.write_bytes(b"png")
+    overlays = VisualCaptionOverlaySet(
+        project_id=plan.project_id,
+        timeline_id=plan.timeline_id,
+        timeline_revision=plan.timeline_revision,
+        output_width=plan.output_width,
+        output_height=plan.output_height,
+        output_fps=plan.output_fps,
+        duration_ms=plan.duration_ms,
+        target_frames=30,
+        captions=(VisualCaptionOverlayBinding(1, 3, 12, png),),
+    )
+
+    result = compile_visual_ffmpeg_command(
+        tools,
+        plan,
+        (first, second),
+        tmp_path / "result.mp4",
+        caption_overlays=overlays,
+    )
+
+    assert "[2:v:0]fps=30" in result.filter_complex
+    assert result.argv.index(os.fspath(png)) > result.argv.index(os.fspath(second.source_path))
+
+
+def test_empty_caption_set_is_byte_identical_to_omitting_captions(tmp_path: Path) -> None:
+    tools = _tools(tmp_path)
+    image_id = uuid4()
+    image = _source(tmp_path, image_id, SegmentSelectionMaterialKind.IMAGE, "still.png")
+    plan = _plan(
+        (_clip(1, image_id, image.kind, start_ms=0, duration_ms=1000),),
+        duration_ms=1000,
+    )
+    overlays = VisualCaptionOverlaySet(
+        project_id=plan.project_id,
+        timeline_id=plan.timeline_id,
+        timeline_revision=plan.timeline_revision,
+        output_width=plan.output_width,
+        output_height=plan.output_height,
+        output_fps=plan.output_fps,
+        duration_ms=plan.duration_ms,
+        target_frames=30,
+        captions=(),
+    )
+
+    without = compile_visual_ffmpeg_command(tools, plan, (image,), tmp_path / "result.mp4")
+    with_empty = compile_visual_ffmpeg_command(
+        tools,
+        plan,
+        (image,),
+        tmp_path / "result.mp4",
+        caption_overlays=overlays,
+    )
+
+    assert with_empty == without
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("project_id", uuid4()),
+        ("timeline_id", uuid4()),
+        ("timeline_revision", 99),
+        ("output_width", 1280),
+        ("output_height", 720),
+        ("output_fps", 24),
+        ("duration_ms", 900),
+        ("target_frames", 29),
+    ],
+)
+def test_caption_set_must_match_the_visual_plan_identity(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    tools = _tools(tmp_path)
+    image_id = uuid4()
+    image = _source(tmp_path, image_id, SegmentSelectionMaterialKind.IMAGE, "still.png")
+    plan = _plan(
+        (_clip(1, image_id, image.kind, start_ms=0, duration_ms=1000),),
+        duration_ms=1000,
+    )
+    values: dict[str, object] = {
+        "project_id": plan.project_id,
+        "timeline_id": plan.timeline_id,
+        "timeline_revision": plan.timeline_revision,
+        "output_width": plan.output_width,
+        "output_height": plan.output_height,
+        "output_fps": plan.output_fps,
+        "duration_ms": plan.duration_ms,
+        "target_frames": 30,
+        "captions": (),
+    }
+    values[field] = value
+    overlays = VisualCaptionOverlaySet(**values)  # type: ignore[arg-type]
+
+    with pytest.raises(VisualFilterGraphRejected) as error:
+        compile_visual_ffmpeg_command(
+            tools,
+            plan,
+            (image,),
+            tmp_path / "result.mp4",
+            caption_overlays=overlays,
+        )
+
+    assert error.value.code is VisualFilterGraphRejection.INVALID_CAPTIONS
+    assert error.value.__cause__ is None
+
+
+def test_wrong_or_mutated_caption_set_is_rejected_before_paths_are_used(tmp_path: Path) -> None:
+    tools = _tools(tmp_path)
+    image_id = uuid4()
+    image = _source(tmp_path, image_id, SegmentSelectionMaterialKind.IMAGE, "still.png")
+    plan = _plan(
+        (_clip(1, image_id, image.kind, start_ms=0, duration_ms=1000),),
+        duration_ms=1000,
+    )
+    with pytest.raises(VisualFilterGraphRejected) as wrong_type:
+        compile_visual_ffmpeg_command(
+            tools,
+            plan,
+            (image,),
+            tmp_path / "result.mp4",
+            caption_overlays=cast(VisualCaptionOverlaySet, object()),
+        )
+    assert wrong_type.value.code is VisualFilterGraphRejection.INVALID_CAPTIONS
+
+    png = tmp_path / "caption.png"
+    png.write_bytes(b"png")
+    binding = VisualCaptionOverlayBinding(1, 3, 12, png)
+    overlays = VisualCaptionOverlaySet(
+        project_id=plan.project_id,
+        timeline_id=plan.timeline_id,
+        timeline_revision=plan.timeline_revision,
+        output_width=plan.output_width,
+        output_height=plan.output_height,
+        output_fps=plan.output_fps,
+        duration_ms=plan.duration_ms,
+        target_frames=30,
+        captions=(binding,),
+    )
+    object.__setattr__(binding, "source_path", Path("relative.png"))
+    object.__setattr__(overlays, "captions", (binding,))
+    with pytest.raises(VisualFilterGraphRejected) as mutated:
+        compile_visual_ffmpeg_command(
+            tools,
+            plan,
+            (image,),
+            tmp_path / "result.mp4",
+            caption_overlays=overlays,
+        )
+    assert mutated.value.code is VisualFilterGraphRejection.INVALID_CAPTIONS
 
 
 @pytest.mark.parametrize(
@@ -370,12 +604,10 @@ def test_consecutive_transitions_keep_absolute_offsets_and_unique_chain_labels(
     result = compile_visual_ffmpeg_command(tools, plan, sources, tmp_path / "result.mp4")
 
     assert (
-        "[v1][v2]xfade=transition=dissolve:duration=0.100000000:"
-        "offset=0.400000000[out2]"
+        "[v1][v2]xfade=transition=dissolve:duration=0.100000000:offset=0.400000000[out2]"
     ) in result.filter_complex
     assert (
-        "[out2][v3]xfade=transition=wipeleft:duration=0.100000000:"
-        "offset=0.800000000[out3]"
+        "[out2][v3]xfade=transition=wipeleft:duration=0.100000000:offset=0.800000000[out3]"
     ) in result.filter_complex
     assert result.filter_complex.count("[out2]") == 2
     assert result.argv[result.argv.index("-map") + 1] == "[out3]"
@@ -420,13 +652,11 @@ def test_hard_cuts_and_transition_form_one_pairwise_chain(tmp_path: Path) -> Non
 
     assert "[v1][v2]concat=n=2:v=1:a=0,settb=1/20[out2]" in result.filter_complex
     assert (
-        "[out2][v3]xfade=transition=fade:duration=0.050000000:"
-        "offset=0.350000000[out3]"
+        "[out2][v3]xfade=transition=fade:duration=0.050000000:offset=0.350000000[out3]"
     ) in result.filter_complex
     assert "[out3][v4]concat=n=2:v=1:a=0,settb=1/20[out4]" in result.filter_complex
     assert (
-        "[out4][v5]xfade=transition=dissolve:duration=0.050000000:"
-        "offset=0.750000000[out5]"
+        "[out4][v5]xfade=transition=dissolve:duration=0.050000000:offset=0.750000000[out5]"
     ) in result.filter_complex
     assert result.argv[result.argv.index("-map") + 1] == "[out5]"
     assert result.target_frames == 20

@@ -22,6 +22,9 @@ from automation_tool.control_plane.domain.timeline import (
 )
 from automation_tool.protocol.local_editing import SegmentSelectionMaterialKind
 from automation_tool.protocol.local_rendering import (
+    LocalEditingCaptionRenderCue,
+    LocalEditingCaptionRenderPlan,
+    LocalEditingCaptionRenderStyle,
     LocalEditingVisualRenderClip,
     LocalEditingVisualRenderPlan,
     LocalEditingVisualTransitionKind,
@@ -33,6 +36,13 @@ class LocalEditingVisualPlanRejected(ValueError):
 
     def __init__(self) -> None:
         super().__init__("local visual render projection rejected")
+
+
+class LocalEditingCaptionPlanRejected(ValueError):
+    """The domain values cannot form one caption render plan."""
+
+    def __init__(self) -> None:
+        super().__init__("local caption render projection rejected")
 
 
 def _reject() -> Never:
@@ -182,7 +192,74 @@ def create_local_editing_visual_render_plan(
         _reject()
 
 
+def create_local_editing_caption_render_plan(
+    project: EditingProject,
+    timeline: Timeline,
+) -> LocalEditingCaptionRenderPlan:
+    """Create the caption-only wire value without carrying local paths or audio."""
+
+    if (
+        not isinstance(project, EditingProject)
+        or not isinstance(timeline, Timeline)
+        or not isinstance(project.project_id, EditingProjectId)
+        or not isinstance(timeline.project_id, EditingProjectId)
+        or not isinstance(timeline.timeline_id, TimelineId)
+        or not isinstance(project.output, OutputSpec)
+        or not isinstance(project.caption_style, CaptionStyle)
+        or not isinstance(timeline.tracks, tuple)
+        or not all(
+            isinstance(track, TimelineTrack)
+            and isinstance(track.kind, TimelineTrackKind)
+            and isinstance(track.clips, tuple)
+            and all(isinstance(clip, TimelineClip) for clip in track.clips)
+            for track in timeline.tracks
+        )
+    ):
+        raise LocalEditingCaptionPlanRejected from None
+    try:
+        validated_project = _rebuilt_project(project)
+        validated_timeline = _rebuilt_timeline(timeline)
+        if validated_project.project_id != validated_timeline.project_id:
+            raise LocalEditingCaptionPlanRejected
+        output = validated_project.output
+        style = validated_project.caption_style
+        caption_track = validated_timeline.track_of(TimelineTrackKind.CAPTION)
+        cues = (
+            ()
+            if caption_track is None
+            else tuple(
+                LocalEditingCaptionRenderCue(
+                    sequence=index,
+                    start_ms=clip.start_ms,
+                    duration_ms=clip.duration_ms,
+                    text=cast(str, clip.text),
+                )
+                for index, clip in enumerate(caption_track.clips, start=1)
+            )
+        )
+        return LocalEditingCaptionRenderPlan(
+            project_id=validated_project.project_id.uuid,
+            timeline_id=validated_timeline.timeline_id.uuid,
+            timeline_revision=validated_timeline.revision,
+            output_width=output.width,
+            output_height=output.height,
+            output_fps=output.fps,
+            duration_ms=validated_timeline.duration_ms,
+            style=LocalEditingCaptionRenderStyle(
+                font_key=style.font_key,
+                font_px=style.font_px,
+                stroke_px=style.stroke_px,
+                line_spacing=style.line_spacing,
+            ),
+            cues=cues,
+        )
+    except Exception:
+        raise LocalEditingCaptionPlanRejected from None
+
+
 __all__ = [
+    "LocalEditingCaptionPlanRejected",
     "LocalEditingVisualPlanRejected",
+    "create_local_editing_caption_render_plan",
     "create_local_editing_visual_render_plan",
 ]
