@@ -419,7 +419,11 @@ fn every_video_worker_launch_carries_the_packaged_environment_from_its_entry_poi
     for (source, item, required) in [
         // The defect this pins: the resolver existed and was correct, but no
         // entry point called it, so the packaged binary was never used.
-        (material, "pub(crate) fn open(", "material_worker_launch("),
+        // PC-22 split the worker service from the embedded WebView mount.
+        // Keep both hops pinned: `open` must still start the service, and the
+        // service must still resolve the packaged launch environment.
+        (material, "pub(crate) fn open(", "start_service("),
+        (material, "fn start_service(", "material_worker_launch("),
         (
             material,
             "pub fn material_worker_launch(",
