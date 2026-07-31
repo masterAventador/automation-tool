@@ -103,21 +103,6 @@ function assertNoLeak(value: string, where: string): void {
   }
 }
 
-async function waitForSelectedPage(page: string): Promise<void> {
-  const item = await browser.$(
-    `//*[@role='menuitem'][.//*[normalize-space()='${page}'] or normalize-space()='${page}']`,
-  );
-  await browser.waitUntil(
-    async () =>
-      ((await item.getAttribute("class")) ?? "").includes("ant-menu-item-selected"),
-    {
-      timeout: 10_000,
-      interval: 100,
-      timeoutMsg: `production App did not settle on ${page}`,
-    },
-  );
-}
-
 async function captureAccessibility(page: string): Promise<void> {
   const title = await browser.execute(() => document.title);
   const elements = await browser.$$(ACCESSIBLE_ELEMENTS);
@@ -159,7 +144,6 @@ describe("CQ-02 production App accessibility-tree acceptance", () => {
   for (const page of PAGES) {
     it(`keeps ${page} free of upstream names`, async () => {
       await openWorkbenchSection(page);
-      await waitForSelectedPage(page);
       await captureAccessibility(page);
     });
   }

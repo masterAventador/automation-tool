@@ -370,6 +370,74 @@ def check_slow_tier_materializes_vendor_without_writing_source() -> None:
             )
 
 
+def check_slow_checkout_preparation_is_isolated_and_reconstructible() -> None:
+    """Slow tests need metadata and build products, never host source bytes.
+
+    ``git archive`` deliberately omits ``.git``, ignored virtual environments
+    and ``.local`` build products. The slow tier must reconstruct those three
+    classes explicitly. In particular, the offline catalog is copied rather
+    than linked: a test writing into its disposable input must not mutate the
+    developer's cache.
+    """
+    prepare = getattr(commit_gate, "prepare_slow_checkout", None)
+    if prepare is None:
+        _fail("the slow tier has no isolated checkout preparation")
+
+    with tempfile.TemporaryDirectory() as scratch:
+        root = Path(scratch)
+        source = root / "source"
+        checkout = root / "checkout"
+        checkout.mkdir()
+        (checkout / ".gitignore").write_text(
+            ".local/\n**/.venv/\n",
+            encoding="utf-8",
+        )
+        (checkout / "tracked.txt").write_text("commit bytes\n", encoding="utf-8")
+
+        executable = (
+            ("Scripts", "python.exe") if sys.platform == "win32" else ("bin", "python")
+        )
+        for environment in (
+            source / "backend" / ".venv",
+            source / "tools" / "browser-use-contract" / ".venv",
+        ):
+            interpreter = environment / executable[0] / executable[1]
+            interpreter.parent.mkdir(parents=True)
+            interpreter.write_text("runtime only\n", encoding="utf-8")
+        cached = source / ".local/offline-motion-deps/catalog"
+        cached.mkdir(parents=True)
+        (cached / "locked.txt").write_text("digest-pinned\n", encoding="utf-8")
+
+        def build_release(tree: Path) -> None:
+            generated = tree / ".local/motion-catalog-release/1.0.0"
+            generated.mkdir(parents=True)
+            (generated / "manifest.json").write_text("{}\n", encoding="utf-8")
+
+        prepare(checkout, source_root=source, build_release=build_release)
+
+        if not (checkout / ".git").is_dir():
+            _fail("slow checkout has no disposable Git metadata")
+        tracked = subprocess.check_output(
+            ["git", "ls-files"],
+            cwd=checkout,
+            text=True,
+        ).splitlines()
+        if tracked != [".gitignore", "tracked.txt"]:
+            _fail(f"slow checkout snapshot tracked build inputs: {tracked}")
+        if not (checkout / "backend/.venv" / executable[0] / executable[1]).is_file():
+            _fail("slow checkout cannot resolve the project interpreter layout")
+        copied = checkout / ".local/offline-motion-deps/catalog/locked.txt"
+        if not copied.is_file() or copied.is_symlink():
+            _fail("slow checkout did not copy its offline catalog input")
+        copied.write_text("test mutation\n", encoding="utf-8")
+        if (cached / "locked.txt").read_text(encoding="utf-8") != "digest-pinned\n":
+            _fail("slow checkout writes through into the developer's build cache")
+        if not (
+            checkout / ".local/motion-catalog-release/1.0.0/manifest.json"
+        ).is_file():
+            _fail("slow checkout did not reconstruct the release from committed code")
+
+
 CHECKS = (
     check_mypy_path_covers_every_static_sys_path_insert,
     check_every_declared_root_exists,
@@ -385,6 +453,7 @@ CHECKS = (
     check_slow_tier_runs_the_aggregate_script_suite,
     check_slow_tier_requires_a_positive_visible_count,
     check_slow_tier_materializes_vendor_without_writing_source,
+    check_slow_checkout_preparation_is_isolated_and_reconstructible,
 )
 
 
