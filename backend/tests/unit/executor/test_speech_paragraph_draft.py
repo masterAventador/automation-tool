@@ -415,6 +415,36 @@ def test_speech_aware_draft_exposes_its_protocol_version() -> None:
     assert result.version == LOCAL_EDITING_SPEECH_PARAGRAPH_VERSION
 
 
+@pytest.mark.parametrize(
+    ("materials", "planner"),
+    [
+        (cast(tuple[SpeechParagraphMaterial, ...], []), _RecordingPlanner(())),
+        ((), _RecordingPlanner(())),
+        ((cast(SpeechParagraphMaterial, object()),), _RecordingPlanner(())),
+        ((_material(),), cast(_RecordingPlanner, object())),
+    ],
+)
+def test_orchestration_rejects_wrong_public_argument_shapes(
+    materials: tuple[SpeechParagraphMaterial, ...],
+    planner: _RecordingPlanner,
+) -> None:
+    with pytest.raises(SpeechParagraphDraftRejected):
+        build_speech_aware_paragraph_draft(materials, planner=planner)
+
+
+@pytest.mark.parametrize("planned", [(), cast(tuple[NarratedParagraphDraft, ...], [])])
+def test_silent_planner_must_return_a_nonempty_tuple(
+    planned: tuple[NarratedParagraphDraft, ...],
+) -> None:
+    silent = _material()
+
+    with pytest.raises(SpeechParagraphDraftRejected):
+        build_speech_aware_paragraph_draft(
+            (silent,),
+            planner=_RecordingPlanner(planned),
+        )
+
+
 def test_planner_cannot_reintroduce_a_voiced_material_as_sentence_candidate() -> None:
     voiced = _material(has_speech=True, transcript="秘密转写")
     silent = _material()
@@ -442,6 +472,22 @@ def test_planner_cannot_reintroduce_a_voiced_material_as_sentence_candidate() ->
     assert str(caught.value) == "speech paragraph draft rejected"
     assert "秘密转写" not in str(caught.value)
     assert str(voiced.material_id) not in str(caught.value)
+
+
+def test_planner_cannot_smuggle_a_mutated_narration_path_across_boundary() -> None:
+    silent = _material()
+    draft = _narrated(silent)
+    object.__setattr__(draft, "narration_relative_path", "C:/Users/private/secret.wav")
+
+    with pytest.raises(SpeechParagraphDraftRejected) as caught:
+        build_speech_aware_paragraph_draft(
+            (silent,),
+            planner=_RecordingPlanner((draft,)),
+        )
+
+    assert str(caught.value) == "speech paragraph draft rejected"
+    assert "private" not in str(caught.value)
+    assert caught.value.__cause__ is None
 
 
 def test_planner_exception_is_collapsed_without_sensitive_exception_chain() -> None:

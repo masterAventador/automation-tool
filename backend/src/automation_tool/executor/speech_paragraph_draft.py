@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Final, NoReturn, Protocol, runtime_checkable
+from typing import Final, NoReturn, Protocol, cast, runtime_checkable
 from uuid import UUID
 
 from automation_tool.executor.segment_selection import FittingMaterialSegment
@@ -181,15 +181,48 @@ class SilentParagraphPlanner(Protocol):
     def plan(self, material_ids: tuple[UUID, ...]) -> tuple[NarratedParagraphDraft, ...]: ...
 
 
+def _validated_material(material: SpeechParagraphMaterial) -> SpeechParagraphMaterial:
+    try:
+        return SpeechParagraphMaterial(
+            material_id=material.material_id,
+            kind=material.kind,
+            duration_ms=material.duration_ms,
+            has_speech=material.has_speech,
+            speech_segments_ms=material.speech_segments_ms,
+            speech_transcript=material.speech_transcript,
+        )
+    except Exception:
+        _reject()
+
+
+def _validated_narrated_paragraph(
+    paragraph: NarratedParagraphDraft,
+) -> NarratedParagraphDraft:
+    try:
+        candidates = tuple(
+            FittingMaterialSegment(
+                material_id=candidate.material_id,
+                score=candidate.score,
+                duration_ms=candidate.duration_ms,
+                source_in_ms=candidate.source_in_ms,
+                source_out_ms=candidate.source_out_ms,
+            )
+            for candidate in paragraph.candidates
+        )
+        return NarratedParagraphDraft(
+            sequence=paragraph.sequence,
+            caption_text=paragraph.caption_text,
+            narration_relative_path=paragraph.narration_relative_path,
+            duration_ms=paragraph.duration_ms,
+            candidates=candidates,
+        )
+    except Exception:
+        _reject()
+
+
 def _original_speech_paragraph(
     material: SpeechParagraphMaterial,
 ) -> OriginalSpeechParagraphDraft:
-    if (
-        not material.has_speech
-        or not material.speech_segments_ms
-        or material.speech_transcript is None
-    ):
-        _reject()
     source_in_ms = material.speech_segments_ms[0][0]
     source_out_ms = material.speech_segments_ms[-1][1]
     duration_ms = source_out_ms - source_in_ms
@@ -203,7 +236,7 @@ def _original_speech_paragraph(
         ambient_duration_ms=duration_ms,
         caption_start_ms=0,
         caption_duration_ms=duration_ms,
-        caption_text=material.speech_transcript,
+        caption_text=cast(str, material.speech_transcript),
     )
 
 
@@ -218,16 +251,25 @@ def build_speech_aware_paragraph_draft(
         not isinstance(materials, tuple)
         or not 1 <= len(materials) <= MAX_LOCAL_EDITING_SEMANTIC_MATERIALS
         or not all(isinstance(material, SpeechParagraphMaterial) for material in materials)
-        or len({material.material_id for material in materials}) != len(materials)
-        or any(material.kind is SegmentSelectionMaterialKind.AUDIO for material in materials)
         or not isinstance(planner, SilentParagraphPlanner)
+    ):
+        _reject()
+    validated_materials = tuple(_validated_material(material) for material in materials)
+    if len({material.material_id for material in validated_materials}) != len(
+        validated_materials
+    ) or any(
+        material.kind is SegmentSelectionMaterialKind.AUDIO for material in validated_materials
     ):
         _reject()
 
     original = tuple(
-        _original_speech_paragraph(material) for material in materials if material.has_speech
+        _original_speech_paragraph(material)
+        for material in validated_materials
+        if material.has_speech
     )
-    silent_ids = tuple(material.material_id for material in materials if not material.has_speech)
+    silent_ids = tuple(
+        material.material_id for material in validated_materials if not material.has_speech
+    )
     narrated: tuple[NarratedParagraphDraft, ...] = ()
     if silent_ids:
         try:
@@ -236,14 +278,16 @@ def build_speech_aware_paragraph_draft(
                 not isinstance(candidate, tuple)
                 or not candidate
                 or not all(isinstance(paragraph, NarratedParagraphDraft) for paragraph in candidate)
-                or any(
-                    item.material_id not in silent_ids
-                    for paragraph in candidate
-                    for item in paragraph.candidates
-                )
             ):
                 _reject()
-            narrated = candidate
+            rebuilt = tuple(_validated_narrated_paragraph(paragraph) for paragraph in candidate)
+            if any(
+                item.material_id not in silent_ids
+                for paragraph in rebuilt
+                for item in paragraph.candidates
+            ):
+                _reject()
+            narrated = rebuilt
         except Exception:
             _reject()
 
