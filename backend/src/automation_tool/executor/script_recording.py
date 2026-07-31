@@ -241,7 +241,7 @@ def _slice_proves_sentence(
     if 0 < sentence_index < len(normalized_sentences) - 1:
         previous = normalized_sentences[sentence_index - 1]
         following = normalized_sentences[sentence_index + 1]
-        if any(
+        if expected_distance and any(
             previous.endswith(actual[:boundary]) and following.startswith(actual[boundary:])
             for boundary in range(1, len(actual))
         ):

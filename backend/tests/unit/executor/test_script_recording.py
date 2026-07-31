@@ -276,6 +276,33 @@ def test_sentence_partition_moves_when_an_earlier_sentence_loses_its_first_chara
     )
 
 
+def test_exact_overlapping_short_sentences_are_not_mistaken_for_a_missing_sentence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, approved, tools, asr = _arrange_boundary(tmp_path, monkeypatch)
+    InjectedRecordedSpeechAnalyzer.next_result = RecordedSpeechAnalysis(
+        duration_ms=5_000,
+        speech_segments_ms=((100, 1_000), (1_500, 2_500), (3_000, 4_000)),
+        transcript="天气气温温暖",
+    )
+
+    result = align_script_recording(
+        _script("天气", "气温", "温暖"),
+        source=source,
+        approved=approved,
+        tools=tools,
+        vad_factory=object,
+        asr_adapter=asr,
+    )
+
+    assert tuple(clip.sentence.text for clip in result.clips) == (
+        "天气",
+        "气温",
+        "温暖",
+    )
+
+
 def test_maximum_exact_script_avoids_edit_distance_work(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
