@@ -250,6 +250,32 @@ def test_text_alignment_accepts_normalization_and_a_bounded_recognition_error(
     assert result.clips[0].sentence.text == script_text
 
 
+def test_sentence_partition_moves_when_an_earlier_sentence_loses_its_first_character(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, approved, tools, asr = _arrange_boundary(tmp_path, monkeypatch)
+    InjectedRecordedSpeechAnalyzer.next_result = RecordedSpeechAnalysis(
+        duration_ms=5_000,
+        speech_segments_ms=((100, 2_000), (2_500, 4_000)),
+        transcript="bcdefghijklmnopqrst",
+    )
+
+    result = align_script_recording(
+        _script("abcdefghij", "klmnopqrst"),
+        source=source,
+        approved=approved,
+        tools=tools,
+        vad_factory=object,
+        asr_adapter=asr,
+    )
+
+    assert tuple(clip.sentence.text for clip in result.clips) == (
+        "abcdefghij",
+        "klmnopqrst",
+    )
+
+
 @pytest.mark.parametrize(
     ("sentences", "transcript"),
     [
@@ -295,6 +321,7 @@ def test_text_alignment_rejects_short_errors_large_differences_reordering_and_em
     [
         (("abcdefghij", "Z"), "abcdefghij"),
         (("aaaaaaaaab", "aaaaaaaaac"), "aaaaaaaaacaaaaaaaaab"),
+        (("a" * 33 + "b" * 7, "b" * 7), "a" * 33 + "b" * 7),
         (tuple("abcdefghij"), "abcdefghi"),
     ],
 )

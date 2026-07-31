@@ -164,31 +164,45 @@ def _texts_align(script_text: str, transcript: str) -> bool:
     return _levenshtein_distance(script_text, transcript) <= allowed_errors
 
 
-def _transcript_slices(
+def _aligned_slice_length_bounds(expected: str) -> tuple[int, int]:
+    expected_length = len(expected)
+    minimum = max(
+        1,
+        expected_length - expected_length * _MAX_ALIGNMENT_ERROR_PERCENT // 100,
+    )
+    maximum = expected_length * 100 // (100 - _MAX_ALIGNMENT_ERROR_PERCENT)
+    return minimum, maximum
+
+
+def _slice_proves_sentence(
     normalized_sentences: tuple[str, ...],
-    transcript: str,
-) -> tuple[str, ...] | None:
-    if len(transcript) < len(normalized_sentences):
-        return None
-    total_script_characters = sum(len(sentence) for sentence in normalized_sentences)
-    transcript_start = 0
-    cumulative_script_characters = 0
-    slices: list[str] = []
-    for index, sentence in enumerate(normalized_sentences):
-        cumulative_script_characters += len(sentence)
-        remaining_sentences = len(normalized_sentences) - index - 1
-        if remaining_sentences:
-            numerator = len(transcript) * cumulative_script_characters
-            target = (numerator + total_script_characters // 2) // total_script_characters
-            transcript_end = max(
-                transcript_start + 1,
-                min(target, len(transcript) - remaining_sentences),
-            )
-        else:
-            transcript_end = len(transcript)
-        slices.append(transcript[transcript_start:transcript_end])
-        transcript_start = transcript_end
-    return tuple(slices)
+    *,
+    sentence_index: int,
+    actual: str,
+) -> bool:
+    expected = normalized_sentences[sentence_index]
+    if not _texts_align(expected, actual):
+        return False
+    expected_distance = _levenshtein_distance(expected, actual)
+    for other_index, other in enumerate(normalized_sentences):
+        if other_index == sentence_index or other == expected:
+            continue
+        if (
+            _texts_align(other, actual)
+            and _levenshtein_distance(other, actual) <= expected_distance
+        ):
+            # A slice that is at least as close to another distinct script
+            # sentence cannot prove the declared order. Fail closed rather
+            # than binding a near-duplicate sentence to the wrong audio.
+            return False
+        if actual in other:
+            # A shortened slice copied wholly from another distinct sentence
+            # can be paid for by the global deletion budget when the intended
+            # sentence was never spoken. It cannot establish sentence
+            # presence, even when it also falls within this sentence's ASR
+            # tolerance.
+            return False
+    return True
 
 
 def _sentences_align(
@@ -197,27 +211,40 @@ def _sentences_align(
 ) -> bool:
     if not _texts_align("".join(normalized_sentences), transcript):
         return False
-    transcript_slices = _transcript_slices(normalized_sentences, transcript)
-    if transcript_slices is None:
+    length_bounds = tuple(
+        _aligned_slice_length_bounds(sentence) for sentence in normalized_sentences
+    )
+    minimum_suffix = [0] * (len(normalized_sentences) + 1)
+    maximum_suffix = [0] * (len(normalized_sentences) + 1)
+    for index in range(len(normalized_sentences) - 1, -1, -1):
+        minimum, maximum = length_bounds[index]
+        minimum_suffix[index] = minimum + minimum_suffix[index + 1]
+        maximum_suffix[index] = maximum + maximum_suffix[index + 1]
+    if not minimum_suffix[0] <= len(transcript) <= maximum_suffix[0]:
         return False
-    for index, (expected, actual) in enumerate(
-        zip(normalized_sentences, transcript_slices, strict=True)
-    ):
-        if not _texts_align(expected, actual):
+    reachable_starts = {0}
+    for index, (minimum, maximum) in enumerate(length_bounds):
+        reachable_ends: set[int] = set()
+        for start in reachable_starts:
+            first_end = max(
+                start + minimum,
+                len(transcript) - maximum_suffix[index + 1],
+            )
+            last_end = min(
+                start + maximum,
+                len(transcript) - minimum_suffix[index + 1],
+            )
+            for end in range(first_end, last_end + 1):
+                if _slice_proves_sentence(
+                    normalized_sentences,
+                    sentence_index=index,
+                    actual=transcript[start:end],
+                ):
+                    reachable_ends.add(end)
+        if not reachable_ends:
             return False
-        expected_distance = _levenshtein_distance(expected, actual)
-        for other_index, other in enumerate(normalized_sentences):
-            if other_index == index or other == expected:
-                continue
-            if (
-                _texts_align(other, actual)
-                and _levenshtein_distance(other, actual) <= expected_distance
-            ):
-                # A slice that is at least as close to another distinct script
-                # sentence cannot prove the declared order. Fail closed rather
-                # than binding a near-duplicate sentence to the wrong audio.
-                return False
-    return True
+        reachable_starts = reachable_ends
+    return len(transcript) in reachable_starts
 
 
 def _clips_from_segments(
