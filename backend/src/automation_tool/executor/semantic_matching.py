@@ -46,6 +46,8 @@ _MAX_REQUEST_ID_CHARACTERS: Final = 512
 _MAX_STRUCTURED_RESULT_BYTES: Final = 262_144
 _MAX_RESPONSE_BYTES: Final = 262_144
 _MAX_REQUEST_BYTES: Final = 2 * 1024 * 1024
+_JSON_TEXT_CONTROLS: Final = frozenset({"\n", "\r", "\t"})
+_MATERIAL_TEXT_CONTROLS: Final = frozenset({"\n", "\t"})
 _MATCHING_PROMPT: Final = (
     "Score the semantic relevance of every supplied sentence and candidate. "
     "Return one JSON object with exactly one field named scores. Its value must "
@@ -74,7 +76,7 @@ def _validate_text(
     value: object,
     *,
     maximum: int,
-    allow_json_whitespace: bool = False,
+    allowed_controls: frozenset[str] = frozenset(),
 ) -> str:
     if (
         type(value) is not str
@@ -82,8 +84,7 @@ def _validate_text(
         or value != value.strip()
         or len(value) > maximum
         or any(
-            (not allow_json_whitespace or character not in {"\n", "\r", "\t"})
-            and unicodedata.category(character).startswith("C")
+            character not in allowed_controls and unicodedata.category(character).startswith("C")
             for character in value
         )
     ):
@@ -135,7 +136,11 @@ class SemanticMatchingCandidate:
             or _CANDIDATE_KEY_PATTERN.fullmatch(self.candidate_key) is None
         ):
             _reject()
-        _validate_text(self.description, maximum=MAX_DESCRIPTION_CHARACTERS)
+        _validate_text(
+            self.description,
+            maximum=MAX_DESCRIPTION_CHARACTERS,
+            allowed_controls=_MATERIAL_TEXT_CONTROLS,
+        )
         if (
             not isinstance(self.tags, tuple)
             or len(self.tags) > MAX_TAGS
@@ -145,7 +150,11 @@ class SemanticMatchingCandidate:
         for tag in self.tags:
             _validate_text(tag, maximum=MAX_TAG_CHARACTERS)
         if self.transcript is not None:
-            _validate_text(self.transcript, maximum=MAX_TRANSCRIPT_CHARACTERS)
+            _validate_text(
+                self.transcript,
+                maximum=MAX_TRANSCRIPT_CHARACTERS,
+                allowed_controls=_MATERIAL_TEXT_CONTROLS,
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,7 +245,7 @@ class SemanticMatchingReply:
         _validate_text(
             self.content,
             maximum=_MAX_STRUCTURED_RESULT_BYTES,
-            allow_json_whitespace=True,
+            allowed_controls=_JSON_TEXT_CONTROLS,
         )
         if len(self.content.encode("utf-8")) > _MAX_STRUCTURED_RESULT_BYTES:
             _reject()
@@ -676,6 +685,7 @@ class BailianSemanticMatchingAdapter:
             )
         except (
             http.client.HTTPException,
+            KeyError,
             OSError,
             RecursionError,
             TypeError,

@@ -201,6 +201,26 @@ def test_projection_includes_transcript_but_excludes_private_material_facts() ->
         assert forbidden not in encoded
 
 
+def test_projection_preserves_material_multiline_evidence() -> None:
+    material = _material(
+        description="第一行画面描述\n第二行画面描述\t补充",
+        has_speech=True,
+        transcript="第一批转写\n第二批转写\t停顿",
+    )
+    adapter = _ScoringAdapter()
+
+    match_script_materials(
+        cast(SemanticMatchingAdapter, adapter),
+        _script(1),
+        (material,),
+        options=SemanticMatchingOptions(),
+    )
+
+    request, _options = adapter.requests[0]
+    assert request.candidates[0].description == "第一行画面描述\n第二行画面描述\t补充"
+    assert request.candidates[0].transcript == "第一批转写\n第二批转写\t停顿"
+
+
 def test_local_sorting_is_stable_and_threshold_is_inclusive() -> None:
     first = _material(digest_character="a")
     second = _material(digest_character="b")
@@ -634,6 +654,24 @@ def test_bailian_request_is_closed_and_follows_thinking(
 @pytest.mark.parametrize(
     "body",
     [
+        {},
+        {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"content": '{"scores":[]}'},
+                }
+            ],
+        },
+        {"id": "req", "choices": [{"finish_reason": "stop"}]},
+        {
+            "id": "req",
+            "choices": [{"finish_reason": "stop", "message": {}}],
+        },
+        {
+            "id": "req",
+            "choices": [{"message": {"content": '{"scores":[]}'}}],
+        },
         {"id": "req", "choices": []},
         {"id": "req", "choices": [7]},
         {"id": "req", "choices": [{"finish_reason": "stop", "message": 7}]},
@@ -648,7 +686,18 @@ def test_bailian_request_is_closed_and_follows_thinking(
         },
         b"\xff",
     ],
-    ids=["no-choice", "bad-choice", "bad-message", "refusal", "invalid-utf8"],
+    ids=[
+        "missing-choices",
+        "missing-id",
+        "missing-message",
+        "missing-content",
+        "missing-finish-reason",
+        "no-choice",
+        "bad-choice",
+        "bad-message",
+        "refusal",
+        "invalid-utf8",
+    ],
 )
 def test_bailian_response_shape_and_refusal_fail_closed(
     body: dict[str, object] | bytes,
