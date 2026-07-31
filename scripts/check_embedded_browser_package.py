@@ -83,6 +83,15 @@ _FORBIDDEN_PATH_SEGMENTS: Final = frozenset({"ms-playwright"})
 
 _MEBIBYTE: Final = 1024 * 1024
 
+# The smallest required video runtime on each platform is the media toolchain,
+# measured from the real packages recorded in RELEASE-package-clean-rebuild.md
+# (macOS) and PC-16.md (Windows). The whole-package drift window is derived
+# from these facts below; it must never be wide enough to hide a second copy.
+MINIMUM_COMPLETE_RUNTIME_BYTES: Final = {
+    "macos": 44_095_804,
+    "windows": 51_168_139,
+}
+
 
 @dataclass(frozen=True)
 class PackageSizeBounds:
@@ -114,8 +123,8 @@ RELEASE_PAYLOAD_PARTS_MIB: Final = {
     "material-video-worker": 462,
     # Frozen brand-motion worker with its private Node runtime (113,124,957 bytes).
     "motion-video-worker": 108,
-    # Packaged ffmpeg/ffprobe plus the GPL source archive (Windows x86_64:
-    # 51,168,139 bytes).
+    # Packaged ffmpeg/ffprobe plus the GPL source archive. Exact target values
+    # live in MINIMUM_COMPLETE_RUNTIME_BYTES because they define the gate.
     "media-toolchain": 49,
     # Frozen 134-part catalog including its manifest and offline assets
     # (338 files, 47,671,952 bytes).
@@ -134,25 +143,23 @@ RELEASE_PACKAGE_BASELINE_BYTES: Final = {
     "windows": 1_289_130_572,
 }
 
-# A symmetric drift band lets normal metadata/runtime movement through while
-# keeping the entire 96 MiB window below the 113,124,957 byte motion Worker,
-# the smallest complete runtime tree that could be added or removed. Thus
-# weight alone rejects both a duplicate and a stripped required runtime from
-# every allowed point in the envelope.
-_RELEASE_PACKAGE_DRIFT_BYTES: Final = 48 * _MEBIBYTE
-
 
 def release_size_bounds(platform: str) -> PackageSizeBounds:
     """Return the size envelope for one real target-shaped package."""
     baseline = RELEASE_PACKAGE_BASELINE_BYTES.get(platform)
-    if baseline is None:
+    minimum_runtime = MINIMUM_COMPLETE_RUNTIME_BYTES.get(platform)
+    if baseline is None or minimum_runtime is None:
         _reject("unsupported package platform")
         raise AssertionError("unreachable")
+    # Keep the *whole* symmetric window strictly below the smallest required
+    # runtime on this target. From either inclusive endpoint, adding or removing
+    # a complete runtime must therefore cross the opposite endpoint.
+    drift = (minimum_runtime - 1) // 2
     return PackageSizeBounds(
         min_browser_bytes=320 * _MEBIBYTE,
         max_browser_bytes=420 * _MEBIBYTE,
-        min_package_bytes=baseline - _RELEASE_PACKAGE_DRIFT_BYTES,
-        max_package_bytes=baseline + _RELEASE_PACKAGE_DRIFT_BYTES,
+        min_package_bytes=baseline - drift,
+        max_package_bytes=baseline + drift,
     )
 
 
@@ -334,6 +341,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 __all__ = [
+    "MINIMUM_COMPLETE_RUNTIME_BYTES",
     "RELEASE_PACKAGE_BASELINE_BYTES",
     "RELEASE_PAYLOAD_PARTS_MIB",
     "PackageAuditReport",

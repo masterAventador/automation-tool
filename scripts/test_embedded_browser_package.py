@@ -36,6 +36,7 @@ from build_embedded_chromium_staging import (  # noqa: E402
     sha256_file,
 )
 from check_embedded_browser_package import (  # noqa: E402
+    MINIMUM_COMPLETE_RUNTIME_BYTES,
     RELEASE_PACKAGE_BASELINE_BYTES,
     RELEASE_PAYLOAD_PARTS_MIB,
     PackageRejected,
@@ -105,16 +106,20 @@ class ReleaseSizeBoundsTests(unittest.TestCase):
     ) -> None:
         self.assertEqual(RELEASE_PAYLOAD_PARTS_MIB["embedded-chromium"], 416)
         self.assertEqual(RELEASE_PAYLOAD_PARTS_MIB["local-executor"], 246)
-        motion_worker = 113_124_957
         for platform, baseline in RELEASE_PACKAGE_BASELINE_BYTES.items():
+            minimum_runtime = MINIMUM_COMPLETE_RUNTIME_BYTES[platform]
             bounds = release_size_bounds(platform)
             self.assertLessEqual(bounds.min_package_bytes, baseline)
             self.assertGreaterEqual(bounds.max_package_bytes, baseline)
-            self.assertGreater(bounds.min_package_bytes, baseline - motion_worker)
-            self.assertLess(bounds.max_package_bytes, baseline + motion_worker)
+            self.assertGreater(bounds.min_package_bytes, baseline - minimum_runtime)
+            self.assertLess(bounds.max_package_bytes, baseline + minimum_runtime)
             self.assertGreater(
-                bounds.min_package_bytes + motion_worker,
+                bounds.min_package_bytes + minimum_runtime,
                 bounds.max_package_bytes,
+            )
+            self.assertLess(
+                bounds.max_package_bytes - minimum_runtime,
+                bounds.min_package_bytes,
             )
 
     def test_windows_bound_rejects_one_more_complete_motion_worker(self) -> None:
