@@ -1,6 +1,7 @@
 # T4 独立剪辑生产装配
 
-> 状态：🔍 待验收（源码生产链已闭合；待有效凭据、正式包与双平台正常用户路径）
+> 状态：🔍 待验收（源码生产链与 macOS 正式包边界已闭合；待有效凭据、
+> macOS 真实云正常用户路径与 Windows 正式包同路径）
 >
 > 日期：2026-07-31
 >
@@ -8,7 +9,8 @@
 
 用户可操作：是
 
-证据层级：分层实现 + Mock 纵向 + 真实网关失败边界；当前已发布正式包尚未包含本次改动
+证据层级：分层实现 + Mock 纵向 + 真实网关失败边界 + Developer ID 正式包内容边界；
+尚未声称真实云成功
 
 ## 本片交付
 
@@ -47,7 +49,8 @@
 - 输出只有重新进入统一 Artifact 库后才允许标 `succeeded`。
 
 恢复 checkpoint 不含凭据或绝对路径，任务列表在后台续查完成后会自动刷新。T4 仍保持
-待验收，是因为当前真实凭据已失效，且新源码尚未进入 macOS/Windows 正式包正常用户路径。
+待验收，是因为当前真实凭据已失效；macOS 正式包虽已包含新链路，但尚不能从正常用户路径
+完成真实云成片，Windows 正式包同路径也仍待补。
 
 ## RED
 
@@ -101,12 +104,45 @@ IMS 只读连接测试 → AuthenticationRejected
 `backend/tests/real_cloud/test_t4_video_editing_executor.py`，换入有效凭据后可直接复跑完整的上传、
 提交、轮询、导入与清理链。
 
+## macOS 正式包证据
+
+2026-07-31 从干净的 `main@4b04408` 执行：
+
+```bash
+pnpm --dir frontend release:package --platform macos --build-id main-4b04408
+```
+
+发布脚本与独立复验均通过：
+
+- 最新 Executor 清单为 `build_id=main-4b04408`，包摘要
+  `9bb90e96a9c195916636118e752406fa2439174f1a927e2a67024012d7ca8705`；
+- PyInstaller 递归模块表明确包含
+  `automation_tool.control_plane.infrastructure.aliyun.editing_intent_store` 与
+  `automation_tool.executor.video_editing`，不是只改了源码、包内仍用旧 Executor；
+- App 公证 submission 为 `c4a37fea-5e85-4bf3-8bf9-ccc76cece306`，DMG 公证
+  submission 为 `76324c19-60e3-4712-9fd6-ffe5e4ea63a8`，两者均 Accepted 且
+  stapler 验证成功；
+- DMG 为 548,116,370 bytes，SHA-256
+  `c741bf93883cb5b35a8f1d12044498965b5cac98449cffb65c36b7e35f1b9ae4`；
+- DMG 与只读挂载后的卷内 App 均由 Gatekeeper 判定
+  `accepted / Notarized Developer ID`，卷内 App 另经 `codesign --deep --strict`；
+- 卷内六类资源文件数为 embedded browser 336、Local Executor 344、material Worker
+  2107、media toolchain 8、motion Worker 4、motion catalog 338；E4-15 与 P9-05
+  整包审计通过。
+
+首轮构建曾被发布门禁拒绝：BM-16 视觉诊断遗留的
+`bm16-component-preview-diagnostic.html` 可写且未登记摘要。只删除该本地诊断残留后，
+零件发布树重新以 134 items / 337 files / 0 remote URLs 通过，再从头构建、公证；没有
+放宽只读或未注册文件门禁。
+
+这组证据只证明最新 T4 代码和资源进入客户包并满足发布边界，不替代有效凭据下的真实云点击路径。
+
 ## 正常用户路径验收
 
-未完成。源码路径与 Mock 纵向已闭合，但尚未：
+部分完成。源码路径、Mock 纵向与 macOS 正式包内容边界已闭合，但尚未：
 
 1. 用有效阿里云凭据跑出真实成片；
-2. 重建签名公证 macOS 正式包并从设置页、工作台正常点击完成一次；
+2. 从签名公证 macOS 正式包的设置页、工作台正常点击完成一次真实云成片；
 3. 在 Windows x86_64 正式安装树复跑同一路径。
 
 ## 遗留项
@@ -115,5 +151,5 @@ IMS 只读连接测试 → AuthenticationRejected
 | --- | --- |
 | 有效阿里云 IMS/OSS 凭据 | 当前文件被真实网关判 `InvalidAccessKeyId / AuthenticationRejected` |
 | 真实云最小成片 | 待有效凭据，复跑 opt-in T4 测试 |
-| macOS 签名公证正式包正常用户路径 | 待重新构建 |
+| macOS 签名公证正式包 | 已构建、公证、staple、Gatekeeper 与卷内内容复验；真实云正常用户路径待有效凭据 |
 | Windows x86_64 正式包同路径 | 待 Windows 环境 |

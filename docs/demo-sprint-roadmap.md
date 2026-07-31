@@ -133,7 +133,7 @@
 
 | ID | 任务 | 并行 | 为什么冻结 |
 |---|---|---|---|
-| T4 | 补 VE 剪辑装配任务 | 🔍 待验收 | 07-31 源码生产链已闭合：Tauri 原子保存项目/Timeline/作业，统一 Artifact 私有 staging，已验签 Executor 通过一次性 stdin 驱动生产 OSS/IMS Provider、对账、输出导入和清理，成功成片可回到工作台预览；App 重启会重新验证保留 Workspace，并按持久 vendor JobId 自动续查，已提交任务不重复上传或 Submit。真实网关复跑在 PutObject 前报 `InvalidAccessKeyId`，IMS 只读测试同样 `AuthenticationRejected`，未 dispatch、未计费；待有效凭据、重建正式包和 macOS/Windows 正常用户路径。见 `docs/development/T4-video-editing-assembly.md` |
+| T4 | 补 VE 剪辑装配任务 | 🔍 待验收 | 07-31 源码生产链已闭合：Tauri 原子保存项目/Timeline/作业，统一 Artifact 私有 staging，已验签 Executor 通过一次性 stdin 驱动生产 OSS/IMS Provider、对账、输出导入和清理，成功成片可回到工作台预览；App 重启会重新验证保留 Workspace，并按持久 vendor JobId 自动续查，已提交任务不重复上传或 Submit。`main@4b04408` 已进入 Developer ID 签名公证 macOS 正式包，App/DMG 票据、Gatekeeper、卷内资源与 T4 PyInstaller 模块表均复验通过。真实网关复跑在 PutObject 前报 `InvalidAccessKeyId`，IMS 只读测试同样 `AuthenticationRejected`，未 dispatch、未计费；待有效凭据下 macOS 正常用户路径与 Windows 正式包同路径。见 `docs/development/T4-video-editing-assembly.md` |
 | T19 | 动效零件接 AI 一句话制作链路（方案 B） | ❌ 需设计 | 大工程。07-27 复核：无相关提交 |
 | T37 | 四条合规决策 | 👤 | 你已定：Demo 后处理 |
 
