@@ -367,6 +367,60 @@ def _windows_descendant_process_ids(
     return tuple(descendants)
 
 
+def _windows_existing_process_ids(
+    process_ids: tuple[int, ...],
+    *,
+    deadline: float,
+) -> tuple[int, ...] | None:
+    """Return which bounded owned PIDs still exist, or None if status is unknown."""
+
+    if (
+        not isinstance(process_ids, tuple)
+        or len(process_ids) > MAXIMUM_WINDOWS_DESCENDANTS
+        or any(
+            type(process_id) is not int or process_id <= 0 for process_id in process_ids
+        )
+    ):
+        return None
+    ordered_process_ids = tuple(dict.fromkeys(process_ids))
+    if not ordered_process_ids:
+        return ()
+    timeout = _remaining_cleanup_seconds(deadline, PROCESS_STOP_TIMEOUT_SECONDS)
+    if timeout <= 0:
+        return None
+    try:
+        completed = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                (
+                    "Get-CimInstance Win32_Process | "
+                    "ForEach-Object { [int]$_.ProcessId }"
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if completed.returncode != 0:
+        return None
+    observed_process_ids = {
+        int(rendered)
+        for line in completed.stdout.splitlines()
+        if (rendered := line.strip()).isdigit()
+    }
+    return tuple(
+        process_id
+        for process_id in ordered_process_ids
+        if process_id in observed_process_ids
+    )
+
+
 def _taskkill_tree(
     process_id: int,
     *,
@@ -413,11 +467,19 @@ def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
                 process.kill()
             except OSError:
                 cleanup_failed = True
+            failed_descendants: list[int] = []
             for process_id in descendants:
                 if _remaining_cleanup_seconds(deadline, CLEANUP_TIMEOUT_SECONDS) <= 0:
                     cleanup_failed = True
                     break
                 if not _taskkill_tree(process_id, deadline=deadline):
+                    failed_descendants.append(process_id)
+            if failed_descendants:
+                existing_process_ids = _windows_existing_process_ids(
+                    tuple(failed_descendants),
+                    deadline=deadline,
+                )
+                if existing_process_ids is None or existing_process_ids:
                     cleanup_failed = True
         wait_timeout = _remaining_cleanup_seconds(
             deadline,
@@ -428,11 +490,19 @@ def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
         try:
             process.wait(timeout=wait_timeout)
         except (OSError, subprocess.TimeoutExpired):
+            failed_descendants = []
             for process_id in descendants:
                 if _remaining_cleanup_seconds(deadline, CLEANUP_TIMEOUT_SECONDS) <= 0:
                     cleanup_failed = True
                     break
                 if not _taskkill_tree(process_id, deadline=deadline):
+                    failed_descendants.append(process_id)
+            if failed_descendants:
+                existing_process_ids = _windows_existing_process_ids(
+                    tuple(failed_descendants),
+                    deadline=deadline,
+                )
+                if existing_process_ids is None or existing_process_ids:
                     cleanup_failed = True
             try:
                 process.kill()
@@ -473,6 +543,29 @@ def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
             process.kill()
     with contextlib.suppress(OSError, subprocess.TimeoutExpired):
         process.wait(timeout=PROCESS_KILL_TIMEOUT_SECONDS)
+
+
+def _windows_postgres_running(pg_ctl: str, data_directory: Path) -> bool | None:
+    try:
+        completed = subprocess.run(
+            [
+                pg_ctl,
+                "--pgdata",
+                os.fspath(data_directory),
+                "status",
+            ],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=CLEANUP_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if completed.returncode == 0:
+        return True
+    if completed.returncode == 3:
+        return False
+    return None
 
 
 def _cleanup_postgres_resources(
@@ -518,6 +611,8 @@ def _cleanup_postgres_resources(
         except (OSError, subprocess.TimeoutExpired):
             completed = None
         if completed is None or completed.returncode != 0:
+            if _windows_postgres_running(pg_ctl, data_directory) is False:
+                return
             immediate_command = [*command]
             immediate_command[immediate_command.index("fast")] = "immediate"
             try:
@@ -530,7 +625,10 @@ def _cleanup_postgres_resources(
                 )
             except (OSError, subprocess.TimeoutExpired):
                 _reject("LE-14 real acceptance failed")
-            if completed.returncode != 0:
+            if (
+                completed.returncode != 0
+                and _windows_postgres_running(pg_ctl, data_directory) is not False
+            ):
                 _reject("LE-14 real acceptance failed")
         return
     environment = {

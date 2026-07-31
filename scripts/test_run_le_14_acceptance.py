@@ -692,6 +692,7 @@ def test_sleep_until_cancelled() -> None:
 
     def test_windows_cleanup_escalates_a_failed_fast_postgres_stop(self) -> None:
         failed = subprocess.CompletedProcess([], 1, "", "")
+        running = subprocess.CompletedProcess([], 0, "", "")
         succeeded = subprocess.CompletedProcess([], 0, "", "")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "windows-postgres"
@@ -708,27 +709,29 @@ def test_sleep_until_cancelled() -> None:
                 patch.object(
                     subprocess,
                     "run",
-                    side_effect=[failed, succeeded],
+                    side_effect=[failed, running, succeeded],
                 ) as process,
             ):
                 run_le_14_acceptance._cleanup_postgres_resources(4596, root)
 
-        self.assertEqual(len(process.call_args_list), 2)
+        self.assertEqual(len(process.call_args_list), 3)
         self.assertEqual(
             process.call_args_list[0].args[0][
                 process.call_args_list[0].args[0].index("--mode") + 1
             ],
             "fast",
         )
+        self.assertEqual(process.call_args_list[1].args[0][-1], "status")
         self.assertEqual(
-            process.call_args_list[1].args[0][
-                process.call_args_list[1].args[0].index("--mode") + 1
+            process.call_args_list[2].args[0][
+                process.call_args_list[2].args[0].index("--mode") + 1
             ],
             "immediate",
         )
 
     def test_windows_cleanup_rejects_a_failed_immediate_postgres_stop(self) -> None:
         failed = subprocess.CompletedProcess([], 1, "", "")
+        running = subprocess.CompletedProcess([], 0, "", "")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "windows-postgres"
             data = root / "data"
@@ -744,7 +747,7 @@ def test_sleep_until_cancelled() -> None:
                 patch.object(
                     subprocess,
                     "run",
-                    side_effect=[failed, failed],
+                    side_effect=[failed, running, failed, running],
                 ),
                 self.assertRaisesRegex(
                     run_le_14_acceptance.Le14AcceptanceFailure,
@@ -752,6 +755,32 @@ def test_sleep_until_cancelled() -> None:
                 ),
             ):
                 run_le_14_acceptance._cleanup_postgres_resources(4597, root)
+
+    def test_windows_cleanup_accepts_postgres_that_is_already_stopped(self) -> None:
+        failed = subprocess.CompletedProcess([], 1, "", "")
+        stopped = subprocess.CompletedProcess([], 3, "", "")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "windows-postgres"
+            data = root / "data"
+            pg_ctl = os.fspath(Path(directory) / "pg_ctl.exe")
+            data.mkdir(parents=True)
+            with (
+                patch.object(run_le_14_acceptance.os, "name", "nt"),
+                patch.object(
+                    run_le_14_acceptance.shutil,
+                    "which",
+                    return_value=pg_ctl,
+                ),
+                patch.object(
+                    subprocess,
+                    "run",
+                    side_effect=[failed, stopped],
+                ) as process,
+            ):
+                run_le_14_acceptance._cleanup_postgres_resources(4598, root)
+
+        self.assertEqual(len(process.call_args_list), 2)
+        self.assertEqual(process.call_args_list[1].args[0][-1], "status")
 
     @unittest.skipIf(
         os.name == "nt" or not hasattr(signal, "SIGKILL"),
@@ -891,6 +920,11 @@ def test_sleep_until_cancelled() -> None:
                 "_windows_descendant_process_ids",
                 side_effect=[(4880,), (4881, 4880)],
             ),
+            patch.object(
+                run_le_14_acceptance,
+                "_windows_existing_process_ids",
+                return_value=(4881,),
+            ),
             patch.object(run_le_14_acceptance.time, "monotonic", return_value=0.0),
             patch.object(
                 subprocess,
@@ -903,6 +937,35 @@ def test_sleep_until_cancelled() -> None:
             ),
         ):
             run_le_14_acceptance._terminate_process_tree(child_process)
+
+    def test_windows_taskkill_nonzero_accepts_an_exited_descendant(self) -> None:
+        child_process = MagicMock()
+        child_process.pid = 4890
+        failed = subprocess.CompletedProcess([], 1, "", "")
+        succeeded = subprocess.CompletedProcess([], 0, "", "")
+        with (
+            patch.object(run_le_14_acceptance.os, "name", "nt"),
+            patch.object(
+                run_le_14_acceptance,
+                "_windows_descendant_process_ids",
+                side_effect=[(4892,), (4893, 4892)],
+            ),
+            patch.object(
+                run_le_14_acceptance,
+                "_windows_existing_process_ids",
+                return_value=(),
+                create=True,
+            ) as existing_process_ids,
+            patch.object(run_le_14_acceptance.time, "monotonic", return_value=0.0),
+            patch.object(
+                subprocess,
+                "run",
+                side_effect=[failed, failed, succeeded],
+            ),
+        ):
+            run_le_14_acceptance._terminate_process_tree(child_process)
+
+        existing_process_ids.assert_called_once()
 
     def test_windows_taskkill_fallback_shares_one_cleanup_deadline(self) -> None:
         child_process = MagicMock()
@@ -958,6 +1021,35 @@ def test_sleep_until_cancelled() -> None:
         )
         self.assertNotIn("4848", process.call_args.args[0])
         self.assertEqual(
+            process.call_args.kwargs["timeout"],
+            run_le_14_acceptance.PROCESS_STOP_TIMEOUT_SECONDS,
+        )
+
+    def test_windows_existing_process_ids_filters_the_system_snapshot(self) -> None:
+        completed = subprocess.CompletedProcess(
+            [],
+            0,
+            "4850\nnot-a-pid\n9999\n4850\n",
+            "",
+        )
+        with (
+            patch.object(subprocess, "run", return_value=completed) as process,
+            patch.object(
+                run_le_14_acceptance.time,
+                "monotonic",
+                return_value=0.0,
+            ),
+        ):
+            existing = run_le_14_acceptance._windows_existing_process_ids(
+                (4850, 4849),
+                deadline=run_le_14_acceptance.CLEANUP_TIMEOUT_SECONDS,
+            )
+
+        self.assertEqual(existing, (4850,))
+        self.assertNotIn("env", process.call_args.kwargs)
+        self.assertNotIn("4850", process.call_args.args[0])
+        self.assertGreater(process.call_args.kwargs["timeout"], 0)
+        self.assertLessEqual(
             process.call_args.kwargs["timeout"],
             run_le_14_acceptance.PROCESS_STOP_TIMEOUT_SECONDS,
         )
