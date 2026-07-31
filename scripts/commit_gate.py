@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -147,6 +148,46 @@ def discard_checkout(checkout: Path) -> None:
     shutil.rmtree(checkout, ignore_errors=True)
 
 
+def _link_directory(
+    link: Path,
+    target: Path,
+    *,
+    platform: str = os.name,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> None:
+    """Expose one dependency directory without requiring Windows link privilege.
+
+    A directory junction is deliberately used on Windows. Unlike
+    ``Path.symlink_to``, ``mklink /J`` works for a normal user without Developer
+    Mode, which keeps the pre-push gate runnable on a stock workstation.
+    """
+    if platform != "nt":
+        link.symlink_to(target, target_is_directory=True)
+        return
+
+    completed = runner(
+        [
+            "cmd.exe",
+            "/d",
+            "/c",
+            "mklink",
+            "/J",
+            os.fspath(link),
+            os.fspath(target),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0 or not link.is_dir():
+        detail = (completed.stderr or completed.stdout).strip()
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(
+            f"could not create the Windows dependency junction "
+            f"(exit {completed.returncode}){suffix}"
+        )
+
+
 def _link_build_inputs(checkout: Path) -> None:
     """Borrow installed dependencies so the gate checks source, not installs.
 
@@ -156,7 +197,7 @@ def _link_build_inputs(checkout: Path) -> None:
     """
     modules = checkout / "frontend" / "node_modules"
     if not modules.exists():
-        modules.symlink_to(REPOSITORY_ROOT / "frontend" / "node_modules")
+        _link_directory(modules, REPOSITORY_ROOT / "frontend" / "node_modules")
 
 
 def _node_tool(name: str) -> str | None:

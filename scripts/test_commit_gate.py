@@ -99,6 +99,60 @@ def check_gate_detects_an_injected_typescript_defect() -> None:
             _fail("gate passed a checkout containing an undeclared-property read")
 
 
+def check_windows_build_input_uses_an_unprivileged_directory_junction() -> None:
+    """Windows must not require Developer Mode just to run the pre-push gate."""
+    link_directory = getattr(commit_gate, "_link_directory", None)
+    if link_directory is None:
+        _fail("the gate has no cross-platform directory-link helper")
+
+    with tempfile.TemporaryDirectory() as scratch:
+        root = Path(scratch)
+        target = root / "source" / "node_modules"
+        link = root / "checkout" / "frontend" / "node_modules"
+        target.mkdir(parents=True)
+        link.parent.mkdir(parents=True)
+        commands: list[list[str]] = []
+
+        def create_fake_junction(command: list[str], **kwargs: object):
+            commands.append(command)
+            link.mkdir()
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        link_directory(link, target, platform="nt", runner=create_fake_junction)
+        expected = [
+            "cmd.exe",
+            "/d",
+            "/c",
+            "mklink",
+            "/J",
+            str(link),
+            str(target),
+        ]
+        if commands != [expected]:
+            _fail(f"Windows build input did not use mklink /J exactly: {commands}")
+
+        calls: list[tuple[Path, Path]] = []
+        original_root = commit_gate.REPOSITORY_ROOT
+        original_link_directory = commit_gate._link_directory
+        try:
+            commit_gate.REPOSITORY_ROOT = root / "source"
+            commit_gate._link_directory = lambda actual_link, actual_target: (
+                calls.append((actual_link, actual_target))
+            )
+            checkout = root / "another-checkout"
+            (checkout / "frontend").mkdir(parents=True)
+            commit_gate._link_build_inputs(checkout)
+        finally:
+            commit_gate.REPOSITORY_ROOT = original_root
+            commit_gate._link_directory = original_link_directory
+        expected_call = (
+            checkout / "frontend" / "node_modules",
+            root / "source" / "frontend" / "node_modules",
+        )
+        if calls != [expected_call]:
+            _fail(f"_link_build_inputs bypassed the portable helper: {calls}")
+
+
 def check_gate_detects_an_injected_python_defect() -> None:
     """A missing required keyword-only argument must be caught.
 
@@ -321,6 +375,7 @@ CHECKS = (
     check_every_declared_root_exists,
     check_gate_judges_the_commit_not_the_working_tree,
     check_gate_detects_an_injected_typescript_defect,
+    check_windows_build_input_uses_an_unprivileged_directory_junction,
     check_gate_detects_an_injected_python_defect,
     check_python_baseline_is_clean_for_blocking_codes,
     check_python_check_covers_every_tree_backend_config_omits,
