@@ -231,6 +231,7 @@ def select_fitting_segments(
         _reject()
 
     material_by_id = {material.material_id: material for material in materials}
+    material_index = {material.material_id: index for index, material in enumerate(materials)}
     if {candidate.material_id for candidate in matches.candidates} != set(material_by_id):
         _reject()
 
@@ -246,8 +247,15 @@ def select_fitting_segments(
     ):
         _reject()
 
+    ranked = sorted(
+        matches.candidates,
+        key=lambda candidate: (
+            -candidate.score,
+            material_index[candidate.material_id],
+        ),
+    )
     selected: list[FittingMaterialSegment] = []
-    for candidate in matches.candidates:
+    for candidate in ranked:
         if not candidate.qualified:
             continue
         material = material_by_id[candidate.material_id]

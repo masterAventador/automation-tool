@@ -428,6 +428,44 @@ def test_an_image_needs_no_decodable_evidence_or_source_window() -> None:
     )
 
 
+def test_equal_scores_are_resolved_by_material_input_order_at_selection_boundary() -> None:
+    first = _material(
+        kind=SegmentSelectionMaterialKind.IMAGE,
+        digest_character="a",
+    )
+    second = _material(
+        kind=SegmentSelectionMaterialKind.IMAGE,
+        digest_character="b",
+    )
+    matches = SegmentSelectionSentenceMatches(
+        sequence=1,
+        candidates=(
+            SegmentSelectionCandidateScore(
+                material_id=second.material_id,
+                score=80,
+                qualified=True,
+            ),
+            SegmentSelectionCandidateScore(
+                material_id=first.material_id,
+                score=80,
+                qualified=True,
+            ),
+        ),
+    )
+
+    result = select_fitting_segments(
+        SegmentSelectionSlot(sequence=1, duration_ms=2_000),
+        matches,
+        (first, second),
+        (),
+    )
+
+    assert tuple(segment.material_id for segment in result.segments) == (
+        first.material_id,
+        second.material_id,
+    )
+
+
 def test_qualified_fitting_materials_are_ranked_by_score_then_input_order() -> None:
     first = _material(digest_character="a")
     second = _material(
