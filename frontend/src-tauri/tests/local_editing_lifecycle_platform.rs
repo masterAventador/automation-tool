@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -54,12 +55,44 @@ impl Drop for TemporaryAppData {
 }
 
 fn required_executable(name: &str) -> PathBuf {
-    let configured = std::env::var_os(name).unwrap_or_else(|| {
-        panic!("{name} must name a real executable; use scripts/run_le12_native_lifecycle.py")
-    });
+    let configured = std::env::var_os(name).unwrap_or_else(|| discover_executable(name));
     let path = fs::canonicalize(configured).expect("canonical configured executable");
     assert!(path.is_file(), "configured executable is not a file");
     path
+}
+
+fn discover_executable(name: &str) -> std::ffi::OsString {
+    if name == "LE12_MEDIA_TOOL_A" {
+        return required_executable("LE12_PYTHON_EXECUTABLE").into_os_string();
+    }
+    let candidates: &[&str] = match name {
+        "LE12_PYTHON_EXECUTABLE" if cfg!(windows) => &["python.exe", "python3.exe"],
+        "LE12_PYTHON_EXECUTABLE" => &["/usr/bin/python3", "python3"],
+        "LE12_MEDIA_TOOL_B" if cfg!(windows) => &["cmd.exe", "powershell.exe"],
+        "LE12_MEDIA_TOOL_B" => &["/usr/bin/true", "/bin/sh"],
+        _ => &[],
+    };
+    for candidate in candidates {
+        let direct = Path::new(candidate);
+        if direct.is_absolute() && direct.is_file() {
+            return direct.as_os_str().to_owned();
+        }
+        let locator = if cfg!(windows) { "where.exe" } else { "which" };
+        let Ok(output) = Command::new(locator).arg(candidate).output() else {
+            continue;
+        };
+        if !output.status.success() {
+            continue;
+        }
+        if let Some(path) = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::trim)
+            .find(|value| !value.is_empty())
+        {
+            return std::ffi::OsString::from(path);
+        }
+    }
+    panic!("{name} executable discovery failed; use scripts/run_le12_native_lifecycle.py")
 }
 
 fn workspace_store(root: &Path) -> VideoJobWorkspaceStore {
