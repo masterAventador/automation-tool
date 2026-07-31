@@ -67,7 +67,7 @@
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
 | LE-13 | 素材理解 | 抽帧送百炼多模态，产出描述、标签与镜头时间区间并写回 Material；**关闭深度思考**（`enable_thinking=false`，作为配置项非硬编码，见设计文档 §4.5）；超时/拒答/空描述/token 超限的失败矩阵；真实模型调用验收。T1～T4、Codex Review finding 修复与真实纵向复验全部完成，证据见 `docs/development/LE-13.md` | LE-08 | ✅ 已完成 |
-| LE-14 | 人声检测与转写 | 三级漏斗：`silencedetect` 判有无声音 → Silero VAD（本地 ONNX，约 2 MB）判是人声还是纯环境音 → 仅对人声素材调百炼语音识别转写（只传音轨不传视频，避免为筛选步骤打包 140 MB+ 的本地 Whisper）。产出 `has_speech`、`speech_segments_ms`、`speech_transcript` 写回 Material；**onnxruntime 与 VAD 模型必须进安装包并有出厂门禁核对**；纯音乐误判人声、人声判成环境音、转写为空、方言/嘈杂环境、ASR 超时、路人背景说话被当主体的失败矩阵。T1～T4 及各轮 Review finding 已全部收口；T5 已完成摘要锁定真人声、真实随包 FFmpeg/Silero/百炼 ASR、纯音乐零调用、PostgreSQL 原始行与 PyInstaller 正式候选纵向验收；首轮 Windows 二进制/权限、下载中断和有界整树/Compose 清理四项 P2，以及复审 SIGTERM、Windows 原生 PostgreSQL、`taskkill` 失败兜底和跨平台测试四项 P2 均已按 TDD 修复，真实链路复验通过，待最终复审 | LE-07 | 🚧 实现中 |
+| LE-14 | 人声检测与转写 | 三级漏斗：`silencedetect` 判有无声音 → Silero VAD（本地 ONNX，约 2 MB）判是人声还是纯环境音 → 仅对人声素材调百炼语音识别转写（只传音轨不传视频，避免为筛选步骤打包 140 MB+ 的本地 Whisper）。产出 `has_speech`、`speech_segments_ms`、`speech_transcript` 写回 Material；**onnxruntime 与 VAD 模型必须进安装包并有出厂门禁核对**；纯音乐误判人声、人声判成环境音、转写为空、方言/嘈杂环境、ASR 超时、路人背景说话被当主体的失败矩阵。T1～T4 及各轮 Review finding 已全部收口；T5 已完成摘要锁定真人声、真实随包 FFmpeg/Silero/百炼 ASR、纯音乐零调用、PostgreSQL 原始行与 PyInstaller 正式候选纵向验收；三轮 Review 共十二项跨平台、协议与资源清理 finding 均已按 TDD 修复，最新补齐 Windows 路径测试、超时 SIGTERM 生命周期、失败后后代重捕获和统一清理 deadline，真实链路复验通过，待本轮修复提交复审 | LE-07 | 🚧 实现中 |
 | LE-15 | 文案分句与旁白合成 | 一句话经百炼文本模型产出脚本分句（**关闭深度思考**，见设计文档 §4.5）；TTS 合成每句并取真实音频时长；支持用户上传录音替代（转写后对齐句子，复用 LE-14 的 ASR） | LE-06,LE-14 | ⬜ 未开始 |
 | LE-16 | 语义匹配与片段选择 | 句子与素材描述语义匹配（有转写的素材把转写文本一并纳入匹配依据；**关闭深度思考**，见设计文档 §4.5）；在选中素材的镜头区间内挑最贴片段产出 in/out 点；**有人声素材按"自带旁白片段"编排：时长由原声内容决定、独立占段、用原声与转写字幕、不配 TTS**；文案句子只分配给无人声素材；素材不足、单条过短、匹配全低于阈值、全部素材均有人声的处理；产出 Timeline 草稿。**LE-07 交接的硬约束**：探测报出的 duration 取自容器头，**不保证时长内每一帧都存在**——实测 faststart 截断件（半个下载）报出的是完整时长，截到 25% 仍报 60000 ms 而实际只剩 268/1500 帧，且它不产生任何拒绝码、按码分支看不见；挑 in/out 点不得默认「时长内帧完备」。依据见 `docs/development/LE-07.md` Q2 | LE-13,LE-15 | ⬜ 未开始 |
 
@@ -106,10 +106,10 @@
 
 ## 5. 当前下一步
 
-**LE-14 人声检测与转写 T5 最终 Codex Review。** T1～T5 实现、真实纵向验收与模块收口
-门禁均已完成；两轮共八项 P2 已按 RED→GREEN 修复，SIGTERM 真实子会话与正常真实链路
-复验通过。修复检查点提交推送后执行最终 Review，无 finding 则把 LE-14 顶格收口为
-`🔍 待验收` 并进入 LE-15 T1。
+**LE-14 人声检测与转写 T5 修复提交 Codex Review。** T1～T5 实现、真实纵向验收与模块
+收口门禁均已完成；三轮共十二项 finding 已按 RED→GREEN 修复，最新专项与真实链路复验
+通过。修复检查点提交推送后执行 Review，无 finding 则把 LE-14 顶格收口为 `🔍 待验收`
+并进入 LE-15 T1。
 
 ## 7. 用户可见文案门禁现已恢复绿色
 

@@ -11,7 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest.mock import MagicMock, call, patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -342,6 +342,76 @@ class Le14AcceptanceRunnerTests(unittest.TestCase):
         self.assertEqual(cleanup.call_args.args[0], child_process.pid)
         self.assertEqual(cleanup.call_args.args[1].name, "windows-postgres")
 
+    def test_runner_timeout_keeps_sigterm_handler_until_cleanup_finishes(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            secret = root / "credential.json"
+            secret.write_text(
+                json.dumps({"provider": "bailian", "apiKey": f"sk-{'b' * 20}"}),
+                encoding="utf-8",
+            )
+            secret.chmod(0o600)
+            child_process = MagicMock()
+            child_process.pid = 4393
+            child_process.communicate.side_effect = subprocess.TimeoutExpired([], 1)
+            original_handler = MagicMock(
+                side_effect=AssertionError("old SIGTERM handler interrupted cleanup")
+            )
+            active_handler = original_handler
+
+            def install_handler(
+                _signal_number: int,
+                handler: object,
+            ) -> object:
+                nonlocal active_handler
+                previous = active_handler
+                active_handler = handler
+                return previous
+
+            def terminate_during_second_sigterm(process: object) -> None:
+                self.assertIs(process, child_process)
+                active_handler(signal.SIGTERM, None)
+
+            with (
+                patch.object(
+                    run_le_14_acceptance,
+                    "prepare_verified_media_toolchain",
+                    return_value=root / "media-toolchain",
+                ),
+                patch.object(run_le_14_acceptance, "ensure_silero_vad_assets"),
+                patch.object(
+                    run_le_14_acceptance,
+                    "prepare_voice_fixture",
+                    return_value=root / "voice.flac",
+                ),
+                patch.object(subprocess, "Popen", return_value=child_process),
+                patch.object(
+                    run_le_14_acceptance.signal,
+                    "signal",
+                    side_effect=install_handler,
+                ),
+                patch.object(
+                    run_le_14_acceptance,
+                    "_terminate_process_tree",
+                    side_effect=terminate_during_second_sigterm,
+                ) as terminate,
+                patch.object(
+                    run_le_14_acceptance,
+                    "_cleanup_postgres_resources",
+                ) as cleanup,
+                self.assertRaisesRegex(
+                    run_le_14_acceptance.Le14AcceptanceFailure,
+                    r"^LE-14 real acceptance failed$",
+                ),
+            ):
+                run_le_14_acceptance.run_acceptance(secret)
+
+        self.assertIs(active_handler, original_handler)
+        terminate.assert_called_once_with(child_process)
+        cleanup.assert_called_once()
+
     def test_runner_cancellation_cleans_process_tree_and_postgres(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -657,6 +727,32 @@ def test_sleep_until_cancelled() -> None:
             "immediate",
         )
 
+    def test_windows_cleanup_rejects_a_failed_immediate_postgres_stop(self) -> None:
+        failed = subprocess.CompletedProcess([], 1, "", "")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "windows-postgres"
+            data = root / "data"
+            pg_ctl = os.fspath(Path(directory) / "pg_ctl.exe")
+            data.mkdir(parents=True)
+            with (
+                patch.object(run_le_14_acceptance.os, "name", "nt"),
+                patch.object(
+                    run_le_14_acceptance.shutil,
+                    "which",
+                    return_value=pg_ctl,
+                ),
+                patch.object(
+                    subprocess,
+                    "run",
+                    side_effect=[failed, failed],
+                ),
+                self.assertRaisesRegex(
+                    run_le_14_acceptance.Le14AcceptanceFailure,
+                    r"^LE-14 real acceptance failed$",
+                ),
+            ):
+                run_le_14_acceptance._cleanup_postgres_resources(4597, root)
+
     @unittest.skipIf(
         os.name == "nt" or not hasattr(signal, "SIGKILL"),
         "POSIX process-group signals are unavailable",
@@ -739,12 +835,16 @@ def test_sleep_until_cancelled() -> None:
             process.call_args.args[0],
             ["taskkill", "/PID", str(child_process.pid), "/T", "/F"],
         )
-        self.assertEqual(
+        self.assertGreater(
+            process.call_args.kwargs["timeout"],
+            0,
+        )
+        self.assertLessEqual(
             process.call_args.kwargs["timeout"],
             run_le_14_acceptance.CLEANUP_TIMEOUT_SECONDS,
         )
 
-    def test_windows_taskkill_failure_terminates_the_snapshotted_tree(self) -> None:
+    def test_windows_taskkill_failure_recaptures_late_descendants(self) -> None:
         child_process = MagicMock()
         child_process.pid = 4848
         failed = subprocess.CompletedProcess([], 1, "", "")
@@ -754,9 +854,9 @@ def test_sleep_until_cancelled() -> None:
             patch.object(
                 run_le_14_acceptance,
                 "_windows_descendant_process_ids",
-                return_value=(4850, 4849),
-                create=True,
-            ),
+                side_effect=[(4850,), (4851, 4850)],
+            ) as descendants,
+            patch.object(run_le_14_acceptance.time, "monotonic", return_value=0.0),
             patch.object(
                 subprocess,
                 "run",
@@ -765,17 +865,78 @@ def test_sleep_until_cancelled() -> None:
         ):
             run_le_14_acceptance._terminate_process_tree(child_process)
 
+        self.assertEqual(descendants.call_count, 2)
         self.assertEqual(
             [entry.args[0] for entry in process.call_args_list],
             [
                 ["taskkill", "/PID", "4848", "/T", "/F"],
+                ["taskkill", "/PID", "4851", "/T", "/F"],
                 ["taskkill", "/PID", "4850", "/T", "/F"],
-                ["taskkill", "/PID", "4849", "/T", "/F"],
             ],
         )
         child_process.kill.assert_called_once_with()
         child_process.wait.assert_called_with(
             timeout=run_le_14_acceptance.PROCESS_KILL_TIMEOUT_SECONDS
+        )
+
+    def test_windows_taskkill_fallback_rejects_a_surviving_descendant(self) -> None:
+        child_process = MagicMock()
+        child_process.pid = 4878
+        failed = subprocess.CompletedProcess([], 1, "", "")
+        succeeded = subprocess.CompletedProcess([], 0, "", "")
+        with (
+            patch.object(run_le_14_acceptance.os, "name", "nt"),
+            patch.object(
+                run_le_14_acceptance,
+                "_windows_descendant_process_ids",
+                side_effect=[(4880,), (4881, 4880)],
+            ),
+            patch.object(run_le_14_acceptance.time, "monotonic", return_value=0.0),
+            patch.object(
+                subprocess,
+                "run",
+                side_effect=[failed, failed, succeeded],
+            ),
+            self.assertRaisesRegex(
+                run_le_14_acceptance.Le14AcceptanceFailure,
+                r"^LE-14 real acceptance failed$",
+            ),
+        ):
+            run_le_14_acceptance._terminate_process_tree(child_process)
+
+    def test_windows_taskkill_fallback_shares_one_cleanup_deadline(self) -> None:
+        child_process = MagicMock()
+        child_process.pid = 4898
+        failed = subprocess.CompletedProcess([], 1, "", "")
+        with (
+            patch.object(run_le_14_acceptance.os, "name", "nt"),
+            patch.object(
+                run_le_14_acceptance,
+                "_windows_descendant_process_ids",
+                side_effect=[(4900, 4899), (4901, 4900, 4899)],
+            ) as descendants,
+            patch.object(
+                run_le_14_acceptance.time,
+                "monotonic",
+                side_effect=[0.0, 0.0, 61.0, 61.0, 61.0, 61.0],
+            ),
+            patch.object(subprocess, "run", return_value=failed) as process,
+            self.assertRaisesRegex(
+                run_le_14_acceptance.Le14AcceptanceFailure,
+                r"^LE-14 real acceptance failed$",
+            ),
+        ):
+            run_le_14_acceptance._terminate_process_tree(child_process)
+
+        self.assertEqual(descendants.call_count, 2)
+        taskkill_commands = [
+            entry.args[0]
+            for entry in process.call_args_list
+            if entry.args[0][0] == "taskkill"
+        ]
+        self.assertEqual(
+            taskkill_commands,
+            [["taskkill", "/PID", "4898", "/T", "/F"]],
         )
 
     def test_windows_descendant_snapshot_is_bounded_and_path_free(self) -> None:
@@ -805,12 +966,17 @@ def test_sleep_until_cancelled() -> None:
 class WindowsPostgresHandoffTests(unittest.TestCase):
     def test_native_postgres_uses_the_parent_owned_root(self) -> None:
         calls: list[list[str]] = []
+        windows_tool_root = PureWindowsPath("C:/PostgreSQL/bin")
+        tools = {
+            name: os.fspath(windows_tool_root / f"{name}.exe")
+            for name in ("initdb", "pg_ctl", "createdb")
+        }
 
         def fake_run(
             command: list[str], **_kwargs: object
         ) -> subprocess.CompletedProcess[str]:
             calls.append(command)
-            if command[0].endswith("initdb"):
+            if command[0] == tools["initdb"]:
                 data = Path(command[command.index("--pgdata") + 1])
                 data.mkdir(parents=True)
                 (data / "postgresql.conf").write_text("", encoding="utf-8")
@@ -830,7 +996,7 @@ class WindowsPostgresHandoffTests(unittest.TestCase):
                 patch.object(
                     acceptance_postgres,
                     "_required_postgres_tool",
-                    side_effect=lambda name: os.fspath(Path("/tools") / name),
+                    side_effect=tools.__getitem__,
                 ),
                 patch.object(
                     acceptance_postgres.subprocess,
@@ -847,7 +1013,7 @@ class WindowsPostgresHandoffTests(unittest.TestCase):
             self.assertTrue(parent_owned_root.is_dir())
 
         stop = calls[-1]
-        self.assertEqual(stop[0], "/tools/pg_ctl")
+        self.assertEqual(stop[0], tools["pg_ctl"])
         self.assertEqual(
             stop[stop.index("--pgdata") + 1],
             os.fspath(parent_owned_root / "data"),

@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -298,9 +299,24 @@ def ensure_silero_vad_assets() -> Path:
         _reject("LE-14 Silero VAD runtime is unavailable")
 
 
-def _windows_descendant_process_ids(root_pid: int) -> tuple[int, ...]:
+def _remaining_cleanup_seconds(deadline: float, maximum: float) -> float:
+    return max(0.0, min(maximum, deadline - time.monotonic()))
+
+
+def _windows_descendant_process_ids(
+    root_pid: int,
+    *,
+    deadline: float | None = None,
+) -> tuple[int, ...]:
     """Snapshot the bounded descendants used if Windows tree termination fails."""
 
+    timeout = (
+        PROCESS_STOP_TIMEOUT_SECONDS
+        if deadline is None
+        else _remaining_cleanup_seconds(deadline, PROCESS_STOP_TIMEOUT_SECONDS)
+    )
+    if timeout <= 0:
+        return ()
     environment = os.environ.copy()
     environment[WINDOWS_CLEANUP_ROOT_PID_ENVIRONMENT] = str(root_pid)
     script = (
@@ -331,7 +347,7 @@ def _windows_descendant_process_ids(root_pid: int) -> tuple[int, ...]:
             capture_output=True,
             text=True,
             check=False,
-            timeout=PROCESS_STOP_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
     except (OSError, subprocess.TimeoutExpired):
         return ()
@@ -351,14 +367,25 @@ def _windows_descendant_process_ids(root_pid: int) -> tuple[int, ...]:
     return tuple(descendants)
 
 
-def _taskkill_tree(process_id: int) -> bool:
+def _taskkill_tree(
+    process_id: int,
+    *,
+    deadline: float | None = None,
+) -> bool:
+    timeout = (
+        CLEANUP_TIMEOUT_SECONDS
+        if deadline is None
+        else _remaining_cleanup_seconds(deadline, CLEANUP_TIMEOUT_SECONDS)
+    )
+    if timeout <= 0:
+        return False
     try:
         completed = subprocess.run(
             ["taskkill", "/PID", str(process_id), "/T", "/F"],
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            timeout=CLEANUP_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -369,22 +396,61 @@ def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
     """Stop only the process tree placed in this driver's private group."""
 
     if os.name == "nt":
-        descendants = _windows_descendant_process_ids(process.pid)
-        tree_stopped = _taskkill_tree(process.pid)
+        deadline = time.monotonic() + CLEANUP_TIMEOUT_SECONDS
+        cleanup_failed = False
+        descendants = _windows_descendant_process_ids(
+            process.pid,
+            deadline=deadline,
+        )
+        tree_stopped = _taskkill_tree(process.pid, deadline=deadline)
         if not tree_stopped:
-            for process_id in descendants:
-                _taskkill_tree(process_id)
-            with contextlib.suppress(OSError):
+            late_descendants = _windows_descendant_process_ids(
+                process.pid,
+                deadline=deadline,
+            )
+            descendants = tuple(dict.fromkeys((*late_descendants, *descendants)))
+            try:
                 process.kill()
+            except OSError:
+                cleanup_failed = True
+            for process_id in descendants:
+                if _remaining_cleanup_seconds(deadline, CLEANUP_TIMEOUT_SECONDS) <= 0:
+                    cleanup_failed = True
+                    break
+                if not _taskkill_tree(process_id, deadline=deadline):
+                    cleanup_failed = True
+        wait_timeout = _remaining_cleanup_seconds(
+            deadline,
+            PROCESS_KILL_TIMEOUT_SECONDS,
+        )
+        if wait_timeout <= 0:
+            _reject("LE-14 real acceptance failed")
         try:
-            process.wait(timeout=PROCESS_KILL_TIMEOUT_SECONDS)
+            process.wait(timeout=wait_timeout)
         except (OSError, subprocess.TimeoutExpired):
             for process_id in descendants:
-                _taskkill_tree(process_id)
-            with contextlib.suppress(OSError):
+                if _remaining_cleanup_seconds(deadline, CLEANUP_TIMEOUT_SECONDS) <= 0:
+                    cleanup_failed = True
+                    break
+                if not _taskkill_tree(process_id, deadline=deadline):
+                    cleanup_failed = True
+            try:
                 process.kill()
-            with contextlib.suppress(OSError, subprocess.TimeoutExpired):
-                process.wait(timeout=PROCESS_KILL_TIMEOUT_SECONDS)
+            except OSError:
+                cleanup_failed = True
+            wait_timeout = _remaining_cleanup_seconds(
+                deadline,
+                PROCESS_KILL_TIMEOUT_SECONDS,
+            )
+            if wait_timeout <= 0:
+                cleanup_failed = True
+            else:
+                try:
+                    process.wait(timeout=wait_timeout)
+                except (OSError, subprocess.TimeoutExpired):
+                    cleanup_failed = True
+        if cleanup_failed:
+            _reject("LE-14 real acceptance failed")
         return
 
     try:
@@ -455,7 +521,7 @@ def _cleanup_postgres_resources(
             immediate_command = [*command]
             immediate_command[immediate_command.index("fast")] = "immediate"
             try:
-                subprocess.run(
+                completed = subprocess.run(
                     immediate_command,
                     check=False,
                     stdout=subprocess.DEVNULL,
@@ -463,7 +529,9 @@ def _cleanup_postgres_resources(
                     timeout=CLEANUP_TIMEOUT_SECONDS,
                 )
             except (OSError, subprocess.TimeoutExpired):
-                pass
+                _reject("LE-14 real acceptance failed")
+            if completed.returncode != 0:
+                _reject("LE-14 real acceptance failed")
         return
     environment = {
         key: value
@@ -550,6 +618,7 @@ def run_acceptance(secret_path: Path) -> None:
         process: subprocess.Popen[str] | None = None
         cancellation_requested = False
         cleanup_started = False
+        resources_cleaned = False
         handler_restored = False
 
         def request_cancellation(
@@ -572,7 +641,22 @@ def run_acceptance(secret_path: Path) -> None:
                 signal.signal(signal.SIGTERM, previous_sigterm_handler)
                 handler_restored = True
 
-        timed_out = False
+        def cleanup_owned_resources() -> None:
+            nonlocal cleanup_started, resources_cleaned
+            if process is None or resources_cleaned:
+                return
+            cleanup_started = True
+            try:
+                _terminate_process_tree(process)
+            finally:
+                try:
+                    _cleanup_postgres_resources(
+                        process.pid,
+                        windows_postgres_root,
+                    )
+                finally:
+                    resources_cleaned = True
+
         try:
             process = subprocess.Popen(
                 command,
@@ -591,46 +675,31 @@ def run_acceptance(secret_path: Path) -> None:
             )
             if cancellation_requested:
                 _reject("LE-14 real acceptance failed")
+            timed_out = False
             try:
                 stdout, stderr = process.communicate(timeout=ACCEPTANCE_TIMEOUT_SECONDS)
             except subprocess.TimeoutExpired:
                 timed_out = True
                 stdout = ""
                 stderr = ""
+            if timed_out:
+                cleanup_owned_resources()
+                _reject("LE-14 real acceptance failed")
+            returncode = process.returncode
+            if returncode is None:
+                cleanup_owned_resources()
+                _reject("LE-14 real acceptance failed")
+            completed = subprocess.CompletedProcess(
+                command,
+                returncode,
+                stdout,
+                stderr,
+            )
         except BaseException:
-            cleanup_started = True
-            if process is not None:
-                _terminate_process_tree(process)
-                _cleanup_postgres_resources(
-                    process.pid,
-                    windows_postgres_root,
-                )
+            cleanup_owned_resources()
             raise
         finally:
             restore_sigterm_handler()
-        if timed_out:
-            cleanup_started = True
-            _terminate_process_tree(process)
-            _cleanup_postgres_resources(
-                process.pid,
-                windows_postgres_root,
-            )
-            _reject("LE-14 real acceptance failed")
-        returncode = process.returncode
-        if returncode is None:
-            cleanup_started = True
-            _terminate_process_tree(process)
-            _cleanup_postgres_resources(
-                process.pid,
-                windows_postgres_root,
-            )
-            _reject("LE-14 real acceptance failed")
-        completed = subprocess.CompletedProcess(
-            command,
-            returncode,
-            stdout,
-            stderr,
-        )
     combined = completed.stdout + completed.stderr
     if api_key in combined or os.fspath(secret_path) in combined:
         _reject("LE-14 acceptance output leaked private input")
