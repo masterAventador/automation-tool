@@ -12,6 +12,8 @@ import pytest
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, os.fspath(REPOSITORY_ROOT / "scripts"))
 
+from video_runtime_cache import cache_root  # type: ignore[import-not-found]  # noqa: E402
+
 from automation_tool.executor import script_voiceover as script_voiceover_module  # noqa: E402
 from automation_tool.executor.material_probe import (  # noqa: E402
     MAX_MATERIAL_DURATION_MS,
@@ -35,9 +37,9 @@ from automation_tool.executor.script_segmentation import (  # noqa: E402
 from automation_tool.executor.script_voiceover import (  # noqa: E402
     ScriptVoiceoverClip,
     ScriptVoiceoverRejected,
+    ScriptVoiceoverResult,
     synthesize_script_voiceovers,
 )
-from video_runtime_cache import cache_root  # type: ignore[import-not-found]  # noqa: E402
 
 API_KEY = "sk-private-script-voiceover-key-123456"
 
@@ -306,6 +308,267 @@ def test_an_existing_fixed_output_is_preserved_before_any_tts_call(
 
     assert synthesizer.calls == []
     assert existing.read_bytes() == b"existing operator data"
+
+
+def test_a_rejected_retry_preserves_the_previously_successful_batch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = _workspace(tmp_path / "workspace")
+    synthesizer = _Synthesizer()
+    monkeypatch.setattr(
+        script_voiceover_module,
+        "synthesize_voiceover",
+        synthesizer,
+    )
+    _install_probe(monkeypatch, [_facts(1237)])
+    script = _script("第一句。")
+    tools = _stub_tools(tmp_path)
+
+    first = synthesize_script_voiceovers(
+        script,
+        config=_config(),
+        workspace=workspace,
+        tools=tools,
+    )
+    output = workspace.root / first.clips[0].relative_path
+    original_bytes = output.read_bytes()
+
+    with pytest.raises(ScriptVoiceoverRejected):
+        synthesize_script_voiceovers(
+            script,
+            config=_config(),
+            workspace=workspace,
+            tools=tools,
+        )
+
+    assert synthesizer.calls == [("第一句。", "voiceover/sentence-0001.wav")]
+    assert output.read_bytes() == original_bytes
+
+
+def test_a_failed_batch_preserves_files_authored_before_the_batch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = _workspace(tmp_path / "workspace")
+    previous = workspace.write_bytes("previous-result.bin", b"keep previous result")
+    synthesizer = _Synthesizer(fail_on_call=2)
+    monkeypatch.setattr(
+        script_voiceover_module,
+        "synthesize_voiceover",
+        synthesizer,
+    )
+    _install_probe(monkeypatch, [_facts(1237)])
+
+    with pytest.raises(ScriptVoiceoverRejected):
+        synthesize_script_voiceovers(
+            _script("第一句。", "第二句失败。"),
+            config=_config(),
+            workspace=workspace,
+            tools=_stub_tools(tmp_path),
+        )
+
+    assert previous.read_bytes() == b"keep previous result"
+    assert list(workspace.root.rglob("*.wav")) == []
+
+
+def test_a_local_write_failure_preserves_files_authored_before_the_batch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = _workspace(tmp_path / "workspace")
+    previous = workspace.write_bytes("previous-result.bin", b"keep previous result")
+    original_write_bytes = Path.write_bytes
+
+    def short_write_then_fail(path: Path, payload: bytes) -> int:
+        if path.name == "sentence-0001.wav":
+            original_write_bytes(path, payload[:1])
+            raise OSError(f"private path: {path}")
+        return original_write_bytes(path, payload)
+
+    monkeypatch.setattr(Path, "write_bytes", short_write_then_fail)
+    monkeypatch.setattr(
+        script_voiceover_module,
+        "synthesize_voiceover",
+        _Synthesizer(),
+    )
+
+    with pytest.raises(ScriptVoiceoverRejected) as raised:
+        synthesize_script_voiceovers(
+            _script("第一句。"),
+            config=_config(),
+            workspace=workspace,
+            tools=_stub_tools(tmp_path),
+        )
+
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    assert previous.read_bytes() == b"keep previous result"
+    assert list(workspace.root.rglob("*.wav")) == []
+
+
+def test_an_unusable_output_parent_is_rejected_before_any_tts_call(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    blocked_parent = root / "voiceover"
+    blocked_parent.write_bytes(b"not a directory")
+    workspace = AuthoringWorkspace(root)
+    synthesizer = _Synthesizer()
+    monkeypatch.setattr(
+        script_voiceover_module,
+        "synthesize_voiceover",
+        synthesizer,
+    )
+
+    with pytest.raises(ScriptVoiceoverRejected):
+        synthesize_script_voiceovers(
+            _script("第一句。"),
+            config=_config(),
+            workspace=workspace,
+            tools=_stub_tools(tmp_path),
+        )
+
+    assert synthesizer.calls == []
+    assert blocked_parent.read_bytes() == b"not a directory"
+
+
+def test_a_missing_written_audio_is_rejected_without_a_private_path_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = _workspace(tmp_path / "workspace")
+
+    def report_without_writing(
+        _config: VoiceoverConfig,
+        _narration: str,
+        *,
+        workspace: AuthoringWorkspace,
+        relative_path: str,
+    ) -> SynthesizedVoiceover:
+        del workspace
+        return SynthesizedVoiceover(relative_path=relative_path, bytes_written=1)
+
+    monkeypatch.setattr(
+        script_voiceover_module,
+        "synthesize_voiceover",
+        report_without_writing,
+    )
+
+    with pytest.raises(ScriptVoiceoverRejected) as raised:
+        synthesize_script_voiceovers(
+            _script("第一句。"),
+            config=_config(),
+            workspace=workspace,
+            tools=_stub_tools(tmp_path),
+        )
+
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+
+
+def test_an_unreadable_output_parent_is_rejected_without_a_private_path_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = _workspace(tmp_path / "workspace")
+    output_parent = workspace.root / "voiceover"
+    original_lstat = Path.lstat
+
+    def reject_output_parent(path: Path) -> os.stat_result:
+        if path == output_parent:
+            raise PermissionError(f"private path: {path}")
+        return original_lstat(path)
+
+    synthesizer = _Synthesizer()
+    monkeypatch.setattr(Path, "lstat", reject_output_parent)
+    monkeypatch.setattr(
+        script_voiceover_module,
+        "synthesize_voiceover",
+        synthesizer,
+    )
+
+    with pytest.raises(ScriptVoiceoverRejected) as raised:
+        synthesize_script_voiceovers(
+            _script("第一句。"),
+            config=_config(),
+            workspace=workspace,
+            tools=_stub_tools(tmp_path),
+        )
+
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    assert synthesizer.calls == []
+
+
+def test_an_invalid_synthesizer_reply_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = _workspace(tmp_path / "workspace")
+    monkeypatch.setattr(
+        script_voiceover_module,
+        "synthesize_voiceover",
+        lambda *_args, **_kwargs: object(),
+    )
+
+    with pytest.raises(ScriptVoiceoverRejected):
+        synthesize_script_voiceovers(
+            _script("第一句。"),
+            config=_config(),
+            workspace=workspace,
+            tools=_stub_tools(tmp_path),
+        )
+
+
+def test_written_audio_must_match_the_synthesizer_byte_count(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = _workspace(tmp_path / "workspace")
+
+    def report_a_different_size(
+        _config: VoiceoverConfig,
+        _narration: str,
+        *,
+        workspace: AuthoringWorkspace,
+        relative_path: str,
+    ) -> SynthesizedVoiceover:
+        workspace.write_bytes(relative_path, b"x")
+        return SynthesizedVoiceover(relative_path=relative_path, bytes_written=2)
+
+    monkeypatch.setattr(
+        script_voiceover_module,
+        "synthesize_voiceover",
+        report_a_different_size,
+    )
+
+    with pytest.raises(ScriptVoiceoverRejected):
+        synthesize_script_voiceovers(
+            _script("第一句。"),
+            config=_config(),
+            workspace=workspace,
+            tools=_stub_tools(tmp_path),
+        )
+
+    assert list(workspace.root.rglob("*.wav")) == []
+
+
+def test_result_and_public_input_types_fail_closed(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ScriptVoiceoverRejected):
+        ScriptVoiceoverResult(script_request_id="", clips=())
+
+    with pytest.raises(ScriptVoiceoverRejected):
+        synthesize_script_voiceovers(
+            object(),  # type: ignore[arg-type]
+            config=_config(),
+            workspace=_workspace(tmp_path / "workspace"),
+            tools=_stub_tools(tmp_path),
+        )
 
 
 def test_packaged_tools_are_revalidated_before_any_tts_call(

@@ -103,6 +103,19 @@ def _fresh_output_path(workspace: AuthoringWorkspace, relative_path: str) -> Pat
     resolved = workspace.resolve(relative_path)
     if resolved != expected or expected.is_symlink() or expected.exists():
         _reject()
+    parent_metadata = None
+    parent_unreadable = False
+    try:
+        parent_metadata = expected.parent.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        parent_unreadable = True
+    if parent_unreadable or (
+        parent_metadata is not None
+        and (not stat.S_ISDIR(parent_metadata.st_mode) or stat.S_ISLNK(parent_metadata.st_mode))
+    ):
+        _reject()
     return expected
 
 
@@ -119,10 +132,14 @@ def _require_written_audio(
         or not 1 <= synthesized.bytes_written <= MAX_VOICEOVER_BYTES
     ):
         _reject()
+    metadata = None
+    resolved = None
     try:
         metadata = output_path.lstat()
         resolved = output_path.resolve(strict=True)
     except OSError:
+        pass
+    if metadata is None or resolved is None:
         _reject()
     if (
         not stat.S_ISREG(metadata.st_mode)
@@ -163,6 +180,7 @@ def synthesize_script_voiceovers(
         _reject()
 
     clips: list[ScriptVoiceoverClip] = []
+    batch_workspace: AuthoringWorkspace | None = None
     try:
         # Prove every local precondition before the first billable cloud call.
         # `read_stream_facts` revalidates the tools again at the moment of use;
@@ -179,14 +197,17 @@ def synthesize_script_voiceovers(
             )
             for sentence in script.sentences
         )
+        # A scoped view snapshots everything that predates this call as seeded
+        # and therefore rolls back only files authored by this batch.
+        batch_workspace = AuthoringWorkspace(workspace.root)
         for sentence, relative_path, output_path in planned_outputs:
             # Close the window between the batch preflight and this sentence.
-            output_path = _fresh_output_path(workspace, relative_path)
+            output_path = _fresh_output_path(batch_workspace, relative_path)
             synthesized = _require_written_audio(
                 synthesize_voiceover(
                     config,
                     sentence.text,
-                    workspace=workspace,
+                    workspace=batch_workspace,
                     relative_path=relative_path,
                 ),
                 relative_path=relative_path,
@@ -207,10 +228,12 @@ def synthesize_script_voiceovers(
             clips=tuple(clips),
         )
     except ScriptVoiceoverRejected:
-        workspace.rollback_authored_files()
+        if batch_workspace is not None:
+            batch_workspace.rollback_authored_files()
         raise
     except Exception:
-        workspace.rollback_authored_files()
+        if batch_workspace is not None:
+            batch_workspace.rollback_authored_files()
     _reject()
 
 
