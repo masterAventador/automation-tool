@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Never
+from typing import Never, cast
 
 from automation_tool.control_plane.domain.editing_project import (
+    CaptionStyle,
     EditingProject,
     EditingProjectId,
     OutputSpec,
@@ -45,19 +46,76 @@ _TRANSITION_KINDS = {
 }
 
 
+def _rebuilt_project(project: EditingProject) -> EditingProject:
+    return EditingProject(
+        project_id=project.project_id,
+        title=project.title,
+        output=OutputSpec(
+            width=project.output.width,
+            height=project.output.height,
+            fps=project.output.fps,
+        ),
+        caption_style=CaptionStyle(
+            font_key=project.caption_style.font_key,
+            font_px=project.caption_style.font_px,
+            stroke_px=project.caption_style.stroke_px,
+            line_spacing=project.caption_style.line_spacing,
+        ),
+        created_at=project.created_at,
+    )
+
+
+def _rebuilt_timeline_clip(clip: TimelineClip) -> TimelineClip:
+    transition = clip.transition_in
+    rebuilt_transition = (
+        None
+        if transition is None
+        else TimelineTransition(
+            kind=transition.kind,
+            duration_ms=transition.duration_ms,
+        )
+    )
+    return TimelineClip(
+        clip_id=clip.clip_id,
+        start_ms=clip.start_ms,
+        duration_ms=clip.duration_ms,
+        source_material_id=clip.source_material_id,
+        source_in_ms=clip.source_in_ms,
+        source_out_ms=clip.source_out_ms,
+        text=clip.text,
+        gain_db=clip.gain_db,
+        transition_in=rebuilt_transition,
+    )
+
+
+def _rebuilt_timeline(timeline: Timeline) -> Timeline:
+    return Timeline(
+        timeline_id=timeline.timeline_id,
+        project_id=timeline.project_id,
+        revision=timeline.revision,
+        duration_ms=timeline.duration_ms,
+        tracks=tuple(
+            TimelineTrack(
+                track_id=track.track_id,
+                kind=track.kind,
+                clips=tuple(_rebuilt_timeline_clip(clip) for clip in track.clips),
+            )
+            for track in timeline.tracks
+        ),
+        created_at=timeline.created_at,
+    )
+
+
 def _visual_clip(
     clip: TimelineClip,
     *,
     sequence: int,
 ) -> LocalEditingVisualRenderClip:
-    if not isinstance(clip, TimelineClip) or not isinstance(clip.source_material_id, MaterialId):
-        _reject()
+    material_id = cast(MaterialId, clip.source_material_id)
     transition = clip.transition_in
-    if transition is not None and not isinstance(transition, TimelineTransition):
-        _reject()
     return LocalEditingVisualRenderClip(
         sequence=sequence,
-        material_id=clip.source_material_id.uuid,
+        material_id=material_id.uuid,
         kind=(
             SegmentSelectionMaterialKind.IMAGE
             if clip.source_in_ms is None
@@ -84,8 +142,8 @@ def create_local_editing_visual_render_plan(
         or not isinstance(project.project_id, EditingProjectId)
         or not isinstance(timeline.project_id, EditingProjectId)
         or not isinstance(timeline.timeline_id, TimelineId)
-        or project.project_id != timeline.project_id
         or not isinstance(project.output, OutputSpec)
+        or not isinstance(project.caption_style, CaptionStyle)
         or not isinstance(timeline.tracks, tuple)
         or not all(
             isinstance(track, TimelineTrack)
@@ -97,30 +155,27 @@ def create_local_editing_visual_render_plan(
     ):
         _reject()
     try:
-        output = OutputSpec(
-            width=project.output.width,
-            height=project.output.height,
-            fps=project.output.fps,
-        )
-        visual_tracks = tuple(
-            track
-            for track in timeline.tracks
-            if isinstance(track, TimelineTrack) and track.kind is TimelineTrackKind.VISUAL
-        )
-        if len(visual_tracks) != 1 or not isinstance(visual_tracks[0].clips, tuple):
+        validated_project = _rebuilt_project(project)
+        validated_timeline = _rebuilt_timeline(timeline)
+        if validated_project.project_id != validated_timeline.project_id:
             _reject()
+        output = validated_project.output
+        visual_track = cast(
+            TimelineTrack,
+            validated_timeline.track_of(TimelineTrackKind.VISUAL),
+        )
         clips = tuple(
             _visual_clip(clip, sequence=index)
-            for index, clip in enumerate(visual_tracks[0].clips, start=1)
+            for index, clip in enumerate(visual_track.clips, start=1)
         )
         return LocalEditingVisualRenderPlan(
-            project_id=project.project_id.uuid,
-            timeline_id=timeline.timeline_id.uuid,
-            timeline_revision=timeline.revision,
+            project_id=validated_project.project_id.uuid,
+            timeline_id=validated_timeline.timeline_id.uuid,
+            timeline_revision=validated_timeline.revision,
             output_width=output.width,
             output_height=output.height,
             output_fps=output.fps,
-            duration_ms=timeline.duration_ms,
+            duration_ms=validated_timeline.duration_ms,
             clips=clips,
         )
     except Exception:

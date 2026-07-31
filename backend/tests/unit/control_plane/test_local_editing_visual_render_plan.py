@@ -271,6 +271,37 @@ def test_projection_rejects_mutated_nonvisual_track_shapes_before_filtering() ->
             create_local_editing_visual_render_plan(project, timeline)
 
 
+def test_projection_rebuilds_the_complete_domain_before_selecting_visual_data() -> None:
+    project_id = EditingProjectId.new()
+
+    project = _project(project_id)
+    timeline = _timeline(project_id)
+    object.__setattr__(project.caption_style, "font_px", 0)
+    with pytest.raises(LocalEditingVisualPlanRejected):
+        create_local_editing_visual_render_plan(project, timeline)
+
+    project = _project(project_id)
+    timeline = _timeline(project_id)
+    caption = timeline.tracks[-1]
+    duplicate_caption = TimelineTrack(
+        track_id="caption-copy",
+        kind=TimelineTrackKind.CAPTION,
+        clips=caption.clips,
+    )
+    object.__setattr__(timeline, "tracks", (*timeline.tracks, duplicate_caption))
+    with pytest.raises(LocalEditingVisualPlanRejected):
+        create_local_editing_visual_render_plan(project, timeline)
+
+    timeline = _timeline(project_id)
+    caption = timeline.tracks[-1]
+    object.__setattr__(caption.clips[0], "text", "/Users/private/caption")
+    object.__setattr__(caption.clips[0], "source_in_ms", 0)
+    with pytest.raises(LocalEditingVisualPlanRejected) as error:
+        create_local_editing_visual_render_plan(project, timeline)
+    assert "private" not in str(error.value)
+    assert error.value.__cause__ is None
+
+
 def test_render_wire_limits_are_guarded_against_domain_drift() -> None:
     assert (
         MIN_LOCAL_EDITING_OUTPUT_DIMENSION,
