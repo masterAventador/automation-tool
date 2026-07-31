@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,6 +33,7 @@ from automation_tool.executor.script_segmentation import (
 _MAX_REQUEST_ID_CHARACTERS: Final = 512
 _MAX_ALIGNMENT_ERROR_PERCENT: Final = 15
 _EXACT_ALIGNMENT_CHARACTERS: Final = 4
+_MAX_ALIGNMENT_CANDIDATE_CHECKS: Final = 1_024
 
 
 class ScriptRecordingRejected(RuntimeError):
@@ -134,34 +135,64 @@ def _normalized_speech_text(value: str) -> str:
     )
 
 
-def _levenshtein_distance(left: str, right: str) -> int:
+def _levenshtein_distance(
+    left: str,
+    right: str,
+    *,
+    maximum_distance: int,
+) -> int:
     if len(left) > len(right):
         left, right = right, left
-    previous = list(range(len(left) + 1))
+    rejected_distance = maximum_distance + 1
+    previous = [rejected_distance] * (len(left) + 1)
+    for left_index in range(min(len(left), maximum_distance) + 1):
+        previous[left_index] = left_index
     for right_index, right_character in enumerate(right, start=1):
-        current = [right_index]
-        for left_index, left_character in enumerate(left, start=1):
-            current.append(
-                min(
-                    current[-1] + 1,
-                    previous[left_index] + 1,
-                    previous[left_index - 1] + int(left_character != right_character),
-                )
+        current = [rejected_distance] * (len(left) + 1)
+        if right_index <= maximum_distance:
+            current[0] = right_index
+        first_left_index = max(1, right_index - maximum_distance)
+        last_left_index = min(len(left), right_index + maximum_distance)
+        for left_index in range(first_left_index, last_left_index + 1):
+            current[left_index] = min(
+                current[left_index - 1] + 1,
+                previous[left_index] + 1,
+                previous[left_index - 1] + int(left[left_index - 1] != right_character),
             )
         previous = current
     return previous[-1]
 
 
-def _texts_align(script_text: str, transcript: str) -> bool:
+def _alignment_distance(
+    script_text: str,
+    transcript: str,
+    *,
+    maximum_distance: int | None = None,
+) -> int | None:
     maximum = max(len(script_text), len(transcript))
     if not script_text or not transcript:
-        return False
+        return None
+    if script_text == transcript:
+        return 0
     if maximum <= _EXACT_ALIGNMENT_CHARACTERS:
-        return script_text == transcript
+        return None
     allowed_errors = maximum * _MAX_ALIGNMENT_ERROR_PERCENT // 100
+    if maximum_distance is not None:
+        allowed_errors = min(allowed_errors, maximum_distance)
     if abs(len(script_text) - len(transcript)) > allowed_errors:
-        return False
-    return _levenshtein_distance(script_text, transcript) <= allowed_errors
+        return None
+    distance = _levenshtein_distance(
+        script_text,
+        transcript,
+        maximum_distance=allowed_errors,
+    )
+    if distance > allowed_errors:
+        return None
+    return distance
+
+
+def _texts_align(script_text: str, transcript: str) -> bool:
+    return _alignment_distance(script_text, transcript) is not None
 
 
 def _aligned_slice_length_bounds(expected: str) -> tuple[int, int]:
@@ -181,15 +212,20 @@ def _slice_proves_sentence(
     actual: str,
 ) -> bool:
     expected = normalized_sentences[sentence_index]
-    if not _texts_align(expected, actual):
+    expected_distance = _alignment_distance(expected, actual)
+    if expected_distance is None:
         return False
-    expected_distance = _levenshtein_distance(expected, actual)
     for other_index, other in enumerate(normalized_sentences):
         if other_index == sentence_index or other == expected:
             continue
         if (
-            _texts_align(other, actual)
-            and _levenshtein_distance(other, actual) <= expected_distance
+            expected_distance
+            and _alignment_distance(
+                other,
+                actual,
+                maximum_distance=expected_distance,
+            )
+            is not None
         ):
             # A slice that is at least as close to another distinct script
             # sentence cannot prove the declared order. Fail closed rather
@@ -202,7 +238,34 @@ def _slice_proves_sentence(
             # presence, even when it also falls within this sentence's ASR
             # tolerance.
             return False
+    if 0 < sentence_index < len(normalized_sentences) - 1:
+        previous = normalized_sentences[sentence_index - 1]
+        following = normalized_sentences[sentence_index + 1]
+        if any(
+            previous.endswith(actual[:boundary]) and following.startswith(actual[boundary:])
+            for boundary in range(1, len(actual))
+        ):
+            # A missing middle sentence can otherwise be synthesized from the
+            # previous sentence's suffix and the following sentence's prefix.
+            return False
     return True
+
+
+def _candidate_ends(
+    *,
+    first: int,
+    last: int,
+    preferred: int,
+) -> Iterator[int]:
+    centered = max(first, min(preferred, last))
+    yield centered
+    for offset in range(1, max(centered - first, last - centered) + 1):
+        lower = centered - offset
+        upper = centered + offset
+        if lower >= first:
+            yield lower
+        if upper <= last:
+            yield upper
 
 
 def _sentences_align(
@@ -222,29 +285,43 @@ def _sentences_align(
         maximum_suffix[index] = maximum + maximum_suffix[index + 1]
     if not minimum_suffix[0] <= len(transcript) <= maximum_suffix[0]:
         return False
-    reachable_starts = {0}
-    for index, (minimum, maximum) in enumerate(length_bounds):
-        reachable_ends: set[int] = set()
-        for start in reachable_starts:
-            first_end = max(
-                start + minimum,
-                len(transcript) - maximum_suffix[index + 1],
-            )
-            last_end = min(
-                start + maximum,
-                len(transcript) - minimum_suffix[index + 1],
-            )
-            for end in range(first_end, last_end + 1):
-                if _slice_proves_sentence(
-                    normalized_sentences,
-                    sentence_index=index,
-                    actual=transcript[start:end],
-                ):
-                    reachable_ends.add(end)
-        if not reachable_ends:
+    failed_states: set[tuple[int, int]] = set()
+    candidate_checks = 0
+
+    def partition_from(sentence_index: int, transcript_start: int) -> bool:
+        nonlocal candidate_checks
+        if sentence_index == len(normalized_sentences):
+            return transcript_start == len(transcript)
+        state = (sentence_index, transcript_start)
+        if state in failed_states:
             return False
-        reachable_starts = reachable_ends
-    return len(transcript) in reachable_starts
+        minimum, maximum = length_bounds[sentence_index]
+        first_end = max(
+            transcript_start + minimum,
+            len(transcript) - maximum_suffix[sentence_index + 1],
+        )
+        last_end = min(
+            transcript_start + maximum,
+            len(transcript) - minimum_suffix[sentence_index + 1],
+        )
+        for transcript_end in _candidate_ends(
+            first=first_end,
+            last=last_end,
+            preferred=transcript_start + len(normalized_sentences[sentence_index]),
+        ):
+            if candidate_checks >= _MAX_ALIGNMENT_CANDIDATE_CHECKS:
+                return False
+            candidate_checks += 1
+            if _slice_proves_sentence(
+                normalized_sentences,
+                sentence_index=sentence_index,
+                actual=transcript[transcript_start:transcript_end],
+            ) and partition_from(sentence_index + 1, transcript_end):
+                return True
+        failed_states.add(state)
+        return False
+
+    return partition_from(0, 0)
 
 
 def _clips_from_segments(

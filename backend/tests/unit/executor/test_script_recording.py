@@ -276,6 +276,84 @@ def test_sentence_partition_moves_when_an_earlier_sentence_loses_its_first_chara
     )
 
 
+def test_maximum_exact_script_avoids_edit_distance_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    normalized_sentences = tuple(chr(0x4E00 + index) * 31 for index in range(128))
+    transcript = "".join(normalized_sentences)
+
+    def unexpected_edit_distance(left: str, right: str) -> int:
+        del left, right
+        raise AssertionError("exact text must not enter edit-distance work")
+
+    monkeypatch.setattr(
+        script_recording,
+        "_levenshtein_distance",
+        unexpected_edit_distance,
+    )
+
+    assert script_recording._sentences_align(normalized_sentences, transcript)
+
+
+def test_exact_partition_search_does_not_expand_every_valid_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    normalized_sentences = tuple(chr(0x4E00 + index) * 20 for index in range(16))
+    transcript = "".join(normalized_sentences)
+    candidate_checks = 0
+
+    def accept_candidate(
+        actual_sentences: tuple[str, ...],
+        *,
+        sentence_index: int,
+        actual: str,
+    ) -> bool:
+        nonlocal candidate_checks
+        del actual_sentences, sentence_index, actual
+        candidate_checks += 1
+        return True
+
+    monkeypatch.setattr(
+        script_recording,
+        "_slice_proves_sentence",
+        accept_candidate,
+    )
+
+    assert script_recording._sentences_align(normalized_sentences, transcript)
+    assert candidate_checks <= len(normalized_sentences) * 2
+
+
+def test_partition_search_stops_at_a_hard_candidate_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    normalized_sentences = tuple(chr(0x4E00 + index) * 20 for index in range(64))
+    transcript = "".join(normalized_sentences)
+    maximum_candidate_checks = 1_024
+    candidate_checks = 0
+
+    def exhaust_candidates(
+        actual_sentences: tuple[str, ...],
+        *,
+        sentence_index: int,
+        actual: str,
+    ) -> bool:
+        nonlocal candidate_checks
+        del actual_sentences, actual
+        candidate_checks += 1
+        if candidate_checks > maximum_candidate_checks:
+            raise AssertionError("partition search exceeded its hard work budget")
+        return sentence_index < len(normalized_sentences) - 1
+
+    monkeypatch.setattr(
+        script_recording,
+        "_slice_proves_sentence",
+        exhaust_candidates,
+    )
+
+    assert not script_recording._sentences_align(normalized_sentences, transcript)
+    assert candidate_checks == maximum_candidate_checks
+
+
 @pytest.mark.parametrize(
     ("sentences", "transcript"),
     [
@@ -322,6 +400,10 @@ def test_text_alignment_rejects_short_errors_large_differences_reordering_and_em
         (("abcdefghij", "Z"), "abcdefghij"),
         (("aaaaaaaaab", "aaaaaaaaac"), "aaaaaaaaacaaaaaaaaab"),
         (("a" * 33 + "b" * 7, "b" * 7), "a" * 33 + "b" * 7),
+        (
+            ("a" * 17 + "xyz", "xyz123q", "123" + "c" * 17),
+            ("a" * 17 + "xyz") + ("123" + "c" * 17),
+        ),
         (tuple("abcdefghij"), "abcdefghi"),
     ],
 )
