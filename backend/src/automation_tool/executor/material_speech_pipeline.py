@@ -20,6 +20,7 @@ from typing import Final, NoReturn, Protocol, runtime_checkable
 import numpy as np
 
 from automation_tool.executor.material_probe import (
+    MAX_MATERIAL_DURATION_MS,
     MaterialFacts,
     PackagedMediaTools,
     require_source_unchanged,
@@ -97,6 +98,29 @@ class SpeechAudioBatch:
 @runtime_checkable
 class SpeechTranscriptionAdapter(Protocol):
     def transcribe(self, audio: SpeechAudioBatch) -> str: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RecordedSpeechAnalysis:
+    """Path-free VAD and ASR facts for one user-supplied narration recording."""
+
+    duration_ms: int
+    speech_segments_ms: tuple[tuple[int, int], ...]
+    transcript: str = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.duration_ms) is not int
+            or not 1 <= self.duration_ms <= MAX_MATERIAL_DURATION_MS
+        ):
+            _reject()
+        validated = MaterialSpeechAnalysis(
+            has_speech=True,
+            speech_segments_ms=self.speech_segments_ms,
+            speech_transcript=self.transcript,
+        )
+        if any(end > self.duration_ms for _start, end in validated.speech_segments_ms):
+            _reject()
 
 
 @runtime_checkable
@@ -235,6 +259,123 @@ class LocalAudibleSpeechAnalyzer:
                 _reject()
             transcript = "\n".join(transcripts)
             return MaterialSpeechAnalysis(True, segments, transcript)
+        finally:
+            with suppress(OSError):
+                shutil.rmtree(workspace)
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class LocalRecordedSpeechAnalyzer:
+    """Run LE-14's local extraction, VAD and neutral ASR for known narration."""
+
+    tools: PackagedMediaTools
+    source: Path
+    approved: os.stat_result
+    vad_factory: Callable[[], object]
+    asr_adapter: SpeechTranscriptionAdapter
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.tools, PackagedMediaTools)
+            or not isinstance(self.source, Path)
+            or not isinstance(self.approved, os.stat_result)
+            or not callable(self.vad_factory)
+            or not isinstance(self.asr_adapter, SpeechTranscriptionAdapter)
+        ):
+            _reject()
+
+    def analyze(
+        self,
+        duration_ms: int,
+        *,
+        minimum_segments: int,
+    ) -> RecordedSpeechAnalysis:
+        failed = False
+        result: RecordedSpeechAnalysis | None = None
+        try:
+            result = self._analyze(
+                duration_ms,
+                minimum_segments=minimum_segments,
+            )
+        except Exception:
+            failed = True
+        if failed or result is None:
+            _reject()
+        return result
+
+    def _analyze(
+        self,
+        duration_ms: int,
+        *,
+        minimum_segments: int,
+    ) -> RecordedSpeechAnalysis:
+        if (
+            type(duration_ms) is not int
+            or not 1 <= duration_ms <= MAX_MATERIAL_DURATION_MS
+            or type(minimum_segments) is not int
+            or not 1 <= minimum_segments <= MAX_SPEECH_SEGMENTS
+        ):
+            _reject()
+        self.tools.revalidate()
+        source, checked = require_source_unchanged(self.source, self.approved)
+        try:
+            workspace_text = tempfile.mkdtemp(prefix=_SCRATCH_PREFIX)
+        except OSError:
+            _reject()
+        workspace = Path(workspace_text)
+        pcm_path = workspace / _PCM_FILENAME
+        try:
+            approved_pcm = _extract_pcm(
+                self.tools.ffmpeg_path,
+                source,
+                pcm_path,
+                duration_ms=duration_ms,
+            )
+            require_source_unchanged(source, checked)
+            vad = self.vad_factory()
+            if not isinstance(vad, SpeechProbabilityAnalyzer):
+                _reject()
+            segments, _confirmed_speech_duration_ms, pcm_bytes = _detect_speech_segments(
+                pcm_path,
+                vad,
+                duration_ms=duration_ms,
+                approved=approved_pcm,
+            )
+            # Sentence alignment is impossible without one real local boundary
+            # per sentence. Refuse before the first billable ASR request.
+            if len(segments) < minimum_segments:
+                _reject()
+            transcripts: list[str] = []
+            transcript_characters = 0
+            batches = _speech_audio_batches(
+                pcm_path,
+                pcm_bytes=pcm_bytes,
+                duration_ms=duration_ms,
+                segments=segments,
+                approved=approved_pcm,
+            )
+            try:
+                for batch in batches:
+                    transcript = self.asr_adapter.transcribe(batch)
+                    if (
+                        type(transcript) is not str
+                        or not transcript
+                        or transcript != transcript.strip()
+                    ):
+                        _reject()
+                    transcript_characters += len(transcript) + int(bool(transcripts))
+                    if transcript_characters > MAX_TRANSCRIPT_CHARACTERS:
+                        _reject()
+                    transcripts.append(transcript)
+            finally:
+                batches.close()
+            if not transcripts:
+                _reject()
+            return RecordedSpeechAnalysis(
+                duration_ms=duration_ms,
+                speech_segments_ms=segments,
+                transcript="\n".join(transcripts),
+            )
         finally:
             with suppress(OSError):
                 shutil.rmtree(workspace)
@@ -680,6 +821,8 @@ __all__ = [
     "MAX_ASR_WAV_BYTES",
     "LocalAudibleSpeechAnalyzer",
     "LocalAudibleSpeechAnalyzerFactory",
+    "LocalRecordedSpeechAnalyzer",
+    "RecordedSpeechAnalysis",
     "SpeechAudioBatch",
     "SpeechProbabilityAnalyzer",
     "SpeechTranscriptionAdapter",
