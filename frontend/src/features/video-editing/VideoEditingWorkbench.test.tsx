@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createLocalVideoEditingGateway } from "./local-video-editing-gateway";
 import type { VideoEditingGateway } from "./video-editing-gateway";
@@ -140,11 +140,89 @@ describe("video editing workbench", () => {
     expect(screen.getByText("时间轴结构预览")).toBeVisible();
     expect(screen.getByText(/轨道 1（画面）/u)).toBeVisible();
     expect(
-      screen.getByText("视频画面预览将在云端剪辑服务接入后提供。"),
+      screen.getByText("提交剪辑任务并成功生成成片后，可在这里播放预览。"),
     ).toBeVisible();
   });
 
-  it("keeps submission honestly unavailable and never fakes job progress", async () => {
+  it("loads a successful editing artifact into the real preview player", async () => {
+    const projectId = "0a48954d-2df1-4168-8f33-b62c5772845a";
+    const timelineId = "1b70168c-90d0-4ac7-938a-51eb4754f32a";
+    const outputId = "2c29395b-1015-43ae-84a7-6f1901caac09";
+    const readEditingArtifact = vi.fn().mockResolvedValue({
+      artifactId: outputId,
+      mediaType: "video/mp4",
+      base64: "AAAA",
+    });
+    const gateway: VideoEditingGateway = {
+      async listProjects() {
+        return [{
+          projectId,
+          title: "发布会剪辑",
+          sourceArtifactIds: [ARTIFACT_A],
+          createdAt: "2026-07-23T00:00:00.000Z",
+          updatedAt: "2026-07-23T00:00:00.000Z",
+        }];
+      },
+      async createProject() {
+        throw new Error("unused");
+      },
+      async getTimeline() {
+        return {
+          timelineId,
+          projectId,
+          revision: 1,
+          durationMs: 3_000,
+          tracks: [{
+            trackId: "track-1",
+            kind: "visual",
+            clips: [{
+              clipId: "clip-1",
+              startMs: 0,
+              durationMs: 3_000,
+              sourceArtifactId: ARTIFACT_A,
+              text: null,
+              transitionIn: null,
+            }],
+          }],
+          createdAt: "2026-07-23T00:00:00.000Z",
+        };
+      },
+      async saveTimeline() {
+        throw new Error("unused");
+      },
+      async listEditingJobs() {
+        return [{
+          editingJobId: "3d594650-b5f4-4498-8e38-0cf85d6dfa72",
+          projectId,
+          timelineId,
+          timelineRevision: 1,
+          status: "succeeded",
+          inputArtifactIds: [ARTIFACT_A],
+          outputArtifactIds: [outputId],
+          failureCode: null,
+          createdAt: "2026-07-23T00:00:00.000Z",
+          updatedAt: "2026-07-23T00:00:00.000Z",
+        }];
+      },
+      async submitEditingJob() {
+        throw new Error("unused");
+      },
+      readEditingArtifact,
+    };
+    const user = userEvent.setup();
+    render(<VideoEditingWorkbench gateway={gateway} />);
+
+    await user.click(await screen.findByRole("button", { name: "打开时间轴编辑" }));
+    await user.click(screen.getByRole("tab", { name: "预览" }));
+
+    expect(await screen.findByLabelText("剪辑成片预览")).toHaveAttribute(
+      "src",
+      "data:video/mp4;base64,AAAA",
+    );
+    expect(readEditingArtifact).toHaveBeenCalledWith(outputId);
+  });
+
+  it("reports an unavailable submission honestly and never fakes job progress", async () => {
     const user = userEvent.setup();
     render(
       <VideoEditingWorkbench gateway={createLocalVideoEditingGateway(memoryStorage())} />,
@@ -157,7 +235,7 @@ describe("video editing workbench", () => {
     await user.click(screen.getByRole("tab", { name: "提交与任务" }));
     expect(screen.getByText("还没有剪辑任务")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "提交剪辑任务" }));
-    expect(await screen.findByText(/云端剪辑功能尚未开通/u)).toBeVisible();
+    expect(await screen.findByText(/当前无法提交云端剪辑/u)).toBeVisible();
     expect(screen.getByText("还没有剪辑任务")).toBeVisible();
     expect(document.body).not.toHaveTextContent(/完成 100%|示例成片|假任务/u);
   });
@@ -202,6 +280,9 @@ describe("video editing workbench", () => {
         ];
       },
       async submitEditingJob() {
+        throw new Error("unused");
+      },
+      async readEditingArtifact() {
         throw new Error("unused");
       },
     };

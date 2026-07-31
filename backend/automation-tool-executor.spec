@@ -53,6 +53,9 @@ motion_authoring_resources = [
     # PC-26: the narrator's voice model id and audio hosts come from the same
     # catalog declaration the App reads.
     "contracts/video/bailian-model-catalog.v1.json",
+    # T4: the one-shot editing process derives all staging/output keys from
+    # this closed contract; a frozen package without it must not be built.
+    "contracts/video/aliyun-ims-editing-staging.v1.json",
     "vendor/hyperframes/skills/hyperframes-core/references/minimal-composition.md",
     "vendor/hyperframes/skills/hyperframes-core/references/determinism-rules.md",
 ]

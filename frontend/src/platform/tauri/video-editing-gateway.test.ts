@@ -11,6 +11,8 @@ import { TauriVideoEditingGateway } from "./video-editing-gateway";
 const PROJECT_ID = "00000000-0000-4000-8000-000000000101";
 const TIMELINE_ID = "00000000-0000-4000-8000-000000000102";
 const ARTIFACT_ID = "00000000-0000-4000-8000-000000000103";
+const JOB_ID = "00000000-0000-4000-8000-000000000104";
+const OUTPUT_ID = "00000000-0000-4000-8000-000000000105";
 
 const project = {
   projectId: PROJECT_ID,
@@ -48,6 +50,19 @@ const timeline = {
   createdAt: "2026-07-31T01:03:04Z",
 } as const;
 
+const job = {
+  editingJobId: JOB_ID,
+  projectId: PROJECT_ID,
+  timelineId: TIMELINE_ID,
+  timelineRevision: 1,
+  status: "succeeded",
+  inputArtifactIds: [ARTIFACT_ID],
+  outputArtifactIds: [OUTPUT_ID],
+  failureCode: null,
+  createdAt: "2026-07-31T01:04:05Z",
+  updatedAt: "2026-07-31T01:05:06Z",
+} as const;
+
 describe("Tauri video editing gateway", () => {
   beforeEach(() => invoke.mockReset());
 
@@ -58,9 +73,11 @@ describe("Tauri video editing gateway", () => {
       .mockResolvedValueOnce(timeline)
       .mockResolvedValueOnce(timeline)
       .mockResolvedValueOnce([])
-      .mockRejectedValueOnce({
-        code: "editing_service_unavailable",
-        retryable: false,
+      .mockResolvedValueOnce(job)
+      .mockResolvedValueOnce({
+        artifactId: OUTPUT_ID,
+        mediaType: "video/mp4",
+        base64: "AAAA",
       });
     const gateway = new TauriVideoEditingGateway();
 
@@ -74,8 +91,11 @@ describe("Tauri video editing gateway", () => {
     await expect(gateway.getTimeline(PROJECT_ID)).resolves.toEqual(timeline);
     await expect(gateway.saveTimeline(PROJECT_ID, draft)).resolves.toEqual(timeline);
     await expect(gateway.listEditingJobs(PROJECT_ID)).resolves.toEqual([]);
-    await expect(gateway.submitEditingJob(PROJECT_ID)).rejects.toMatchObject({
-      code: "editing_service_unavailable",
+    await expect(gateway.submitEditingJob(PROJECT_ID)).resolves.toEqual(job);
+    await expect(gateway.readEditingArtifact(OUTPUT_ID)).resolves.toEqual({
+      artifactId: OUTPUT_ID,
+      mediaType: "video/mp4",
+      base64: "AAAA",
     });
 
     expect(invoke.mock.calls).toEqual([
@@ -88,6 +108,7 @@ describe("Tauri video editing gateway", () => {
       ["save_video_editing_timeline", { projectId: PROJECT_ID, draft }],
       ["list_video_editing_jobs", { projectId: PROJECT_ID }],
       ["submit_video_editing_job", { projectId: PROJECT_ID }],
+      ["read_video_editing_artifact", { artifactId: OUTPUT_ID }],
     ]);
   });
 

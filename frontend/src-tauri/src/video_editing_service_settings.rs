@@ -86,12 +86,14 @@ pub struct ConfigureVideoEditingServiceRequest {
     region: AliyunEditingRegion,
     access_key_id: String,
     access_key_secret: String,
+    oss_bucket: String,
 }
 
 impl Drop for ConfigureVideoEditingServiceRequest {
     fn drop(&mut self) {
         self.access_key_id.zeroize();
         self.access_key_secret.zeroize();
+        self.oss_bucket.zeroize();
     }
 }
 
@@ -102,12 +104,15 @@ struct StoredCredential {
     region: AliyunEditingRegion,
     access_key_id: String,
     access_key_secret: String,
+    #[serde(default)]
+    oss_bucket: Option<String>,
 }
 
 impl Drop for StoredCredential {
     fn drop(&mut self) {
         self.access_key_id.zeroize();
         self.access_key_secret.zeroize();
+        self.oss_bucket.zeroize();
     }
 }
 
@@ -115,6 +120,7 @@ pub struct EditingServiceCredential {
     region: AliyunEditingRegion,
     access_key_id: Zeroizing<String>,
     access_key_secret: Zeroizing<String>,
+    oss_bucket: Zeroizing<String>,
 }
 
 impl fmt::Debug for EditingServiceCredential {
@@ -137,6 +143,10 @@ impl EditingServiceCredential {
 
     pub fn access_key_secret(&self) -> &str {
         self.access_key_secret.as_str()
+    }
+
+    pub fn oss_bucket(&self) -> &str {
+        self.oss_bucket.as_str()
     }
 }
 
@@ -275,6 +285,7 @@ where
     ) -> Result<VideoEditingServiceSnapshot, VideoEditingServiceError> {
         if !is_valid_access_key_id(&request.access_key_id)
             || !is_valid_access_key_secret(&request.access_key_secret)
+            || !is_valid_oss_bucket(&request.oss_bucket)
         {
             return Err(VideoEditingServiceError::new(
                 VideoEditingServiceErrorCode::ConfigurationInvalid,
@@ -286,6 +297,7 @@ where
             region: request.region,
             access_key_id: request.access_key_id.clone(),
             access_key_secret: request.access_key_secret.clone(),
+            oss_bucket: Some(request.oss_bucket.clone()),
         };
         let bytes = Zeroizing::new(serde_json::to_vec(&credential).map_err(|_| {
             VideoEditingServiceError::new(VideoEditingServiceErrorCode::ConfigurationInvalid, false)
@@ -314,6 +326,12 @@ where
             region: credential.region,
             access_key_id: Zeroizing::new(credential.access_key_id.clone()),
             access_key_secret: Zeroizing::new(credential.access_key_secret.clone()),
+            oss_bucket: Zeroizing::new(credential.oss_bucket.clone().ok_or_else(|| {
+                VideoEditingServiceError::new(
+                    VideoEditingServiceErrorCode::ConfigurationRequired,
+                    false,
+                )
+            })?),
         })
     }
 
@@ -421,6 +439,13 @@ where
                 false,
             ));
         }
+        if credential
+            .oss_bucket
+            .as_deref()
+            .is_none_or(|bucket| !is_valid_oss_bucket(bucket))
+        {
+            return Ok(None);
+        }
         Ok(Some(credential))
     }
 }
@@ -448,6 +473,21 @@ fn is_valid_access_key_secret(value: &str) -> bool {
         && value.bytes().all(|byte| {
             byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'+' | b'=' | b'-' | b'_')
         })
+}
+
+fn is_valid_oss_bucket(value: &str) -> bool {
+    (3..=63).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        && value
+            .as_bytes()
+            .first()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        && value
+            .as_bytes()
+            .last()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
 }
 
 fn is_valid_override(value: &str) -> bool {

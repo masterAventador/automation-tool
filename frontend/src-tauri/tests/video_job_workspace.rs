@@ -111,6 +111,59 @@ fn isolates_jobs_and_atomically_imports_a_content_addressed_artifact() {
 }
 
 #[test]
+fn stages_verified_editing_inputs_under_artifact_identity_and_extension() {
+    let root = TemporaryRoot::new();
+    let store = VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("workspace store");
+    let source_workspace = store
+        .create(job("123e4567-e89b-42d3-a456-426614174231"))
+        .expect("source workspace");
+    let payload = b"verified-editing-input";
+    fs::write(
+        store
+            .worker_output_directory(&source_workspace)
+            .expect("source output")
+            .join("source.mp4"),
+        payload,
+    )
+    .expect("source bytes");
+    let artifact = store
+        .import_output(
+            &source_workspace,
+            "source.mp4",
+            "video/mp4",
+            "rendered_video",
+        )
+        .expect("source artifact");
+    let editing_workspace = store
+        .create(job("123e4567-e89b-42d3-a456-426614174232"))
+        .expect("editing workspace");
+
+    let staged = store
+        .stage_editing_artifacts(&editing_workspace, &[artifact.artifact_id()])
+        .expect("editing staging");
+
+    assert_eq!(staged.len(), 1);
+    assert_eq!(staged[0].artifact_id(), artifact.artifact_id());
+    assert_eq!(staged[0].extension(), ".mp4");
+    assert_eq!(staged[0].sha256(), artifact.sha256());
+    assert_eq!(staged[0].size_bytes(), artifact.size_bytes());
+    assert_eq!(
+        staged[0].path().parent(),
+        Some(
+            store
+                .worker_asset_directory(&editing_workspace)
+                .expect("editing input")
+                .as_path()
+        )
+    );
+    assert_eq!(
+        staged[0].path().file_name().and_then(|name| name.to_str()),
+        Some(format!("{}.mp4", artifact.artifact_id()).as_str())
+    );
+    assert_eq!(fs::read(staged[0].path()).unwrap(), payload);
+}
+
+#[test]
 fn checkpoint_survives_reopen_and_workspace_disposition_does_not_delete_artifacts() {
     let root = TemporaryRoot::new();
     let job_id = job("123e4567-e89b-42d3-a456-426614174203");

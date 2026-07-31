@@ -55,6 +55,11 @@ const WAITS_ON_THE_WORLD: &[(&str, &str, &str)] = &[
         "verifies every byte of the installed Executor package against its signed manifest",
     ),
     (
+        "video_editing_executor.rs",
+        "run_video_editing_child",
+        "starts the editing child and waits up to VIDEO_EDITING_CHILD_DEADLINE for it to exit",
+    ),
+    (
         "executor_platform.rs",
         "startup_environment_state",
         "runs the same whole-package verification behind the startup gate",

@@ -1167,6 +1167,7 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
       // dependency on how loaded the host happens to be.
       let previousProbe = null;
       let stable = false;
+      let stableWithoutTimeline = false;
       for (let attempt = 0; attempt < WARM_UP_STABLE_ATTEMPTS; attempt += 1) {
         const warmed = await pipe.send("Runtime.evaluate", {
           expression: `(async () => {
@@ -1198,19 +1199,28 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         // declares that it will register a timeline. Give its bounded async
         // initialisation the entire warm-up budget instead of freezing the
         // initial zero-timeline result forever.
-        if (
-          data === previousProbe
-          && !(
+        if (data === previousProbe) {
+          if (
             timelineMetadata.timelineExpected === true
             && timelineMetadata.timelineCount === 0
-          )
-        ) {
-          stable = true;
-          break;
+          ) {
+            stableWithoutTimeline = true;
+          } else {
+            stable = true;
+            break;
+          }
         }
         previousProbe = data;
       }
       if (!stable) {
+        if (stableWithoutTimeline) {
+          // The document promised a seekable timeline but never registered
+          // one, while its pixels stayed identical throughout the bounded
+          // warm-up. That is a proved static composition, not a wall-clock
+          // timeout; keep the two diagnostics distinct.
+          finish({ status: "static" });
+          return;
+        }
         // The page never settled within the warm-up budget; a render that
         // cannot be reproduced must not be reported as a successful one.
         finish({ status: "timeout" });

@@ -2,9 +2,9 @@
 //!
 //! T4 moves the workbench out of WebView `sessionStorage`. This store owns one
 //! bounded JSON document below Tauri `app_data_dir`, validates every value on
-//! both read and write, and replaces it atomically. Cloud submission remains
-//! fail-closed until the provider execution adapter is connected; this module
-//! never invents an `EditingJob` merely to make the UI look operational.
+//! both read and write, and replaces it atomically. It freezes each submitted
+//! timeline before dispatch and blocks another submission while the previous
+//! side effect is active or its outcome remains uncertain.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -206,6 +206,29 @@ pub struct EditingJobSnapshot {
     pub updated_at: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PreparedEditingJob {
+    snapshot: EditingJobSnapshot,
+    timeline: EditingTimelineSnapshot,
+}
+
+impl PreparedEditingJob {
+    pub const fn snapshot(&self) -> &EditingJobSnapshot {
+        &self.snapshot
+    }
+
+    pub const fn timeline(&self) -> &EditingTimelineSnapshot {
+        &self.timeline
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum EditingJobTerminalOutcome {
+    Succeeded(Vec<Uuid>),
+    Failed(EditingFailureCode),
+    OutcomeUncertain,
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StoredState {
@@ -247,8 +270,13 @@ impl VideoEditingWorkspace {
         let directory = app_data_directory.join(STORE_DIRECTORY);
         ensure_private_directory(&directory)?;
         let state_path = directory.join(STATE_FILE);
-        let state = load_state(&state_path)?;
+        let mut state = load_state(&state_path)?;
         validate_state(&state)?;
+        if recover_interrupted_jobs(&mut state) {
+            validate_state(&state)?;
+            let payload = serde_json::to_vec(&state).map_err(|_| storage_unavailable())?;
+            atomic_write(&directory, &state_path, &payload)?;
+        }
         Ok(Self {
             directory,
             state_path,
@@ -342,18 +370,166 @@ impl VideoEditingWorkspace {
         Ok(guard.jobs.get(&project_id).cloned().unwrap_or_default())
     }
 
-    pub fn submit_editing_job(
+    pub fn prepare_editing_job(
         &self,
         project_id: Uuid,
-    ) -> Result<EditingJobSnapshot, VideoEditingWorkspaceError> {
-        let guard = self.lock_state()?;
+    ) -> Result<PreparedEditingJob, VideoEditingWorkspaceError> {
+        let mut guard = self.lock_state()?;
         require_project(&guard, project_id)?;
-        if !guard.timelines.contains_key(&project_id) {
+        if guard.jobs.get(&project_id).is_some_and(|jobs| {
+            jobs.iter().any(|job| {
+                matches!(
+                    job.status,
+                    EditingJobStatus::Queued
+                        | EditingJobStatus::Running
+                        | EditingJobStatus::Paused
+                        | EditingJobStatus::Cancelling
+                        | EditingJobStatus::OutcomeUncertain
+                )
+            })
+        }) {
+            return Err(editing_service_unavailable());
+        }
+        let timeline = guard
+            .timelines
+            .get(&project_id)
+            .cloned()
+            .ok_or_else(invalid_timeline)?;
+        let mut input_artifact_ids = Vec::new();
+        for artifact_id in timeline
+            .tracks
+            .iter()
+            .flat_map(|track| track.clips.iter())
+            .filter_map(|clip| clip.source_artifact_id)
+        {
+            if !input_artifact_ids.contains(&artifact_id) {
+                input_artifact_ids.push(artifact_id);
+            }
+        }
+        validate_artifact_ids(&input_artifact_ids, MAX_JOB_ARTIFACT_REFERENCES)
+            .map_err(|_| invalid_timeline())?;
+        if input_artifact_ids.is_empty() {
             return Err(invalid_timeline());
         }
-        Err(VideoEditingWorkspaceError::new(
-            VideoEditingWorkspaceErrorCode::EditingServiceUnavailable,
-        ))
+        if !guard
+            .projects
+            .iter()
+            .find(|project| project.project_id == project_id)
+            .is_some_and(|project| {
+                input_artifact_ids
+                    .iter()
+                    .all(|artifact_id| project.source_artifact_ids.contains(artifact_id))
+            })
+        {
+            return Err(invalid_timeline());
+        }
+        if guard.jobs.get(&project_id).map_or(0, Vec::len) >= MAX_PROJECTS {
+            return Err(storage_unavailable());
+        }
+        let now = utc_timestamp();
+        let snapshot = EditingJobSnapshot {
+            editing_job_id: generate_uuid_v4().map_err(|_| storage_unavailable())?,
+            project_id,
+            timeline_id: timeline.timeline_id,
+            timeline_revision: timeline.revision,
+            status: EditingJobStatus::Queued,
+            input_artifact_ids,
+            output_artifact_ids: Vec::new(),
+            failure_code: None,
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        let mut candidate = guard.clone();
+        candidate
+            .jobs
+            .entry(project_id)
+            .or_default()
+            .push(snapshot.clone());
+        self.commit(&candidate)?;
+        *guard = candidate;
+        Ok(PreparedEditingJob { snapshot, timeline })
+    }
+
+    pub fn mark_editing_job_running(
+        &self,
+        editing_job_id: Uuid,
+    ) -> Result<EditingJobSnapshot, VideoEditingWorkspaceError> {
+        self.update_editing_job(editing_job_id, |job| {
+            if job.status != EditingJobStatus::Queued {
+                return Err(storage_unavailable());
+            }
+            job.status = EditingJobStatus::Running;
+            Ok(())
+        })
+    }
+
+    pub fn settle_editing_job(
+        &self,
+        editing_job_id: Uuid,
+        outcome: EditingJobTerminalOutcome,
+    ) -> Result<EditingJobSnapshot, VideoEditingWorkspaceError> {
+        self.update_editing_job(editing_job_id, move |job| {
+            if !matches!(
+                job.status,
+                EditingJobStatus::Queued | EditingJobStatus::Running
+            ) {
+                return Err(storage_unavailable());
+            }
+            match outcome {
+                EditingJobTerminalOutcome::Succeeded(output_artifact_ids) => {
+                    validate_artifact_ids(&output_artifact_ids, MAX_JOB_ARTIFACT_REFERENCES)
+                        .map_err(|_| storage_unavailable())?;
+                    if output_artifact_ids.is_empty()
+                        || output_artifact_ids
+                            .iter()
+                            .any(|output| job.input_artifact_ids.contains(output))
+                    {
+                        return Err(storage_unavailable());
+                    }
+                    job.status = EditingJobStatus::Succeeded;
+                    job.output_artifact_ids = output_artifact_ids;
+                    job.failure_code = None;
+                }
+                EditingJobTerminalOutcome::Failed(code) => {
+                    job.status = EditingJobStatus::Failed;
+                    job.output_artifact_ids.clear();
+                    job.failure_code = Some(code);
+                }
+                EditingJobTerminalOutcome::OutcomeUncertain => {
+                    job.status = EditingJobStatus::OutcomeUncertain;
+                    job.output_artifact_ids.clear();
+                    job.failure_code = None;
+                }
+            }
+            Ok(())
+        })
+    }
+
+    fn update_editing_job<F>(
+        &self,
+        editing_job_id: Uuid,
+        update: F,
+    ) -> Result<EditingJobSnapshot, VideoEditingWorkspaceError>
+    where
+        F: FnOnce(&mut EditingJobSnapshot) -> Result<(), VideoEditingWorkspaceError>,
+    {
+        if !valid_uuid_v4(editing_job_id) {
+            return Err(storage_unavailable());
+        }
+        let mut guard = self.lock_state()?;
+        let mut candidate = guard.clone();
+        let job = candidate
+            .jobs
+            .values_mut()
+            .flat_map(|jobs| jobs.iter_mut())
+            .find(|job| job.editing_job_id == editing_job_id)
+            .ok_or_else(storage_unavailable)?;
+        update(job)?;
+        job.updated_at = utc_timestamp();
+        let snapshot = job.clone();
+        self.commit(&candidate)?;
+        *guard = candidate;
+        Ok(snapshot)
     }
 
     fn lock_state(
@@ -370,6 +546,27 @@ impl VideoEditingWorkspace {
         }
         atomic_write(&self.directory, &self.state_path, &payload)
     }
+}
+
+fn recover_interrupted_jobs(state: &mut StoredState) -> bool {
+    let now = utc_timestamp();
+    let mut changed = false;
+    for job in state.jobs.values_mut().flat_map(|jobs| jobs.iter_mut()) {
+        if matches!(
+            job.status,
+            EditingJobStatus::Queued
+                | EditingJobStatus::Running
+                | EditingJobStatus::Paused
+                | EditingJobStatus::Cancelling
+        ) {
+            job.status = EditingJobStatus::OutcomeUncertain;
+            job.output_artifact_ids.clear();
+            job.failure_code = None;
+            job.updated_at = now.clone();
+            changed = true;
+        }
+    }
+    changed
 }
 
 fn validate_state(state: &StoredState) -> Result<(), VideoEditingWorkspaceError> {
@@ -780,4 +977,8 @@ const fn invalid_timeline() -> VideoEditingWorkspaceError {
 
 const fn storage_unavailable() -> VideoEditingWorkspaceError {
     VideoEditingWorkspaceError::new(VideoEditingWorkspaceErrorCode::DraftStorageUnavailable)
+}
+
+const fn editing_service_unavailable() -> VideoEditingWorkspaceError {
+    VideoEditingWorkspaceError::new(VideoEditingWorkspaceErrorCode::EditingServiceUnavailable)
 }

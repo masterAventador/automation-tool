@@ -42,6 +42,7 @@ const MAX_RETENTION_SECONDS: u64 = 365 * 24 * 60 * 60;
 const MAX_MEDIA_TYPE_BYTES: usize = 192;
 const MAX_ROLE_BYTES: usize = 64;
 const MAX_FILE_NAME_BYTES: usize = 128;
+const MAX_EDITING_INPUTS: usize = 100;
 const COPY_BUFFER_BYTES: usize = 1024 * 1024;
 /// The largest finished film the in-App player will be handed. It is buffered
 /// whole and base64 encoded, so a bound belongs here rather than in whichever
@@ -310,6 +311,48 @@ pub struct StagedPublishArtifact {
     size_bytes: u64,
 }
 
+#[derive(Clone, Eq, PartialEq)]
+pub struct StagedEditingArtifact {
+    path: PathBuf,
+    artifact_id: Uuid,
+    sha256: String,
+    size_bytes: u64,
+    extension: &'static str,
+}
+
+impl StagedEditingArtifact {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub const fn artifact_id(&self) -> Uuid {
+        self.artifact_id
+    }
+
+    pub fn sha256(&self) -> &str {
+        &self.sha256
+    }
+
+    pub const fn size_bytes(&self) -> u64 {
+        self.size_bytes
+    }
+
+    pub const fn extension(&self) -> &'static str {
+        self.extension
+    }
+}
+
+impl fmt::Debug for StagedEditingArtifact {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("StagedEditingArtifact")
+            .field("artifact_id", &self.artifact_id)
+            .field("size_bytes", &self.size_bytes)
+            .field("extension", &self.extension)
+            .finish_non_exhaustive()
+    }
+}
+
 impl StagedPublishArtifact {
     pub fn path(&self) -> &Path {
         &self.path
@@ -473,6 +516,84 @@ impl VideoJobWorkspaceStore {
     ) -> Result<PathBuf, VideoWorkspaceError> {
         self.revalidate_workspace(workspace)?;
         Ok(workspace.directory.join(WORK_DIRECTORY))
+    }
+
+    pub fn stage_editing_artifacts(
+        &self,
+        workspace: &VideoJobWorkspace,
+        artifact_ids: &[Uuid],
+    ) -> Result<Vec<StagedEditingArtifact>, VideoWorkspaceError> {
+        self.revalidate_workspace(workspace)?;
+        self.revalidate_roots()?;
+        if artifact_ids.is_empty()
+            || artifact_ids.len() > MAX_EDITING_INPUTS
+            || artifact_ids.iter().any(|value| !valid_uuid_v4(*value))
+            || artifact_ids
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                != artifact_ids.len()
+        {
+            return Err(configuration_invalid());
+        }
+        let input_directory = workspace.directory.join(WORK_DIRECTORY);
+        if fs::read_dir(&input_directory)
+            .map_err(|_| storage_unavailable())?
+            .next()
+            .is_some()
+        {
+            return Err(path_rejected());
+        }
+        let result = (|| {
+            let mut staged = Vec::with_capacity(artifact_ids.len());
+            for artifact_id in artifact_ids {
+                let record = self.load_artifact_record(*artifact_id)?;
+                let extension =
+                    editing_extension(&record.media_type).ok_or_else(configuration_invalid)?;
+                let source = self.artifact_directory(*artifact_id).join(ARTIFACT_PAYLOAD);
+                let source_metadata =
+                    safe_regular_file_metadata(&source)?.ok_or_else(storage_unavailable)?;
+                ensure_free_space(&input_directory, source_metadata.len(), self.policy)?;
+                let destination =
+                    input_directory.join(format!("{}{extension}", artifact_id.hyphenated()));
+                let (size_bytes, sha256) = copy_stable_file(
+                    &source,
+                    &destination,
+                    source_metadata,
+                    self.policy.maximum_artifact_bytes,
+                )?;
+                if size_bytes != record.size_bytes || sha256 != record.sha256 {
+                    return Err(storage_unavailable());
+                }
+                staged.push(StagedEditingArtifact {
+                    path: destination,
+                    artifact_id: *artifact_id,
+                    sha256,
+                    size_bytes,
+                    extension,
+                });
+            }
+            if workspace_usage(&workspace.directory)? > self.policy.maximum_workspace_bytes {
+                return Err(quota_exceeded());
+            }
+            sync_directory(&input_directory)?;
+            Ok(staged)
+        })();
+        if result.is_err() {
+            if let Ok(entries) = fs::read_dir(&input_directory) {
+                for entry in entries.flatten() {
+                    if safe_regular_file_metadata(&entry.path())
+                        .ok()
+                        .flatten()
+                        .is_some()
+                    {
+                        let _ = fs::remove_file(entry.path());
+                    }
+                }
+            }
+            let _ = sync_directory(&input_directory);
+        }
+        result
     }
 
     pub fn save_checkpoint(
@@ -1016,6 +1137,21 @@ impl VideoJobWorkspaceStore {
             require_private_directory(&workspace.directory.join(child))?;
         }
         Ok(())
+    }
+}
+
+fn editing_extension(media_type: &str) -> Option<&'static str> {
+    match media_type {
+        "application/x-subrip" => Some(".srt"),
+        "audio/aac" => Some(".aac"),
+        "audio/mp4" => Some(".m4a"),
+        "audio/mpeg" => Some(".mp3"),
+        "audio/wav" | "audio/x-wav" => Some(".wav"),
+        "image/jpeg" => Some(".jpg"),
+        "image/png" => Some(".png"),
+        "video/mp4" => Some(".mp4"),
+        "video/quicktime" => Some(".mov"),
+        _ => None,
     }
 }
 

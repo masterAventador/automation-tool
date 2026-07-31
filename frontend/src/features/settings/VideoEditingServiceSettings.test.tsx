@@ -50,18 +50,22 @@ describe("video editing service settings", () => {
 
     const keyIdInput = screen.getByLabelText("阿里云 AccessKey ID");
     const secretInput = screen.getByLabelText("阿里云 AccessKey Secret");
+    const bucketInput = screen.getByLabelText("阿里云 OSS Bucket");
     await user.type(keyIdInput, "LTAI5tVe04TestAccessKey");
     await user.type(secretInput, SECRET);
+    await user.type(bucketInput, "automation-tool-video-staging");
     await user.click(screen.getByRole("button", { name: "保存配置" }));
 
     expect(editingGateway.configure).toHaveBeenCalledWith({
       region: "cn-shanghai",
       accessKeyId: "LTAI5tVe04TestAccessKey",
       accessKeySecret: SECRET,
+      ossBucket: "automation-tool-video-staging",
     });
     expect(await screen.findByText("已配置")).toBeInTheDocument();
     expect(keyIdInput).toHaveValue("");
     expect(secretInput).toHaveValue("");
+    expect(bucketInput).toHaveValue("");
     expect(document.body.textContent).not.toContain(SECRET);
   });
 
@@ -75,7 +79,9 @@ describe("video editing service settings", () => {
 
     expect(editingGateway.configure).not.toHaveBeenCalled();
     expect(
-      await screen.findByText("请输入新的 AccessKey ID 和 AccessKey Secret。已保存的密钥不会回显。"),
+      await screen.findByText(
+        "请输入 OSS Bucket、新的 AccessKey ID 和 AccessKey Secret。已保存的配置不会回显。",
+      ),
     ).toBeInTheDocument();
   });
 

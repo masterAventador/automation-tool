@@ -39,6 +39,7 @@ struct RealCredentials {
     region: String,
     access_key_id: Zeroizing<String>,
     access_key_secret: Zeroizing<String>,
+    oss_bucket: Zeroizing<String>,
 }
 
 fn load_real_credentials() -> Option<RealCredentials> {
@@ -59,6 +60,7 @@ fn load_real_credentials() -> Option<RealCredentials> {
         region: field("region").to_string(),
         access_key_id: field("accessKeyId"),
         access_key_secret: field("accessKeySecret"),
+        oss_bucket: field("ossBucket"),
     })
 }
 
@@ -76,6 +78,7 @@ fn service_with(
     region: &str,
     key_id: &str,
     key_secret: &str,
+    oss_bucket: &str,
 ) -> VideoEditingServiceSettings<MemoryStore> {
     let settings =
         VideoEditingServiceSettings::new(MemoryStore::default(), production_like_client(), None)
@@ -84,6 +87,7 @@ fn service_with(
         "region": region,
         "accessKeyId": key_id,
         "accessKeySecret": key_secret,
+        "ossBucket": oss_bucket,
     }))
     .expect("configure request deserializes");
     settings.configure(&request).expect("configure succeeds");
@@ -100,6 +104,7 @@ fn real_gateway_accepts_production_signature() {
         &credentials.region,
         &credentials.access_key_id,
         &credentials.access_key_secret,
+        &credentials.oss_bucket,
     );
     let connection = tauri::async_runtime::block_on(settings.test_connection())
         .expect("real gateway accepts the ACS3-HMAC-SHA256 signed connection test");
@@ -117,7 +122,12 @@ fn real_gateway_rejects_tampered_secret_with_sanitized_error() {
         return;
     };
     let tampered = Zeroizing::new(format!("{}x", credentials.access_key_secret.as_str()));
-    let settings = service_with(&credentials.region, &credentials.access_key_id, &tampered);
+    let settings = service_with(
+        &credentials.region,
+        &credentials.access_key_id,
+        &tampered,
+        &credentials.oss_bucket,
+    );
     let error = tauri::async_runtime::block_on(settings.test_connection())
         .expect_err("real gateway must reject a tampered secret");
     assert_eq!(

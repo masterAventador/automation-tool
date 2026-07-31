@@ -32,6 +32,7 @@ pub mod publish_workspace;
 mod runtime_compatibility;
 pub mod secure_store;
 pub mod startup_environment;
+pub mod video_editing_executor;
 pub mod video_editing_service_settings;
 pub mod video_editing_workspace;
 pub mod video_job_workspace;
@@ -378,11 +379,230 @@ fn list_video_editing_jobs(
 }
 
 #[tauri::command]
-fn submit_video_editing_job(
+fn read_video_editing_artifact(
+    artifact_id: uuid::Uuid,
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+) -> Result<video_job_workspace::RenderedVideoArtifactPayload, VideoEditingWorkspaceCommandError> {
+    workspaces
+        .read_rendered_video_artifact(artifact_id)
+        .map_err(|_| VideoEditingWorkspaceCommandError {
+            code: "draft_storage_unavailable",
+            retryable: false,
+        })
+}
+
+#[tauri::command]
+async fn submit_video_editing_job(
     project_id: uuid::Uuid,
-    workspace: tauri::State<'_, video_editing_workspace::VideoEditingWorkspace>,
+    app: tauri::AppHandle,
 ) -> Result<video_editing_workspace::EditingJobSnapshot, VideoEditingWorkspaceCommandError> {
-    workspace.submit_editing_job(project_id).map_err(Into::into)
+    tauri::async_runtime::spawn_blocking(move || {
+        submit_video_editing_job_off_thread(&app, project_id)
+    })
+    .await
+    .map_err(|_| VideoEditingWorkspaceCommandError {
+        code: "editing_service_unavailable",
+        retryable: true,
+    })?
+}
+
+const VIDEO_EDITING_CHILD_DEADLINE: std::time::Duration =
+    std::time::Duration::from_secs(2 * 60 * 60);
+
+fn submit_video_editing_job_off_thread(
+    app: &tauri::AppHandle,
+    project_id: uuid::Uuid,
+) -> Result<video_editing_workspace::EditingJobSnapshot, VideoEditingWorkspaceCommandError> {
+    use video_editing_executor::{
+        build_video_editing_child_request, run_video_editing_child, VideoEditingChildErrorKind,
+        VideoEditingChildStatus,
+    };
+    use video_editing_workspace::{EditingFailureCode, EditingJobTerminalOutcome};
+    use video_job_workspace::{VideoWorkspaceDisposition, VideoWorkspaceErrorCode};
+
+    let editing = app
+        .try_state::<video_editing_workspace::VideoEditingWorkspace>()
+        .ok_or(VideoEditingWorkspaceCommandError {
+            code: "draft_storage_unavailable",
+            retryable: false,
+        })?;
+    let prepared = editing
+        .prepare_editing_job(project_id)
+        .map_err(VideoEditingWorkspaceCommandError::from)?;
+    let editing_job_id = prepared.snapshot().editing_job_id;
+    let fail = |code: EditingFailureCode| {
+        editing
+            .settle_editing_job(editing_job_id, EditingJobTerminalOutcome::Failed(code))
+            .map_err(Into::into)
+    };
+    let uncertain = || {
+        editing
+            .settle_editing_job(editing_job_id, EditingJobTerminalOutcome::OutcomeUncertain)
+            .map_err(Into::into)
+    };
+    let Some(settings) =
+        app.try_state::<video_editing_service_settings::ProductionVideoEditingServiceSettings>()
+    else {
+        return fail(EditingFailureCode::DependencyUnavailable);
+    };
+    let credential = match settings.credential_for_adapter() {
+        Ok(value) => value,
+        Err(_) => return fail(EditingFailureCode::DependencyUnavailable),
+    };
+    let Some(platform) = app.try_state::<executor_platform::ExecutorPlatformService>() else {
+        return fail(EditingFailureCode::DependencyUnavailable);
+    };
+    let entrypoint = match platform.verified_entrypoint() {
+        Ok(value) => value,
+        Err(_) => return fail(EditingFailureCode::DependencyUnavailable),
+    };
+    let Some(workspaces) = app.try_state::<video_job_workspace::VideoJobWorkspaceStore>() else {
+        return fail(EditingFailureCode::DependencyUnavailable);
+    };
+    let execution_workspace = match workspaces.create(editing_job_id) {
+        Ok(value) => value,
+        Err(_) => return fail(EditingFailureCode::DependencyUnavailable),
+    };
+    let finish = |disposition| {
+        let _ = workspaces.finish(&execution_workspace, disposition);
+    };
+    let staged = match workspaces.stage_editing_artifacts(
+        &execution_workspace,
+        &prepared.snapshot().input_artifact_ids,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            finish(VideoWorkspaceDisposition::Delete);
+            let failure_code = if error.code() == VideoWorkspaceErrorCode::QuotaExceeded {
+                EditingFailureCode::ResourceExhausted
+            } else {
+                EditingFailureCode::InvalidInput
+            };
+            return fail(failure_code);
+        }
+    };
+    let input_directory = match workspaces.worker_asset_directory(&execution_workspace) {
+        Ok(value) => value,
+        Err(_) => {
+            finish(VideoWorkspaceDisposition::Delete);
+            return fail(EditingFailureCode::DependencyUnavailable);
+        }
+    };
+    let output_directory = match workspaces.worker_output_directory(&execution_workspace) {
+        Ok(value) => value,
+        Err(_) => {
+            finish(VideoWorkspaceDisposition::Delete);
+            return fail(EditingFailureCode::DependencyUnavailable);
+        }
+    };
+    let request = match build_video_editing_child_request(
+        &credential,
+        prepared.snapshot(),
+        prepared.timeline(),
+        &staged,
+        &input_directory,
+        &output_directory,
+        (1920, 1080),
+    ) {
+        Ok(value) => value,
+        Err(_) => {
+            finish(VideoWorkspaceDisposition::Delete);
+            return fail(EditingFailureCode::InvalidInput);
+        }
+    };
+    if editing.mark_editing_job_running(editing_job_id).is_err() {
+        finish(VideoWorkspaceDisposition::Delete);
+        return Err(VideoEditingWorkspaceCommandError {
+            code: "draft_storage_unavailable",
+            retryable: false,
+        });
+    }
+    let result = match run_video_editing_child(
+        &entrypoint,
+        request.as_slice(),
+        editing_job_id,
+        &output_directory,
+        VIDEO_EDITING_CHILD_DEADLINE,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            return match error.kind() {
+                VideoEditingChildErrorKind::NotStarted => {
+                    finish(VideoWorkspaceDisposition::Delete);
+                    fail(EditingFailureCode::DependencyUnavailable)
+                }
+                VideoEditingChildErrorKind::RequestRejected => {
+                    finish(VideoWorkspaceDisposition::Delete);
+                    fail(EditingFailureCode::InvalidInput)
+                }
+                VideoEditingChildErrorKind::InvalidResponse
+                | VideoEditingChildErrorKind::OutcomeUncertain => {
+                    finish(VideoWorkspaceDisposition::Keep);
+                    uncertain()
+                }
+            };
+        }
+    };
+    match result.status() {
+        VideoEditingChildStatus::Failed => {
+            finish(VideoWorkspaceDisposition::Delete);
+            fail(
+                result
+                    .failure_code()
+                    .unwrap_or(EditingFailureCode::EditingFailed),
+            )
+        }
+        VideoEditingChildStatus::OutcomeUncertain => {
+            finish(VideoWorkspaceDisposition::Keep);
+            uncertain()
+        }
+        VideoEditingChildStatus::Succeeded => {
+            let Some(file_name) = result
+                .output_path()
+                .and_then(std::path::Path::file_name)
+                .and_then(std::ffi::OsStr::to_str)
+            else {
+                finish(VideoWorkspaceDisposition::Keep);
+                return uncertain();
+            };
+            let imported = workspaces.import_output(
+                &execution_workspace,
+                file_name,
+                "video/mp4",
+                "rendered_video",
+            );
+            let artifact = match imported {
+                Ok(value)
+                    if Some(value.sha256()) == result.output_sha256()
+                        && Some(value.size_bytes()) == result.output_size_bytes() =>
+                {
+                    value
+                }
+                Ok(value) => {
+                    let _ = workspaces.delete_artifact(value.artifact_id());
+                    finish(VideoWorkspaceDisposition::Delete);
+                    return fail(EditingFailureCode::EditingFailed);
+                }
+                Err(error) => {
+                    finish(VideoWorkspaceDisposition::Delete);
+                    let code = if error.code() == VideoWorkspaceErrorCode::QuotaExceeded {
+                        EditingFailureCode::ResourceExhausted
+                    } else {
+                        EditingFailureCode::EditingFailed
+                    };
+                    return fail(code);
+                }
+            };
+            let settled = editing
+                .settle_editing_job(
+                    editing_job_id,
+                    EditingJobTerminalOutcome::Succeeded(vec![artifact.artifact_id()]),
+                )
+                .map_err(VideoEditingWorkspaceCommandError::from);
+            finish(VideoWorkspaceDisposition::Delete);
+            settled
+        }
+    }
 }
 
 #[tauri::command]
@@ -607,16 +827,15 @@ where
 /// to the blocking pool; the work looks the services up itself instead.
 /// `try_state` rather than `state` because a service that was never managed has
 /// to come back as this command's own error, not as a panic on a pool thread.
+type MotionRenderServices<'a> = (
+    tauri::State<'a, embedded_browser_authority::EmbeddedBrowserAuthority>,
+    tauri::State<'a, local_video_orchestrator::LocalVideoOrchestrator>,
+    tauri::State<'a, video_job_workspace::VideoJobWorkspaceStore>,
+);
+
 fn motion_render_services(
     app: &tauri::AppHandle,
-) -> Result<
-    (
-        tauri::State<'_, embedded_browser_authority::EmbeddedBrowserAuthority>,
-        tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
-        tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
-    ),
-    motion_video_studio::MotionVideoStudioError,
-> {
+) -> Result<MotionRenderServices<'_>, motion_video_studio::MotionVideoStudioError> {
     let authority = app
         .try_state::<embedded_browser_authority::EmbeddedBrowserAuthority>()
         .ok_or_else(motion_video_studio::render_unavailable)?;
@@ -801,12 +1020,10 @@ pub fn run_motion_authoring(
         return Err(error);
     }
     let deadline = std::time::Instant::now() + budget;
-    let mut exited_cleanly = false;
-    loop {
+    let exited_cleanly = loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                exited_cleanly = status.success();
-                break;
+                break status.success();
             }
             Ok(None) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(std::time::Duration::from_millis(200));
@@ -824,7 +1041,7 @@ pub fn run_motion_authoring(
                 return Err(motion_video_studio::authoring_crashed());
             }
         }
-    }
+    };
     // Stdout is read whichever way the child exited. On the failure path it is
     // the only thing that separates "the agent completed the protocol and said
     // no" from every way the run can fail without anything having read the
@@ -4785,6 +5002,7 @@ pub fn run() {
         get_video_editing_timeline,
         save_video_editing_timeline,
         list_video_editing_jobs,
+        read_video_editing_artifact,
         submit_video_editing_job,
         open_material_video_studio,
         update_material_video_studio_view,
@@ -4860,6 +5078,7 @@ pub fn run() {
         get_video_editing_timeline,
         save_video_editing_timeline,
         list_video_editing_jobs,
+        read_video_editing_artifact,
         submit_video_editing_job,
         open_material_video_studio,
         update_material_video_studio_view,
@@ -4966,6 +5185,7 @@ pub fn run() {
         get_video_editing_timeline,
         save_video_editing_timeline,
         list_video_editing_jobs,
+        read_video_editing_artifact,
         submit_video_editing_job,
         open_material_video_studio,
         update_material_video_studio_view,

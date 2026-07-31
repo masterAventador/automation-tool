@@ -2,8 +2,8 @@
 """CQ-04 生产纵向链路的静态装配事实。
 
 凭据文件存在只证明可以认证供应商，不能证明正式 App 会把用户操作交给那个供应商。
-独立剪辑当前正好踩中这个区别：服务 Gateway 已有，但用户项目/作业 Gateway 仍是
-sessionStorage 实现。CQ-04 必须把两件事分开报告。
+独立剪辑曾经正好踩中这个区别；本门禁继续分别检查生产 Tauri Gateway 和原生执行链，
+避免后续回退到 sessionStorage 或只留下未被正式入口调用的供应商代码。
 """
 
 from __future__ import annotations
@@ -18,9 +18,15 @@ _EXPECTED_FAILURE = re.compile(
 _REAL_TAURI_ASSIGNMENT = re.compile(
     r"const\s+videoEditingGateway\s*=\s*new\s+Tauri[A-Za-z0-9_]*Gateway\s*\("
 )
-_FAIL_CLOSED_SUBMISSION = re.compile(
-    r"pub fn submit_editing_job[\s\S]{0,1600}"
-    r"VideoEditingWorkspaceErrorCode::EditingServiceUnavailable"
+_PRODUCTION_DISPATCH_FACTS = (
+    "spawn_blocking",
+    "credential_for_adapter",
+    "verified_entrypoint",
+    "stage_editing_artifacts",
+    "build_video_editing_child_request",
+    "run_video_editing_child",
+    "import_output",
+    "settle_editing_job",
 )
 
 
@@ -61,12 +67,16 @@ def video_editing_production_wiring_gaps(
         )
     if _REAL_TAURI_ASSIGNMENT.search(main_text) is None:
         gaps.append("production App constructs no real Tauri videoEditingGateway")
-    if execution_source is not None and _FAIL_CLOSED_SUBMISSION.search(
-        execution_source.read_text(encoding="utf-8")
-    ):
-        gaps.append(
-            "production editing submission still fails closed before provider dispatch"
-        )
+    if execution_source is not None:
+        execution_text = execution_source.read_text(encoding="utf-8")
+        missing_dispatch_facts = [
+            fact for fact in _PRODUCTION_DISPATCH_FACTS if fact not in execution_text
+        ]
+        if missing_dispatch_facts:
+            gaps.append(
+                "production editing dispatch is missing native facts: "
+                + ", ".join(missing_dispatch_facts)
+            )
     return tuple(gaps)
 
 

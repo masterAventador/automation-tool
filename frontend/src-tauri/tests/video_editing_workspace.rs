@@ -3,8 +3,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use automation_tool_desktop_lib::video_editing_workspace::{
-    CreateEditingProjectRequest, EditingTimelineDraft, TimelineClip, TimelineTrack,
-    TimelineTrackKind, VideoEditingWorkspace, VideoEditingWorkspaceErrorCode,
+    CreateEditingProjectRequest, EditingFailureCode, EditingJobStatus, EditingJobTerminalOutcome,
+    EditingTimelineDraft, TimelineClip, TimelineTrack, TimelineTrackKind, VideoEditingWorkspace,
+    VideoEditingWorkspaceErrorCode,
 };
 use uuid::Uuid;
 
@@ -127,7 +128,7 @@ fn invalid_projects_and_timelines_fail_closed_without_mutating_state() {
 }
 
 #[test]
-fn editing_submission_does_not_invent_a_cloud_job_before_the_adapter_is_connected() {
+fn editing_job_is_durable_before_dispatch_and_settles_to_one_terminal_outcome() {
     let root = TemporaryRoot::new();
     let workspace = VideoEditingWorkspace::initialize(root.path()).unwrap();
     let project = workspace
@@ -140,15 +141,71 @@ fn editing_submission_does_not_invent_a_cloud_job_before_the_adapter_is_connecte
         .save_timeline(project.project_id, draft())
         .unwrap();
 
-    let failure = workspace
-        .submit_editing_job(project.project_id)
+    let prepared = workspace.prepare_editing_job(project.project_id).unwrap();
+    assert_eq!(prepared.snapshot().status, EditingJobStatus::Queued);
+    assert_eq!(prepared.timeline().revision, 1);
+    assert_eq!(
+        prepared.snapshot().input_artifact_ids,
+        vec![Uuid::parse_str(ARTIFACT_ID).unwrap()]
+    );
+    workspace
+        .mark_editing_job_running(prepared.snapshot().editing_job_id)
+        .unwrap();
+
+    let failed = workspace
+        .settle_editing_job(
+            prepared.snapshot().editing_job_id,
+            EditingJobTerminalOutcome::Failed(EditingFailureCode::DependencyUnavailable),
+        )
+        .unwrap();
+    assert_eq!(failed.status, EditingJobStatus::Failed);
+    assert_eq!(
+        failed.failure_code,
+        Some(EditingFailureCode::DependencyUnavailable)
+    );
+    assert_eq!(
+        workspace.list_editing_jobs(project.project_id).unwrap(),
+        vec![failed.clone()]
+    );
+
+    drop(workspace);
+    let reopened = VideoEditingWorkspace::initialize(root.path()).unwrap();
+    assert_eq!(
+        reopened.list_editing_jobs(project.project_id).unwrap(),
+        vec![failed]
+    );
+}
+
+#[test]
+fn an_interrupted_editing_dispatch_reopens_as_outcome_uncertain() {
+    let root = TemporaryRoot::new();
+    let workspace = VideoEditingWorkspace::initialize(root.path()).unwrap();
+    let project = workspace
+        .create_project(CreateEditingProjectRequest {
+            title: "中断精剪".to_owned(),
+            source_artifact_ids: vec![Uuid::parse_str(ARTIFACT_ID).unwrap()],
+        })
+        .unwrap();
+    workspace
+        .save_timeline(project.project_id, draft())
+        .unwrap();
+    let prepared = workspace.prepare_editing_job(project.project_id).unwrap();
+    workspace
+        .mark_editing_job_running(prepared.snapshot().editing_job_id)
+        .unwrap();
+
+    drop(workspace);
+    let reopened = VideoEditingWorkspace::initialize(root.path()).unwrap();
+    let jobs = reopened.list_editing_jobs(project.project_id).unwrap();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].status, EditingJobStatus::OutcomeUncertain);
+    assert!(jobs[0].failure_code.is_none());
+
+    let duplicate = reopened
+        .prepare_editing_job(project.project_id)
         .unwrap_err();
     assert_eq!(
-        failure.code(),
+        duplicate.code(),
         VideoEditingWorkspaceErrorCode::EditingServiceUnavailable
     );
-    assert!(workspace
-        .list_editing_jobs(project.project_id)
-        .unwrap()
-        .is_empty());
 }

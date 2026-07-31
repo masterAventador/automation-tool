@@ -83,6 +83,9 @@ function simulatedCloudGateway(cloud: SimulatedCloud): VideoEditingGateway {
         }),
       );
     },
+    async readEditingArtifact(artifactId) {
+      return { artifactId, mediaType: "video/mp4", base64: "AAAA" };
+    },
   };
 }
 

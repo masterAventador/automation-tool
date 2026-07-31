@@ -31,6 +31,7 @@ describe("Tauri video editing service gateway", () => {
       region: "cn-shanghai",
       accessKeyId: "LTAI5tVe04TestAccessKey",
       accessKeySecret: "ve04PrivateSecret1234567890",
+      ossBucket: "automation-tool-video-staging",
     });
     await gateway.clear();
     await expect(gateway.testConnection()).resolves.toEqual({
@@ -47,6 +48,7 @@ describe("Tauri video editing service gateway", () => {
             region: "cn-shanghai",
             accessKeyId: "LTAI5tVe04TestAccessKey",
             accessKeySecret: "ve04PrivateSecret1234567890",
+            ossBucket: "automation-tool-video-staging",
           },
         },
       ],

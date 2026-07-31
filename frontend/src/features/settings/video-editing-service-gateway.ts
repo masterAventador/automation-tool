@@ -18,6 +18,7 @@ export interface ConfigureVideoEditingServiceInput {
   readonly region: AliyunEditingRegion;
   readonly accessKeyId: string;
   readonly accessKeySecret: string;
+  readonly ossBucket: string;
 }
 
 export interface VideoEditingConnectionSnapshot {

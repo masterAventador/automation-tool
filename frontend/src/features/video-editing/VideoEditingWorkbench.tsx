@@ -60,7 +60,7 @@ const STORAGE_UNAVAILABLE_TEXT = "本机剪辑草稿暂时无法读取，请稍�
 const INVALID_TIMELINE_TEXT =
   "时间轴还不完整：请确认每个画面或音频片段已填写素材引用、字幕片段已填写文字，并且时长为有效的毫秒数。";
 const SERVICE_UNAVAILABLE_TEXT =
-  "云端剪辑功能尚未开通：时间轴修订会保留在本机，接入云端剪辑服务后才能提交剪辑任务。";
+  "当前无法提交云端剪辑：请先检查剪辑服务配置；若已有“结果待确认”任务，请到云端核对，系统不会自动重发。";
 
 interface ClipForm {
   readonly formId: string;
@@ -503,11 +503,66 @@ function TimelinePage({
   );
 }
 
+function EditingFilmPreview({
+  artifactId,
+  gateway,
+}: {
+  readonly artifactId: string;
+  readonly gateway: VideoEditingGateway;
+}) {
+  const [videoSource, setVideoSource] = useState<string | null>(null);
+  const [previewFailed, setPreviewFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void gateway
+      .readEditingArtifact(artifactId)
+      .then((artifact) => {
+        if (active) {
+          setVideoSource(`data:${artifact.mediaType};base64,${artifact.base64}`);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setPreviewFailed(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [artifactId, gateway]);
+
+  if (previewFailed) {
+    return <Alert type="error" showIcon title="成片已生成，但暂时无法读取预览。" />;
+  }
+  if (videoSource === null) {
+    return null;
+  }
+  return (
+    <video
+      aria-label="剪辑成片预览"
+      className="video-editing-film-preview"
+      controls
+      src={videoSource}
+    />
+  );
+}
+
 function PreviewPage({
   savedTimeline,
+  jobs,
+  gateway,
 }: {
   readonly savedTimeline: EditingTimelineSnapshot | null;
+  readonly jobs: readonly EditingJobSnapshot[];
+  readonly gateway: VideoEditingGateway;
 }) {
+  const outputArtifactId =
+    [...jobs]
+      .reverse()
+      .find((job) => job.status === "succeeded" && job.outputArtifactIds.length > 0)
+      ?.outputArtifactIds[0] ?? null;
+
   if (savedTimeline === null) {
     return (
       <Card className="video-editing-panel">
@@ -550,7 +605,16 @@ function PreviewPage({
             </ul>
           </div>
         ))}
-        <Alert type="info" showIcon title="视频画面预览将在云端剪辑服务接入后提供。" />
+        {outputArtifactId === null ? null : (
+          <EditingFilmPreview
+            key={outputArtifactId}
+            artifactId={outputArtifactId}
+            gateway={gateway}
+          />
+        )}
+        {outputArtifactId === null ? (
+          <Alert type="info" showIcon title="提交剪辑任务并成功生成成片后，可在这里播放预览。" />
+        ) : null}
       </Space>
     </Card>
   );
@@ -820,7 +884,9 @@ export function VideoEditingWorkbench({
           {
             key: "preview",
             label: "预览",
-            children: <PreviewPage savedTimeline={savedTimeline} />,
+            children: (
+              <PreviewPage savedTimeline={savedTimeline} jobs={jobs} gateway={gateway} />
+            ),
           },
           {
             key: "jobs",

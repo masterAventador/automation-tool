@@ -133,7 +133,7 @@
 
 | ID | 任务 | 并行 | 为什么冻结 |
 |---|---|---|---|
-| T4 | 补 VE 剪辑装配任务 | 🔄 进行中 | 07-31 第一片已把正式 App 从 `sessionStorage` 替身切到真实 Tauri Gateway；项目/时间线进入 App 私有原子持久化，重开可读回，六条固定 IPC 与 strict DTO 已锁定。云端提交仍明确 fail closed，下一片接 Control Plane API、同地域素材暂存、Provider 对账和成片回流；尚不可演示。见 `docs/development/T4-video-editing-assembly.md` |
+| T4 | 补 VE 剪辑装配任务 | 🔍 待验收 | 07-31 源码生产链已闭合：Tauri 原子保存项目/Timeline/作业，统一 Artifact 私有 staging，已验签 Executor 通过一次性 stdin 驱动生产 OSS/IMS Provider、对账、输出导入和清理，成功成片可回到工作台预览。真实网关复跑在 PutObject 前报 `InvalidAccessKeyId`，IMS 只读测试同样 `AuthenticationRejected`，未 dispatch、未计费；待有效凭据、重建正式包、macOS/Windows 正常用户路径和中断自动续对账。见 `docs/development/T4-video-editing-assembly.md` |
 | T19 | 动效零件接 AI 一句话制作链路（方案 B） | ❌ 需设计 | 大工程。07-27 复核：无相关提交 |
 | T37 | 四条合规决策 | 👤 | 你已定：Demo 后处理 |
 

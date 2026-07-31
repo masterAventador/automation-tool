@@ -400,6 +400,9 @@ const shellVideoEditingGateway: VideoEditingGateway = {
   async submitEditingJob() {
     throw new VideoEditingGatewayError("editing_service_unavailable", false);
   },
+  async readEditingArtifact() {
+    throw new VideoEditingGatewayError("editing_service_unavailable", false);
+  },
 };
 
 const shellVideoEditingServiceGateway: VideoEditingServiceGateway = {

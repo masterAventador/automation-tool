@@ -934,6 +934,13 @@ EditingJob、PublishJob 三个状态机互不嵌套，只通过 Artifact 谱系�
 剪辑页面 → 剪辑领域 → Provider Adapter 单向。`VideoEditingProvider`
 契约由 VE-02 定义；本任务不建表、不加 API、不做 UI。
 
+T4 在设备 Executor 的 infrastructure 边界补齐生产实现：Rust 只从 App 私有设置读取地域、
+同地域 OSS Bucket 与访问密钥，并把已冻结时间轴和重新验过摘要的 Artifact 副本通过一次性
+stdin 交给已签名 Executor；Python Adapter 用固定 OSS 对象键完成上传，再通过 ACS3 签名
+调用 IMS Submit/Query、按有界策略对账、流式导回 MP4，并在确定终态清理临时对象。长期密钥、
+绝对路径和供应商响应不进入领域对象、Control Plane、WebView、argv、环境变量或错误文本；
+响应丢失收敛为 `outcome_uncertain`，不得自动重发。
+
 ### 17.1 两种视频制作执行链
 
 Control Plane 领域只认识 `material_montage_v1` 和 `motion_composition_v1` 两个稳定内部

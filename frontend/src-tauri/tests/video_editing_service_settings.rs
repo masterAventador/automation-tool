@@ -11,6 +11,7 @@ use zeroize::Zeroizing;
 
 const ACCESS_KEY_ID: &str = "LTAI5tVe04TestAccessKey";
 const ACCESS_KEY_SECRET: &str = "ve04TestSecretValue1234567890";
+const OSS_BUCKET: &str = "automation-tool-video-staging";
 const EMPTY_BODY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
 #[derive(Clone, Default)]
@@ -66,6 +67,7 @@ fn request(region: &str, key_id: &str, key_secret: &str) -> ConfigureVideoEditin
         "region": region,
         "accessKeyId": key_id,
         "accessKeySecret": key_secret,
+        "ossBucket": OSS_BUCKET,
     }))
     .unwrap()
 }
@@ -126,6 +128,7 @@ fn configure_snapshot_and_clear_never_expose_credentials() {
     assert_eq!(credential.region(), AliyunEditingRegion::CnShanghai);
     assert_eq!(credential.access_key_id(), ACCESS_KEY_ID);
     assert_eq!(credential.access_key_secret(), ACCESS_KEY_SECRET);
+    assert_eq!(credential.oss_bucket(), OSS_BUCKET);
     assert!(!format!("{credential:?}").contains(ACCESS_KEY_SECRET));
     assert!(!format!("{settings:?}").contains(ACCESS_KEY_SECRET));
 
@@ -170,9 +173,41 @@ fn invalid_configurations_are_rejected_without_reflection() {
             "region": "cn-shanghai",
             "accessKeyId": ACCESS_KEY_ID,
             "accessKeySecret": ACCESS_KEY_SECRET,
+            "ossBucket": OSS_BUCKET,
             "extra": true,
         }))
         .is_err()
+    );
+    let invalid_bucket =
+        serde_json::from_value::<ConfigureVideoEditingServiceRequest>(serde_json::json!({
+            "region": "cn-shanghai",
+            "accessKeyId": ACCESS_KEY_ID,
+            "accessKeySecret": ACCESS_KEY_SECRET,
+            "ossBucket": "Invalid_Bucket",
+        }))
+        .unwrap();
+    assert_eq!(
+        settings.configure(&invalid_bucket).unwrap_err().code(),
+        VideoEditingServiceErrorCode::ConfigurationInvalid
+    );
+}
+
+#[test]
+fn oss_bucket_validation_matches_the_provider_contract() {
+    let settings = service(MemoryStore::default(), None);
+    let numeric_prefix =
+        serde_json::from_value::<ConfigureVideoEditingServiceRequest>(serde_json::json!({
+            "region": "cn-shanghai",
+            "accessKeyId": ACCESS_KEY_ID,
+            "accessKeySecret": ACCESS_KEY_SECRET,
+            "ossBucket": "1-automation-tool-video-staging",
+        }))
+        .unwrap();
+
+    settings.configure(&numeric_prefix).unwrap();
+    assert_eq!(
+        settings.credential_for_adapter().unwrap().oss_bucket(),
+        "1-automation-tool-video-staging"
     );
 }
 
@@ -193,6 +228,25 @@ fn corrupt_or_unavailable_storage_fails_closed() {
     assert_eq!(
         error.code(),
         VideoEditingServiceErrorCode::StorageUnavailable
+    );
+}
+
+#[test]
+fn legacy_credentials_without_a_bucket_require_reconfiguration_without_blocking_startup() {
+    let legacy = MemoryStore::default();
+    legacy.replace_raw(
+        format!(
+            r#"{{"version":1,"region":"cn-shanghai","access_key_id":"{ACCESS_KEY_ID}","access_key_secret":"{ACCESS_KEY_SECRET}"}}"#
+        )
+        .as_bytes(),
+    );
+
+    let settings = service(legacy, None);
+    let snapshot = serde_json::to_value(settings.snapshot().unwrap()).unwrap();
+    assert_eq!(snapshot["configured"], false);
+    assert_eq!(
+        settings.credential_for_adapter().unwrap_err().code(),
+        VideoEditingServiceErrorCode::ConfigurationRequired
     );
 }
 

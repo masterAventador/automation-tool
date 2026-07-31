@@ -8,12 +8,8 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 REPOSITORY_ROOT = BACKEND_ROOT.parent
 SPEC_PATH = BACKEND_ROOT / "automation-tool-executor.spec"
-AUTHORING_PACKAGE = (
-    BACKEND_ROOT / "src/automation_tool/executor/motion_authoring"
-)
-WORKFLOW_CONTRACT = (
-    REPOSITORY_ROOT / "contracts/video/motion-authoring-workflow.v1.json"
-)
+AUTHORING_PACKAGE = BACKEND_ROOT / "src/automation_tool/executor/motion_authoring"
+WORKFLOW_CONTRACT = REPOSITORY_ROOT / "contracts/video/motion-authoring-workflow.v1.json"
 # A versioned contract filename as it appears in the package's source, with or
 # without the directory it sits in: `"video/motion-render-canvas.v1.json"` and
 # `"motion-authoring-refusal.v1.json"` are both reads that must be packaged.
@@ -82,6 +78,12 @@ def test_executor_spec_packages_the_closed_authoring_refusal_contract() -> None:
     assert '"contracts/video/motion-authoring-refusal.v1.json"' in source
 
 
+def test_executor_spec_packages_the_editing_staging_contract() -> None:
+    source = SPEC_PATH.read_text(encoding="utf-8")
+
+    assert '"contracts/video/aliyun-ims-editing-staging.v1.json"' in source
+
+
 def _spec_packaged_basenames() -> set[str]:
     spec = SPEC_PATH.read_text(encoding="utf-8")
     return {Path(entry).name for entry in SPEC_RESOURCE.findall(spec)}
@@ -126,8 +128,7 @@ def test_the_spec_packages_every_file_the_locked_workflow_reference_pins() -> No
 
     missing = sorted(pinned - _spec_packaged_basenames())
     assert missing == [], (
-        f"the locked workflow reference pins {missing} but the spec does not "
-        "package them"
+        f"the locked workflow reference pins {missing} but the spec does not package them"
     )
 
 

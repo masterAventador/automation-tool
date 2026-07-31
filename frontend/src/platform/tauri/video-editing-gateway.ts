@@ -14,6 +14,7 @@ import {
 import {
   VideoEditingGatewayError,
   type CreateEditingProjectInput,
+  type EditingVideoArtifactPayload,
   type VideoEditingErrorCode,
   type VideoEditingGateway,
 } from "../../features/video-editing/video-editing-gateway";
@@ -22,6 +23,11 @@ import { nativeCommandErrorFields } from "./native-command-error";
 const projectListSchema = z.array(editingProjectSchema);
 const jobListSchema = z.array(editingJobSchema);
 const optionalTimelineSchema = editingTimelineSchema.nullable();
+const editingVideoArtifactSchema = z.strictObject({
+  artifactId: z.string().uuid({ version: "v4" }),
+  mediaType: z.literal("video/mp4"),
+  base64: z.string().min(1).max(48 * 1024 * 1024).regex(/^[A-Za-z0-9+/]+={0,2}$/u),
+});
 const NATIVE_ERROR_CODES = new Set<VideoEditingErrorCode>([
   "invalid_project",
   "invalid_timeline",
@@ -101,5 +107,9 @@ export class TauriVideoEditingGateway implements VideoEditingGateway {
 
   async submitEditingJob(projectId: string): Promise<EditingJobSnapshot> {
     return native("submit_video_editing_job", editingJobSchema, { projectId });
+  }
+
+  async readEditingArtifact(artifactId: string): Promise<EditingVideoArtifactPayload> {
+    return native("read_video_editing_artifact", editingVideoArtifactSchema, { artifactId });
   }
 }

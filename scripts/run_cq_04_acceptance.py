@@ -6,9 +6,9 @@ CQ-04 要的是"从全新安装的真实 App 一句话创建两类视频、送�
 
 | 条件 | 本机 | 影响 |
 | --- | --- | --- |
-| 百炼模型密钥 | 有 | 一句话生成脚本可跑 |
-| 阿里云剪辑密钥 | 有 | 只证明供应商凭据可达 |
-| 独立剪辑生产装配 | 缺失 | 正式 App 仍使用 sessionStorage Gateway |
+| 百炼模型密钥文件 | 有 | 只证明文件存在，不证明密钥有效 |
+| 阿里云剪辑密钥文件 | 有 | 只证明文件存在，不证明密钥有效 |
+| 独立剪辑生产装配 | 静态检查 | 正式 App 必须具备 native staging、已验签 Executor、Provider dispatch、回流与终态 |
 | 抖音创作者账号 | **没有**（要扫码） | 真实发布跑不了 |
 
 所以本脚本不假装跑完了整条链路。它做三件事：
@@ -53,7 +53,7 @@ _TASK_ROW = re.compile(
 )
 _NOT_ACTIVATED = ("⬜", "⏸")
 
-# 外部条件：只看文件在不在，不读内容——密钥不该进入任何日志或报告。
+# 外部条件：只看文件在不在，不读内容——因此存在也不能报告为凭据可用。
 EXTERNAL_CONDITIONS = {
     "百炼模型密钥": SECRETS / "bailian-model.json",
     "阿里云剪辑密钥": SECRETS / "aliyun-video-editing.json",
@@ -91,8 +91,9 @@ def probe_external_conditions() -> dict[str, bool]:
     available = {}
     for name, path in EXTERNAL_CONDITIONS.items():
         present = path.is_file() and path.stat().st_size > 0
-        available[name] = present
-        announce(f"{name}: {'可用' if present else '缺失'}")
+        available[name] = False
+        state = "文件存在（有效性未验证）" if present else "缺失"
+        announce(f"{name}: {state}")
     # 抖音要人工扫码，没有"文件在不在"这种判据；它一律算缺失，
     # 由本脚本如实报告，不用测试页冒充。
     available["抖音创作者账号"] = False
@@ -106,7 +107,7 @@ def probe_production_readiness() -> dict[str, bool]:
         gaps = video_editing_production_wiring_gaps(
             PRODUCTION_MAIN,
             PRODUCTION_WIRING_TEST,
-            ROOT / "frontend/src-tauri/src/video_editing_workspace.rs",
+            REPOSITORY_ROOT / "frontend/src-tauri/src/lib.rs",
         )
     except VerticalReadinessRejected as error:
         fail(str(error))
@@ -183,9 +184,14 @@ def main() -> int:
     announce(f"{checked} activated tasks all state what they are still missing")
 
     missing = [name for name, present in available.items() if not present]
+    package_summary = (
+        "package segments were skipped"
+        if arguments.skip_package_segments
+        else "the release-package segments"
+    )
     print(
         "CQ-04 acceptance passed for everything the host can reach: content gates, "
-        f"the release-package segments, and a {checked}-task ledger sweep. "
+        f"{package_summary}, and a {checked}-task ledger sweep. "
         f"Still unreachable here: {', '.join(missing)} — the vertical is NOT complete, "
         "and no fixture may stand in for it."
     )

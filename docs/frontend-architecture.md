@@ -414,18 +414,27 @@ React 只消费封闭状态和业务结果，不能取得浏览器路径、Profi
 - 两条链路共享同一套已校验 Chromium 与媒体工具发行物，但 Worker 进程、会话、任务目录
   和 checkpoint 相互隔离，失败、取消、崩溃恢复与 App 退出都由各自受管进程树清理。
 
-### 6.8 独立剪辑设备工作区
+### 6.8 独立剪辑设备执行链
 
-T4 第一片把正式 `videoEditingGateway` 从 WebView `sessionStorage` 替身替换为
-`TauriVideoEditingGateway`。React 只消费 VE-03 的 provider 中性 DTO，项目、时间线与任务
-列表通过六条固定 Command 进入 Rust；返回值在 IPC 两侧都按严格字段和封闭枚举复验，未知
+T4 把正式 `videoEditingGateway` 从 WebView `sessionStorage` 替身替换为
+`TauriVideoEditingGateway`。React 只消费 VE-03 的 provider 中性 DTO；项目、时间线、作业
+与成片读取通过固定 Command 进入 Rust，返回值在 IPC 两侧都按严格字段和封闭枚举复验，未知
 错误不会把路径、凭据或上游响应带回 WebView。
 
 设备侧 `VideoEditingWorkspace` 固定落在 App 私有数据目录，状态写入先生成私有临时文件、
-fsync，再原子替换并同步目录；重开 Store 后复验全部项目、Timeline 修订和任务结果形状。
-这一层只解决设备持久化与 UI 装配，不冒充云执行：Provider 调度尚未接通时提交明确返回
-`editing_service_unavailable`，不得预造 `queued` 作业。后续装配仍遵循 ADR-0002 的单向
-依赖：剪辑页面 → Control Plane 剪辑应用层 → Provider Adapter。
+fsync，再原子替换并同步目录。作业必须在任何云副作用前持久化为 `queued`，随后才能进入
+`running`；重启遗留的活跃态收敛为 `outcome_uncertain`，不得凭空说“没提交”或自动重提。
+
+执行时，`VideoJobWorkspaceStore` 从统一 Artifact 库重新校验并复制
+`<artifactId>.<ext>` 私有输入。Rust 从私有设置读取地域、同地域 OSS Bucket 与 AccessKey，
+验证 Executor 发行物后通过 stdin 启动 `--execute-video-editing` 一次性进程；凭据不进
+argv、环境、日志、React 或 Control Plane。Executor 的生产 Transport 串起 OSS staging、
+`AliyunImsEditingProvider`、轮询对账、输出导入和临时对象清理。Rust 最后再次核对输出路径、
+摘要和大小，只有成功导入统一 Artifact 库后才落 `succeeded`；预览页按稳定 Artifact ID
+读取 MP4，不获得本机路径。
+
+当前 App 中断会安全停在 `outcome_uncertain`，尚未按 vendor JobId 自动续对账；这项恢复
+增强以及正式包双平台真实云验收仍在 T4/CQ-04 遗留项中。
 
 B5-01 已冻结原外部浏览器会话的历史迁移边界。当前 Profile 只能从 Tauri `app_data_dir/browser-profiles/douyin/<canonical UUIDv4 profile_id>` 派生，不能由 React、服务端、平台账号文本或任意路径输入决定；B5-05 负责私有权限、symlink/reparse point 与稳定 identity，B5-06/B5-07 负责跨进程单实例锁和真实 headed 浏览器资源所有权。登录健康只由真实页面检测产生 `missing/healthy/expired/risk/unknown`，只有 `healthy` 关闭熔断；等待扫码/确认和人工接管是本地平台工作流，不是 automation-tool 产品登录。
 

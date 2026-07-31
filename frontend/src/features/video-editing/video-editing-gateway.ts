@@ -26,6 +26,12 @@ export interface CreateEditingProjectInput {
   readonly sourceArtifactIds: readonly string[];
 }
 
+export interface EditingVideoArtifactPayload {
+  readonly artifactId: string;
+  readonly mediaType: "video/mp4";
+  readonly base64: string;
+}
+
 export interface VideoEditingGateway {
   listProjects(): Promise<readonly EditingProjectSnapshot[]>;
   createProject(input: CreateEditingProjectInput): Promise<EditingProjectSnapshot>;
@@ -36,4 +42,5 @@ export interface VideoEditingGateway {
   ): Promise<EditingTimelineSnapshot>;
   listEditingJobs(projectId: string): Promise<readonly EditingJobSnapshot[]>;
   submitEditingJob(projectId: string): Promise<EditingJobSnapshot>;
+  readEditingArtifact(artifactId: string): Promise<EditingVideoArtifactPayload>;
 }

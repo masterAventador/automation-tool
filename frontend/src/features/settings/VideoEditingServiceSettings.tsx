@@ -20,7 +20,7 @@ const REGION_OPTIONS = [
 const LOAD_FAILURE = "暂时无法读取视频剪辑服务设置，请稍后重试。";
 const OPERATION_FAILURE = "视频剪辑服务操作暂时不可用，请稍后重试。";
 const MISSING_INPUT_FAILURE =
-  "请输入新的 AccessKey ID 和 AccessKey Secret。已保存的密钥不会回显。";
+  "请输入 OSS Bucket、新的 AccessKey ID 和 AccessKey Secret。已保存的配置不会回显。";
 const CONNECTION_SUCCESS = "连接成功；访问密钥与所选地域可用。";
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -53,6 +53,7 @@ export function VideoEditingServiceSettings({ gateway }: VideoEditingServiceSett
   const [region, setRegion] = useState<AliyunEditingRegion>("cn-shanghai");
   const [accessKeyId, setAccessKeyId] = useState("");
   const [accessKeySecret, setAccessKeySecret] = useState("");
+  const [ossBucket, setOssBucket] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [loadFailure, setLoadFailure] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -96,6 +97,7 @@ export function VideoEditingServiceSettings({ gateway }: VideoEditingServiceSett
       acceptSnapshot(await action());
       setAccessKeyId("");
       setAccessKeySecret("");
+      setOssBucket("");
     } catch (error) {
       setFailure(safeFailure(error));
     } finally {
@@ -104,12 +106,12 @@ export function VideoEditingServiceSettings({ gateway }: VideoEditingServiceSett
   };
 
   const configure = () => {
-    if (accessKeyId.length === 0 || accessKeySecret.length === 0) {
+    if (accessKeyId.length === 0 || accessKeySecret.length === 0 || ossBucket.length === 0) {
       setFailure(MISSING_INPUT_FAILURE);
       return;
     }
     void runSnapshotAction("configure", () =>
-      gateway.configure({ region, accessKeyId, accessKeySecret }),
+      gateway.configure({ region, accessKeyId, accessKeySecret, ossBucket }),
     );
   };
 
@@ -159,6 +161,20 @@ export function VideoEditingServiceSettings({ gateway }: VideoEditingServiceSett
                   value={region}
                   options={[...REGION_OPTIONS]}
                   onChange={(value: AliyunEditingRegion) => setRegion(value)}
+                />
+              </label>
+              <label>
+                <Typography.Text>同地域 OSS Bucket</Typography.Text>
+                <Input
+                  aria-label="阿里云 OSS Bucket"
+                  autoComplete="off"
+                  placeholder={
+                    snapshot.configured
+                      ? "已安全保存；输入新 Bucket 可替换"
+                      : "请输入与服务地域相同的 Bucket 名称"
+                  }
+                  value={ossBucket}
+                  onChange={(event) => setOssBucket(event.target.value)}
                 />
               </label>
               <label>
