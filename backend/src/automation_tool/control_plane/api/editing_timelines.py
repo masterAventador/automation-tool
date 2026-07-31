@@ -28,6 +28,7 @@ from automation_tool.control_plane.domain import (
     InvalidResourceId,
     InvalidTimelineModel,
     MaterialId,
+    OriginalAudioMode,
     Timeline,
     TimelineClip,
     TimelineTrack,
@@ -99,6 +100,10 @@ class EditingTimelineClip(BaseModel):
         le=MAX_GAIN_DB,
     )
     transition_in: EditingTimelineTransition | None = Field(alias="transitionIn")
+    original_audio_mode: OriginalAudioMode | None = Field(
+        alias="originalAudioMode",
+        default=None,
+    )
 
     def to_domain(self) -> TimelineClip:
         return TimelineClip(
@@ -115,6 +120,7 @@ class EditingTimelineClip(BaseModel):
             text=self.text,
             gain_db=self.gain_db,
             transition_in=(None if self.transition_in is None else self.transition_in.to_domain()),
+            original_audio_mode=self.original_audio_mode,
         )
 
 
@@ -205,6 +211,7 @@ def _clip_response(clip: TimelineClip) -> EditingTimelineClip:
         text=clip.text,
         gainDb=clip.gain_db,
         transitionIn=_transition_response(clip.transition_in),
+        originalAudioMode=clip.original_audio_mode,
     )
 
 

@@ -56,6 +56,14 @@ class TimelineTrackKind(StrEnum):
     CAPTION = "caption"
 
 
+class OriginalAudioMode(StrEnum):
+    """How one source-material audio clip participates in the final mix."""
+
+    AUTO_DUCK = "auto_duck"
+    FIXED_VOLUME = "fixed_volume"
+    MUTED = "muted"
+
+
 AUDIBLE_TRACK_KINDS: Final = frozenset(
     {TimelineTrackKind.NARRATION, TimelineTrackKind.AMBIENT, TimelineTrackKind.MUSIC}
 )
@@ -126,6 +134,7 @@ class TimelineClip:
     text: str | None
     gain_db: float | None
     transition_in: TimelineTransition | None
+    original_audio_mode: OriginalAudioMode | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -239,7 +248,11 @@ class TimelineTrack:
             # a source window for a level, and `_validate_source_window`
             # requires a material for a window — so a clip carrying a level
             # already has a material, which the first disjunct below catches.
-            if clip.source_material_id is not None or clip.transition_in is not None:
+            if (
+                clip.source_material_id is not None
+                or clip.transition_in is not None
+                or clip.original_audio_mode is not None
+            ):
                 _reject()
             return
         if clip.text is not None:
@@ -247,7 +260,7 @@ class TimelineTrack:
         if self.kind is TimelineTrackKind.VISUAL:
             # The picture lane carries no level of its own; a material's own
             # sound rides the separate AMBIENT lane so it can be ducked.
-            if clip.gain_db is not None:
+            if clip.gain_db is not None or clip.original_audio_mode is not None:
                 _reject()
             return
         # NARRATION / AMBIENT / MUSIC: every clip states its level, and the
@@ -255,6 +268,11 @@ class TimelineTrack:
         # implies having a stretch to play — `TimelineClip` enforces that —
         # so checking the window again here would be unreachable.
         if clip.gain_db is None or clip.transition_in is not None:
+            _reject()
+        if self.kind is TimelineTrackKind.AMBIENT:
+            if not isinstance(clip.original_audio_mode, OriginalAudioMode):
+                _reject()
+        elif clip.original_audio_mode is not None:
             _reject()
 
     def _validate_layout(self) -> None:
@@ -352,6 +370,7 @@ __all__ = [
     "MIN_GAIN_DB",
     "MIN_TIMELINE_DURATION_MS",
     "InvalidTimelineModel",
+    "OriginalAudioMode",
     "Timeline",
     "TimelineClip",
     "TimelineId",

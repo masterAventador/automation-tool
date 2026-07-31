@@ -95,6 +95,7 @@ def _rebuilt_timeline_clip(clip: TimelineClip) -> TimelineClip:
         text=clip.text,
         gain_db=clip.gain_db,
         transition_in=rebuilt_transition,
+        original_audio_mode=clip.original_audio_mode,
     )
 
 

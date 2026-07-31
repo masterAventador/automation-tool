@@ -23,6 +23,7 @@ from automation_tool.control_plane.domain.timeline import (
     MIN_GAIN_DB,
     MIN_TIMELINE_DURATION_MS,
     InvalidTimelineModel,
+    OriginalAudioMode,
     Timeline,
     TimelineClip,
     TimelineId,
@@ -50,9 +51,8 @@ def test_invalid_timeline_model_is_a_value_error() -> None:
 def test_public_timeline_models_have_exact_provider_neutral_fields() -> None:
     """Same guard `video_creation.py` carries for its own models (T5 review finding):
     an exact field tuple catches a silently added/renamed field, and the banned
-    fragment check catches a provider concept sneaking in as an *optional* field —
-    which a required-field-only check would miss, since every field here has no
-    default and a required addition already breaks every call site.
+    fragment check catches a provider concept sneaking in as an *optional* field,
+    which a required-field-only check would miss.
     """
     expected = {
         TimelineTransition: ("kind", "duration_ms"),
@@ -66,6 +66,7 @@ def test_public_timeline_models_have_exact_provider_neutral_fields() -> None:
             "text",
             "gain_db",
             "transition_in",
+            "original_audio_mode",
         ),
         TimelineTrack: ("track_id", "kind", "clips"),
         Timeline: (
@@ -90,6 +91,59 @@ def test_track_kinds_split_one_audio_lane_into_three() -> None:
         "music",
         "caption",
     }
+
+
+def test_original_audio_modes_are_the_exact_three_product_choices() -> None:
+    assert {mode.value for mode in OriginalAudioMode} == {
+        "auto_duck",
+        "fixed_volume",
+        "muted",
+    }
+
+
+@pytest.mark.parametrize("mode", list(OriginalAudioMode))
+def test_an_ambient_clip_requires_one_strongly_typed_original_audio_mode(
+    mode: OriginalAudioMode,
+) -> None:
+    clip = _audible_clip(clip_id="ambient-1", original_audio_mode=mode)
+    track = TimelineTrack("ambient", TimelineTrackKind.AMBIENT, (clip,))
+    assert track.clips[0].original_audio_mode is mode
+
+    with pytest.raises(InvalidTimelineModel):
+        TimelineTrack(
+            "ambient",
+            TimelineTrackKind.AMBIENT,
+            (_audible_clip(clip_id="ambient-1", original_audio_mode=mode.value),),
+        )
+
+
+def test_only_the_ambient_lane_accepts_an_original_audio_mode() -> None:
+    with pytest.raises(InvalidTimelineModel):
+        TimelineTrack(
+            "ambient",
+            TimelineTrackKind.AMBIENT,
+            (_audible_clip(clip_id="ambient-1"),),
+        )
+    for kind in (
+        TimelineTrackKind.VISUAL,
+        TimelineTrackKind.NARRATION,
+        TimelineTrackKind.MUSIC,
+        TimelineTrackKind.CAPTION,
+    ):
+        if kind is TimelineTrackKind.CAPTION:
+            clip = _caption_clip(original_audio_mode=OriginalAudioMode.AUTO_DUCK)
+        elif kind is TimelineTrackKind.VISUAL:
+            clip = _media_clip(
+                clip_id="visual-1",
+                original_audio_mode=OriginalAudioMode.AUTO_DUCK,
+            )
+        else:
+            clip = _audible_clip(
+                clip_id="sound-1",
+                original_audio_mode=OriginalAudioMode.AUTO_DUCK,
+            )
+        with pytest.raises(InvalidTimelineModel):
+            TimelineTrack("sound", kind, (clip,))
 
 
 def test_a_hard_cut_is_the_absence_of_a_transition_not_a_kind_of_one() -> None:
@@ -554,7 +608,16 @@ def test_a_visual_clip_carries_no_level_of_its_own() -> None:
     [TimelineTrackKind.NARRATION, TimelineTrackKind.AMBIENT, TimelineTrackKind.MUSIC],
 )
 def test_an_audible_track_states_a_level_for_every_clip(kind: TimelineTrackKind) -> None:
-    TimelineTrack("sound", kind, (_audible_clip(clip_id="sound-1"),))
+    mode = (
+        OriginalAudioMode.AUTO_DUCK
+        if kind is TimelineTrackKind.AMBIENT
+        else None
+    )
+    TimelineTrack(
+        "sound",
+        kind,
+        (_audible_clip(clip_id="sound-1", original_audio_mode=mode),),
+    )
     with pytest.raises(InvalidTimelineModel):
         TimelineTrack("sound", kind, (_media_clip(clip_id="sound-1"),))
 
@@ -886,6 +949,7 @@ def test_a_full_timeline_carries_picture_narration_ambient_music_and_captions() 
                         duration_ms=7_000,
                         source_in_ms=0,
                         source_out_ms=7_000,
+                        original_audio_mode=OriginalAudioMode.AUTO_DUCK,
                     ),
                 ),
             ),

@@ -47,6 +47,7 @@ from automation_tool.control_plane.domain import (
     InstallationId,
     InvalidTimelineModel,
     MaterialId,
+    OriginalAudioMode,
     TaskId,
     Timeline,
     TimelineClip,
@@ -342,6 +343,7 @@ def clip_document(
     text: object = None,
     gain_db: object = None,
     transition_in: object = None,
+    original_audio_mode: object = None,
 ) -> dict[str, object]:
     """A clip as it really sits in the column, written out by hand.
 
@@ -359,6 +361,7 @@ def clip_document(
         "text": text,
         "gain_db": gain_db,
         "transition_in": transition_in,
+        "original_audio_mode": original_audio_mode,
     }
 
 
@@ -1040,6 +1043,109 @@ def test_hydration_rebuilds_the_whole_tree_as_the_domain_declares_it() -> None:
     assert caption.kind is TimelineTrackKind.CAPTION
     assert caption.clips[0].text == CAPTION_ONE
     assert caption.clips[0].source_material_id is None
+
+
+@pytest.mark.parametrize("mode", list(OriginalAudioMode))
+def test_original_audio_mode_round_trips_as_a_closed_enum(
+    mode: OriginalAudioMode,
+) -> None:
+    tracks = track_documents()
+    tracks.insert(
+        2,
+        {
+            "track_id": "ambient",
+            "kind": "ambient",
+            "clips": [
+                clip_document(
+                    "ambient-one",
+                    0,
+                    1_000,
+                    source_material_id=str(MATERIAL_ONE),
+                    source_in_ms=0,
+                    source_out_ms=1_000,
+                    gain_db=-12.0,
+                    original_audio_mode=mode.value,
+                )
+            ],
+        },
+    )
+
+    hydrated = repository_module._hydrate(hydration_row(tracks=tracks))
+
+    ambient = hydrated.track_of(TimelineTrackKind.AMBIENT)
+    assert ambient is not None
+    assert ambient.clips[0].original_audio_mode is mode
+    documents = repository_module._column_values(hydrated)["tracks"]
+    assert cast(list[dict[str, object]], documents)[2]["clips"][0][  # type: ignore[index]
+        "original_audio_mode"
+    ] == mode.value
+
+
+@pytest.mark.parametrize("stored", ["duck", 1, True, {}])
+def test_hydration_rejects_an_unknown_or_untyped_original_audio_mode(
+    stored: object,
+) -> None:
+    tracks = track_documents()
+    tracks.insert(
+        2,
+        {
+            "track_id": "ambient",
+            "kind": "ambient",
+            "clips": [
+                clip_document(
+                    "ambient-one",
+                    0,
+                    1_000,
+                    source_material_id=str(MATERIAL_ONE),
+                    source_in_ms=0,
+                    source_out_ms=1_000,
+                    gain_db=-12.0,
+                    original_audio_mode=stored,
+                )
+            ],
+        },
+    )
+
+    with pytest.raises(InvalidTimelineModel):
+        repository_module._hydrate(hydration_row(tracks=tracks))
+
+
+def test_legacy_jsonb_without_the_new_mode_keeps_old_auto_duck_semantics() -> None:
+    tracks = track_documents()
+    tracks.insert(
+        2,
+        {
+            "track_id": "ambient",
+            "kind": "ambient",
+            "clips": [
+                clip_document(
+                    "ambient-one",
+                    0,
+                    1_000,
+                    source_material_id=str(MATERIAL_ONE),
+                    source_in_ms=0,
+                    source_out_ms=1_000,
+                    gain_db=-12.0,
+                    original_audio_mode="auto_duck",
+                )
+            ],
+        },
+    )
+    for track in tracks:
+        for clip in cast(list[dict[str, object]], track["clips"]):
+            del clip["original_audio_mode"]
+
+    hydrated = repository_module._hydrate(hydration_row(tracks=tracks))
+
+    ambient = hydrated.track_of(TimelineTrackKind.AMBIENT)
+    assert ambient is not None
+    assert ambient.clips[0].original_audio_mode is OriginalAudioMode.AUTO_DUCK
+    assert all(
+        clip.original_audio_mode is None
+        for track in hydrated.tracks
+        if track.kind is not TimelineTrackKind.AMBIENT
+        for clip in track.clips
+    )
 
 
 def test_the_wrappers_the_rejection_cases_use_are_themselves_accepted() -> None:

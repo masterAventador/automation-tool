@@ -19,6 +19,7 @@ from automation_tool.control_plane.domain.timeline import (
     MAX_TIMELINE_DURATION_MS,
     MIN_TIMELINE_DURATION_MS,
     InvalidTimelineModel,
+    OriginalAudioMode,
     Timeline,
     TimelineId,
     TimelineTrackKind,
@@ -170,7 +171,16 @@ def test_mixed_plan_builds_aligned_domain_tracks_without_transitions() -> None:
         ambient.clips[0].source_in_ms,
         ambient.clips[0].source_out_ms,
         ambient.clips[0].gain_db,
-    ) == (0, 300, MaterialId.parse(original_video), 100, 400, 0.0)
+        ambient.clips[0].original_audio_mode,
+    ) == (
+        0,
+        300,
+        MaterialId.parse(original_video),
+        100,
+        400,
+        0.0,
+        OriginalAudioMode.AUTO_DUCK,
+    )
 
     caption = result.track_of(TimelineTrackKind.CAPTION)
     assert caption is not None

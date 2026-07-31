@@ -169,6 +169,7 @@ from automation_tool.control_plane.domain.task_state_machine import (
 from automation_tool.control_plane.domain.timeline import (
     AUDIBLE_TRACK_KINDS,
     InvalidTimelineModel,
+    OriginalAudioMode,
     Timeline,
     TimelineClip,
     TimelineId,
@@ -323,6 +324,7 @@ __all__ = [
     "Material",
     "MaterialId",
     "MaterialKind",
+    "OriginalAudioMode",
     "OutputSpec",
     "PasswordHash",
     "PublishCapability",

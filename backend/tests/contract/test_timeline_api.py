@@ -53,6 +53,7 @@ VALID_DRAFT: dict[str, object] = {
                     "text": None,
                     "gainDb": None,
                     "transitionIn": None,
+                    "originalAudioMode": None,
                 }
             ],
         }
@@ -235,6 +236,7 @@ def test_transition_shape_round_trips_through_the_domain() -> None:
                         "text": None,
                         "gainDb": None,
                         "transitionIn": None,
+                        "originalAudioMode": None,
                     },
                     {
                         "clipId": "visual-two",
@@ -249,6 +251,7 @@ def test_transition_shape_round_trips_through_the_domain() -> None:
                             "kind": "fade",
                             "durationMs": 200,
                         },
+                        "originalAudioMode": None,
                     },
                 ],
             }
@@ -262,6 +265,52 @@ def test_transition_shape_round_trips_through_the_domain() -> None:
 
     assert response.status_code == 201
     assert response.json()["tracks"] == draft["tracks"]
+
+
+def test_original_audio_mode_round_trips_and_is_required_only_for_ambient() -> None:
+    client, repository = timeline_client()
+    ambient_clip = {
+        "clipId": "ambient-one",
+        "startMs": 0,
+        "durationMs": 1_000,
+        "sourceMaterialId": MATERIAL_ID,
+        "sourceInMs": 0,
+        "sourceOutMs": 1_000,
+        "text": None,
+        "gainDb": -12.0,
+        "transitionIn": None,
+        "originalAudioMode": "fixed_volume",
+    }
+    draft = {
+        **VALID_DRAFT,
+        "tracks": [
+            *cast(list[object], VALID_DRAFT["tracks"]),
+            {"trackId": "ambient", "kind": "ambient", "clips": [ambient_clip]},
+        ],
+    }
+
+    response = client.put(
+        f"/api/v1/editing-projects/{PROJECT_ID}/timeline",
+        json=draft,
+    )
+
+    assert response.status_code == 201
+    assert response.json()["tracks"][1]["clips"][0] == ambient_clip
+    stored = repository.revisions[PROJECT_ID][0].tracks[1].clips[0]
+    assert stored.original_audio_mode.value == "fixed_volume"  # type: ignore[union-attr]
+
+    for value in (None, "duck", 1):
+        rejected = {**draft, "tracks": [*cast(list[object], draft["tracks"])]}
+        rejected["tracks"][1] = {  # type: ignore[index]
+            "trackId": "ambient",
+            "kind": "ambient",
+            "clips": [{**ambient_clip, "originalAudioMode": value}],
+        }
+        result = client.put(
+            f"/api/v1/editing-projects/{PROJECT_ID}/timeline",
+            json=rejected,
+        )
+        assert result.status_code == 422
 
 
 def test_revision_conflict_reloads_and_reports_the_newest_revision() -> None:

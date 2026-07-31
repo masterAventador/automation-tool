@@ -1074,6 +1074,7 @@ export interface components {
             durationMs: number;
             /** Gaindb */
             gainDb: number | null;
+            originalAudioMode?: components["schemas"]["OriginalAudioMode"] | null;
             /** Sourceinms */
             sourceInMs: number | null;
             /** Sourcematerialid */
@@ -1214,6 +1215,12 @@ export interface components {
          * @enum {string}
          */
         MaterialKind: "video" | "image" | "audio";
+        /**
+         * OriginalAudioMode
+         * @description How one source-material audio clip participates in the final mix.
+         * @enum {string}
+         */
+        OriginalAudioMode: "auto_duck" | "fixed_volume" | "muted";
         /** PasswordChangeRequest */
         PasswordChangeRequest: {
             /**

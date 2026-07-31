@@ -9,6 +9,7 @@ from automation_tool.control_plane.domain.editing_project import EditingProjectI
 from automation_tool.control_plane.domain.material import MaterialId
 from automation_tool.control_plane.domain.timeline import (
     InvalidTimelineModel,
+    OriginalAudioMode,
     Timeline,
     TimelineClip,
     TimelineId,
@@ -113,6 +114,7 @@ def create_local_editing_timeline(
             text=None,
             gain_db=_DEFAULT_AUDIO_GAIN_DB,
             transition_in=None,
+            original_audio_mode=OriginalAudioMode.AUTO_DUCK,
         )
         for paragraph, paragraph_start_ms in positioned
         if paragraph.kind is LocalEditingTimelineParagraphKind.ORIGINAL_SPEECH

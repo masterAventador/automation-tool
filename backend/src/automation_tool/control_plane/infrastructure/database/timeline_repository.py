@@ -24,6 +24,7 @@ from automation_tool.control_plane.domain import (
     InvalidResourceId,
     InvalidTimelineModel,
     MaterialId,
+    OriginalAudioMode,
     Timeline,
     TimelineClip,
     TimelineId,
@@ -62,6 +63,7 @@ _PROJECT_CONSTRAINT: Final = "fk_editing_project_timelines_project"
 # worse, leave the reader quietly dropping it.
 _TRACK_KEYS: Final = frozenset(field.name for field in fields(TimelineTrack))
 _CLIP_KEYS: Final = frozenset(field.name for field in fields(TimelineClip))
+_LEGACY_CLIP_KEYS: Final = _CLIP_KEYS - {"original_audio_mode"}
 _TRANSITION_KEYS: Final = frozenset(field.name for field in fields(TimelineTransition))
 
 
@@ -137,27 +139,42 @@ def _track(document: dict[str, object]) -> object:
     """
     if document.keys() != _TRACK_KEYS or not _all_documents(document["clips"]):
         return document
+    kind = enumeration_member(TimelineTrackKind, document["kind"], InvalidTimelineModel)
     return TimelineTrack(
         track_id=cast(str, document["track_id"]),
-        kind=enumeration_member(TimelineTrackKind, document["kind"], InvalidTimelineModel),
+        kind=kind,
         clips=cast(
             "tuple[TimelineClip, ...]",
-            tuple(_clip(clip) for clip in cast("list[dict[str, object]]", document["clips"])),
+            tuple(
+                _clip(clip, kind)
+                for clip in cast("list[dict[str, object]]", document["clips"])
+            ),
         ),
     )
 
 
-def _clip(document: dict[str, object]) -> object:
+def _clip(document: dict[str, object], track_kind: TimelineTrackKind) -> object:
     """One stretch of one lane, or the raw document when it is not one.
 
     This is where a dropped key does the most damage: `None` is a legal value
-    for four of these nine fields, so a misspelt `gain_db` or `transition_in`
+    for several fields, so a misspelt `gain_db` or `transition_in`
     would hydrate into an object the domain happily accepts and that quietly
     means something other than what was stored. Hence the exact key set, and
-    hence subscripting rather than `.get` below -- once the keys match, a
-    missing one is impossible rather than merely unlikely.
+    hence subscripting rather than `.get` below. The sole missing-key shape is
+    the explicitly named pre-LE-11 document handled immediately below.
     """
-    if document.keys() != _CLIP_KEYS:
+    if document.keys() == _CLIP_KEYS:
+        stored_original_audio_mode = document["original_audio_mode"]
+    elif document.keys() == _LEGACY_CLIP_KEYS:
+        # Timelines written before LE-11 had no mode key. Their only ambient
+        # behaviour was the product default, automatic ducking; preserving it
+        # is an explicit one-shape upgrade, not a general missing-key fallback.
+        stored_original_audio_mode = (
+            OriginalAudioMode.AUTO_DUCK.value
+            if track_kind is TimelineTrackKind.AMBIENT
+            else None
+        )
+    else:
         return document
     return TimelineClip(
         clip_id=cast(str, document["clip_id"]),
@@ -169,7 +186,17 @@ def _clip(document: dict[str, object]) -> object:
         text=cast("str | None", document["text"]),
         gain_db=cast("float | None", document["gain_db"]),
         transition_in=cast("TimelineTransition | None", _transition(document["transition_in"])),
+        original_audio_mode=cast(
+            "OriginalAudioMode | None",
+            _original_audio_mode(stored_original_audio_mode),
+        ),
     )
+
+
+def _original_audio_mode(stored: object) -> object:
+    if stored is None:
+        return None
+    return enumeration_member(OriginalAudioMode, stored, InvalidTimelineModel)
 
 
 def _transition(stored: object) -> object:
@@ -249,6 +276,9 @@ def _clip_document(clip: TimelineClip) -> dict[str, object]:
         "gain_db": clip.gain_db,
         "transition_in": (
             None if clip.transition_in is None else _transition_document(clip.transition_in)
+        ),
+        "original_audio_mode": (
+            None if clip.original_audio_mode is None else clip.original_audio_mode.value
         ),
     }
 

@@ -1047,6 +1047,16 @@
             ],
             "title": "Gaindb"
           },
+          "originalAudioMode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OriginalAudioMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "sourceInMs": {
             "anyOf": [
               {
@@ -1439,6 +1449,16 @@
           "audio"
         ],
         "title": "MaterialKind",
+        "type": "string"
+      },
+      "OriginalAudioMode": {
+        "description": "How one source-material audio clip participates in the final mix.",
+        "enum": [
+          "auto_duck",
+          "fixed_volume",
+          "muted"
+        ],
+        "title": "OriginalAudioMode",
         "type": "string"
       },
       "PasswordChangeRequest": {

@@ -53,6 +53,7 @@ from automation_tool.control_plane.domain import (
     InstallationId,
     InvalidTimelineModel,
     MaterialId,
+    OriginalAudioMode,
     OutputSpec,
     Timeline,
     TimelineClip,
@@ -323,6 +324,7 @@ def clip_document(
     text_value: object = None,
     gain_db: object = None,
     transition_in: object = None,
+    original_audio_mode: object = None,
 ) -> dict[str, object]:
     """A clip as it really sits in the column, written out by hand.
 
@@ -340,6 +342,7 @@ def clip_document(
         "text": text_value,
         "gain_db": gain_db,
         "transition_in": transition_in,
+        "original_audio_mode": original_audio_mode,
     }
 
 
@@ -553,6 +556,69 @@ async def test_saved_timeline_lands_as_typed_columns_and_hydrates_back_equal(
         assert loaded.tracks[2].clips[0].text == CAPTION_ONE
         assert type(loaded.tracks[1].clips[1].gain_db) is float
         assert loaded.created_at.tzinfo is UTC
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_original_audio_mode_round_trips_through_real_postgresql_jsonb(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyTimelineRepository(database)
+    try:
+        await reset_data(database)
+        project_id = EditingProjectId.new()
+        await store_project(database, project_id)
+        timeline_id = TimelineId.new()
+        base = make_timeline(timeline_id, project_id)
+        ambient = TimelineTrack(
+            track_id="ambient",
+            kind=TimelineTrackKind.AMBIENT,
+            clips=(
+                TimelineClip(
+                    clip_id="ambient-one",
+                    start_ms=0,
+                    duration_ms=1_000,
+                    source_material_id=MATERIAL_ONE,
+                    source_in_ms=0,
+                    source_out_ms=1_000,
+                    text=None,
+                    gain_db=-12.0,
+                    transition_in=None,
+                    original_audio_mode=OriginalAudioMode.FIXED_VOLUME,
+                ),
+            ),
+        )
+        timeline = Timeline(
+            timeline_id=base.timeline_id,
+            project_id=base.project_id,
+            revision=base.revision,
+            duration_ms=base.duration_ms,
+            tracks=(*base.tracks, ambient),
+            created_at=base.created_at,
+        )
+
+        await repository.save(timeline, OWNER)
+
+        row = await stored_row(database, timeline_id.uuid, 1)
+        stored_ambient = next(
+            track
+            for track in cast(list[dict[str, object]], row["tracks"])
+            if track["kind"] == "ambient"
+        )
+        stored_clip = cast(list[dict[str, object]], stored_ambient["clips"])[0]
+        assert stored_clip["original_audio_mode"] == "fixed_volume"
+        loaded = await repository.get(timeline_id, 1, OWNER)
+        loaded_ambient = loaded.track_of(TimelineTrackKind.AMBIENT)
+        assert loaded_ambient is not None
+        assert (
+            loaded_ambient.clips[0].original_audio_mode
+            is OriginalAudioMode.FIXED_VOLUME
+        )
     finally:
         await reset_data(database)
         await database.close()
