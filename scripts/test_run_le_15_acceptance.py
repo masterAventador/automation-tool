@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, os.fspath(ROOT / "scripts"))
 
 import run_le_15_acceptance
+from run_le_14_acceptance import Le14AcceptanceFailure
 
 
 class Le15AcceptanceRunnerTests(unittest.TestCase):
@@ -44,6 +45,7 @@ class Le15AcceptanceRunnerTests(unittest.TestCase):
                 patch.dict(
                     os.environ,
                     {
+                        "PYTHONOPTIMIZE": "2",
                         "PYTEST_ADDOPTS": "--collect-only",
                         "PYTEST_CURRENT_TEST": "private",
                     },
@@ -64,6 +66,7 @@ class Le15AcceptanceRunnerTests(unittest.TestCase):
         environment = invocation.kwargs["env"]
         self.assertNotIn(api_key, command)
         self.assertNotIn(api_key, environment.values())
+        self.assertNotIn("PYTHONOPTIMIZE", environment)
         self.assertNotIn("PYTEST_ADDOPTS", environment)
         self.assertNotIn("PYTEST_CURRENT_TEST", environment)
         self.assertEqual(
@@ -87,6 +90,33 @@ class Le15AcceptanceRunnerTests(unittest.TestCase):
             timeout=run_le_15_acceptance.ACCEPTANCE_TIMEOUT_SECONDS
         )
 
+    def test_pytest_workspace_is_inside_the_driver_owned_temporary_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            secret, _ = self._credential(root)
+            child = MagicMock()
+            child.pid = 1520
+            child.returncode = 0
+            child.communicate.return_value = ("1 passed in 0.01s\n", "")
+            with (
+                patch.object(
+                    run_le_15_acceptance,
+                    "prepare_verified_media_toolchain",
+                    return_value=root / "media-toolchain",
+                ),
+                patch.object(subprocess, "Popen", return_value=child) as popen,
+            ):
+                run_le_15_acceptance.run_acceptance(secret)
+
+        command = popen.call_args.args[0]
+        basetemp_index = command.index("--basetemp")
+        pytest_root = Path(command[basetemp_index + 1])
+        self.assertEqual(pytest_root.name, "pytest")
+        self.assertTrue(
+            pytest_root.parent.name.startswith("automation-tool-le15-acceptance-")
+        )
+        self.assertFalse(pytest_root.exists())
+
     def test_collect_only_exit_zero_is_not_a_real_acceptance(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -102,12 +132,18 @@ class Le15AcceptanceRunnerTests(unittest.TestCase):
                     return_value=root / "media-toolchain",
                 ),
                 patch.object(subprocess, "Popen", return_value=child),
+                patch.object(
+                    run_le_15_acceptance,
+                    "_terminate_process_tree",
+                ) as terminate,
                 self.assertRaisesRegex(
                     run_le_15_acceptance.Le15AcceptanceFailure,
                     r"^LE-15 real acceptance failed$",
                 ),
             ):
                 run_le_15_acceptance.run_acceptance(secret)
+
+        terminate.assert_called_once_with(child)
 
     def test_output_cannot_publish_the_private_toolchain_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -128,12 +164,18 @@ class Le15AcceptanceRunnerTests(unittest.TestCase):
                     return_value=toolchain,
                 ),
                 patch.object(subprocess, "Popen", return_value=child),
+                patch.object(
+                    run_le_15_acceptance,
+                    "_terminate_process_tree",
+                ) as terminate,
                 self.assertRaisesRegex(
                     run_le_15_acceptance.Le15AcceptanceFailure,
                     r"^LE-15 real acceptance failed$",
                 ),
             ):
                 run_le_15_acceptance.run_acceptance(secret)
+
+        terminate.assert_called_once_with(child)
 
     def test_timeout_cleans_the_child_tree_and_returns_a_fixed_failure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -167,6 +209,53 @@ class Le15AcceptanceRunnerTests(unittest.TestCase):
         self.assertNotIn(api_key, str(raised.exception))
         self.assertNotIn(os.fspath(secret), str(raised.exception))
         terminate.assert_called_once_with(child)
+
+    def test_nonzero_exit_cleans_the_child_tree_before_fixed_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            secret, _ = self._credential(root)
+            child = MagicMock()
+            child.pid = 1519
+            child.returncode = 1
+            child.communicate.return_value = ("", "private pytest failure")
+            with (
+                patch.object(
+                    run_le_15_acceptance,
+                    "prepare_verified_media_toolchain",
+                    return_value=root / "media-toolchain",
+                ),
+                patch.object(subprocess, "Popen", return_value=child),
+                patch.object(
+                    run_le_15_acceptance,
+                    "_terminate_process_tree",
+                ) as terminate,
+                self.assertRaisesRegex(
+                    run_le_15_acceptance.Le15AcceptanceFailure,
+                    r"^LE-15 real acceptance failed$",
+                ),
+            ):
+                run_le_15_acceptance.run_acceptance(secret)
+
+        terminate.assert_called_once_with(child)
+
+    def test_le14_cleanup_failure_is_normalized_without_a_traceback_chain(self) -> None:
+        child = MagicMock()
+        with (
+            patch.object(
+                run_le_15_acceptance,
+                "_terminate_owned_process_tree",
+                side_effect=Le14AcceptanceFailure("LE-14 private cleanup path"),
+            ),
+            self.assertRaisesRegex(
+                run_le_15_acceptance.Le15AcceptanceFailure,
+                r"^LE-15 real acceptance failed$",
+            ) as raised,
+        ):
+            run_le_15_acceptance._terminate_process_tree(child)
+
+        self.assertTrue(raised.exception.__suppress_context__)
+        self.assertNotIn("LE-14", str(raised.exception))
+        self.assertNotIn("private cleanup path", str(raised.exception))
 
 
 if __name__ == "__main__":

@@ -63,7 +63,10 @@ def prepare_verified_media_toolchain(resource_root: Path) -> Path:
 
 
 def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
-    _terminate_owned_process_tree(process)
+    try:
+        _terminate_owned_process_tree(process)
+    except (OSError, Le14AcceptanceFailure):
+        _reject("LE-15 real acceptance failed")
 
 
 def run_acceptance(secret_path: Path) -> None:
@@ -71,15 +74,20 @@ def run_acceptance(secret_path: Path) -> None:
 
     api_key = read_bailian_api_key(secret_path)
     completed: subprocess.CompletedProcess[str] | None = None
+    acceptance_succeeded = False
     with tempfile.TemporaryDirectory(
         prefix="automation-tool-le15-acceptance-"
     ) as directory:
-        prepared_toolchain = prepare_verified_media_toolchain(Path(directory))
+        acceptance_root = Path(directory).resolve()
+        prepared_toolchain = prepare_verified_media_toolchain(
+            acceptance_root / "runtime"
+        )
         toolchain = prepared_toolchain.resolve()
+        pytest_root = acceptance_root / "pytest"
         environment = {
             key: value
             for key, value in os.environ.items()
-            if not key.startswith("PYTEST_")
+            if not key.startswith(("PYTEST_", "PYTHON"))
         }
         environment[SECRET_PATH_ENVIRONMENT] = os.fspath(secret_path)
         environment[TOOLCHAIN_ROOT_ENVIRONMENT] = os.fspath(toolchain)
@@ -90,6 +98,8 @@ def run_acceptance(secret_path: Path) -> None:
             ACCEPTANCE_TEST,
             "-q",
             "-s",
+            "--basetemp",
+            os.fspath(pytest_root),
             "-o",
             "addopts=",
         ]
@@ -159,6 +169,18 @@ def run_acceptance(secret_path: Path) -> None:
                         stdout,
                         stderr,
                     )
+                    combined = completed.stdout + completed.stderr
+                    acceptance_succeeded = not (
+                        api_key in combined
+                        or os.fspath(secret_path) in combined
+                        or os.fspath(acceptance_root) in combined
+                        or os.fspath(prepared_toolchain) in combined
+                        or os.fspath(toolchain) in combined
+                        or completed.returncode != 0
+                        or _PASS_SUMMARY_PATTERN.search(completed.stdout) is None
+                    )
+                    if not acceptance_succeeded:
+                        cleanup_owned_process()
         except BaseException:
             cleanup_owned_process()
             raise
@@ -166,17 +188,7 @@ def run_acceptance(secret_path: Path) -> None:
             restore_sigterm_handler()
         if timed_out:
             cleanup_owned_process()
-    if launch_failed or timed_out or completed is None:
-        _reject("LE-15 real acceptance failed")
-    combined = completed.stdout + completed.stderr
-    if (
-        api_key in combined
-        or os.fspath(secret_path) in combined
-        or os.fspath(prepared_toolchain) in combined
-        or os.fspath(toolchain) in combined
-        or completed.returncode != 0
-        or _PASS_SUMMARY_PATTERN.search(completed.stdout) is None
-    ):
+    if launch_failed or timed_out or completed is None or not acceptance_succeeded:
         _reject("LE-15 real acceptance failed")
     print(completed.stdout.strip())
 
