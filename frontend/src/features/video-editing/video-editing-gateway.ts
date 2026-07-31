@@ -11,7 +11,8 @@ export type VideoEditingErrorCode =
   | "invalid_project"
   | "invalid_timeline"
   | "draft_storage_unavailable"
-  | "editing_service_unavailable";
+  | "editing_service_unavailable"
+  | "outcome_uncertain";
 
 export class VideoEditingGatewayError extends Error {
   constructor(

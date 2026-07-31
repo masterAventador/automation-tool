@@ -22,11 +22,11 @@ const CANONICAL_UUID_V4 =
 const LOCAL_ID = /^[a-z][a-z0-9-]{0,63}$/;
 const FONT_KEY = /^[a-z][a-z0-9-]{0,63}$/;
 
-const resourceIdSchema = z.string().regex(CANONICAL_UUID_V4);
+export const editingResourceIdSchema = z.string().regex(CANONICAL_UUID_V4);
 const localIdSchema = z.string().regex(LOCAL_ID);
 const timestampSchema = z.iso.datetime();
 
-const titleSchema = z
+export const editingProjectTitleSchema = z
   .string()
   .min(1)
   .max(MAX_EDITING_PROJECT_TITLE_CHARACTERS)
@@ -58,8 +58,8 @@ export type EditingCaptionStyle = z.infer<typeof editingCaptionStyleSchema>;
 
 export const editingProjectSchema = z
   .strictObject({
-    projectId: resourceIdSchema,
-    title: titleSchema,
+    projectId: editingResourceIdSchema,
+    title: editingProjectTitleSchema,
     output: editingOutputSpecSchema,
     captionStyle: editingCaptionStyleSchema,
     createdAt: timestampSchema,
@@ -97,7 +97,7 @@ export const timelineClipSchema = z
     clipId: localIdSchema,
     startMs: z.number().int().min(0).max(MAX_VIDEO_DURATION_MS),
     durationMs: z.number().int().min(1).max(MAX_VIDEO_DURATION_MS),
-    sourceMaterialId: resourceIdSchema.nullable(),
+    sourceMaterialId: editingResourceIdSchema.nullable(),
     sourceInMs: z.number().int().min(0).max(MAX_MATERIAL_DURATION_MS).nullable(),
     sourceOutMs: z.number().int().min(0).max(MAX_MATERIAL_DURATION_MS).nullable(),
     text: z
@@ -235,8 +235,8 @@ export type EditingTimelineDraft = z.infer<typeof editingTimelineDraftSchema>;
 
 export const editingTimelineSchema = z
   .strictObject({
-    timelineId: resourceIdSchema,
-    projectId: resourceIdSchema,
+    timelineId: editingResourceIdSchema,
+    projectId: editingResourceIdSchema,
     revision: z.number().int().min(1),
     durationMs: timelineDurationSchema,
     tracks: timelineTracksSchema,
@@ -269,13 +269,13 @@ export type EditingFailureCode = z.infer<typeof editingFailureCodeSchema>;
 
 export const editingJobSchema = z
   .strictObject({
-    jobId: resourceIdSchema,
-    projectId: resourceIdSchema,
-    timelineId: resourceIdSchema,
+    jobId: editingResourceIdSchema,
+    projectId: editingResourceIdSchema,
+    timelineId: editingResourceIdSchema,
     timelineRevision: z.number().int().min(1),
     status: editingJobStatusSchema,
     failureCode: editingFailureCodeSchema.nullable(),
-    outputArtifactId: resourceIdSchema.nullable(),
+    outputArtifactId: editingResourceIdSchema.nullable(),
     createdAt: timestampSchema,
     updatedAt: timestampSchema,
   })

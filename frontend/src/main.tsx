@@ -19,7 +19,7 @@ import { TauriAccountSessionGateway } from "./platform/tauri/account-session-gat
 import { TauriModelServiceGateway } from "./platform/tauri/model-service-gateway";
 import { TauriMaterialVideoStudioGateway } from "./platform/tauri/material-video-studio-gateway";
 import { TauriPublishWorkspaceGateway } from "./platform/tauri/publish-workspace-gateway";
-import { createLocalVideoEditingGateway } from "./features/video-editing/local-video-editing-gateway";
+import { TauriVideoEditingGateway } from "./platform/tauri/video-editing-gateway";
 import "./styles/global.css";
 
 const root = document.getElementById("root");
@@ -45,7 +45,7 @@ const appUpdateGateway = new TauriAppUpdateGateway();
 const modelServiceGateway = new TauriModelServiceGateway();
 const materialVideoStudioGateway = new TauriMaterialVideoStudioGateway();
 const publishWorkspaceGateway = new TauriPublishWorkspaceGateway();
-const videoEditingGateway = createLocalVideoEditingGateway(window.sessionStorage);
+const videoEditingGateway = new TauriVideoEditingGateway();
 // Always constructed. Whether a product account is actually required is a
 // property of the deployment this build was configured for, answered at
 // runtime by `restore_product_account_session`. Selecting it by Vite mode

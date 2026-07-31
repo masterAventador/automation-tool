@@ -82,6 +82,7 @@ const REQUIRED_TAURI_PROPS = [
   "modelServiceGateway",
   "materialVideoStudioGateway",
   "publishWorkspaceGateway",
+  "videoEditingGateway",
 ] as const;
 
 function requireRealTauriGateway(prop: string): void {
@@ -97,23 +98,6 @@ function requireRealTauriGateway(prop: string): void {
 describe("production wiring", () => {
   it.each(REQUIRED_TAURI_PROPS)("%s is handed a real Tauri gateway", (prop) => {
     requireRealTauriGateway(prop);
-  });
-
-  /**
-   * 已知未接线，等 [T4] 独立剪辑装配。
-   *
-   * VE-01～VE-08 八项全部标记已完成——阿里云的凭据、媒资暂存、Timeline 编译、任务提交、
-   * 回调对账、成片导入都实现了，还用真实凭据验过。但 `platform/tauri/` 下没有剪辑工作台
-   * 网关，生产 `invoke_handler` 里没有剪辑命令，FastAPI 也没有剪辑路由，两个
-   * repository 连 `database/__init__.py` 都没 re-export。`main.tsx` 传的是
-   * `createLocalVideoEditingGateway(window.sessionStorage)`：关掉 App 就清空，提交永远
-   * 返回不可用。
-   *
-   * 用 `it.fails` 而不是删掉这一条，是为了让现状留在测试里而不是留在备忘录里。装配补上
-   * 之后这条会因为「预期失败却通过了」而报错，那时把它移回上面的清单即可。
-   */
-  it.fails("videoEditingGateway is handed a real Tauri gateway", () => {
-    requireRealTauriGateway("videoEditingGateway");
   });
 
   /**
