@@ -34,6 +34,8 @@ _MAX_REQUEST_ID_CHARACTERS: Final = 512
 _MAX_ALIGNMENT_ERROR_PERCENT: Final = 15
 _EXACT_ALIGNMENT_CHARACTERS: Final = 4
 _MAX_ALIGNMENT_CANDIDATE_CHECKS: Final = 1_024
+_MAX_ALIGNMENT_DISTANCE_DP_CELLS: Final = 40_000_000
+_MAX_ALIGNMENT_ADJACENT_DP_CELLS: Final = 4_000_000
 
 
 class ScriptRecordingRejected(RuntimeError):
@@ -168,6 +170,7 @@ def _alignment_distance(
     transcript: str,
     *,
     maximum_distance: int | None = None,
+    consume_dp_cells: Callable[[int], bool] | None = None,
 ) -> int | None:
     maximum = max(len(script_text), len(transcript))
     if not script_text or not transcript:
@@ -181,6 +184,9 @@ def _alignment_distance(
         allowed_errors = min(allowed_errors, maximum_distance)
     if abs(len(script_text) - len(transcript)) > allowed_errors:
         return None
+    required_dp_cells = maximum * (min(len(script_text), len(transcript)) + 1)
+    if consume_dp_cells is not None and not consume_dp_cells(required_dp_cells):
+        return None
     distance = _levenshtein_distance(
         script_text,
         transcript,
@@ -191,8 +197,20 @@ def _alignment_distance(
     return distance
 
 
-def _texts_align(script_text: str, transcript: str) -> bool:
-    return _alignment_distance(script_text, transcript) is not None
+def _texts_align(
+    script_text: str,
+    transcript: str,
+    *,
+    consume_dp_cells: Callable[[int], bool] | None = None,
+) -> bool:
+    return (
+        _alignment_distance(
+            script_text,
+            transcript,
+            consume_dp_cells=consume_dp_cells,
+        )
+        is not None
+    )
 
 
 def _aligned_slice_length_bounds(expected: str) -> tuple[int, int]:
@@ -210,9 +228,14 @@ def _slice_proves_sentence(
     *,
     sentence_index: int,
     actual: str,
+    consume_dp_cells: Callable[[int], bool],
 ) -> bool:
     expected = normalized_sentences[sentence_index]
-    expected_distance = _alignment_distance(expected, actual)
+    expected_distance = _alignment_distance(
+        expected,
+        actual,
+        consume_dp_cells=consume_dp_cells,
+    )
     if expected_distance is None:
         return False
     for other_index, other in enumerate(normalized_sentences):
@@ -224,6 +247,7 @@ def _slice_proves_sentence(
                 other,
                 actual,
                 maximum_distance=expected_distance,
+                consume_dp_cells=consume_dp_cells,
             )
             is not None
         ):
@@ -298,12 +322,21 @@ def _slice_preserves_adjacent_boundaries(
     previous_actual: str,
     actual: str,
     following_actual: str,
-    consume_work: Callable[[], bool],
+    consume_distance_dp_cells: Callable[[int], bool],
+    consume_dp_cells: Callable[[int], bool],
 ) -> bool:
     previous = normalized_sentences[sentence_index - 1]
     following = normalized_sentences[sentence_index + 1]
-    previous_distance = _alignment_distance(previous, previous_actual)
-    following_distance = _alignment_distance(following, following_actual)
+    previous_distance = _alignment_distance(
+        previous,
+        previous_actual,
+        consume_dp_cells=consume_distance_dp_cells,
+    )
+    following_distance = _alignment_distance(
+        following,
+        following_actual,
+        consume_dp_cells=consume_distance_dp_cells,
+    )
     if previous_distance is None or following_distance is None:
         return False
     current_adjacent_distance = previous_distance + following_distance
@@ -323,7 +356,10 @@ def _slice_preserves_adjacent_boundaries(
         plausible_boundaries.append(boundary)
     if not plausible_boundaries:
         return True
-    if not consume_work():
+    required_dp_cells = (len(previous_actual) + len(actual)) * (len(previous) + 1) + (
+        len(following_actual) + len(actual)
+    ) * (len(following) + 1)
+    if not consume_dp_cells(required_dp_cells):
         return False
     alternative_previous_distances = _bounded_extension_distances(
         previous,
@@ -331,8 +367,6 @@ def _slice_preserves_adjacent_boundaries(
         actual,
         maximum_distance=current_adjacent_distance,
     )
-    if not consume_work():
-        return False
     alternative_following_distances = _bounded_extension_distances(
         following[::-1],
         following_actual[::-1],
@@ -387,8 +421,25 @@ def _sentences_align(
     normalized_sentences: tuple[str, ...],
     transcript: str,
 ) -> bool:
+    distance_dp_cells = 0
+
+    def consume_distance_dp_cells(required: int) -> bool:
+        nonlocal distance_dp_cells
+        if (
+            type(required) is not int
+            or required < 1
+            or distance_dp_cells + required > _MAX_ALIGNMENT_DISTANCE_DP_CELLS
+        ):
+            return False
+        distance_dp_cells += required
+        return True
+
     expected_transcript = "".join(normalized_sentences)
-    if not _texts_align(expected_transcript, transcript):
+    if not _texts_align(
+        expected_transcript,
+        transcript,
+        consume_dp_cells=consume_distance_dp_cells,
+    ):
         return False
     length_bounds = tuple(
         _aligned_slice_length_bounds(sentence) for sentence in normalized_sentences
@@ -403,12 +454,24 @@ def _sentences_align(
         return False
     failed_states: set[tuple[int, ...]] = set()
     candidate_checks = 0
+    adjacent_dp_cells = 0
 
     def consume_work() -> bool:
         nonlocal candidate_checks
         if candidate_checks >= _MAX_ALIGNMENT_CANDIDATE_CHECKS:
             return False
         candidate_checks += 1
+        return True
+
+    def consume_adjacent_dp_cells(required: int) -> bool:
+        nonlocal adjacent_dp_cells
+        if (
+            type(required) is not int
+            or required < 1
+            or adjacent_dp_cells + required > _MAX_ALIGNMENT_ADJACENT_DP_CELLS
+        ):
+            return False
+        adjacent_dp_cells += required
         return True
 
     def partition_from(
@@ -443,6 +506,7 @@ def _sentences_align(
                 normalized_sentences,
                 sentence_index=sentence_index,
                 actual=actual,
+                consume_dp_cells=consume_distance_dp_cells,
             ):
                 continue
             if sentence_index >= 2:
@@ -454,7 +518,8 @@ def _sentences_align(
                     previous_actual=transcript[previous_start:middle_start],
                     actual=transcript[middle_start:transcript_start],
                     following_actual=actual,
-                    consume_work=consume_work,
+                    consume_distance_dp_cells=consume_distance_dp_cells,
+                    consume_dp_cells=consume_adjacent_dp_cells,
                 ):
                     continue
             if partition_from(

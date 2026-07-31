@@ -381,9 +381,10 @@ def test_exact_partition_search_does_not_expand_every_valid_boundary(
         *,
         sentence_index: int,
         actual: str,
+        consume_dp_cells: object,
     ) -> bool:
         nonlocal candidate_checks
-        del actual_sentences, sentence_index, actual
+        del actual_sentences, sentence_index, actual, consume_dp_cells
         candidate_checks += 1
         return True
 
@@ -411,9 +412,10 @@ def test_partition_search_stops_at_a_hard_candidate_budget(
         *,
         sentence_index: int,
         actual: str,
+        consume_dp_cells: object,
     ) -> bool:
         nonlocal candidate_checks
-        del actual_sentences, actual
+        del actual_sentences, actual, consume_dp_cells
         candidate_checks += 1
         if candidate_checks > maximum_candidate_checks:
             raise AssertionError("partition search exceeded its hard work budget")
@@ -483,6 +485,74 @@ def test_long_overlapping_boundaries_do_not_repeat_edit_distance_per_character(
     assert edit_distance_checks <= 32
 
 
+def test_partition_backtracking_limits_total_incremental_dp_allocation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_incremental_distances = script_recording._bounded_extension_distances
+    original_edit_distance = script_recording._levenshtein_distance
+    allocated_dp_cells = 0
+    allocated_edit_distance_cells = 0
+
+    def count_allocated_dp_cells(
+        expected: str,
+        base_actual: str,
+        extension: str,
+        *,
+        maximum_distance: int,
+    ) -> tuple[int, ...]:
+        nonlocal allocated_dp_cells
+        allocated_dp_cells += (len(base_actual) + len(extension)) * (len(expected) + 1)
+        return original_incremental_distances(
+            expected,
+            base_actual,
+            extension,
+            maximum_distance=maximum_distance,
+        )
+
+    def count_allocated_edit_distance_cells(
+        left: str,
+        right: str,
+        *,
+        maximum_distance: int,
+    ) -> int:
+        nonlocal allocated_edit_distance_cells
+        allocated_edit_distance_cells += max(len(left), len(right)) * (
+            min(len(left), len(right)) + 1
+        )
+        return original_edit_distance(
+            left,
+            right,
+            maximum_distance=maximum_distance,
+        )
+
+    monkeypatch.setattr(
+        script_recording,
+        "_bounded_extension_distances",
+        count_allocated_dp_cells,
+    )
+    monkeypatch.setattr(
+        script_recording,
+        "_levenshtein_distance",
+        count_allocated_edit_distance_cells,
+    )
+    sentence_length = 200
+    allowed_errors = sentence_length * 15 // 100
+    previous = "q" * (sentence_length - allowed_errors + 1) + "a" * (allowed_errors - 1)
+    middle = "a" * allowed_errors
+    following = "a" * (allowed_errors - 1) + "r" * (sentence_length - allowed_errors + 1)
+    final = "s" * sentence_length
+    previous_actual = "c" * (allowed_errors - 1) + previous[allowed_errors - 1 :]
+    following_actual = following[:-allowed_errors] + "d" * allowed_errors
+    final_actual = "t" * (allowed_errors + 1) + final[allowed_errors + 1 :]
+
+    assert not script_recording._sentences_align(
+        (previous, middle, following, final),
+        previous_actual + middle + following_actual + final_actual,
+    )
+    assert allocated_dp_cells <= 4_000_000
+    assert allocated_edit_distance_cells <= 40_000_000
+
+
 def test_adjacent_boundary_proof_fails_closed_when_its_work_budget_is_exhausted() -> None:
     previous = "a" * 19 + "X"
     middle = "XY"
@@ -494,16 +564,8 @@ def test_adjacent_boundary_proof_fails_closed_when_its_work_budget_is_exhausted(
         previous_actual=previous,
         actual=middle,
         following_actual=following[1:],
-        consume_work=lambda: False,
-    )
-    work_results = iter((True, False))
-    assert not script_recording._slice_preserves_adjacent_boundaries(
-        (previous, middle, following),
-        sentence_index=1,
-        previous_actual=previous,
-        actual=middle,
-        following_actual=following[1:],
-        consume_work=lambda: next(work_results),
+        consume_distance_dp_cells=lambda required: True,
+        consume_dp_cells=lambda required: False,
     )
 
 
@@ -519,7 +581,8 @@ def test_adjacent_boundary_proof_keeps_a_middle_with_no_better_reallocation() ->
         previous_actual=previous_actual,
         actual=middle,
         following_actual=following[1:],
-        consume_work=lambda: True,
+        consume_distance_dp_cells=lambda required: True,
+        consume_dp_cells=lambda required: True,
     )
 
 
