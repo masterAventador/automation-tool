@@ -63,7 +63,6 @@ import {
   type OwnMotionJob,
   type VideoCreationMethodId,
 } from "./motion-run-store";
-import { motionPartsUsage } from "./motion-parts-catalog";
 import { MotionPartsCatalog } from "./MotionPartsCatalog";
 import { MotionStyleCatalog, type MotionStyleDraftSelection } from "./MotionStyleCatalog";
 import { MOTION_STYLE_CATALOG } from "./motion-style-catalog";
@@ -1063,6 +1062,12 @@ function MotionPreviewPage({
             提交本机渲染
           </Button>
         </Space>
+        <Alert
+          type="info"
+          showIcon
+          title="这里预览和提交的是固定模板手工制作"
+          description="动效零件页为下一次“一句话自动制作”指定的零件不会在这里显示，也不会随“提交本机渲染”使用。"
+        />
         {valid ? null : (
           <Alert
             type="warning"
@@ -1500,6 +1505,11 @@ export function VideoStudio({
       aspectRatio: MOTION_BRIEF_LIMITS.aspectRatios[0]!,
       durationSeconds: briefFilmSeconds,
       language: MOTION_BRIEF_LIMITS.languages[0]!,
+      catalogPartOverrides: motionPartSelections.some(
+        (selection) => selection.length > 0,
+      )
+        ? motionPartSelections.map((selection) => selection[0] ?? null)
+        : [],
       modelThinking: briefThinking,
     };
     setBusy(true);
@@ -1714,7 +1724,7 @@ export function VideoStudio({
               selectedMethod === "motion_composition_v1" ? (
                 <MotionPartsCatalog
                   beats={motionDraft.beats}
-                  usage={motionPartsUsage(MOTION_CREATION_MODE)}
+                  usage="applies_to_output"
                   selections={motionPartSelections}
                   onSelectionsChange={setMotionPartSelections}
                 />

@@ -47,7 +47,7 @@ import urllib.error
 import urllib.request
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Final
 
@@ -2039,6 +2039,48 @@ def _first_message_contract(brief: MotionBrief) -> str:
     )
 
 
+def _catalog_part_override_instruction(
+    overrides: tuple[str | None, ...],
+) -> str:
+    """Tell the model the shot shape the operator already owns."""
+    if not overrides:
+        return ""
+    choices = "；".join(
+        f"第{index}镜头={'由你自动选择' if part is None else part}"
+        for index, part in enumerate(overrides, start=1)
+    )
+    return (
+        "\n\n用户已经在 App 里逐镜头指定了零件。storyboard 必须恰好输出 "
+        f"{len(overrides)} 个 beats，并按相同顺序安排；{choices}。"
+        "明确指定的镜头必须把该 id 作为 catalog_parts 的唯一一项；"
+        "标为自动选择的镜头仍按内容从锁定目录选择或留空。"
+    )
+
+
+def apply_catalog_part_overrides(
+    storyboard: StoryboardArtifact,
+    overrides: tuple[str | None, ...],
+) -> StoryboardArtifact:
+    """Make the user's choices authoritative without dropping a shot."""
+    if not overrides:
+        return storyboard
+    _require(
+        len(storyboard.beats) == len(overrides),
+        "catalog part overrides do not match storyboard beats",
+    )
+    return StoryboardArtifact(
+        beats=tuple(
+            replace(
+                beat,
+                catalog_parts=(override,)
+                if override is not None
+                else beat.catalog_parts,
+            )
+            for beat, override in zip(storyboard.beats, overrides, strict=True)
+        )
+    )
+
+
 class MotionAuthoringAgent:
     """Drives one restricted authoring run from brief to submitted RenderJob."""
 
@@ -2056,6 +2098,7 @@ class MotionAuthoringAgent:
         catalog_root: Path | None = None,
         slot_probe: Callable[[tuple[Path, ...]], Sequence[ProbeReading]] | None = None,
         narrator: Callable[[str, str], tuple[str, float]] | None = None,
+        catalog_part_overrides: tuple[str | None, ...] = (),
     ) -> None:
         # Supplied by the App, which resolves it beside the other packaged
         # resources; this process does not go looking for it. `None` means this
@@ -2086,6 +2129,20 @@ class MotionAuthoringAgent:
             and 1 <= model_timeout_seconds <= MAX_MODEL_TIMEOUT_SECONDS,
             "model timeout out of range",
         )
+        _require(
+            isinstance(catalog_part_overrides, tuple)
+            and len(catalog_part_overrides) <= MAX_STORYBOARD_BEATS
+            and (
+                not catalog_part_overrides
+                or any(part is not None for part in catalog_part_overrides)
+            )
+            and all(
+                part is None
+                or (type(part) is str and part in SELECTABLE_CATALOG_PART_IDS)
+                for part in catalog_part_overrides
+            ),
+            "catalog part overrides must be selectable catalog ids",
+        )
         self._workspace = workspace
         self._tools = tools
         self._workflow = workflow
@@ -2096,6 +2153,7 @@ class MotionAuthoringAgent:
         self._model_timeout_seconds = model_timeout_seconds
         self._slot_probe = slot_probe
         self._narrator = narrator
+        self._catalog_part_overrides = catalog_part_overrides
 
     def _call(self, messages: list[dict[str, str]]) -> dict[str, Any]:
         assert self._model_config is not None  # guarded in author()
@@ -2353,7 +2411,11 @@ class MotionAuthoringAgent:
         )
         messages: list[dict[str, str]] = [
             {"role": "system", "content": _SYSTEM_RULES + "\n\n" + self._workflow.text},
-            {"role": "user", "content": _first_message_contract(brief)},
+            {
+                "role": "user",
+                "content": _first_message_contract(brief)
+                + _catalog_part_override_instruction(self._catalog_part_overrides),
+            },
         ]
         data = self._call(messages)
         _require(
@@ -2362,6 +2424,11 @@ class MotionAuthoringAgent:
         )
         design = self._tools.write_design(data["design"])
         script = self._tools.write_script(data["script"])
+        storyboard = apply_catalog_part_overrides(
+            StoryboardArtifact.from_payload(data["storyboard"]),
+            self._catalog_part_overrides,
+        )
+        data["storyboard"] = json.loads(storyboard.to_json())
         storyboard = self._tools.write_storyboard(data["storyboard"])
 
         # PC-26: narrate before anything is assembled — the measured seconds

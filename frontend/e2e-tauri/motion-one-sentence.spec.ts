@@ -181,6 +181,22 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
     await studio.$("div[role='tab']=新建视频").click();
 
     step("empty brief refused, no job created");
+    // --- One real catalog choice, through the page a user sees ------------
+    await studio.$("div[role='tab']=动效零件").click();
+    const parts = await studio.$("section[aria-label='动效零件目录']");
+    await parts
+      .$("//label[contains(@class,'ant-radio-button-wrapper') and contains(., '数据与地图')]")
+      .click();
+    const dataChart = await parts.$(
+      "//li[contains(@class,'motion-parts-card') and .//*[normalize-space()='数据图表动画']]",
+    );
+    await dataChart.$("button=指定给第 1 镜头").click();
+    await expect(studio).toHaveText(
+      expect.stringContaining("第 1 镜头：已指定数据图表动画"),
+    );
+    await studio.$("div[role='tab']=新建视频").click();
+
+    step("first shot catalog override selected");
     // --- One sentence, and nothing else ------------------------------------
     await studio.$("textarea[aria-label='一句话视频需求']").setValue(BRIEF);
     // The card refuses an empty sentence with the same words it showed a moment
@@ -303,6 +319,17 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
     assert.ok(
       Array.isArray(settled.shotStructure) && settled.shotStructure.length > 0,
       "the retained RenderJob carries no product shot table",
+    );
+    const shotStructure = settled.shotStructure as Array<Record<string, unknown>>;
+    assert.equal(
+      shotStructure.length,
+      3,
+      "three override slots must produce exactly three authored shots",
+    );
+    assert.equal(
+      shotStructure[0]?.part,
+      "data-chart",
+      "the first-shot catalog choice did not reach the retained RenderJob",
     );
     writeFileSync(evidenceShots, JSON.stringify(settled.shotStructure), { flag: "wx" });
 

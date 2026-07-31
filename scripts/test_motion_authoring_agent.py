@@ -30,8 +30,12 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend/src"))
 
-from automation_tool.executor.motion_authoring import agent as motion_authoring_agent  # noqa: E402
-from automation_tool.executor.motion_authoring import entry as motion_authoring_entry  # noqa: E402
+from automation_tool.executor.motion_authoring import (
+    agent as motion_authoring_agent,  # noqa: E402
+)
+from automation_tool.executor.motion_authoring import (
+    entry as motion_authoring_entry,  # noqa: E402
+)
 from automation_tool.executor.motion_authoring import (  # noqa: E402
     run_motion_authoring_entry,
 )
@@ -39,9 +43,14 @@ from automation_tool.executor.motion_authoring.agent import (  # noqa: E402
     ALLOWED_TOOLS,
     BRIEF_ASPECT_RATIOS,
     BRIEF_LANGUAGES,
+    COMPOSITION_PATH,
+    LOCKED_CATALOG_PART_IDS,
     MAX_BRAND_ASSETS,
     MAX_BRIEF_CHARS,
     MAX_DURATION_SECONDS,
+    RENDER_CANVAS_HEIGHT,
+    RENDER_CANVAS_WIDTH,
+    SELECTABLE_CATALOG_PARTS,
     AuthoringWorkspace,
     DesignArtifact,
     MotionAuthoringAgent,
@@ -54,13 +63,9 @@ from automation_tool.executor.motion_authoring.agent import (  # noqa: E402
     StoryboardArtifact,
     VideoCreationModelConfig,
     _accumulate_stream_content,
-    call_video_creation_model,
-    COMPOSITION_PATH,
-    LOCKED_CATALOG_PART_IDS,
-    SELECTABLE_CATALOG_PARTS,
-    RENDER_CANVAS_HEIGHT,
-    RENDER_CANVAS_WIDTH,
     _first_message_contract,
+    apply_catalog_part_overrides,
+    call_video_creation_model,
     check_composition,
     lint_composition,
     load_locked_authoring_workflow,
@@ -914,6 +919,55 @@ class CatalogPartSelectionTest(unittest.TestCase):
             storyboard.beats[0].catalog_parts, ("data-chart", "flowchart")
         )
 
+    def test_user_overrides_replace_only_the_shots_the_user_owns(self) -> None:
+        storyboard = StoryboardArtifact.from_payload(
+            _valid_storyboard(
+                [
+                    _valid_beat(
+                        beat_id="hook",
+                        start_seconds=0.0,
+                        duration_seconds=4.0,
+                        catalog_parts=["lt-bold-block"],
+                    ),
+                    _valid_beat(
+                        beat_id="proof",
+                        start_seconds=4.0,
+                        duration_seconds=4.0,
+                        catalog_parts=["flowchart"],
+                    ),
+                    _valid_beat(
+                        beat_id="close",
+                        start_seconds=8.0,
+                        duration_seconds=4.0,
+                        catalog_parts=[],
+                    ),
+                ]
+            )
+        )
+
+        overridden = apply_catalog_part_overrides(
+            storyboard,
+            ("data-chart", None, "lt-clean-minimal"),
+        )
+
+        self.assertEqual(overridden.beats[0].catalog_parts, ("data-chart",))
+        self.assertEqual(overridden.beats[1].catalog_parts, ("flowchart",))
+        self.assertEqual(
+            overridden.beats[2].catalog_parts,
+            ("lt-clean-minimal",),
+        )
+
+    def test_user_overrides_refuse_a_storyboard_with_a_different_shot_count(
+        self,
+    ) -> None:
+        storyboard = StoryboardArtifact.from_payload(_valid_storyboard())
+        with self.assertRaises(MotionAuthoringRejected) as ctx:
+            apply_catalog_part_overrides(
+                storyboard,
+                ("data-chart", None, "lt-clean-minimal"),
+            )
+        self.assertIn("do not match storyboard beats", str(ctx.exception))
+
     def test_locked_catalog_part_ids_match_the_frozen_contract(self) -> None:
         catalog = json.loads(
             (ROOT / "contracts/quality/motion-catalog.v1.json").read_text(
@@ -1005,6 +1059,20 @@ class CatalogPartSelectionTest(unittest.TestCase):
         # be built from.
         self.assertNotIn("shimmer-sweep", offered)
         self.assertIn("lt-bold-block", offered)
+
+    def test_the_app_and_agent_share_the_exact_frozen_film_slot_set(self) -> None:
+        slots = json.loads(
+            (ROOT / "contracts/video/motion-part-slots.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        slot_ids = {str(part["name"]) for part in slots["parts"]}
+        self.assertEqual(len(slot_ids), 37)
+        self.assertEqual(
+            {str(part["name"]) for part in SELECTABLE_CATALOG_PARTS},
+            slot_ids,
+            "the App enables slot-contract ids; the Agent must accept that exact set",
+        )
 
     def test_a_deferred_part_is_refused_even_though_the_catalog_lists_it(self) -> None:
         payload = _valid_storyboard()
@@ -1631,6 +1699,51 @@ class ExecutorEntryTests(unittest.TestCase):
             seen.get("catalog_root"),
             catalog,
             "the entry accepted catalogRoot and never handed it to the agent",
+        )
+
+    def test_the_users_catalog_part_overrides_reach_the_agent(self) -> None:
+        """A checked App selection must not stop at the subprocess request."""
+
+        seen: dict[str, object] = {}
+
+        class ReachedAgent(RuntimeError):
+            pass
+
+        class RecordingAgent:
+            def __init__(self, **kwargs: object) -> None:
+                seen.update(kwargs)
+                raise ReachedAgent
+
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            _make_workspace(root)
+            request = {
+                "schemaVersion": 1,
+                "workspace": str(root),
+                "brief": "用蓝色商务风做一段本周销售增长说明",
+                "aspectRatio": "16:9",
+                "durationSeconds": 20,
+                "language": "zh",
+                "brandAssets": [],
+                "catalogPartOverrides": ["data-chart", None, None],
+                "model": {
+                    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "modelId": "qwen3.7-max-2026-06-08",
+                    "apiKey": "sk-" + "a" * 40,
+                },
+            }
+            with (
+                mock.patch.object(
+                    motion_authoring_entry, "MotionAuthoringAgent", RecordingAgent
+                ),
+                self.assertRaises(ReachedAgent),
+            ):
+                run_motion_authoring_entry(request)
+
+        self.assertEqual(
+            seen.get("catalog_part_overrides"),
+            ("data-chart", None, None),
+            "the entry accepted the user's part overrides and then dropped them",
         )
 
     def test_the_beat_length_it_suggests_can_always_fit_the_beat_ceiling(self) -> None:

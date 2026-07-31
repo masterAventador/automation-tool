@@ -13,7 +13,11 @@ import {
   type MotionVideoBriefRequest,
   type MotionVideoDraftRequest,
 } from "../../features/video-studio/material-video-studio-gateway";
-import { motionDurationProblem } from "../../features/video-studio/motion-duration";
+import {
+  MOTION_DURATION_LIMITS,
+  motionDurationProblem,
+} from "../../features/video-studio/motion-duration";
+import { MOTION_SELECTABLE_PART_IDS } from "../../features/video-studio/motion-parts-catalog";
 import {
   MOTION_BRIEF_LIMITS,
   motionBriefProblem,
@@ -371,6 +375,14 @@ export class TauriMaterialVideoStudioGateway implements MaterialVideoStudioGatew
       request.creationMode !== "one_sentence_v1" ||
       !MOTION_BRIEF_LIMITS.aspectRatios.includes(request.aspectRatio) ||
       !MOTION_BRIEF_LIMITS.languages.includes(request.language) ||
+      !Array.isArray(request.catalogPartOverrides) ||
+      request.catalogPartOverrides.length >
+        MOTION_DURATION_LIMITS.briefBeatCountMaximum ||
+      (request.catalogPartOverrides.length > 0 &&
+        !request.catalogPartOverrides.some((part) => part !== null)) ||
+      request.catalogPartOverrides.some(
+        (part) => part !== null && !MOTION_SELECTABLE_PART_IDS.has(part),
+      ) ||
       motionBriefProblem(request.brief, request.durationSeconds) !== null
     ) {
       throw new MaterialVideoStudioGatewayError("protocol_mismatch", false);

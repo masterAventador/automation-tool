@@ -15,6 +15,7 @@ from pathlib import Path
 from desktop_e2e_prerequisites import video_studio_startup_harness
 from prepare_video_runtime import install as install_video_runtime
 from prepare_video_runtime import prepare as prepare_video_runtime
+from process_inspection import process_ids_matching, terminate_matching_processes
 from run_vf_06_acceptance import (
     APP_IDENTIFIER,
     DEBUG_APP_RESOURCE_ROOT,
@@ -91,22 +92,30 @@ def _validate_private_app_state(private_app_data: Path) -> None:
         raise RuntimeError(
             f"BM-08 expected two real RenderJob checkpoints, found {len(checkpoints)}"
         )
-    snapshots = [json.loads(checkpoint.read_text(encoding="utf-8")) for checkpoint in checkpoints]
+    snapshots = [
+        json.loads(checkpoint.read_text(encoding="utf-8")) for checkpoint in checkpoints
+    ]
     statuses = sorted(snapshot["status"] for snapshot in snapshots)
     if statuses != ["cancelled", "succeeded"]:
         raise RuntimeError(f"BM-08 real lifecycle statuses drifted: {statuses}")
-    succeeded = next(snapshot for snapshot in snapshots if snapshot["status"] == "succeeded")
+    succeeded = next(
+        snapshot for snapshot in snapshots if snapshot["status"] == "succeeded"
+    )
     if (
         succeeded["progressPercent"] != 100
         or succeeded["artifactId"] is not None
         or succeeded["artifactSizeBytes"] is not None
     ):
-        raise RuntimeError("BM-08 deleted Artifact was not removed from its succeeded checkpoint")
+        raise RuntimeError(
+            "BM-08 deleted Artifact was not removed from its succeeded checkpoint"
+        )
     artifacts = private_app_data / "video-workspaces-v1/artifacts"
     if not artifacts.is_dir() or any(artifacts.iterdir()):
         raise RuntimeError("BM-08 App deletion left an Artifact payload behind")
     if list(private_app_data.rglob("brand-motion-result.mp4")):
-        raise RuntimeError("BM-08 App deletion left a RenderJob MP4 working copy behind")
+        raise RuntimeError(
+            "BM-08 App deletion left a RenderJob MP4 working copy behind"
+        )
     if list(private_app_data.rglob("frame-*.png")):
         raise RuntimeError("BM-08 renderer left frame scratch files behind")
 
@@ -149,13 +158,24 @@ def _run_desktop_acceptance(
     if private_app_data.exists():
         shutil.rmtree(private_app_data)
     port = unused_loopback_port()
-    environment = {key: value for key, value in os.environ.items() if key != "TAURI_WEBDRIVER_PORT"}
+    environment = {
+        key: value for key, value in os.environ.items() if key != "TAURI_WEBDRIVER_PORT"
+    }
     environment.update(
         {
             "TAURI_WEBDRIVER_PORT": str(port),
             "AUTOMATION_TOOL_BM08_EVIDENCE_VIDEO": str(evidence_video),
         }
     )
+    process_markers = (
+        str(private_app_data),
+        str(DEBUG_APP_RESOURCE_ROOT / "motion-video-worker"),
+        str(DEBUG_APP_RESOURCE_ROOT / "media-toolchain"),
+    )
+    process_baselines = {
+        marker: process_ids_matching(marker) for marker in process_markers
+    }
+    process_residue: list[str] = []
     try:
         with video_studio_startup_harness(
             private_app_data,
@@ -187,6 +207,13 @@ def _run_desktop_acceptance(
             require_port_closed(port)
             _validate_private_app_state(private_app_data)
     finally:
+        for marker, baseline in process_baselines.items():
+            unexpected = process_ids_matching(marker) - baseline
+            if unexpected:
+                remaining = terminate_matching_processes(marker, baseline=baseline)
+                process_residue.append(
+                    f"{marker}: started={sorted(unexpected)}, remaining={sorted(remaining)}"
+                )
         restore = subprocess.run(
             [pnpm_executable(), "build"],
             cwd=FRONTEND,
@@ -201,6 +228,11 @@ def _run_desktop_acceptance(
         require_port_closed(port)
         if restore.returncode != 0:
             raise RuntimeError("BM-08 failed to restore production Vite assets")
+        if process_residue:
+            raise RuntimeError(
+                "BM-08 App exit left owned process residue: "
+                + "; ".join(process_residue)
+            )
 
 
 def _inspect_video(
@@ -311,13 +343,18 @@ def require_deliverables() -> None:
         ROOT / "workers/motion_composition/worker.mjs",
         ROOT / "docs/development/BM-08.md",
     )
-    missing = [path.relative_to(ROOT).as_posix() for path in required if not path.is_file()]
+    missing = [
+        path.relative_to(ROOT).as_posix() for path in required if not path.is_file()
+    ]
     if missing:
         raise RuntimeError(f"BM-08 missing deliverables: {', '.join(missing)}")
-    roadmap = (ROOT / "docs/embedded-browser-video-studio-roadmap.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "docs/embedded-browser-video-studio-roadmap.md").read_text(
+        encoding="utf-8"
+    )
     rows = [line for line in roadmap.splitlines() if line.startswith("| BM-08 |")]
     if len(rows) != 1 or not any(
-        rows[0].endswith(f"| {status} |") for status in ("🚧 实现中", "🔍 待验收", "✅ 已完成")
+        rows[0].endswith(f"| {status} |")
+        for status in ("🚧 实现中", "🔍 待验收", "✅ 已完成")
     ):
         raise RuntimeError("BM-08 roadmap row is missing, duplicated or inactive")
 

@@ -1123,36 +1123,37 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         finish({ status: "protocol" });
         return;
       }
-      const timelineProbe = await pipe.send("Runtime.evaluate", {
-        expression: `(() => {
-          const root = document.querySelector('[data-composition-id][data-duration]');
-          const duration = Number(root?.getAttribute('data-duration'));
-          const timelines = Object.values(window.__timelines ?? {})
-            .filter((timeline) => timeline && typeof timeline.seek === 'function');
-          return {
-            duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
-            timelineCount: timelines.length,
-          };
-        })()`,
-        returnByValue: true,
-      }, sessionId);
-      const timelineMetadata = timelineProbe?.result?.result?.value;
-      // Two independent facts, kept separate on purpose. Whether the document
-      // can be seeked depends only on it registering timelines; whether a
-      // requested window can be *validated* depends on the document declaring
-      // its own length. Conflating them skipped seeking entirely for the 31
-      // catalog documents that register a timeline but carry no
-      // `data-duration`, so their typing animations were captured as
-      // identical stills and the static gate below refused them (BM-16,
-      // first seen on `code-snippet-apple-terminal-basic`).
-      const seekableTimelineCount = Number.isInteger(timelineMetadata?.timelineCount)
-        ? timelineMetadata.timelineCount
-        : 0;
-      const seekableDuration = (
-        Number.isFinite(timelineMetadata?.duration)
-        && timelineMetadata.duration > 0
-        && seekableTimelineCount > 0
-      ) ? timelineMetadata.duration : 0;
+      const readTimelineMetadata = async () => {
+        const probe = await pipe.send("Runtime.evaluate", {
+          expression: `(() => {
+            const root = document.querySelector('[data-composition-id][data-duration]');
+            const duration = Number(root?.getAttribute('data-duration'));
+            const timelines = Object.values(window.__timelines ?? {})
+              .filter((timeline) => timeline && typeof timeline.seek === 'function');
+            return {
+              duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
+              timelineCount: timelines.length,
+              timelineExpected: Boolean(root) && Array.from(document.scripts)
+                .some((script) => (script.textContent ?? '').includes('__timelines')),
+            };
+          })()`,
+          returnByValue: true,
+        }, sessionId);
+        if (probe?.result?.exceptionDetails !== undefined) return null;
+        const metadata = probe?.result?.result?.value;
+        if (metadata === null || typeof metadata !== "object") return null;
+        return metadata;
+      };
+      // `load` is only the resource-arrival boundary. Inlined models are still
+      // parsed asynchronously, and a composition may register its timeline
+      // from that completion callback. Keep the first probe as an expectation
+      // signal, then refresh it throughout warm-up before deciding whether the
+      // kept frames are seekable (BM-16, `vfx-iphone-device`).
+      let timelineMetadata = await readTimelineMetadata();
+      if (timelineMetadata === null) {
+        finish({ status: "protocol" });
+        return;
+      }
       // Warm up before the first kept frame. A composition's first paint
       // triggers lazy work — image decode, canvas and SVG initialisation —
       // whose completion drifts across the next few frames. That is why an
@@ -1188,7 +1189,22 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
           finish({ status: "protocol" });
           return;
         }
-        if (data === previousProbe) {
+        timelineMetadata = await readTimelineMetadata();
+        if (timelineMetadata === null) {
+          finish({ status: "protocol" });
+          return;
+        }
+        // A stable background is not a ready composition when the document
+        // declares that it will register a timeline. Give its bounded async
+        // initialisation the entire warm-up budget instead of freezing the
+        // initial zero-timeline result forever.
+        if (
+          data === previousProbe
+          && !(
+            timelineMetadata.timelineExpected === true
+            && timelineMetadata.timelineCount === 0
+          )
+        ) {
           stable = true;
           break;
         }
@@ -1200,6 +1216,22 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         finish({ status: "timeout" });
         return;
       }
+      // Two independent facts, kept separate on purpose. Whether the document
+      // can be seeked depends only on it registering timelines; whether a
+      // requested window can be *validated* depends on the document declaring
+      // its own length. Conflating them skipped seeking entirely for the 31
+      // catalog documents that register a timeline but carry no
+      // `data-duration`, so their typing animations were captured as
+      // identical stills and the static gate below refused them (BM-16,
+      // first seen on `code-snippet-apple-terminal-basic`).
+      const seekableTimelineCount = Number.isInteger(timelineMetadata?.timelineCount)
+        ? timelineMetadata.timelineCount
+        : 0;
+      const seekableDuration = (
+        Number.isFinite(timelineMetadata?.duration)
+        && timelineMetadata.duration > 0
+        && seekableTimelineCount > 0
+      ) ? timelineMetadata.duration : 0;
       // This shot's own stretch of the timeline, resolved once — it does not
       // change per frame.
       //

@@ -127,7 +127,9 @@ def check_restaging_replaces_a_previous_run() -> None:
         staging = _complete_staging(root)
         resources = root / "debug"
         stage_video_runtime(staging=staging, resource_root=resources)
-        stale = resources.joinpath(*VIDEO_RUNTIME_RESOURCES[0].installed_parts) / "stale"
+        stale = (
+            resources.joinpath(*VIDEO_RUNTIME_RESOURCES[0].installed_parts) / "stale"
+        )
         _write(stale)
 
         stage_video_runtime(staging=staging, resource_root=resources)
@@ -193,7 +195,9 @@ def check_the_resource_root_is_where_the_acceptance_app_actually_runs() -> None:
     )
 
 
-def check_native_video_drivers_stage_the_runtime_instead_of_injecting_dead_paths() -> None:
+def check_native_video_drivers_stage_the_runtime_instead_of_injecting_dead_paths() -> (
+    None
+):
     """Real render/WebUI drivers must feed the production resource resolvers.
 
     The crate deliberately ignores the old BM08/IM05 path variables. Keeping
@@ -207,12 +211,17 @@ def check_native_video_drivers_stage_the_runtime_instead_of_injecting_dead_paths
         "AUTOMATION_TOOL_BM08_WORKER",
         "AUTOMATION_TOOL_BM08_FFMPEG",
     ):
-        assert variable not in bm08, f"BM-08 still injects ignored runtime path {variable}"
+        assert variable not in bm08, (
+            f"BM-08 still injects ignored runtime path {variable}"
+        )
     assert "install_video_runtime(" in bm08, (
         "BM-08 does not install its prepared runtime into the debug App resource root"
     )
     assert 'runtime_names = ("media-toolchain", "motion-video-worker")' in bm08, (
         "BM-08 must install only the two resources its render path uses"
+    )
+    assert "process_ids_matching" in bm08 and "terminate_matching_processes" in bm08, (
+        "BM-08 no longer rejects and cleans Worker/browser/FFmpeg process residue"
     )
 
     im05 = IM05_DRIVER.read_text(encoding="utf-8")
@@ -227,7 +236,9 @@ def check_native_video_drivers_stage_the_runtime_instead_of_injecting_dead_paths
     )
 
 
-def check_the_staging_fixture_matches_what_the_checker_requires_on_every_platform() -> None:
+def check_the_staging_fixture_matches_what_the_checker_requires_on_every_platform() -> (
+    None
+):
     """The fixture has to fabricate the artifact names of the platform it runs on.
 
     Measured on the Windows acceptance machine 2026-07-27 (T123): this file
@@ -268,7 +279,9 @@ def check_the_staging_fixture_matches_what_the_checker_requires_on_every_platfor
                         "spellings would hide the disagreement rather than settle it"
                     )
 
-                installed = stage_video_runtime(staging=staging, resource_root=root / "debug")
+                installed = stage_video_runtime(
+                    staging=staging, resource_root=root / "debug"
+                )
                 for resource in VIDEO_RUNTIME_RESOURCES:
                     for name in resource.required_for(expected):
                         assert (installed[resource.staging_name] / name).is_file(), (
@@ -286,7 +299,9 @@ def check_every_declared_check_is_registered() -> None:
     the same shape.
     """
     declared = {
-        name for name, value in globals().items() if name.startswith("check_") and callable(value)
+        name
+        for name, value in globals().items()
+        if name.startswith("check_") and callable(value)
     }
     registered = {check.__name__ for check in CHECKS}
     missing = sorted(declared - registered)

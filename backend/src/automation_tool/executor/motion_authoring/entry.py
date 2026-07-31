@@ -19,6 +19,8 @@ from typing import Any, BinaryIO, Final, TextIO
 from automation_tool.executor.motion_authoring.agent import (
     AUTHORING_VENDOR_ROOT,
     AUTHORING_WORKFLOW_CONTRACT,
+    MAX_STORYBOARD_BEATS,
+    SELECTABLE_CATALOG_PART_IDS,
     AuthoringWorkspace,
     MotionAuthoringAgent,
     MotionAuthoringPersistenceError,
@@ -76,6 +78,10 @@ _OPTIONAL_REQUEST_FIELDS: Final = frozenset(
         # phase is 31 of the 42 seconds authoring takes — worth offering, not
         # worth changing under anyone silently.
         "modelThinking",
+        # BM-15: empty means the model owns both shot count and part choices.
+        # Once any slot is named, the list length fixes the shot count and each
+        # non-null id overrides that position after the model answers.
+        "catalogPartOverrides",
     }
 )
 _MODEL_FIELDS: Final = frozenset({"baseUrl", "modelId", "apiKey"})
@@ -192,6 +198,9 @@ _ENTRY_REASON_TOKENS: Final = {
     "workspace is not a usable render workspace": "workspace_unusable",
     "catalog root is missing": "catalog_root_missing",
     "catalog root must be an absolute path the App resolved": "catalog_root_not_absolute",
+    "catalog part overrides are not the declared shape": (
+        "catalog_part_overrides_shape_invalid"
+    ),
     "browser executable is missing": "browser_executable_missing",
     "browser executable must be an absolute path the App authorized": (
         "browser_executable_not_absolute"
@@ -245,6 +254,8 @@ _AGENT_FIXED_REJECTION_BODIES: Final = frozenset(
         "body is out of range",
         "brief must be a MotionBrief",
         "brief text is out of range",
+        "catalog part overrides do not match storyboard beats",
+        "catalog part overrides must be selectable catalog ids",
         "catalog purposes missing",
         "the storyboard names catalog parts but this installation carries no parts catalog",
         "catalog_parts must be selectable catalog ids",
@@ -503,6 +514,25 @@ def _catalog_root(document: dict[str, Any]) -> Path | None:
     return root
 
 
+def _catalog_part_overrides(
+    document: dict[str, Any],
+) -> tuple[str | None, ...]:
+    """The user's per-shot choices, or no shot-count constraint at all."""
+    payload = document.get("catalogPartOverrides", [])
+    if (
+        not isinstance(payload, list)
+        or len(payload) > MAX_STORYBOARD_BEATS
+        or (payload and not any(part is not None for part in payload))
+        or any(
+            part is not None
+            and (type(part) is not str or part not in SELECTABLE_CATALOG_PART_IDS)
+            for part in payload
+        )
+    ):
+        raise _reject("catalog part overrides are not the declared shape")
+    return tuple(payload)
+
+
 def _browser_executable(document: dict[str, Any]) -> Path | None:
     """The packaged browser the App authorized for measuring, or nothing.
 
@@ -635,6 +665,7 @@ def run_motion_authoring_entry(
             model_config=model,
             model_call=model_call,
             model_thinking=thinking,
+            catalog_part_overrides=_catalog_part_overrides(document),
             catalog_root=_catalog_root(document),
             slot_probe=(
                 None

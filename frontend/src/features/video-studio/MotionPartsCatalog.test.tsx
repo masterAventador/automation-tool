@@ -80,19 +80,23 @@ describe("MotionPartsCatalog", () => {
     expect(screen.getByText(/动效零件与 12 套整体风格不同/)).toBeInTheDocument();
   });
 
-  it("toggles a part for the active beat and respects the override", () => {
+  it("toggles the part specified for the active shot", () => {
     const onChange = renderCatalog(
       [["data-chart"], [], []],
       vi.fn(),
       "applies_to_output",
     );
     const overrides = screen.getByRole("region", { name: "分镜零件选用" });
-    expect(within(overrides).getByText(/第 1 段：已选 1 项/)).toBeInTheDocument();
+    expect(
+      within(overrides).getByText("第 1 镜头：已指定数据图表动画"),
+    ).toBeInTheDocument();
 
     const browser = screen.getByRole("region", { name: "动效零件目录" });
     const card = within(browser).getByText("数据图表动画").closest("li");
     fireEvent.click(
-      within(card as HTMLElement).getByRole("button", { name: /从第 1 段移除/ }),
+      within(card as HTMLElement).getByRole("button", {
+        name: "取消第 1 镜头的指定",
+      }),
     );
     expect(onChange).toHaveBeenCalledWith([[], [], []]);
   });
@@ -106,7 +110,7 @@ describe("MotionPartsCatalog", () => {
     expect(onChange).toHaveBeenCalledTimes(1);
     const next = onChange.mock.calls[0]![0] as readonly (readonly string[])[];
     expect(next[0]!.length).toBeGreaterThan(0);
-    expect(next[0]!.length).toBeLessThanOrEqual(3);
+    expect(next[0]).toHaveLength(1);
   });
 });
 
@@ -172,12 +176,19 @@ describe("MotionPartsCatalog when the creation path ignores part selections", ()
 });
 
 describe("MotionPartsCatalog when the creation path consumes part selections", () => {
-  it("drops the notice and restores per-beat selection", () => {
+  it("explains and enables per-shot overrides", () => {
     const onChange = renderCatalog([[], [], []], vi.fn(), "applies_to_output");
-    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "这些指定只用于下一次“一句话自动制作”",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "37 项可以指定",
+    );
 
     const overrides = screen.getByRole("region", { name: "分镜零件选用" });
-    expect(within(overrides).getByText("第 1 段：已选 0 项")).toBeInTheDocument();
+    expect(
+      within(overrides).getByText("第 1 镜头：由模型自动选择"),
+    ).toBeInTheDocument();
     for (const button of within(overrides).getAllByRole("button", {
       name: "自动推荐",
     })) {
@@ -187,10 +198,21 @@ describe("MotionPartsCatalog when the creation path consumes part selections", (
     const browser = screen.getByRole("region", { name: "动效零件目录" });
     const card = within(browser).getByText("数据图表动画").closest("li");
     const add = within(card as HTMLElement).getByRole("button", {
-      name: "加入第 1 段",
+      name: "指定给第 1 镜头",
     });
     expect(add).toBeEnabled();
     fireEvent.click(add);
     expect(onChange).toHaveBeenCalledWith([["data-chart"], [], []]);
+  });
+
+  it("keeps unassemblable catalog entries browsable without offering a dead action", () => {
+    renderCatalog([[], [], []], vi.fn(), "applies_to_output");
+    const browser = screen.getByRole("region", { name: "动效零件目录" });
+    const card = within(browser).getByText("重砸落字字幕").closest("li");
+    expect(
+      within(card as HTMLElement).getByRole("button", {
+        name: "当前仅供浏览",
+      }),
+    ).toBeDisabled();
   });
 });

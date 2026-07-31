@@ -62,6 +62,12 @@ export interface MotionVideoBriefRequest {
   readonly durationSeconds: number;
   readonly language: string;
   /**
+   * A user-owned part for each requested shot, or `null` where the model keeps
+   * choosing. An empty array means the user made no override and therefore
+   * does not constrain how many shots the model cuts.
+   */
+  readonly catalogPartOverrides: readonly (string | null)[];
+  /**
    * Whether the video-creation model reasons before it answers.
    *
    * Carried on the request rather than configured once, because it is a

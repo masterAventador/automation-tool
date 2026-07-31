@@ -65,7 +65,9 @@ def test_release_lock_contract() -> None:
     assert lock["schemaVersion"] == 1
     assert re.match(r"^\d+\.\d+\.\d+$", lock["catalogVersion"])
     layout = lock["layout"]
-    assert layout["releaseRoot"].startswith(".local/"), "release output must stay out of git"
+    assert layout["releaseRoot"].startswith(".local/"), (
+        "release output must stay out of git"
+    )
     assert layout["itemRoot"] == "items" and layout["dependencyRoot"] == "offline-deps"
 
     # Every composition input is pinned by digest; drift must fail the build.
@@ -83,13 +85,16 @@ def test_release_lock_contract() -> None:
 
     # The scan vocabulary must cover exactly the frozen overlay indicators.
     indicators = {
-        rule["indicator"] for item in overlay["items"] for rule in item["trademarkReplacements"]
+        rule["indicator"]
+        for item in overlay["items"]
+        for rule in item["trademarkReplacements"]
     }
     forms = lock["trademarkScan"]["forms"]
     assert set(forms) == indicators, "literal forms must cover every overlay indicator"
     for token, literals in forms.items():
         assert literals and all(
-            literal == literal.lower() and literal.strip() == literal for literal in literals
+            literal == literal.lower() and literal.strip() == literal
+            for literal in literals
         ), token
 
     keeplist = lock["trademarkScan"]["technicalKeeplist"]
@@ -118,6 +123,7 @@ def test_release_lock_contract() -> None:
     content_rewrites = lock["contentRewrites"]["items"]
     rewrite_names = {entry["name"] for entry in content_rewrites}
     assert {
+        "caption-texture",
         "liquid-glass-notification",
         "liquid-glass-widgets",
         "texture-mask-text",
@@ -138,6 +144,39 @@ def test_release_lock_contract() -> None:
     }
     assert template_items <= rewrite_names
     by_name = {entry["name"]: entry for entry in content_rewrites}
+    assert by_name["caption-texture"]["replacements"] == [
+        {
+            "literal": (
+                'var TEXTURE_URL = "compositions/components/" + TEXTURE + ".png";'
+            ),
+            "replacement": 'var TEXTURE_URL = TEXTURE + ".png";',
+            "occurrences": 1,
+        },
+        {
+            "literal": "        color: #ffd0a0;",
+            "replacement": (
+                "        color: transparent !important;\n"
+                "        background-size: 200% 200%;\n"
+                "        background-position: var(--mask-position, 0% 50%);\n"
+                "        -webkit-background-clip: text;\n"
+                "        background-clip: text;"
+            ),
+            "occurrences": 1,
+        },
+        {
+            "literal": (
+                "          wordEl.style.webkitMaskImage = "
+                '"url(\'" + TEXTURE_URL + "\')";\n'
+                "          wordEl.style.maskImage = "
+                '"url(\'" + TEXTURE_URL + "\')";'
+            ),
+            "replacement": (
+                '          wordEl.style.backgroundImage = "url(\'" + '
+                'TEXTURE_URL + "\')";'
+            ),
+            "occurrences": 1,
+        },
+    ]
     for name in template_items:
         literals = {rule["literal"] for rule in by_name[name]["replacements"]}
         assert any("<template " in literal for literal in literals), name
@@ -161,7 +200,9 @@ def test_runtime_data_is_inlined_only_in_the_release_tree() -> None:
         source = root / "offline-deps/data/map.json"
         document.parent.mkdir(parents=True)
         source.parent.mkdir(parents=True)
-        document.write_text('fetch("../../offline-deps/data/map.json")', encoding="utf-8")
+        document.write_text(
+            'fetch("../../offline-deps/data/map.json")', encoding="utf-8"
+        )
         source.write_bytes(b'{"kind":"map"}')
         rule = {
             "encoding": "data-url-base64",
@@ -180,9 +221,9 @@ def test_runtime_data_is_inlined_only_in_the_release_tree() -> None:
             ],
         }
         applied = build.inline_runtime_data(root, rule)
-        expected = "data:application/json;base64," + base64.b64encode(source.read_bytes()).decode(
-            "ascii"
-        )
+        expected = "data:application/json;base64," + base64.b64encode(
+            source.read_bytes()
+        ).decode("ascii")
         assert document.read_text(encoding="utf-8") == f'fetch("{expected}")'
         assert applied == {"documents": 1, "references": 1, "sourceBytes": 14}
 
@@ -190,7 +231,9 @@ def test_runtime_data_is_inlined_only_in_the_release_tree() -> None:
 def test_content_rewrites_are_exact_and_closed() -> None:
     build = load_module(BUILD)
     check = load_module(CHECK)
-    with tempfile.TemporaryDirectory(prefix="automation-tool-bm13-repair-test-") as temporary:
+    with tempfile.TemporaryDirectory(
+        prefix="automation-tool-bm13-repair-test-"
+    ) as temporary:
         root = Path(temporary)
         document = root / "items/demo/demo.html"
         document.parent.mkdir(parents=True)
@@ -229,14 +272,18 @@ def test_content_rewrites_are_exact_and_closed() -> None:
         except build.BuildError:
             pass
         else:
-            raise AssertionError("an already-rewritten or drifted document must fail closed")
+            raise AssertionError(
+                "an already-rewritten or drifted document must fail closed"
+            )
         document.write_text("Legacy.Canvas ./mask.png", encoding="utf-8", newline="\n")
         try:
             check.verify_content_rewrites(root, contract)
         except check.CheckError:
             pass
         else:
-            raise AssertionError("the independent gate must reject a restored source literal")
+            raise AssertionError(
+                "the independent gate must reject a restored source literal"
+            )
 
 
 def test_trademark_rules() -> None:
@@ -264,19 +311,27 @@ def test_trademark_rules() -> None:
     )
     replaced = build.apply_trademark(sample, ruleset)
     assert 'class="代码编辑器-theme-scene"' in replaced
-    assert "createVSCodeThemeComposition" in replaced, "camel-case identifiers must survive"
+    assert "createVSCodeThemeComposition" in replaced, (
+        "camel-case identifiers must survive"
+    )
     assert 'data-composition-id="vscode-dark-2026"' in replaced, "item ids must survive"
     assert '__timelines["apple-money-count"]' in replaced, "item ids must survive"
     assert "-apple-system" in replaced, "CSS system font keyword must survive"
     assert '"Apple Color Emoji"' in replaced, "emoji font stack entry must survive"
-    assert replaced.count("window.__hyperframes") == 2, "runtime API global must survive"
+    assert replaced.count("window.__hyperframes") == 2, (
+        "runtime API global must survive"
+    )
     assert "<span>动效画布</span>" in replaced
     assert "<title>星云科技 Terminal Basic</title>" in replaced
     assert '"开放界面字体 Text"' in replaced
 
-    assert build.find_trademark_leftovers(sample, ruleset), "original text must be flagged"
+    assert build.find_trademark_leftovers(sample, ruleset), (
+        "original text must be flagged"
+    )
     assert build.find_trademark_leftovers(replaced, ruleset) == []
-    assert build.apply_trademark(replaced, ruleset) == replaced, "replacement must be idempotent"
+    assert build.apply_trademark(replaced, ruleset) == replaced, (
+        "replacement must be idempotent"
+    )
 
 
 def test_composed_asset_path() -> None:
@@ -284,10 +339,16 @@ def test_composed_asset_path() -> None:
     cases = (
         # Literally referenced files take the neutral replacement basename.
         (("assets/avatar.jpg", "generated/avatar.png", True), "assets/avatar.png"),
-        (("models/iphone.glb", "models/portable-device.glb", True), "models/portable-device.glb"),
+        (
+            ("models/iphone.glb", "models/portable-device.glb", True),
+            "models/portable-device.glb",
+        ),
         # Dynamically addressed files keep their upstream basename (same extension only).
         (("lava.png", "generated/textures/lava.png", False), "lava.png"),
-        (("concrete-042-a.png", "generated/textures/concrete.png", False), "concrete-042-a.png"),
+        (
+            ("concrete-042-a.png", "generated/textures/concrete.png", False),
+            "concrete-042-a.png",
+        ),
         # Unreferenced files whose media type changes take the replacement basename.
         (
             ("assets/icons/messages.jpg", "ui/messages.svg", False),
@@ -313,7 +374,9 @@ def _mini_fixture(root: Path) -> tuple[Path, dict, dict, dict, dict]:
     html = (
         '<html><body>\n<img src="assets/photo.svg" alt="示例" />\n<p>图片社区</p>\n</body></html>\n'
     ).encode()
-    svg = b'<svg xmlns="http://www.w3.org/2000/svg"><rect width="4" height="4"/></svg>\n'
+    svg = (
+        b'<svg xmlns="http://www.w3.org/2000/svg"><rect width="4" height="4"/></svg>\n'
+    )
     script = b"// docs: https://docs.example-lib.org/guide\nconsole.log('offline');\n"
     _write(release_root / "items/demo-social/demo-social.html", html)
     _write(release_root / "items/demo-social/assets/photo.svg", svg)
@@ -329,11 +392,16 @@ def _mini_fixture(root: Path) -> tuple[Path, dict, dict, dict, dict]:
             "sha256": sha256_bytes(html),
             "bytes": len(html),
         },
-        {"path": "offline-deps/js/demo.js", "sha256": sha256_bytes(script), "bytes": len(script)},
+        {
+            "path": "offline-deps/js/demo.js",
+            "sha256": sha256_bytes(script),
+            "bytes": len(script),
+        },
     ]
     aggregate = sha256_bytes(
         "".join(
-            f"{f['path']} {f['sha256']}\n" for f in sorted(files, key=lambda f: f["path"])
+            f"{f['path']} {f['sha256']}\n"
+            for f in sorted(files, key=lambda f: f["path"])
         ).encode("utf-8")
     )
     manifest = {
@@ -430,7 +498,9 @@ def _mini_fixture(root: Path) -> tuple[Path, dict, dict, dict, dict]:
                         "replacementPath": "ui/photo.svg",
                     }
                 ],
-                "trademarkReplacements": [{"indicator": "instagram", "replacement": "图片社区"}],
+                "trademarkReplacements": [
+                    {"indicator": "instagram", "replacement": "图片社区"}
+                ],
             }
         ],
     }
@@ -461,8 +531,12 @@ def test_release_gate_tamper_matrix() -> None:
         check.verify_release(release_root, lock, dep_lock, contract, overlay)
 
     def expect_failure(name: str, mutate) -> None:
-        with tempfile.TemporaryDirectory(prefix="automation-tool-bm14-test-") as temporary:
-            release_root, lock, dep_lock, contract, overlay = _mini_fixture(Path(temporary))
+        with tempfile.TemporaryDirectory(
+            prefix="automation-tool-bm14-test-"
+        ) as temporary:
+            release_root, lock, dep_lock, contract, overlay = _mini_fixture(
+                Path(temporary)
+            )
             mutate(release_root, lock, dep_lock, contract, overlay)
             try:
                 check.verify_release(release_root, lock, dep_lock, contract, overlay)
@@ -508,12 +582,18 @@ def test_release_gate_tamper_matrix() -> None:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["items"][0]["assetReplacements"] = []
         manifest_path.chmod(0o644)
-        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+        )
         manifest_path.chmod(0o444)
 
     def missing_item(release_root: Path, _lock, _dep, contract, _overlay) -> None:
         contract["items"].append(
-            {"name": "second-item", "type": "block", "files": [{"path": "second-item.html"}]}
+            {
+                "name": "second-item",
+                "type": "block",
+                "files": [{"path": "second-item.html"}],
+            }
         )
 
     def aggregate_drift(_release_root: Path, lock, *_args) -> None:
@@ -561,8 +641,12 @@ def test_release_gate_tamper_matrix() -> None:
     expect_failure("remote URL with matching digest", remote_url)
     expect_failure("trademark indicator leftover", trademark_leftover)
     expect_failure("writable file breaks the read-only guarantee", writable_file)
-    expect_failure("composed asset no longer matches the overlay digest", unapplied_asset)
-    expect_failure("asset replacement entry hidden from the manifest", missing_replacement_entry)
+    expect_failure(
+        "composed asset no longer matches the overlay digest", unapplied_asset
+    )
+    expect_failure(
+        "asset replacement entry hidden from the manifest", missing_replacement_entry
+    )
     expect_failure("missing catalog item", missing_item)
     expect_failure("aggregate drift against the release lock", aggregate_drift)
     expect_failure("link/reparse point in the release tree", symlink_file)
@@ -572,7 +656,9 @@ def test_release_gate_tamper_matrix() -> None:
 def test_windows_unicode_and_read_only_path_semantics() -> None:
     if os.name != "nt":
         return
-    with tempfile.TemporaryDirectory(prefix="automation-tool-bm14-unicode-") as temporary:
+    with tempfile.TemporaryDirectory(
+        prefix="automation-tool-bm14-unicode-"
+    ) as temporary:
         root = Path(temporary)
         path = root / "目录-Ångström" / "头像-É.svg"
         path.parent.mkdir()
@@ -620,9 +706,9 @@ def test_real_release_build_is_reproducible() -> None:
         for record in first["files"]:
             path = first_root / record["path"]
             metadata = path.stat()
-            assert not metadata.st_mode & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH), (
-                f"release file must be read-only: {record['path']}"
-            )
+            assert not metadata.st_mode & (
+                stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
+            ), f"release file must be read-only: {record['path']}"
             if os.name == "nt":
                 assert metadata.st_file_attributes & stat.FILE_ATTRIBUTE_READONLY
             if path.suffix.lower() in {".html", ".js", ".css", ".svg"}:

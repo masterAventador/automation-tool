@@ -224,6 +224,7 @@ describe("Tauri material video studio gateway", () => {
       aspectRatio: "16:9" as const,
       durationSeconds: 12,
       language: "zh" as const,
+      catalogPartOverrides: [],
       modelThinking: true,
     };
     invoke.mockResolvedValueOnce({
@@ -255,6 +256,53 @@ describe("Tauri material video studio gateway", () => {
     expect(invoke).toHaveBeenCalledWith("submit_motion_video_brief", { request });
   });
 
+  it("preserves valid shot overrides and refuses invalid ones before invoke", async () => {
+    const gateway = new TauriMaterialVideoStudioGateway();
+    const request = {
+      creationMode: "one_sentence_v1" as const,
+      brief: "用蓝色商务风做一段本周销售增长说明",
+      aspectRatio: "16:9" as const,
+      durationSeconds: 12,
+      language: "zh" as const,
+      catalogPartOverrides: ["data-chart", null, null],
+      modelThinking: true,
+    };
+    invoke.mockResolvedValueOnce({
+      renderJobId: "f89d8f18-6b4e-4f5a-8325-8da45f71d7e2",
+      revision: 1,
+      status: "queued",
+      progressPercent: 5,
+      subject: request.brief,
+      styleDisplayName: "一句话自动制作",
+      artifactId: null,
+      artifactSizeBytes: null,
+      failureCode: null,
+      shotStructure: [],
+    });
+
+    await expect(gateway.submitMotionBrief(request)).resolves.toMatchObject({
+      status: "queued",
+    });
+    expect(invoke).toHaveBeenCalledWith("submit_motion_video_brief", {
+      request,
+    });
+
+    invoke.mockClear();
+    for (const catalogPartOverrides of [
+      [null, null, null],
+      ["not-a-locked-part", null, null],
+      ["caption-kinetic-slam", null, null],
+    ]) {
+      await expect(
+        gateway.submitMotionBrief({
+          ...request,
+          catalogPartOverrides,
+        }),
+      ).rejects.toMatchObject({ code: "protocol_mismatch" });
+    }
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   /**
    * 原生侧把编排失败拆成了七个码：整体超时被杀、按协议拒绝、子进程崩溃、答复没通过校验，
    * 以及后来补上的模型服务没有任何回应、模型接上后不再回话、安装文件校验不过。
@@ -270,6 +318,7 @@ describe("Tauri material video studio gateway", () => {
       aspectRatio: "16:9" as const,
       durationSeconds: 12,
       language: "zh" as const,
+      catalogPartOverrides: [],
       modelThinking: true,
     };
 
@@ -303,6 +352,7 @@ describe("Tauri material video studio gateway", () => {
         aspectRatio: "16:9",
         durationSeconds: 12,
         language: "zh",
+        catalogPartOverrides: [],
         modelThinking: true,
       }),
     ).rejects.toMatchObject({ code: "protocol_mismatch" });

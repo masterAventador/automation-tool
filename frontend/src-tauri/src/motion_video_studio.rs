@@ -11,7 +11,7 @@ use crate::video_job_workspace::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -33,6 +33,8 @@ const DURATION_CONTRACT: &str =
     include_str!("../../../contracts/video/motion-storyboard-duration.v1.json");
 const BRIEF_CONTRACT: &str =
     include_str!("../../../contracts/video/motion-one-sentence-brief.v1.json");
+const MOTION_PART_SLOTS_CONTRACT: &str =
+    include_str!("../../../contracts/video/motion-part-slots.v1.json");
 const AUTHORING_REFUSAL_CONTRACT: &str =
     include_str!("../../../contracts/video/motion-authoring-refusal.v1.json");
 const OFFLINE_MOTION_DEPENDENCIES: &str =
@@ -381,6 +383,12 @@ pub struct MotionVideoBriefRequest {
     aspect_ratio: String,
     duration_seconds: u32,
     language: String,
+    /// User-owned part choices by shot index.
+    ///
+    /// Empty means the model remains free to cut and populate the storyboard.
+    /// Once one slot is specified the array length becomes the requested shot
+    /// count, and `None` leaves that particular shot to the model.
+    catalog_part_overrides: Vec<Option<String>>,
     /// Whether the video-creation model reasons before it answers.
     ///
     /// Per request rather than per installation: turning it off saves about 31
@@ -431,12 +439,31 @@ impl MotionVideoBriefRequest {
         language: String,
         model_thinking: bool,
     ) -> Result<Self, MotionVideoStudioError> {
+        Self::one_sentence_with_thinking_and_part_overrides(
+            brief,
+            aspect_ratio,
+            duration_seconds,
+            language,
+            model_thinking,
+            Vec::new(),
+        )
+    }
+
+    pub fn one_sentence_with_thinking_and_part_overrides(
+        brief: String,
+        aspect_ratio: String,
+        duration_seconds: u32,
+        language: String,
+        model_thinking: bool,
+        catalog_part_overrides: Vec<Option<String>>,
+    ) -> Result<Self, MotionVideoStudioError> {
         let value = Self {
             creation_mode: MOTION_BRIEF_CREATION_MODE.to_owned(),
             brief,
             aspect_ratio,
             duration_seconds,
             language,
+            catalog_part_overrides,
             model_thinking,
         };
         value.validate()?;
@@ -463,6 +490,10 @@ impl MotionVideoBriefRequest {
         self.model_thinking
     }
 
+    pub fn catalog_part_overrides(&self) -> &[Option<String>] {
+        &self.catalog_part_overrides
+    }
+
     /// Judged against the two contracts the agent reads, so a brief this side
     /// accepts is one the agent will also accept — the round trip through a
     /// subprocess is not where a user should discover a bound.
@@ -470,6 +501,19 @@ impl MotionVideoBriefRequest {
         let limits = brief_limits()?;
         let duration = duration_limits()?;
         let trimmed = self.brief.trim();
+        let overrides_valid = if self.catalog_part_overrides.is_empty() {
+            true
+        } else {
+            let identifiers = selectable_catalog_part_ids()?;
+            self.catalog_part_overrides.len()
+                <= usize::try_from(duration.brief_beat_count_maximum())
+                    .map_err(|_| draft_invalid())?
+                && self.catalog_part_overrides.iter().any(Option::is_some)
+                && self.catalog_part_overrides.iter().all(|part| {
+                    part.as_ref()
+                        .is_none_or(|identifier| identifiers.contains(identifier))
+                })
+        };
         if self.creation_mode != MOTION_BRIEF_CREATION_MODE
             || trimmed.is_empty()
             || trimmed.chars().count() > limits.max_brief_characters
@@ -482,11 +526,36 @@ impl MotionVideoBriefRequest {
             // The one-sentence entry's own ceiling: this path is one render per
             // shot, so the sandbox's single-capture limit is not what bounds it.
             || self.duration_seconds > duration.brief_seconds_maximum()
+            || !overrides_valid
         {
             return Err(draft_invalid());
         }
         validate_copy(trimmed, limits.max_brief_characters)
     }
+}
+
+fn selectable_catalog_part_ids() -> Result<&'static BTreeSet<String>, MotionVideoStudioError> {
+    static IDENTIFIERS: std::sync::OnceLock<Option<BTreeSet<String>>> = std::sync::OnceLock::new();
+    IDENTIFIERS
+        .get_or_init(|| {
+            let document: serde_json::Value =
+                serde_json::from_str(MOTION_PART_SLOTS_CONTRACT).ok()?;
+            if document.get("schemaVersion")?.as_u64()? != 1
+                || document.get("id")?.as_str()? != "motion-part-slots.v1"
+                || document.get("policy")?.as_str()? != "fail_closed"
+                || document.get("counts")?.get("parts")?.as_u64()? != 37
+            {
+                return None;
+            }
+            let items = document.get("parts")?.as_array()?;
+            let identifiers = items
+                .iter()
+                .map(|item| item.get("name")?.as_str().map(str::to_owned))
+                .collect::<Option<BTreeSet<_>>>()?;
+            (items.len() == 37 && identifiers.len() == 37).then_some(identifiers)
+        })
+        .as_ref()
+        .ok_or_else(authoring_installation_damaged)
 }
 
 /// The single creation mode this request carries, declared once so the request

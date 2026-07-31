@@ -14,6 +14,8 @@
     "agent_body_is_out_of_range",
     "agent_brief_must_be_a_motionbrief",
     "agent_brief_text_is_out_of_range",
+    "agent_catalog_part_overrides_do_not_match_storyboard_beats",
+    "agent_catalog_part_overrides_must_be_selectable_catalog_ids",
     "agent_catalog_parts_must_be_selectable_catalog_ids",
     "agent_catalog_purposes_missing",
     "agent_composition_html_must_be_a_non_empty_string",
@@ -123,6 +125,7 @@
     "brief_too_many_brand_assets",
     "browser_executable_missing",
     "browser_executable_not_absolute",
+    "catalog_part_overrides_shape_invalid",
     "catalog_root_missing",
     "catalog_root_not_absolute",
     "duration_not_whole_seconds",
@@ -168,6 +171,7 @@
       "brand_assets_shape_invalid",
       "browser_executable_missing",
       "browser_executable_not_absolute",
+      "catalog_part_overrides_shape_invalid",
       "duration_not_whole_seconds",
       "ffprobe_executable_missing",
       "ffprobe_executable_not_absolute",
@@ -181,6 +185,8 @@
       "workspace_unusable"
     ],
     "executor_defect": [
+      "agent_catalog_part_overrides_do_not_match_storyboard_beats",
+      "agent_catalog_part_overrides_must_be_selectable_catalog_ids",
       "agent_narrator_must_be_callable_or_absent",
       "agent_not_a_motionauthoringtools_instance",
       "agent_slot_overflow_probe_failed_to_measure",

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   MOTION_PARTS_CATALOG,
   MOTION_PARTS_CATEGORIES,
+  MOTION_SELECTABLE_PART_IDS,
   groupMotionPartsByCategory,
   motionPartsUsage,
   recommendMotionPartsForBeat,
@@ -32,6 +33,15 @@ describe("motion parts catalog projection", () => {
       0,
     );
     expect(total).toBe(134);
+  });
+
+  it("offers only the 37 parts the real film assembler can consume", () => {
+    expect(MOTION_SELECTABLE_PART_IDS.size).toBe(37);
+    expect(MOTION_SELECTABLE_PART_IDS.has("data-chart")).toBe(true);
+    expect(MOTION_SELECTABLE_PART_IDS.has("caption-kinetic-slam")).toBe(false);
+    for (const id of recommendMotionPartsForBeat("展示本周销售数据增长", 0)) {
+      expect(MOTION_SELECTABLE_PART_IDS.has(id)).toBe(true);
+    }
   });
 
   it("never exposes trademark indicator words in user-visible text", () => {
@@ -99,13 +109,13 @@ describe("motion parts catalog projection", () => {
   });
 
   it("picks the part whose own name matches the beat, not the first of a category", () => {
-    // Both beats belong to 字幕; the old rule answered every one of them with
-    // the first three subtitle parts in id order.
-    expect(recommendMotionPartsForBeat("台词逐字跟读字幕", 0)).toContain(
-      "caption-pill-karaoke",
+    // Both beats belong to 代码演示; the old rule answered every one of them
+    // with the first three parts in category order.
+    expect(recommendMotionPartsForBeat("演示代码逐字输入", 0)).toContain(
+      "code-typing",
     );
-    expect(recommendMotionPartsForBeat("字幕用霓虹发光效果", 1)).toContain(
-      "caption-neon-glow",
+    expect(recommendMotionPartsForBeat("对比两版代码差异", 1)).toContain(
+      "code-diff",
     );
 
     // Both beats belong to 数据与地图 and must not collapse onto one answer.
