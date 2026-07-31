@@ -241,7 +241,7 @@ def _slice_proves_sentence(
     if 0 < sentence_index < len(normalized_sentences) - 1:
         previous = normalized_sentences[sentence_index - 1]
         following = normalized_sentences[sentence_index + 1]
-        if expected_distance and any(
+        if any(
             previous.endswith(actual[:boundary]) and following.startswith(actual[boundary:])
             for boundary in range(1, len(actual))
         ):
@@ -272,7 +272,10 @@ def _sentences_align(
     normalized_sentences: tuple[str, ...],
     transcript: str,
 ) -> bool:
-    if not _texts_align("".join(normalized_sentences), transcript):
+    expected_transcript = "".join(normalized_sentences)
+    if expected_transcript == transcript:
+        return True
+    if not _texts_align(expected_transcript, transcript):
         return False
     length_bounds = tuple(
         _aligned_slice_length_bounds(sentence) for sentence in normalized_sentences

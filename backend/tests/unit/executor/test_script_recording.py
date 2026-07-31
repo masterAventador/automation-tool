@@ -354,7 +354,8 @@ def test_partition_search_stops_at_a_hard_candidate_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     normalized_sentences = tuple(chr(0x4E00 + index) * 20 for index in range(64))
-    transcript = "".join(normalized_sentences)
+    exact_transcript = "".join(normalized_sentences)
+    transcript = exact_transcript[:-1] + "龘"
     maximum_candidate_checks = 1_024
     candidate_checks = 0
 
@@ -430,6 +431,10 @@ def test_text_alignment_rejects_short_errors_large_differences_reordering_and_em
         (
             ("a" * 17 + "xyz", "xyz123q", "123" + "c" * 17),
             ("a" * 17 + "xyz") + ("123" + "c" * 17),
+        ),
+        (
+            ("a" * 19 + "X", "XY", "Y" + "b" * 19),
+            ("a" * 19 + "X") + ("Y" + "b" * 19),
         ),
         (tuple("abcdefghij"), "abcdefghi"),
     ],
