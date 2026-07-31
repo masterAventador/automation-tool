@@ -12,6 +12,11 @@ from automation_tool.control_plane.application.local_editing_visual_render impor
     create_local_editing_caption_render_plan,
 )
 from automation_tool.control_plane.domain.editing_project import (
+    MAX_CAPTION_FONT_PX,
+    MAX_CAPTION_LINE_SPACING,
+    MAX_CAPTION_STROKE_PX,
+    MIN_CAPTION_FONT_PX,
+    MIN_CAPTION_LINE_SPACING,
     CaptionStyle,
     EditingProject,
     EditingProjectId,
@@ -19,11 +24,23 @@ from automation_tool.control_plane.domain.editing_project import (
 )
 from automation_tool.control_plane.domain.material import MaterialId
 from automation_tool.control_plane.domain.timeline import (
+    MAX_CLIP_TEXT_CHARACTERS,
+    MAX_CLIPS_PER_TRACK,
     Timeline,
     TimelineClip,
     TimelineId,
     TimelineTrack,
     TimelineTrackKind,
+)
+from automation_tool.executor.captions import render as caption_render
+from automation_tool.protocol.local_rendering import (
+    MAX_LOCAL_EDITING_CAPTION_CUES,
+    MAX_LOCAL_EDITING_CAPTION_FONT_PX,
+    MAX_LOCAL_EDITING_CAPTION_LINE_SPACING,
+    MAX_LOCAL_EDITING_CAPTION_STROKE_PX,
+    MAX_LOCAL_EDITING_CAPTION_TEXT_CHARACTERS,
+    MIN_LOCAL_EDITING_CAPTION_FONT_PX,
+    MIN_LOCAL_EDITING_CAPTION_LINE_SPACING,
 )
 
 NOW = datetime(2026, 8, 1, tzinfo=UTC)
@@ -212,3 +229,31 @@ def test_caption_projection_does_not_import_executor_or_carry_machine_paths() ->
     ).read_text(encoding="utf-8")
 
     assert "automation_tool.executor" not in source
+
+
+def test_caption_wire_limits_are_guarded_against_domain_and_executor_drift() -> None:
+    assert (
+        (
+            MIN_LOCAL_EDITING_CAPTION_FONT_PX,
+            MAX_LOCAL_EDITING_CAPTION_FONT_PX,
+            MAX_LOCAL_EDITING_CAPTION_STROKE_PX,
+            MIN_LOCAL_EDITING_CAPTION_LINE_SPACING,
+            MAX_LOCAL_EDITING_CAPTION_LINE_SPACING,
+        )
+        == (
+            MIN_CAPTION_FONT_PX,
+            MAX_CAPTION_FONT_PX,
+            MAX_CAPTION_STROKE_PX,
+            MIN_CAPTION_LINE_SPACING,
+            MAX_CAPTION_LINE_SPACING,
+        )
+        == (
+            caption_render.MIN_CAPTION_FONT_PX,
+            caption_render.MAX_CAPTION_FONT_PX,
+            caption_render.MAX_CAPTION_STROKE_PX,
+            caption_render.MIN_CAPTION_LINE_SPACING,
+            caption_render.MAX_CAPTION_LINE_SPACING,
+        )
+    )
+    assert MAX_LOCAL_EDITING_CAPTION_TEXT_CHARACTERS == MAX_CLIP_TEXT_CHARACTERS
+    assert MAX_LOCAL_EDITING_CAPTION_CUES == MAX_CLIPS_PER_TRACK

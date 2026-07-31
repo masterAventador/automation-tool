@@ -322,22 +322,20 @@ def test_empty_caption_set_is_byte_identical_to_omitting_captions(tmp_path: Path
 
 
 @pytest.mark.parametrize(
-    ("field", "value"),
+    "overrides",
     [
-        ("project_id", uuid4()),
-        ("timeline_id", uuid4()),
-        ("timeline_revision", 99),
-        ("output_width", 1280),
-        ("output_height", 720),
-        ("output_fps", 24),
-        ("duration_ms", 900),
-        ("target_frames", 29),
+        {"project_id": uuid4()},
+        {"timeline_id": uuid4()},
+        {"timeline_revision": 99},
+        {"output_width": 1280},
+        {"output_height": 720},
+        {"output_fps": 24, "target_frames": 24},
+        {"duration_ms": 900, "target_frames": 27},
     ],
 )
 def test_caption_set_must_match_the_visual_plan_identity(
     tmp_path: Path,
-    field: str,
-    value: object,
+    overrides: dict[str, object],
 ) -> None:
     tools = _tools(tmp_path)
     image_id = uuid4()
@@ -357,7 +355,7 @@ def test_caption_set_must_match_the_visual_plan_identity(
         "target_frames": 30,
         "captions": (),
     }
-    values[field] = value
+    values.update(overrides)
     overlays = VisualCaptionOverlaySet(**values)  # type: ignore[arg-type]
 
     with pytest.raises(VisualFilterGraphRejected) as error:

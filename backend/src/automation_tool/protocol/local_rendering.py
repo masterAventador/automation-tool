@@ -1,4 +1,4 @@
-"""Versioned, path-free visual rendering values shared across process boundaries."""
+"""Versioned, path-free visual and caption values shared across process boundaries."""
 
 from __future__ import annotations
 

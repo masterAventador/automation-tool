@@ -14,6 +14,13 @@ from automation_tool.executor.captions.fonts import CaptionFontRejected
 from automation_tool.executor.captions.render import CaptionRenderStyle, render_caption
 from automation_tool.executor.material_probe import MAX_PATH_CHARACTERS
 from automation_tool.protocol.local_rendering import (
+    MAX_LOCAL_EDITING_CAPTION_CUES,
+    MAX_LOCAL_EDITING_OUTPUT_DIMENSION,
+    MAX_LOCAL_EDITING_OUTPUT_FPS,
+    MAX_LOCAL_EDITING_RENDER_DURATION_MS,
+    MIN_LOCAL_EDITING_OUTPUT_DIMENSION,
+    MIN_LOCAL_EDITING_OUTPUT_FPS,
+    MIN_LOCAL_EDITING_RENDER_DURATION_MS,
     LocalEditingCaptionRenderCue,
     LocalEditingCaptionRenderPlan,
     LocalEditingCaptionRenderStyle,
@@ -72,7 +79,7 @@ class VisualCaptionOverlayBinding:
     def __post_init__(self) -> None:
         if (
             type(self.sequence) is not int
-            or self.sequence < 1
+            or not 1 <= self.sequence <= MAX_LOCAL_EDITING_CAPTION_CUES
             or type(self.start_frame) is not int
             or self.start_frame < 0
             or type(self.end_frame) is not int
@@ -106,16 +113,25 @@ class VisualCaptionOverlaySet:
             or type(self.timeline_revision) is not int
             or self.timeline_revision < 1
             or type(self.output_width) is not int
-            or self.output_width < 1
+            or not MIN_LOCAL_EDITING_OUTPUT_DIMENSION
+            <= self.output_width
+            <= MAX_LOCAL_EDITING_OUTPUT_DIMENSION
+            or self.output_width % 2 != 0
             or type(self.output_height) is not int
-            or self.output_height < 1
+            or not MIN_LOCAL_EDITING_OUTPUT_DIMENSION
+            <= self.output_height
+            <= MAX_LOCAL_EDITING_OUTPUT_DIMENSION
+            or self.output_height % 2 != 0
             or type(self.output_fps) is not int
-            or self.output_fps < 1
+            or not MIN_LOCAL_EDITING_OUTPUT_FPS <= self.output_fps <= MAX_LOCAL_EDITING_OUTPUT_FPS
             or type(self.duration_ms) is not int
-            or self.duration_ms < 1
+            or not MIN_LOCAL_EDITING_RENDER_DURATION_MS
+            <= self.duration_ms
+            <= MAX_LOCAL_EDITING_RENDER_DURATION_MS
             or type(self.target_frames) is not int
-            or self.target_frames < 1
+            or self.target_frames != _frame_at(self.duration_ms, self.output_fps)
             or not isinstance(self.captions, tuple)
+            or len(self.captions) > MAX_LOCAL_EDITING_CAPTION_CUES
             or not all(isinstance(item, VisualCaptionOverlayBinding) for item in self.captions)
         ):
             _reject(CaptionOverlayRejection.INVALID_PLAN)
@@ -236,6 +252,9 @@ def render_caption_overlay_set(
     except Exception:
         _remove(written + destinations)
         _reject(CaptionOverlayRejection.RENDER_FAILED)
+    except BaseException:
+        _remove(written + destinations)
+        raise
 
     return VisualCaptionOverlaySet(
         project_id=validated.project_id,

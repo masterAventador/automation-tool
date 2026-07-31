@@ -107,6 +107,17 @@ def test_a_captionless_timeline_has_one_valid_empty_plan() -> None:
     assert plan.version == "local-editing.caption-render.v1"
 
 
+def test_caption_plan_accepts_exactly_the_limit_and_rejects_one_more() -> None:
+    cues = tuple(
+        LocalEditingCaptionRenderCue(index, index - 1, 1, "字")
+        for index in range(1, MAX_LOCAL_EDITING_CAPTION_CUES + 1)
+    )
+
+    assert len(_plan(cues).cues) == MAX_LOCAL_EDITING_CAPTION_CUES
+    with pytest.raises(LocalEditingCaptionRenderRejected):
+        _plan((*cues, cues[-1]))
+
+
 @pytest.mark.parametrize(
     "overrides",
     [

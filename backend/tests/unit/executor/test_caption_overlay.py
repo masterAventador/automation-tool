@@ -19,6 +19,7 @@ from automation_tool.executor.caption_overlay import (
 )
 from automation_tool.executor.captions.fonts import CaptionFontRejected
 from automation_tool.protocol.local_rendering import (
+    MAX_LOCAL_EDITING_CAPTION_CUES,
     LocalEditingCaptionRenderCue,
     LocalEditingCaptionRenderPlan,
     LocalEditingCaptionRenderStyle,
@@ -139,6 +140,35 @@ def test_a_later_render_failure_removes_every_png_from_this_call(
     assert list(tmp_path.iterdir()) == []
 
 
+def test_an_interrupt_cleans_finished_pngs_and_is_not_turned_into_a_render_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def interrupt_second(
+        text: str,
+        style: object,
+        *,
+        frame_width: int,
+        frame_height: int,
+        destination: Path,
+    ) -> Path:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise KeyboardInterrupt
+        destination.write_bytes(b"png")
+        return destination
+
+    monkeypatch.setattr(caption_overlay, "render_caption", interrupt_second)
+
+    with pytest.raises(KeyboardInterrupt):
+        render_caption_overlay_set(_plan(), tmp_path)
+
+    assert list(tmp_path.iterdir()) == []
+
+
 @pytest.mark.parametrize("directory_kind", ["relative", "missing", "symlink"])
 def test_workspace_must_be_an_existing_absolute_real_directory(
     tmp_path: Path,
@@ -195,6 +225,14 @@ def test_mutated_plan_and_binding_values_fail_closed(tmp_path: Path) -> None:
             source_path=tmp_path / "caption.png",
         )
 
+    with pytest.raises(CaptionOverlayRejected):
+        VisualCaptionOverlayBinding(
+            sequence=MAX_LOCAL_EDITING_CAPTION_CUES + 1,
+            start_frame=0,
+            end_frame=1,
+            source_path=tmp_path / "caption.png",
+        )
+
 
 @pytest.mark.parametrize(
     "overrides",
@@ -226,6 +264,61 @@ def test_overlay_set_shape_fails_closed(tmp_path: Path, overrides: dict[str, obj
 
     with pytest.raises(CaptionOverlayRejected):
         VisualCaptionOverlaySet(**values)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"output_width": 127},
+        {"output_width": 721},
+        {"output_width": 4097},
+        {"output_height": 127},
+        {"output_height": 4097},
+        {"output_fps": 11},
+        {"output_fps": 61},
+        {"duration_ms": 99},
+        {"duration_ms": 600_001},
+        {"target_frames": 29},
+    ],
+)
+def test_overlay_set_reuses_protocol_bounds_and_derives_target_frames(
+    overrides: dict[str, object],
+) -> None:
+    values: dict[str, object] = {
+        "project_id": uuid4(),
+        "timeline_id": uuid4(),
+        "timeline_revision": 1,
+        "output_width": 720,
+        "output_height": 1280,
+        "output_fps": 30,
+        "duration_ms": 1000,
+        "target_frames": 30,
+        "captions": (),
+    }
+    values.update(overrides)
+
+    with pytest.raises(CaptionOverlayRejected):
+        VisualCaptionOverlaySet(**cast(Any, values))
+
+
+def test_overlay_set_rejects_more_than_the_protocol_caption_limit(tmp_path: Path) -> None:
+    captions = tuple(
+        VisualCaptionOverlayBinding(index, index - 1, index, tmp_path / f"{index}.png")
+        for index in range(1, MAX_LOCAL_EDITING_CAPTION_CUES + 1)
+    )
+
+    with pytest.raises(CaptionOverlayRejected):
+        VisualCaptionOverlaySet(
+            project_id=uuid4(),
+            timeline_id=uuid4(),
+            timeline_revision=1,
+            output_width=720,
+            output_height=1280,
+            output_fps=60,
+            duration_ms=10_000,
+            target_frames=600,
+            captions=(*captions, captions[-1]),
+        )
 
 
 def test_overlay_set_rebuilds_nested_bindings_and_validates_layout(tmp_path: Path) -> None:
