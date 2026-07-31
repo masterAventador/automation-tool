@@ -1,0 +1,434 @@
+"""LE-16 T2: choose fitting source windows from verified decodable ranges."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from datetime import UTC, datetime
+
+import pytest
+
+from automation_tool.control_plane.domain.material import (
+    MAX_MATERIAL_DURATION_MS,
+    DescriptionSource,
+    Material,
+    MaterialId,
+    MaterialKind,
+)
+from automation_tool.executor.segment_selection import (
+    FittingMaterialSegment,
+    SegmentSelectionCandidates,
+    SegmentSelectionRejected,
+    SegmentSelectionSlot,
+    VerifiedDecodableInterval,
+    VerifiedDecodableMaterial,
+    select_fitting_segments,
+)
+from automation_tool.executor.semantic_matching import (
+    SemanticCandidateScore,
+    SemanticSentenceMatches,
+)
+
+
+def _material(
+    *,
+    kind: MaterialKind = MaterialKind.VIDEO,
+    duration_ms: int = 60_000,
+    shot_boundaries_ms: tuple[int, ...] = (),
+    digest_character: str = "a",
+) -> Material:
+    is_image = kind is MaterialKind.IMAGE
+    is_audio = kind is MaterialKind.AUDIO
+    return Material.register(
+        material_id=MaterialId.new(),
+        kind=kind,
+        duration_ms=None if is_image else duration_ms,
+        width=None if is_audio else 1920,
+        height=None if is_audio else 1080,
+        content_digest=digest_character * 64,
+        has_audio=is_audio,
+        audio_loudness_lufs=-18.0 if is_audio else None,
+        has_speech=False,
+        speech_segments_ms=(),
+        speech_transcript=None,
+        shot_boundaries_ms=() if is_image or is_audio else shot_boundaries_ms,
+        ai_description="已理解的素材",
+        ai_tags=("素材",),
+        description_source=DescriptionSource.AI,
+        described_at=datetime.now(UTC),
+    )
+
+
+def _matches(
+    materials_and_scores: tuple[tuple[Material, int], ...],
+    *,
+    sequence: int = 1,
+) -> SemanticSentenceMatches:
+    return SemanticSentenceMatches(
+        sequence=sequence,
+        candidates=tuple(
+            SemanticCandidateScore(
+                material_id=material.material_id,
+                score=score,
+                qualified=score >= 60,
+            )
+            for material, score in materials_and_scores
+        ),
+    )
+
+
+def _evidence(
+    material: Material,
+    *intervals: tuple[int, int],
+) -> VerifiedDecodableMaterial:
+    return VerifiedDecodableMaterial(
+        material_id=material.material_id,
+        content_digest=material.content_digest,
+        intervals=tuple(
+            VerifiedDecodableInterval(start_ms=start, end_ms=end) for start, end in intervals
+        ),
+    )
+
+
+def test_declared_duration_never_substitutes_for_decodable_frames() -> None:
+    truncated = _material(
+        duration_ms=60_000,
+        shot_boundaries_ms=(0, 10_000, 30_000),
+    )
+
+    result = select_fitting_segments(
+        SegmentSelectionSlot(sequence=1, duration_ms=9_000),
+        _matches(((truncated, 95),)),
+        (truncated,),
+        (_evidence(truncated, (0, 8_000)),),
+    )
+
+    assert result == SegmentSelectionCandidates(
+        sequence=1,
+        duration_ms=9_000,
+        segments=(),
+    )
+
+
+def test_verified_frames_may_extend_beyond_an_understated_container_duration() -> None:
+    understated = _material(duration_ms=1_000)
+
+    result = select_fitting_segments(
+        SegmentSelectionSlot(sequence=1, duration_ms=1_500),
+        _matches(((understated, 90),)),
+        (understated,),
+        (_evidence(understated, (0, 2_000)),),
+    )
+
+    assert result.segments == (
+        FittingMaterialSegment(
+            material_id=understated.material_id,
+            score=90,
+            duration_ms=1_500,
+            source_in_ms=0,
+            source_out_ms=1_500,
+        ),
+    )
+
+
+def test_shot_boundaries_are_intersected_with_decodable_ranges() -> None:
+    material = _material(
+        shot_boundaries_ms=(0, 5_000, 10_000),
+    )
+
+    result = select_fitting_segments(
+        SegmentSelectionSlot(sequence=1, duration_ms=3_500),
+        _matches(((material, 90),)),
+        (material,),
+        (_evidence(material, (2_000, 7_000), (9_000, 15_000)),),
+    )
+
+    assert result.segments == (
+        FittingMaterialSegment(
+            material_id=material.material_id,
+            score=90,
+            duration_ms=3_500,
+            source_in_ms=10_000,
+            source_out_ms=13_500,
+        ),
+    )
+
+
+def test_the_earliest_fitting_shot_intersection_wins() -> None:
+    material = _material(
+        shot_boundaries_ms=(0, 5_000, 10_000),
+    )
+
+    result = select_fitting_segments(
+        SegmentSelectionSlot(sequence=1, duration_ms=3_000),
+        _matches(((material, 90),)),
+        (material,),
+        (_evidence(material, (2_000, 7_000), (9_000, 15_000)),),
+    )
+
+    assert result.segments[0].source_in_ms == 2_000
+    assert result.segments[0].source_out_ms == 5_000
+
+
+def test_a_nonzero_first_cut_does_not_drop_the_opening_shot() -> None:
+    material = _material(shot_boundaries_ms=(5_000,))
+
+    result = select_fitting_segments(
+        SegmentSelectionSlot(sequence=1, duration_ms=3_000),
+        _matches(((material, 90),)),
+        (material,),
+        (_evidence(material, (0, 4_000)),),
+    )
+
+    assert result.segments[0].source_in_ms == 0
+    assert result.segments[0].source_out_ms == 3_000
+
+
+def test_a_material_without_shot_boundaries_uses_only_verified_ranges() -> None:
+    material = _material()
+
+    result = select_fitting_segments(
+        SegmentSelectionSlot(sequence=1, duration_ms=4_000),
+        _matches(((material, 90),)),
+        (material,),
+        (_evidence(material, (4_000, 6_000), (8_000, 14_000)),),
+    )
+
+    assert result.segments[0].source_in_ms == 8_000
+    assert result.segments[0].source_out_ms == 12_000
+
+
+def test_an_image_needs_no_decodable_evidence_or_source_window() -> None:
+    image = _material(kind=MaterialKind.IMAGE)
+
+    result = select_fitting_segments(
+        SegmentSelectionSlot(sequence=1, duration_ms=12_345),
+        _matches(((image, 90),)),
+        (image,),
+        (),
+    )
+
+    assert result.segments == (
+        FittingMaterialSegment(
+            material_id=image.material_id,
+            score=90,
+            duration_ms=12_345,
+            source_in_ms=None,
+            source_out_ms=None,
+        ),
+    )
+
+
+def test_qualified_fitting_materials_are_ranked_by_score_then_input_order() -> None:
+    first = _material(digest_character="a")
+    second = _material(kind=MaterialKind.IMAGE, digest_character="b")
+    third = _material(digest_character="c")
+    result = select_fitting_segments(
+        SegmentSelectionSlot(sequence=1, duration_ms=2_000),
+        _matches(((first, 80), (third, 80), (second, 95))),
+        (first, second, third),
+        (
+            _evidence(first, (0, 5_000)),
+            _evidence(third, (0, 5_000)),
+        ),
+    )
+
+    assert tuple(segment.material_id for segment in result.segments) == (
+        second.material_id,
+        first.material_id,
+        third.material_id,
+    )
+
+
+def test_low_scores_and_too_short_ranges_are_not_returned() -> None:
+    too_short = _material(digest_character="a")
+    low_score = _material(digest_character="b")
+    image = _material(kind=MaterialKind.IMAGE, digest_character="c")
+
+    result = select_fitting_segments(
+        SegmentSelectionSlot(sequence=1, duration_ms=3_000),
+        _matches(((too_short, 95), (low_score, 59), (image, 75))),
+        (too_short, low_score, image),
+        (
+            _evidence(too_short, (0, 2_999)),
+            _evidence(low_score, (0, 10_000)),
+        ),
+    )
+
+    assert tuple(segment.material_id for segment in result.segments) == (image.material_id,)
+
+
+@pytest.mark.parametrize(
+    "evidence_factory",
+    [
+        lambda first, _second: (),
+        lambda first, _second: (_evidence(first, (0, 5_000)),) * 2,
+        lambda first, second: (
+            _evidence(first, (0, 5_000)),
+            _evidence(second, (0, 5_000)),
+        ),
+    ],
+    ids=["missing-video", "duplicate-video", "image-has-evidence"],
+)
+def test_decodable_evidence_must_exactly_cover_the_video_materials(
+    evidence_factory: Callable[
+        [Material, Material],
+        tuple[VerifiedDecodableMaterial, ...],
+    ],
+) -> None:
+    video = _material()
+    image = _material(kind=MaterialKind.IMAGE, digest_character="b")
+
+    with pytest.raises(SegmentSelectionRejected):
+        select_fitting_segments(
+            SegmentSelectionSlot(sequence=1, duration_ms=1_000),
+            _matches(((video, 90), (image, 80))),
+            (video, image),
+            evidence_factory(video, image),
+        )
+
+
+def test_decodable_evidence_is_bound_to_the_material_bytes() -> None:
+    material = _material()
+    wrong_digest = VerifiedDecodableMaterial(
+        material_id=material.material_id,
+        content_digest="f" * 64,
+        intervals=(VerifiedDecodableInterval(start_ms=0, end_ms=5_000),),
+    )
+
+    with pytest.raises(SegmentSelectionRejected):
+        select_fitting_segments(
+            SegmentSelectionSlot(sequence=1, duration_ms=1_000),
+            _matches(((material, 90),)),
+            (material,),
+            (wrong_digest,),
+        )
+
+
+def test_matching_matrix_must_cover_exactly_the_supplied_materials() -> None:
+    supplied = _material()
+    unknown = _material(digest_character="b")
+
+    with pytest.raises(SegmentSelectionRejected):
+        select_fitting_segments(
+            SegmentSelectionSlot(sequence=1, duration_ms=1_000),
+            _matches(((unknown, 90),)),
+            (supplied,),
+            (_evidence(supplied, (0, 5_000)),),
+        )
+
+
+def test_slot_and_matching_sentence_must_name_the_same_sequence() -> None:
+    material = _material()
+
+    with pytest.raises(SegmentSelectionRejected):
+        select_fitting_segments(
+            SegmentSelectionSlot(sequence=2, duration_ms=1_000),
+            _matches(((material, 90),), sequence=1),
+            (material,),
+            (_evidence(material, (0, 5_000)),),
+        )
+
+
+def test_audio_and_duplicate_materials_fail_closed() -> None:
+    audio = _material(kind=MaterialKind.AUDIO)
+    video = _material(digest_character="b")
+
+    for materials, matches, evidence in (
+        ((audio,), _matches(((audio, 90),)), ()),
+        (
+            (video, video),
+            _matches(((video, 90),)),
+            (_evidence(video, (0, 5_000)),),
+        ),
+    ):
+        with pytest.raises(SegmentSelectionRejected):
+            select_fitting_segments(
+                SegmentSelectionSlot(sequence=1, duration_ms=1_000),
+                matches,
+                materials,
+                evidence,
+            )
+
+
+@pytest.mark.parametrize(
+    "construct",
+    [
+        lambda: VerifiedDecodableInterval(start_ms=-1, end_ms=1),
+        lambda: VerifiedDecodableInterval(start_ms=0, end_ms=0),
+        lambda: VerifiedDecodableInterval(start_ms=True, end_ms=1),
+        lambda: VerifiedDecodableInterval(
+            start_ms=0,
+            end_ms=MAX_MATERIAL_DURATION_MS + 1,
+        ),
+        lambda: VerifiedDecodableMaterial(
+            material_id=MaterialId.new(),
+            content_digest="not-a-digest",
+            intervals=(VerifiedDecodableInterval(start_ms=0, end_ms=1),),
+        ),
+        lambda: VerifiedDecodableMaterial(
+            material_id=MaterialId.new(),
+            content_digest="a" * 64,
+            intervals=(),
+        ),
+        lambda: VerifiedDecodableMaterial(
+            material_id=MaterialId.new(),
+            content_digest="a" * 64,
+            intervals=(
+                VerifiedDecodableInterval(start_ms=0, end_ms=2),
+                VerifiedDecodableInterval(start_ms=2, end_ms=3),
+            ),
+        ),
+        lambda: SegmentSelectionSlot(sequence=0, duration_ms=1),
+        lambda: SegmentSelectionSlot(sequence=1, duration_ms=0),
+        lambda: FittingMaterialSegment(
+            material_id=MaterialId.new(),
+            score=90,
+            duration_ms=1,
+            source_in_ms=0,
+            source_out_ms=None,
+        ),
+        lambda: FittingMaterialSegment(
+            material_id=MaterialId.new(),
+            score=90,
+            duration_ms=2,
+            source_in_ms=0,
+            source_out_ms=1,
+        ),
+        lambda: SegmentSelectionCandidates(
+            sequence=1,
+            duration_ms=2,
+            segments=(
+                FittingMaterialSegment(
+                    material_id=MaterialId.new(),
+                    score=90,
+                    duration_ms=1,
+                    source_in_ms=0,
+                    source_out_ms=1,
+                ),
+            ),
+        ),
+        lambda: SegmentSelectionCandidates(
+            sequence=1,
+            duration_ms=1,
+            segments=(
+                FittingMaterialSegment(
+                    material_id=MaterialId.new(),
+                    score=80,
+                    duration_ms=1,
+                    source_in_ms=0,
+                    source_out_ms=1,
+                ),
+                FittingMaterialSegment(
+                    material_id=MaterialId.new(),
+                    score=90,
+                    duration_ms=1,
+                    source_in_ms=0,
+                    source_out_ms=1,
+                ),
+            ),
+        ),
+    ],
+)
+def test_public_selection_values_fail_closed(construct: Callable[[], object]) -> None:
+    with pytest.raises(SegmentSelectionRejected):
+        construct()
