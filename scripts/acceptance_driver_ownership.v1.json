@@ -59,6 +59,8 @@
         "run_bm_05_acceptance.py",
         "run_bu_06_acceptance.py",
         "run_cq_04_acceptance.py",
+        "run_pc_14_acceptance.py",
+        "run_pc_16_macos_package_acceptance.py",
         "run_t36_acceptance.py",
         "run_ve_04_acceptance.py"
       ]
@@ -103,7 +105,8 @@
         "run_cq_03_acceptance.py",
         "run_eb_03_acceptance.py",
         "run_eb_16_acceptance.py",
-        "run_eb_17_acceptance.py"
+        "run_eb_17_acceptance.py",
+        "run_pc_24_acceptance.py"
       ]
     },
     "manual_embedded_browser_windows": {
