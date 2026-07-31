@@ -187,6 +187,25 @@ def test_project_identity_mismatch_is_rejected_without_partial_plan() -> None:
     assert error.value.__cause__ is None
 
 
+def test_projection_rejects_semantically_wrong_domain_identifier_types() -> None:
+    project_id = EditingProjectId.new()
+    project = _project(project_id)
+    timeline = _timeline(project_id)
+    wrong_project_id = MaterialId.new()
+    object.__setattr__(project, "project_id", wrong_project_id)
+    object.__setattr__(timeline, "project_id", wrong_project_id)
+
+    with pytest.raises(LocalEditingVisualPlanRejected):
+        create_local_editing_visual_render_plan(project, timeline)
+
+    project = _project(project_id)
+    timeline = _timeline(project_id)
+    object.__setattr__(timeline, "timeline_id", MaterialId.new())
+
+    with pytest.raises(LocalEditingVisualPlanRejected):
+        create_local_editing_visual_render_plan(project, timeline)
+
+
 def test_projection_revalidates_mutated_domain_containers_and_nested_values() -> None:
     project_id = EditingProjectId.new()
     project = _project(project_id)
@@ -200,6 +219,19 @@ def test_projection_revalidates_mutated_domain_containers_and_nested_values() ->
     visual = timeline.track_of(TimelineTrackKind.VISUAL)
     assert visual is not None
     object.__setattr__(visual.clips[0], "source_in_ms", "/Users/private/source.mp4")
+
+    with pytest.raises(LocalEditingVisualPlanRejected) as error:
+        create_local_editing_visual_render_plan(project, timeline)
+
+    assert "private" not in str(error.value)
+    assert error.value.__cause__ is None
+
+
+def test_projection_rejects_wrong_elements_in_the_track_tuple_before_filtering() -> None:
+    project_id = EditingProjectId.new()
+    project = _project(project_id)
+    timeline = _timeline(project_id)
+    object.__setattr__(timeline, "tracks", (*timeline.tracks, "private/track"))
 
     with pytest.raises(LocalEditingVisualPlanRejected) as error:
         create_local_editing_visual_render_plan(project, timeline)

@@ -161,6 +161,21 @@ def test_visual_clip_shape_fails_closed(construct: Callable[[], object]) -> None
         construct()
 
 
+def test_visual_kind_requires_the_enum_not_an_equal_raw_string() -> None:
+    with pytest.raises(LocalEditingVisualRenderRejected):
+        LocalEditingVisualRenderClip(
+            sequence=1,
+            material_id=uuid4(),
+            kind=cast(SegmentSelectionMaterialKind, "video"),
+            start_ms=0,
+            duration_ms=100,
+            source_in_ms=0,
+            source_out_ms=100,
+            transition_kind=None,
+            transition_duration_ms=None,
+        )
+
+
 @pytest.mark.parametrize(
     ("source_in_ms", "source_out_ms"),
     [

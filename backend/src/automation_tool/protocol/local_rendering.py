@@ -66,6 +66,7 @@ class LocalEditingVisualRenderClip:
             type(self.sequence) is not int
             or not 1 <= self.sequence <= MAX_LOCAL_EDITING_RENDER_CLIPS
             or not _is_canonical_uuid4(self.material_id)
+            or not isinstance(self.kind, SegmentSelectionMaterialKind)
             or self.kind
             not in {SegmentSelectionMaterialKind.VIDEO, SegmentSelectionMaterialKind.IMAGE}
             or type(self.start_ms) is not int

@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from typing import Never
 
-from automation_tool.control_plane.domain.editing_project import EditingProject, OutputSpec
+from automation_tool.control_plane.domain.editing_project import (
+    EditingProject,
+    EditingProjectId,
+    OutputSpec,
+)
 from automation_tool.control_plane.domain.material import MaterialId
 from automation_tool.control_plane.domain.timeline import (
     Timeline,
     TimelineClip,
+    TimelineId,
     TimelineTrack,
     TimelineTrackKind,
     TimelineTransition,
@@ -76,9 +81,13 @@ def create_local_editing_visual_render_plan(
     if (
         not isinstance(project, EditingProject)
         or not isinstance(timeline, Timeline)
+        or not isinstance(project.project_id, EditingProjectId)
+        or not isinstance(timeline.project_id, EditingProjectId)
+        or not isinstance(timeline.timeline_id, TimelineId)
         or project.project_id != timeline.project_id
         or not isinstance(project.output, OutputSpec)
         or not isinstance(timeline.tracks, tuple)
+        or not all(isinstance(track, TimelineTrack) for track in timeline.tracks)
     ):
         _reject()
     try:
