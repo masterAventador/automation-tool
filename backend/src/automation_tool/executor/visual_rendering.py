@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Never
-from uuid import UUID
+from pathlib import Path
+from typing import Never, cast
+from uuid import RFC_4122, UUID
 
+from automation_tool.executor.material_probe import (
+    MAX_PATH_CHARACTERS,
+    MaterialProbeRejected,
+    PackagedMediaTools,
+)
 from automation_tool.protocol.local_editing import SegmentSelectionMaterialKind
 from automation_tool.protocol.local_rendering import (
     LocalEditingVisualRenderClip,
     LocalEditingVisualRenderPlan,
     LocalEditingVisualTransitionKind,
 )
+from automation_tool.protocol.safe_text import contains_control_or_bidi
 
 
 class VisualFrameGridRejection(StrEnum):
@@ -32,6 +40,83 @@ class VisualFrameGridRejected(ValueError):
 
 def _reject(code: VisualFrameGridRejection) -> Never:
     raise VisualFrameGridRejected(code) from None
+
+
+class VisualFilterGraphRejection(StrEnum):
+    INVALID_PLAN = "invalid_plan"
+    INVALID_BINDINGS = "invalid_bindings"
+    INVALID_OUTPUT = "invalid_output"
+    TRANSITIONS_NOT_SUPPORTED = "transitions_not_supported"
+    TOOL_UNAVAILABLE = "tool_unavailable"
+
+
+class VisualFilterGraphRejected(ValueError):
+    """A hard-cut FFmpeg command cannot be compiled from local inputs."""
+
+    def __init__(self, code: VisualFilterGraphRejection) -> None:
+        self.code = code
+        super().__init__("visual filter graph rejected")
+
+
+def _reject_filter_graph(code: VisualFilterGraphRejection) -> Never:
+    raise VisualFilterGraphRejected(code) from None
+
+
+def _is_uuid4(value: object) -> bool:
+    return (
+        isinstance(value, UUID)
+        and value.variant == RFC_4122
+        and value.version == 4
+        and value.int != 0
+    )
+
+
+def _valid_local_path(value: object, *, suffix: str | None = None) -> bool:
+    if not isinstance(value, Path) or not value.is_absolute():
+        return False
+    text = os.fspath(value)
+    return (
+        1 <= len(text) <= MAX_PATH_CHARACTERS
+        and not contains_control_or_bidi(text)
+        and (suffix is None or value.suffix == suffix)
+    )
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class VisualRenderSourceBinding:
+    """One local-only material path; never sent to the Control Plane."""
+
+    material_id: UUID
+    kind: SegmentSelectionMaterialKind
+    source_path: Path = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if (
+            not _is_uuid4(self.material_id)
+            or not isinstance(self.kind, SegmentSelectionMaterialKind)
+            or self.kind
+            not in {SegmentSelectionMaterialKind.VIDEO, SegmentSelectionMaterialKind.IMAGE}
+            or not _valid_local_path(self.source_path)
+        ):
+            _reject_filter_graph(VisualFilterGraphRejection.INVALID_BINDINGS)
+
+    def __repr__(self) -> str:
+        return "VisualRenderSourceBinding(<redacted>)"
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class VisualFfmpegCommand:
+    """A local argv and its path-free filter graph, redacted as a whole."""
+
+    argv: tuple[str, ...] = field(repr=False)
+    filter_complex: str
+    target_frames: int
+    output_width: int
+    output_height: int
+    output_fps: int
+
+    def __repr__(self) -> str:
+        return "VisualFfmpegCommand(<redacted>)"
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,10 +239,168 @@ def quantize_visual_render_plan(
     )
 
 
+def _validated_sources(
+    sources: tuple[VisualRenderSourceBinding, ...],
+) -> tuple[VisualRenderSourceBinding, ...]:
+    if (
+        not isinstance(sources, tuple)
+        or not sources
+        or not all(isinstance(source, VisualRenderSourceBinding) for source in sources)
+    ):
+        _reject_filter_graph(VisualFilterGraphRejection.INVALID_BINDINGS)
+    try:
+        rebuilt = tuple(
+            VisualRenderSourceBinding(
+                material_id=source.material_id,
+                kind=source.kind,
+                source_path=source.source_path,
+            )
+            for source in sources
+        )
+    except Exception:
+        _reject_filter_graph(VisualFilterGraphRejection.INVALID_BINDINGS)
+    if len({source.material_id for source in rebuilt}) != len(rebuilt):
+        _reject_filter_graph(VisualFilterGraphRejection.INVALID_BINDINGS)
+    return rebuilt
+
+
+def _seconds(milliseconds: int) -> str:
+    return f"{milliseconds // 1000}.{milliseconds % 1000:03d}"
+
+
+def _clip_filter(
+    clip: VisualFrameGridClip,
+    *,
+    input_index: int,
+    width: int,
+    height: int,
+    fps: int,
+) -> str:
+    filters: list[str] = []
+    if clip.kind is SegmentSelectionMaterialKind.VIDEO:
+        source_in_ms = cast(int, clip.source_in_ms)
+        source_out_ms = cast(int, clip.source_out_ms)
+        filters.append(f"trim=start={_seconds(source_in_ms)}:end={_seconds(source_out_ms)}")
+    filters.extend(
+        (
+            "setpts=PTS-STARTPTS",
+            f"scale=w={width}:h={height}:force_original_aspect_ratio=increase",
+            f"crop=w={width}:h={height}:x=(in_w-out_w)/2:y=(in_h-out_h)/2",
+            f"fps={fps}",
+            f"settb=1/{fps}",
+            f"trim=end_frame={clip.frame_count}",
+            "setpts=N",
+            "setsar=1",
+            "format=yuv420p",
+        )
+    )
+    return f"[{input_index}:v:0]{','.join(filters)}[v{clip.sequence}]"
+
+
+def compile_visual_ffmpeg_command(
+    tools: PackagedMediaTools,
+    plan: LocalEditingVisualRenderPlan,
+    sources: tuple[VisualRenderSourceBinding, ...],
+    output_path: Path,
+) -> VisualFfmpegCommand:
+    """Compile one hard-cut visual plan without invoking a shell or FFmpeg."""
+
+    if not isinstance(tools, PackagedMediaTools):
+        _reject_filter_graph(VisualFilterGraphRejection.TOOL_UNAVAILABLE)
+    try:
+        tools.revalidate()
+    except MaterialProbeRejected:
+        _reject_filter_graph(VisualFilterGraphRejection.TOOL_UNAVAILABLE)
+    if not _valid_local_path(output_path, suffix=".mp4"):
+        _reject_filter_graph(VisualFilterGraphRejection.INVALID_OUTPUT)
+    try:
+        frame_plan = quantize_visual_render_plan(plan)
+    except VisualFrameGridRejected:
+        _reject_filter_graph(VisualFilterGraphRejection.INVALID_PLAN)
+    if any(clip.transition_kind is not None for clip in frame_plan.clips):
+        _reject_filter_graph(VisualFilterGraphRejection.TRANSITIONS_NOT_SUPPORTED)
+
+    validated_sources = _validated_sources(sources)
+    source_by_id = {source.material_id: source for source in validated_sources}
+    expected_ids = {clip.material_id for clip in frame_plan.clips}
+    if set(source_by_id) != expected_ids or any(
+        source_by_id[clip.material_id].kind is not clip.kind for clip in frame_plan.clips
+    ):
+        _reject_filter_graph(VisualFilterGraphRejection.INVALID_BINDINGS)
+
+    input_argv: list[str] = []
+    filter_parts: list[str] = []
+    for input_index, clip in enumerate(frame_plan.clips):
+        source = source_by_id[clip.material_id]
+        if clip.kind is SegmentSelectionMaterialKind.IMAGE:
+            input_argv.extend(("-loop", "1", "-framerate", str(frame_plan.output_fps)))
+        input_argv.extend(("-i", os.fspath(source.source_path)))
+        filter_parts.append(
+            _clip_filter(
+                clip,
+                input_index=input_index,
+                width=frame_plan.output_width,
+                height=frame_plan.output_height,
+                fps=frame_plan.output_fps,
+            )
+        )
+
+    output_label = f"v{frame_plan.clips[0].sequence}"
+    if len(frame_plan.clips) > 1:
+        labels = "".join(f"[v{clip.sequence}]" for clip in frame_plan.clips)
+        filter_parts.append(f"{labels}concat=n={len(frame_plan.clips)}:v=1:a=0[outv]")
+        output_label = "outv"
+    filter_complex = ";".join(filter_parts)
+    argv = (
+        os.fspath(tools.ffmpeg_path),
+        "-y",
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        *input_argv,
+        "-filter_complex",
+        filter_complex,
+        "-map",
+        f"[{output_label}]",
+        "-an",
+        "-frames:v",
+        str(frame_plan.target_frames),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-pix_fmt",
+        "yuv420p",
+        "-fps_mode",
+        "cfr",
+        "-r",
+        str(frame_plan.output_fps),
+        "-movflags",
+        "+faststart",
+        os.fspath(output_path),
+    )
+    return VisualFfmpegCommand(
+        argv=argv,
+        filter_complex=filter_complex,
+        target_frames=frame_plan.target_frames,
+        output_width=frame_plan.output_width,
+        output_height=frame_plan.output_height,
+        output_fps=frame_plan.output_fps,
+    )
+
+
 __all__ = [
+    "VisualFfmpegCommand",
+    "VisualFilterGraphRejected",
+    "VisualFilterGraphRejection",
     "VisualFrameGridClip",
     "VisualFrameGridPlan",
     "VisualFrameGridRejected",
     "VisualFrameGridRejection",
+    "VisualRenderSourceBinding",
+    "compile_visual_ffmpeg_command",
     "quantize_visual_render_plan",
 ]

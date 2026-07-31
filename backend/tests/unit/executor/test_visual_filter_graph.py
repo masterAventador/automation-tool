@@ -1,0 +1,381 @@
+"""LE-10 T3: compile hard-cut VIDEO/IMAGE plans into one FFmpeg graph."""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Callable
+from pathlib import Path
+from typing import cast
+from uuid import UUID, uuid4
+
+import pytest
+
+from automation_tool.executor.material_probe import PackagedMediaTools
+from automation_tool.executor.visual_rendering import (
+    VisualFfmpegCommand,
+    VisualFilterGraphRejected,
+    VisualFilterGraphRejection,
+    VisualRenderSourceBinding,
+    compile_visual_ffmpeg_command,
+)
+from automation_tool.protocol.local_editing import SegmentSelectionMaterialKind
+from automation_tool.protocol.local_rendering import (
+    LocalEditingVisualRenderClip,
+    LocalEditingVisualRenderPlan,
+    LocalEditingVisualTransitionKind,
+)
+
+
+def _executable(directory: Path, name: str) -> Path:
+    path = directory / name
+    path.write_bytes(b"#!/bin/sh\nexit 0\n")
+    path.chmod(0o700)
+    return path
+
+
+def _tools(directory: Path) -> PackagedMediaTools:
+    return PackagedMediaTools(
+        ffprobe_path=_executable(directory, "ffprobe"),
+        ffmpeg_path=_executable(directory, "ffmpeg"),
+    )
+
+
+def _clip(
+    sequence: int,
+    material_id: UUID,
+    kind: SegmentSelectionMaterialKind,
+    *,
+    start_ms: int,
+    duration_ms: int,
+    transition_ms: int | None = None,
+) -> LocalEditingVisualRenderClip:
+    return LocalEditingVisualRenderClip(
+        sequence=sequence,
+        material_id=material_id,
+        kind=kind,
+        start_ms=start_ms,
+        duration_ms=duration_ms,
+        source_in_ms=700 if kind is SegmentSelectionMaterialKind.VIDEO else None,
+        source_out_ms=(700 + duration_ms if kind is SegmentSelectionMaterialKind.VIDEO else None),
+        transition_kind=(None if transition_ms is None else LocalEditingVisualTransitionKind.FADE),
+        transition_duration_ms=transition_ms,
+    )
+
+
+def _plan(
+    clips: tuple[LocalEditingVisualRenderClip, ...],
+    *,
+    duration_ms: int,
+    fps: int = 30,
+) -> LocalEditingVisualRenderPlan:
+    return LocalEditingVisualRenderPlan(
+        project_id=uuid4(),
+        timeline_id=uuid4(),
+        timeline_revision=1,
+        output_width=720,
+        output_height=1280,
+        output_fps=fps,
+        duration_ms=duration_ms,
+        clips=clips,
+    )
+
+
+def _source(
+    directory: Path,
+    material_id: UUID,
+    kind: SegmentSelectionMaterialKind,
+    name: str,
+) -> VisualRenderSourceBinding:
+    path = directory / name
+    path.write_bytes(b"source")
+    return VisualRenderSourceBinding(
+        material_id=material_id,
+        kind=kind,
+        source_path=path,
+    )
+
+
+def test_mixed_video_image_hard_cut_compiles_one_path_safe_filter_graph(
+    tmp_path: Path,
+) -> None:
+    tools = _tools(tmp_path)
+    video_id = uuid4()
+    image_id = uuid4()
+    video = _source(tmp_path, video_id, SegmentSelectionMaterialKind.VIDEO, "视频 $' 片段.mp4")
+    image = _source(tmp_path, image_id, SegmentSelectionMaterialKind.IMAGE, "图片 & 片段.png")
+    output = tmp_path / "rendered.mp4"
+    plan = _plan(
+        (
+            _clip(1, video_id, SegmentSelectionMaterialKind.VIDEO, start_ms=0, duration_ms=150),
+            _clip(2, image_id, SegmentSelectionMaterialKind.IMAGE, start_ms=150, duration_ms=150),
+        ),
+        duration_ms=300,
+    )
+
+    result = compile_visual_ffmpeg_command(tools, plan, (video, image), output)
+
+    assert isinstance(result, VisualFfmpegCommand)
+    assert result.argv[0] == os.fspath(tools.ffmpeg_path)
+    assert result.argv.count(os.fspath(video.source_path)) == 1
+    assert result.argv.count(os.fspath(image.source_path)) == 1
+    assert result.argv[-1] == os.fspath(output)
+    assert result.argv.count("-filter_complex") == 1
+    assert result.filter_complex == result.argv[result.argv.index("-filter_complex") + 1]
+    assert "trim=start=0.700:end=0.850" in result.filter_complex
+    assert "scale=w=720:h=1280:force_original_aspect_ratio=increase" in result.filter_complex
+    assert "crop=w=720:h=1280:x=(in_w-out_w)/2:y=(in_h-out_h)/2" in result.filter_complex
+    assert result.filter_complex.count("fps=30") == 2
+    assert "trim=end_frame=5" in result.filter_complex
+    assert "trim=end_frame=4" in result.filter_complex
+    assert "concat=n=2:v=1:a=0[outv]" in result.filter_complex
+    assert not any(
+        os.fspath(path) in result.filter_complex for path in (video.source_path, image.source_path)
+    )
+    assert result.target_frames == 9
+    assert result.argv[
+        result.argv.index("-an") : result.argv.index("-an") + 5
+    ] == ("-an", "-frames:v", "9", "-c:v", "libx264")
+    assert "veryfast" in result.argv
+    assert "23" in result.argv
+    assert "yuv420p" in result.argv
+    assert "cfr" in result.argv
+    assert repr(result) == "VisualFfmpegCommand(<redacted>)"
+    assert os.fspath(video.source_path) not in repr(result)
+
+
+def test_image_input_loops_at_target_fps_and_reused_material_gets_one_input_per_clip(
+    tmp_path: Path,
+) -> None:
+    tools = _tools(tmp_path)
+    image_id = uuid4()
+    image = _source(tmp_path, image_id, SegmentSelectionMaterialKind.IMAGE, "still.png")
+    plan = _plan(
+        (
+            _clip(1, image_id, SegmentSelectionMaterialKind.IMAGE, start_ms=0, duration_ms=100),
+            _clip(2, image_id, SegmentSelectionMaterialKind.IMAGE, start_ms=100, duration_ms=100),
+        ),
+        duration_ms=200,
+    )
+
+    result = compile_visual_ffmpeg_command(tools, plan, (image,), tmp_path / "result.mp4")
+
+    assert result.argv.count(os.fspath(image.source_path)) == 2
+    assert result.argv.count("-loop") == 2
+    assert result.argv.count("-framerate") == 2
+    assert result.filter_complex.startswith("[0:v:0]")
+    assert "[1:v:0]" in result.filter_complex
+
+
+def test_single_clip_maps_normalized_label_without_concat(tmp_path: Path) -> None:
+    tools = _tools(tmp_path)
+    image_id = uuid4()
+    image = _source(tmp_path, image_id, SegmentSelectionMaterialKind.IMAGE, "still.png")
+    plan = _plan(
+        (_clip(1, image_id, SegmentSelectionMaterialKind.IMAGE, start_ms=0, duration_ms=100),),
+        duration_ms=100,
+    )
+
+    result = compile_visual_ffmpeg_command(tools, plan, (image,), tmp_path / "result.mp4")
+
+    assert "concat=" not in result.filter_complex
+    assert result.argv[result.argv.index("-map") + 1] == "[v1]"
+
+
+@pytest.mark.parametrize(
+    "construct",
+    [
+        lambda root: VisualRenderSourceBinding(
+            material_id=UUID(int=0),
+            kind=SegmentSelectionMaterialKind.IMAGE,
+            source_path=root / "image.png",
+        ),
+        lambda root: VisualRenderSourceBinding(
+            material_id=uuid4(),
+            kind=cast(SegmentSelectionMaterialKind, "image"),
+            source_path=root / "image.png",
+        ),
+        lambda root: VisualRenderSourceBinding(
+            material_id=uuid4(),
+            kind=SegmentSelectionMaterialKind.AUDIO,
+            source_path=root / "audio.wav",
+        ),
+        lambda root: VisualRenderSourceBinding(
+            material_id=uuid4(),
+            kind=SegmentSelectionMaterialKind.IMAGE,
+            source_path=Path("relative.png"),
+        ),
+        lambda root: VisualRenderSourceBinding(
+            material_id=uuid4(),
+            kind=SegmentSelectionMaterialKind.IMAGE,
+            source_path=root / "unsafe\u202epng",
+        ),
+        lambda root: VisualRenderSourceBinding(
+            material_id=uuid4(),
+            kind=SegmentSelectionMaterialKind.IMAGE,
+            source_path=Path("/") / ("a" * 4096),
+        ),
+    ],
+)
+def test_source_binding_shape_fails_closed(
+    tmp_path: Path,
+    construct: Callable[[Path], VisualRenderSourceBinding],
+) -> None:
+    with pytest.raises(VisualFilterGraphRejected) as error:
+        construct(tmp_path)
+
+    assert error.value.code is VisualFilterGraphRejection.INVALID_BINDINGS
+    assert error.value.__cause__ is None
+
+
+@pytest.mark.parametrize(
+    "bindings",
+    [
+        lambda root, video, image: (),
+        lambda root, video, image: cast(
+            tuple[VisualRenderSourceBinding, ...],
+            [video, image],
+        ),
+        lambda root, video, image: (video,),
+        lambda root, video, image: (video, image, _source(root, uuid4(), image.kind, "extra.png")),
+        lambda root, video, image: (video, image, image),
+        lambda root, video, image: (
+            video,
+            VisualRenderSourceBinding(
+                material_id=image.material_id,
+                kind=SegmentSelectionMaterialKind.VIDEO,
+                source_path=image.source_path,
+            ),
+        ),
+    ],
+)
+def test_material_bindings_must_be_unique_exact_and_kind_matched(
+    tmp_path: Path,
+    bindings: Callable[
+        [Path, VisualRenderSourceBinding, VisualRenderSourceBinding],
+        tuple[VisualRenderSourceBinding, ...],
+    ],
+) -> None:
+    tools = _tools(tmp_path)
+    video_id = uuid4()
+    image_id = uuid4()
+    video = _source(tmp_path, video_id, SegmentSelectionMaterialKind.VIDEO, "video.mp4")
+    image = _source(tmp_path, image_id, SegmentSelectionMaterialKind.IMAGE, "image.png")
+    plan = _plan(
+        (
+            _clip(1, video_id, video.kind, start_ms=0, duration_ms=100),
+            _clip(2, image_id, image.kind, start_ms=100, duration_ms=100),
+        ),
+        duration_ms=200,
+    )
+
+    with pytest.raises(VisualFilterGraphRejected) as error:
+        compile_visual_ffmpeg_command(
+            tools,
+            plan,
+            bindings(tmp_path, video, image),
+            tmp_path / "result.mp4",
+        )
+
+    assert error.value.code is VisualFilterGraphRejection.INVALID_BINDINGS
+    assert error.value.__cause__ is None
+
+
+def test_transition_is_not_silently_compiled_as_a_hard_cut(tmp_path: Path) -> None:
+    tools = _tools(tmp_path)
+    first_id = uuid4()
+    second_id = uuid4()
+    first = _source(tmp_path, first_id, SegmentSelectionMaterialKind.IMAGE, "first.png")
+    second = _source(tmp_path, second_id, SegmentSelectionMaterialKind.IMAGE, "second.png")
+    plan = _plan(
+        (
+            _clip(1, first_id, first.kind, start_ms=0, duration_ms=100),
+            _clip(
+                2,
+                second_id,
+                second.kind,
+                start_ms=80,
+                duration_ms=100,
+                transition_ms=20,
+            ),
+        ),
+        duration_ms=180,
+        fps=50,
+    )
+
+    with pytest.raises(VisualFilterGraphRejected) as error:
+        compile_visual_ffmpeg_command(tools, plan, (first, second), tmp_path / "result.mp4")
+
+    assert error.value.code is VisualFilterGraphRejection.TRANSITIONS_NOT_SUPPORTED
+
+
+@pytest.mark.parametrize("output", [Path("relative.mp4"), Path("/private/tmp/result.mov")])
+def test_output_path_must_be_absolute_mp4(tmp_path: Path, output: Path) -> None:
+    tools = _tools(tmp_path)
+    image_id = uuid4()
+    image = _source(tmp_path, image_id, SegmentSelectionMaterialKind.IMAGE, "image.png")
+    plan = _plan(
+        (_clip(1, image_id, image.kind, start_ms=0, duration_ms=100),),
+        duration_ms=100,
+    )
+
+    with pytest.raises(VisualFilterGraphRejected) as error:
+        compile_visual_ffmpeg_command(tools, plan, (image,), output)
+
+    assert error.value.code is VisualFilterGraphRejection.INVALID_OUTPUT
+
+
+def test_invalid_plan_and_disappeared_tool_have_fixed_rejections(tmp_path: Path) -> None:
+    tools = _tools(tmp_path)
+    image_id = uuid4()
+    image = _source(tmp_path, image_id, SegmentSelectionMaterialKind.IMAGE, "image.png")
+    plan = _plan(
+        (_clip(1, image_id, image.kind, start_ms=0, duration_ms=100),),
+        duration_ms=100,
+    )
+    object.__setattr__(plan, "clips", cast(tuple[LocalEditingVisualRenderClip, ...], []))
+    with pytest.raises(VisualFilterGraphRejected) as invalid:
+        compile_visual_ffmpeg_command(tools, plan, (image,), tmp_path / "result.mp4")
+    assert invalid.value.code is VisualFilterGraphRejection.INVALID_PLAN
+
+    plan = _plan(
+        (_clip(1, image_id, image.kind, start_ms=0, duration_ms=100),),
+        duration_ms=100,
+    )
+    tools.ffmpeg_path.unlink()
+    with pytest.raises(VisualFilterGraphRejected) as unavailable:
+        compile_visual_ffmpeg_command(tools, plan, (image,), tmp_path / "result.mp4")
+    assert unavailable.value.code is VisualFilterGraphRejection.TOOL_UNAVAILABLE
+
+
+def test_mutated_binding_and_wrong_tools_type_are_rejected_before_use(tmp_path: Path) -> None:
+    tools = _tools(tmp_path)
+    image_id = uuid4()
+    image = _source(tmp_path, image_id, SegmentSelectionMaterialKind.IMAGE, "image.png")
+    plan = _plan(
+        (_clip(1, image_id, image.kind, start_ms=0, duration_ms=100),),
+        duration_ms=100,
+    )
+    object.__setattr__(image, "source_path", Path("relative.png"))
+    with pytest.raises(VisualFilterGraphRejected) as mutated:
+        compile_visual_ffmpeg_command(tools, plan, (image,), tmp_path / "result.mp4")
+    assert mutated.value.code is VisualFilterGraphRejection.INVALID_BINDINGS
+
+    with pytest.raises(VisualFilterGraphRejected) as wrong_tools:
+        compile_visual_ffmpeg_command(
+            cast(PackagedMediaTools, object()),
+            plan,
+            (image,),
+            tmp_path / "result.mp4",
+        )
+    assert wrong_tools.value.code is VisualFilterGraphRejection.TOOL_UNAVAILABLE
+
+
+def test_source_binding_and_module_boundaries_do_not_leak_paths(tmp_path: Path) -> None:
+    binding = _source(tmp_path, uuid4(), SegmentSelectionMaterialKind.IMAGE, "private.png")
+    source = (
+        Path(__file__).parents[3] / "src" / "automation_tool" / "executor" / "visual_rendering.py"
+    ).read_text(encoding="utf-8")
+
+    assert repr(binding) == "VisualRenderSourceBinding(<redacted>)"
+    assert os.fspath(binding.source_path) not in repr(binding)
+    assert "automation_tool.control_plane" not in source
