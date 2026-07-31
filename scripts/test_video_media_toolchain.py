@@ -41,9 +41,16 @@ from check_video_media_toolchain import (
 )
 
 EXPECTED_PRODUCTION_FILTERS = {
+    "adelay",
+    "aformat",
     "ametadata",
     "amix",
+    "anull",
+    "apad",
     "aresample",
+    "asetpts",
+    "asplit",
+    "atrim",
     "concat",
     "crop",
     "ebur128",
@@ -57,7 +64,9 @@ EXPECTED_PRODUCTION_FILTERS = {
     "setsar",
     "settb",
     "silencedetect",
+    "sidechaincompress",
     "trim",
+    "volume",
     "xfade",
 }
 

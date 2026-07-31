@@ -13,6 +13,7 @@ from automation_tool.protocol.local_editing import SegmentSelectionMaterialKind
 
 LOCAL_EDITING_VISUAL_RENDER_VERSION: Final = "local-editing.visual-render.v1"
 LOCAL_EDITING_CAPTION_RENDER_VERSION: Final = "local-editing.caption-render.v1"
+LOCAL_EDITING_AUDIO_RENDER_VERSION: Final = "local-editing.audio-render.v1"
 MIN_LOCAL_EDITING_OUTPUT_DIMENSION: Final = 128
 MAX_LOCAL_EDITING_OUTPUT_DIMENSION: Final = 4096
 MIN_LOCAL_EDITING_OUTPUT_FPS: Final = 12
@@ -29,6 +30,10 @@ MAX_LOCAL_EDITING_CAPTION_FONT_PX: Final = 200
 MAX_LOCAL_EDITING_CAPTION_STROKE_PX: Final = 20
 MIN_LOCAL_EDITING_CAPTION_LINE_SPACING: Final = 1.0
 MAX_LOCAL_EDITING_CAPTION_LINE_SPACING: Final = 3.0
+MAX_LOCAL_EDITING_AUDIO_RENDER_CLIPS: Final = 1_536
+MAX_LOCAL_EDITING_AUDIO_CLIPS_PER_TRACK: Final = 512
+MIN_LOCAL_EDITING_AUDIO_GAIN_DB: Final = -60.0
+MAX_LOCAL_EDITING_AUDIO_GAIN_DB: Final = 12.0
 
 _FONT_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,63}\Z")
 
@@ -47,10 +52,29 @@ class LocalEditingCaptionRenderRejected(ValueError):
         super().__init__("local caption render plan rejected")
 
 
+class LocalEditingAudioRenderRejected(ValueError):
+    """An audio render wire value is invalid."""
+
+    def __init__(self) -> None:
+        super().__init__("local audio render plan rejected")
+
+
 class LocalEditingVisualTransitionKind(StrEnum):
     FADE = "fade"
     DISSOLVE = "dissolve"
     WIPE = "wipe"
+
+
+class LocalEditingAudioTrackKind(StrEnum):
+    NARRATION = "narration"
+    AMBIENT = "ambient"
+    MUSIC = "music"
+
+
+class LocalEditingOriginalAudioMode(StrEnum):
+    AUTO_DUCK = "auto_duck"
+    FIXED_VOLUME = "fixed_volume"
+    MUTED = "muted"
 
 
 def _reject() -> Never:
@@ -61,6 +85,10 @@ def _reject_caption() -> Never:
     raise LocalEditingCaptionRenderRejected from None
 
 
+def _reject_audio() -> Never:
+    raise LocalEditingAudioRenderRejected from None
+
+
 def _is_canonical_uuid4(value: object) -> bool:
     return (
         isinstance(value, UUID)
@@ -68,6 +96,134 @@ def _is_canonical_uuid4(value: object) -> bool:
         and value.version == 4
         and value.int != 0
     )
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class LocalEditingAudioRenderClip:
+    """One source window on one path-free audio lane."""
+
+    sequence: int
+    track_kind: LocalEditingAudioTrackKind
+    material_id: UUID
+    start_ms: int
+    duration_ms: int
+    source_in_ms: int
+    source_out_ms: int
+    gain_db: float
+    original_audio_mode: LocalEditingOriginalAudioMode | None
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.sequence) is not int
+            or not 1 <= self.sequence <= MAX_LOCAL_EDITING_AUDIO_RENDER_CLIPS
+            or not isinstance(self.track_kind, LocalEditingAudioTrackKind)
+            or not _is_canonical_uuid4(self.material_id)
+            or type(self.start_ms) is not int
+            or self.start_ms < 0
+            or type(self.duration_ms) is not int
+            or not 1 <= self.duration_ms <= MAX_LOCAL_EDITING_RENDER_DURATION_MS
+            or self.start_ms + self.duration_ms > MAX_LOCAL_EDITING_RENDER_DURATION_MS
+            or type(self.source_in_ms) is not int
+            or type(self.source_out_ms) is not int
+            or self.source_in_ms < 0
+            or self.source_out_ms > MAX_LOCAL_EDITING_SOURCE_DURATION_MS
+            or self.source_out_ms - self.source_in_ms != self.duration_ms
+            or type(self.gain_db) is not float
+            or not MIN_LOCAL_EDITING_AUDIO_GAIN_DB
+            <= self.gain_db
+            <= MAX_LOCAL_EDITING_AUDIO_GAIN_DB
+        ):
+            _reject_audio()
+        if self.track_kind is LocalEditingAudioTrackKind.AMBIENT:
+            if not isinstance(self.original_audio_mode, LocalEditingOriginalAudioMode):
+                _reject_audio()
+        elif self.original_audio_mode is not None:
+            _reject_audio()
+
+    @property
+    def end_ms(self) -> int:
+        return self.start_ms + self.duration_ms
+
+    def __repr__(self) -> str:
+        return "LocalEditingAudioRenderClip(<redacted>)"
+
+
+def _validated_audio_clip(clip: LocalEditingAudioRenderClip) -> LocalEditingAudioRenderClip:
+    try:
+        return LocalEditingAudioRenderClip(
+            sequence=clip.sequence,
+            track_kind=clip.track_kind,
+            material_id=clip.material_id,
+            start_ms=clip.start_ms,
+            duration_ms=clip.duration_ms,
+            source_in_ms=clip.source_in_ms,
+            source_out_ms=clip.source_out_ms,
+            gain_db=clip.gain_db,
+            original_audio_mode=clip.original_audio_mode,
+        )
+    except Exception:
+        _reject_audio()
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class LocalEditingAudioRenderPlan:
+    """One complete path-free audio mix request."""
+
+    project_id: UUID
+    timeline_id: UUID
+    timeline_revision: int
+    duration_ms: int
+    clips: tuple[LocalEditingAudioRenderClip, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            not _is_canonical_uuid4(self.project_id)
+            or not _is_canonical_uuid4(self.timeline_id)
+            or type(self.timeline_revision) is not int
+            or self.timeline_revision < 1
+            or type(self.duration_ms) is not int
+            or not MIN_LOCAL_EDITING_RENDER_DURATION_MS
+            <= self.duration_ms
+            <= MAX_LOCAL_EDITING_RENDER_DURATION_MS
+            or not isinstance(self.clips, tuple)
+            or len(self.clips) > MAX_LOCAL_EDITING_AUDIO_RENDER_CLIPS
+            or not all(isinstance(clip, LocalEditingAudioRenderClip) for clip in self.clips)
+        ):
+            _reject_audio()
+        validated = tuple(_validated_audio_clip(clip) for clip in self.clips)
+        if tuple(clip.sequence for clip in validated) != tuple(range(1, len(validated) + 1)):
+            _reject_audio()
+        if any(
+            sum(clip.track_kind is kind for clip in validated)
+            > MAX_LOCAL_EDITING_AUDIO_CLIPS_PER_TRACK
+            for kind in LocalEditingAudioTrackKind
+        ):
+            _reject_audio()
+        order = {
+            LocalEditingAudioTrackKind.NARRATION: 0,
+            LocalEditingAudioTrackKind.AMBIENT: 1,
+            LocalEditingAudioTrackKind.MUSIC: 2,
+        }
+        previous_order = -1
+        previous_end_by_track: dict[LocalEditingAudioTrackKind, int] = {}
+        for clip in validated:
+            current_order = order[clip.track_kind]
+            if (
+                current_order < previous_order
+                or clip.start_ms < previous_end_by_track.get(clip.track_kind, 0)
+                or clip.end_ms > self.duration_ms
+            ):
+                _reject_audio()
+            previous_order = current_order
+            previous_end_by_track[clip.track_kind] = clip.end_ms
+        object.__setattr__(self, "clips", validated)
+
+    @property
+    def version(self) -> str:
+        return LOCAL_EDITING_AUDIO_RENDER_VERSION
+
+    def __repr__(self) -> str:
+        return "LocalEditingAudioRenderPlan(<redacted>)"
 
 
 @dataclass(frozen=True, slots=True)
@@ -374,8 +530,12 @@ class LocalEditingVisualRenderPlan:
 
 
 __all__ = [
+    "LOCAL_EDITING_AUDIO_RENDER_VERSION",
     "LOCAL_EDITING_CAPTION_RENDER_VERSION",
     "LOCAL_EDITING_VISUAL_RENDER_VERSION",
+    "MAX_LOCAL_EDITING_AUDIO_CLIPS_PER_TRACK",
+    "MAX_LOCAL_EDITING_AUDIO_GAIN_DB",
+    "MAX_LOCAL_EDITING_AUDIO_RENDER_CLIPS",
     "MAX_LOCAL_EDITING_CAPTION_CUES",
     "MAX_LOCAL_EDITING_CAPTION_FONT_PX",
     "MAX_LOCAL_EDITING_CAPTION_LINE_SPACING",
@@ -387,15 +547,21 @@ __all__ = [
     "MAX_LOCAL_EDITING_RENDER_DURATION_MS",
     "MAX_LOCAL_EDITING_SOURCE_DURATION_MS",
     "MAX_LOCAL_EDITING_TRANSITION_DURATION_MS",
+    "MIN_LOCAL_EDITING_AUDIO_GAIN_DB",
     "MIN_LOCAL_EDITING_CAPTION_FONT_PX",
     "MIN_LOCAL_EDITING_CAPTION_LINE_SPACING",
     "MIN_LOCAL_EDITING_OUTPUT_DIMENSION",
     "MIN_LOCAL_EDITING_OUTPUT_FPS",
     "MIN_LOCAL_EDITING_RENDER_DURATION_MS",
+    "LocalEditingAudioRenderClip",
+    "LocalEditingAudioRenderPlan",
+    "LocalEditingAudioRenderRejected",
+    "LocalEditingAudioTrackKind",
     "LocalEditingCaptionRenderCue",
     "LocalEditingCaptionRenderPlan",
     "LocalEditingCaptionRenderRejected",
     "LocalEditingCaptionRenderStyle",
+    "LocalEditingOriginalAudioMode",
     "LocalEditingVisualRenderClip",
     "LocalEditingVisualRenderPlan",
     "LocalEditingVisualRenderRejected",

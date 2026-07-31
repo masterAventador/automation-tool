@@ -12,6 +12,7 @@ from automation_tool.control_plane.domain.editing_project import (
 )
 from automation_tool.control_plane.domain.material import MaterialId
 from automation_tool.control_plane.domain.timeline import (
+    OriginalAudioMode,
     Timeline,
     TimelineClip,
     TimelineId,
@@ -22,9 +23,13 @@ from automation_tool.control_plane.domain.timeline import (
 )
 from automation_tool.protocol.local_editing import SegmentSelectionMaterialKind
 from automation_tool.protocol.local_rendering import (
+    LocalEditingAudioRenderClip,
+    LocalEditingAudioRenderPlan,
+    LocalEditingAudioTrackKind,
     LocalEditingCaptionRenderCue,
     LocalEditingCaptionRenderPlan,
     LocalEditingCaptionRenderStyle,
+    LocalEditingOriginalAudioMode,
     LocalEditingVisualRenderClip,
     LocalEditingVisualRenderPlan,
     LocalEditingVisualTransitionKind,
@@ -45,6 +50,13 @@ class LocalEditingCaptionPlanRejected(ValueError):
         super().__init__("local caption render projection rejected")
 
 
+class LocalEditingAudioPlanRejected(ValueError):
+    """The domain values cannot form one audio render plan."""
+
+    def __init__(self) -> None:
+        super().__init__("local audio render projection rejected")
+
+
 def _reject() -> Never:
     raise LocalEditingVisualPlanRejected from None
 
@@ -53,6 +65,17 @@ _TRANSITION_KINDS = {
     TransitionKind.FADE: LocalEditingVisualTransitionKind.FADE,
     TransitionKind.DISSOLVE: LocalEditingVisualTransitionKind.DISSOLVE,
     TransitionKind.WIPE: LocalEditingVisualTransitionKind.WIPE,
+}
+
+_AUDIO_TRACK_KINDS = {
+    TimelineTrackKind.NARRATION: LocalEditingAudioTrackKind.NARRATION,
+    TimelineTrackKind.AMBIENT: LocalEditingAudioTrackKind.AMBIENT,
+    TimelineTrackKind.MUSIC: LocalEditingAudioTrackKind.MUSIC,
+}
+_ORIGINAL_AUDIO_MODES = {
+    OriginalAudioMode.AUTO_DUCK: LocalEditingOriginalAudioMode.AUTO_DUCK,
+    OriginalAudioMode.FIXED_VOLUME: LocalEditingOriginalAudioMode.FIXED_VOLUME,
+    OriginalAudioMode.MUTED: LocalEditingOriginalAudioMode.MUTED,
 }
 
 
@@ -193,6 +216,73 @@ def create_local_editing_visual_render_plan(
         _reject()
 
 
+def create_local_editing_audio_render_plan(
+    project: EditingProject,
+    timeline: Timeline,
+) -> LocalEditingAudioRenderPlan:
+    """Create the three-lane audio wire without carrying material facts or paths."""
+
+    if (
+        not isinstance(project, EditingProject)
+        or not isinstance(timeline, Timeline)
+        or not isinstance(project.project_id, EditingProjectId)
+        or not isinstance(timeline.project_id, EditingProjectId)
+        or not isinstance(timeline.timeline_id, TimelineId)
+        or not isinstance(project.output, OutputSpec)
+        or not isinstance(project.caption_style, CaptionStyle)
+        or not isinstance(timeline.tracks, tuple)
+        or not all(
+            isinstance(track, TimelineTrack)
+            and isinstance(track.kind, TimelineTrackKind)
+            and isinstance(track.clips, tuple)
+            and all(isinstance(clip, TimelineClip) for clip in track.clips)
+            for track in timeline.tracks
+        )
+    ):
+        raise LocalEditingAudioPlanRejected from None
+    try:
+        validated_project = _rebuilt_project(project)
+        validated_timeline = _rebuilt_timeline(timeline)
+        if validated_project.project_id != validated_timeline.project_id:
+            raise LocalEditingAudioPlanRejected
+        clips: list[LocalEditingAudioRenderClip] = []
+        for domain_kind in (
+            TimelineTrackKind.NARRATION,
+            TimelineTrackKind.AMBIENT,
+            TimelineTrackKind.MUSIC,
+        ):
+            track = validated_timeline.track_of(domain_kind)
+            if track is None:
+                continue
+            for clip in track.clips:
+                clips.append(
+                    LocalEditingAudioRenderClip(
+                        sequence=len(clips) + 1,
+                        track_kind=_AUDIO_TRACK_KINDS[domain_kind],
+                        material_id=cast(MaterialId, clip.source_material_id).uuid,
+                        start_ms=clip.start_ms,
+                        duration_ms=clip.duration_ms,
+                        source_in_ms=cast(int, clip.source_in_ms),
+                        source_out_ms=cast(int, clip.source_out_ms),
+                        gain_db=cast(float, clip.gain_db),
+                        original_audio_mode=(
+                            None
+                            if clip.original_audio_mode is None
+                            else _ORIGINAL_AUDIO_MODES[clip.original_audio_mode]
+                        ),
+                    )
+                )
+        return LocalEditingAudioRenderPlan(
+            project_id=validated_project.project_id.uuid,
+            timeline_id=validated_timeline.timeline_id.uuid,
+            timeline_revision=validated_timeline.revision,
+            duration_ms=validated_timeline.duration_ms,
+            clips=tuple(clips),
+        )
+    except Exception:
+        raise LocalEditingAudioPlanRejected from None
+
+
 def create_local_editing_caption_render_plan(
     project: EditingProject,
     timeline: Timeline,
@@ -259,8 +349,10 @@ def create_local_editing_caption_render_plan(
 
 
 __all__ = [
+    "LocalEditingAudioPlanRejected",
     "LocalEditingCaptionPlanRejected",
     "LocalEditingVisualPlanRejected",
+    "create_local_editing_audio_render_plan",
     "create_local_editing_caption_render_plan",
     "create_local_editing_visual_render_plan",
 ]

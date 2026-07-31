@@ -23,9 +23,16 @@
     "demuxers": ["concat", "image2", "image2pipe", "mov"],
     "muxers": ["mp4", "mov", "image2"],
     "filters": [
+      "adelay",
+      "aformat",
       "ametadata",
       "amix",
+      "anull",
+      "apad",
       "aresample",
+      "asetpts",
+      "asplit",
+      "atrim",
       "concat",
       "crop",
       "ebur128",
@@ -38,8 +45,10 @@
       "setpts",
       "setsar",
       "settb",
+      "sidechaincompress",
       "silencedetect",
       "trim",
+      "volume",
       "xfade"
     ],
     "protocols": ["file", "pipe"]
