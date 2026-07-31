@@ -181,6 +181,15 @@ def test_a_real_transition_that_quantizes_to_zero_frames_is_not_a_hard_cut() -> 
             ),
             duration_ms=103,
         ),
+        lambda: _plan(
+            (
+                _image(1, start_ms=0, duration_ms=100),
+                _image(2, start_ms=40, duration_ms=100, transition_ms=60),
+                _image(3, start_ms=101, duration_ms=100, transition_ms=39),
+            ),
+            duration_ms=201,
+            fps=50,
+        ),
     ],
 )
 def test_quantized_transition_may_not_swallow_outgoing_or_incoming_clip(
