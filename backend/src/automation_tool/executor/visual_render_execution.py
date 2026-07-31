@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import time
 from collections.abc import Callable
-from contextlib import suppress
+from contextlib import ExitStack, suppress
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
@@ -180,12 +180,19 @@ def _run_bounded_process(
     timeout_seconds: float,
     cancel_requested: Callable[[], bool] | None,
     stdout_limit_bytes: int = 0,
+    output_path: Path | None = None,
+    output_limit_bytes: int = 0,
 ) -> _ProcessResult:
     """Run one argv without a shell; keep captured output bounded on disk."""
 
     deadline = time.monotonic() + timeout_seconds
-    with tempfile.TemporaryFile() as captured:
-        stdout_target: int | BinaryIO = captured if stdout_limit_bytes else subprocess.DEVNULL
+    with ExitStack() as resources:
+        captured: BinaryIO | None = None
+        if stdout_limit_bytes:
+            captured = resources.enter_context(tempfile.TemporaryFile())
+        stdout_target: int | BinaryIO = (
+            captured if captured is not None else subprocess.DEVNULL
+        )
         creationflags = _CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
         process = subprocess.Popen(
             argv,
@@ -198,7 +205,22 @@ def _run_bounded_process(
         )
         try:
             while process.poll() is None:
-                if stdout_limit_bytes and os.fstat(captured.fileno()).st_size > stdout_limit_bytes:
+                if (
+                    captured is not None
+                    and os.fstat(captured.fileno()).st_size > stdout_limit_bytes
+                ):
+                    raise _ProcessOutputTooLarge
+                output_stat: os.stat_result | None = None
+                if output_path is not None and output_limit_bytes:
+                    with suppress(OSError):
+                        output_stat = output_path.lstat()
+                if (
+                    output_stat is not None
+                    and output_path is not None
+                    and stat.S_ISREG(output_stat.st_mode)
+                    and not output_path.is_symlink()
+                    and output_stat.st_size > output_limit_bytes
+                ):
                     raise _ProcessOutputTooLarge
                 if cancel_requested is not None and cancel_requested():
                     raise _ProcessCancelled
@@ -211,6 +233,7 @@ def _run_bounded_process(
         returncode = process.wait()
         if not stdout_limit_bytes:
             return _ProcessResult(returncode=returncode, stdout=b"")
+        assert captured is not None
         captured.seek(0, os.SEEK_END)
         if captured.tell() > stdout_limit_bytes:
             raise _ProcessOutputTooLarge
@@ -277,6 +300,14 @@ def _same_file(before: os.stat_result, after: os.stat_result) -> bool:
         after.st_mtime_ns,
         after.st_ctime_ns,
     )
+
+
+def _caption_unchanged(path: Path, before: os.stat_result) -> bool:
+    try:
+        after = _stat_file(path)
+    except VisualRenderExecutionRejected:
+        return False
+    return _same_file(before, after)
 
 
 def _ffprobe_argv(tools: PackagedMediaTools, output: Path) -> tuple[str, ...]:
@@ -346,7 +377,14 @@ def _verified_receipt(
             _reject(VisualRenderExecutionRejection.OUTPUT_INVALID)
     except VisualRenderExecutionRejected:
         raise
-    except (KeyError, TypeError, ValueError, InvalidOperation, json.JSONDecodeError):
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        ZeroDivisionError,
+        InvalidOperation,
+        json.JSONDecodeError,
+    ):
         payload_invalid = True
     if payload_invalid:
         _reject(VisualRenderExecutionRejection.OUTPUT_INVALID)
@@ -470,10 +508,12 @@ def execute_visual_render(
             command.argv,
             timeout_seconds=_FFMPEG_TIMEOUT_SECONDS,
             cancel_requested=cancel_requested,
+            output_path=working_output,
+            output_limit_bytes=VISUAL_RENDER_MAX_OUTPUT_BYTES,
         )
         _checked_sources(checked_sources, checked_stats)
         if overlays is not None and any(
-            not _same_file(before, _stat_file(item.source_path))
+            not _caption_unchanged(item.source_path, before)
             for item, before in zip(overlays.captions, caption_stats, strict=True)
         ):
             _reject(VisualRenderExecutionRejection.SOURCE_CHANGED)

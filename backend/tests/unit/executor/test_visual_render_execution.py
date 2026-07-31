@@ -393,6 +393,30 @@ def test_bounded_process_stops_a_live_process_as_soon_as_stdout_exceeds_the_limi
         )
 
 
+def test_bounded_process_stops_a_live_process_when_its_output_file_exceeds_the_limit(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "working.mp4"
+
+    with pytest.raises(execution._ProcessOutputTooLarge):
+        execution._run_bounded_process(
+            (
+                sys.executable,
+                "-c",
+                (
+                    "import os,sys\n"
+                    "stream=open(sys.argv[1], 'wb', buffering=0)\n"
+                    "while True: os.write(stream.fileno(), b'x' * 65536)"
+                ),
+                os.fspath(output),
+            ),
+            timeout_seconds=1.0,
+            cancel_requested=None,
+            output_path=output,
+            output_limit_bytes=1024,
+        )
+
+
 def test_bounded_process_returns_exit_status_with_no_captured_output() -> None:
     result = execution._run_bounded_process(
         (sys.executable, "-c", "raise SystemExit(3)"),
@@ -401,6 +425,24 @@ def test_bounded_process_returns_exit_status_with_no_captured_output() -> None:
     )
 
     assert result == execution._ProcessResult(returncode=3, stdout=b"")
+
+
+def test_bounded_process_without_stdout_capture_does_not_allocate_temp_storage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        tempfile,
+        "TemporaryFile",
+        lambda: (_ for _ in ()).throw(PermissionError("temp unavailable")),
+    )
+
+    result = execution._run_bounded_process(
+        (sys.executable, "-c", "raise SystemExit(0)"),
+        timeout_seconds=5.0,
+        cancel_requested=None,
+    )
+
+    assert result == execution._ProcessResult(returncode=0, stdout=b"")
 
 
 def test_bounded_process_returns_small_captured_output() -> None:
@@ -725,6 +767,21 @@ def test_empty_ffmpeg_output_is_rejected_before_ffprobe(
             {
                 "streams": [
                     {
+                        "codec_name": "h264",
+                        "codec_type": "video",
+                        "width": 720,
+                        "height": 1280,
+                        "avg_frame_rate": "0/0",
+                        "nb_read_frames": "30",
+                    }
+                ],
+                "format": {"duration": "1.0", "size": "1"},
+            }
+        ).encode(),
+        json.dumps(
+            {
+                "streams": [
+                    {
                         "codec_name": "hevc",
                         "codec_type": "video",
                         "width": 720,
@@ -1020,11 +1077,11 @@ def test_output_identity_drift_is_rejected_before_publication(
     assert list(task.iterdir()) == []
 
 
-@pytest.mark.parametrize("drift_caption", [False, True])
+@pytest.mark.parametrize("caption_drift", ["none", "rewrite", "delete", "symlink"])
 def test_caption_files_are_identity_checked_and_always_cleaned(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    drift_caption: bool,
+    caption_drift: str,
 ) -> None:
     tools = _tools(tmp_path)
     task = tmp_path / "task"
@@ -1067,15 +1124,20 @@ def test_caption_files_are_identity_checked_and_always_cleaned(
         calls += 1
         if calls == 1:
             Path(argv[-1]).write_bytes(b"x")
-            if drift_caption:
+            if caption_drift == "rewrite":
                 caption_path.write_bytes(b"changed")
+            elif caption_drift == "delete":
+                caption_path.unlink()
+            elif caption_drift == "symlink":
+                caption_path.unlink()
+                caption_path.symlink_to(sources[0].source_path)
             return execution._ProcessResult(returncode=0, stdout=b"")
         return execution._ProcessResult(returncode=0, stdout=_valid_probe_payload(plan))
 
     monkeypatch.setattr(execution, "render_caption_overlay_set", render_overlays)
     monkeypatch.setattr(execution, "_run_bounded_process", run_process)
 
-    if drift_caption:
+    if caption_drift != "none":
         with pytest.raises(VisualRenderExecutionRejected) as raised:
             execute_visual_render(
                 tools,
