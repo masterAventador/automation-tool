@@ -384,7 +384,7 @@ def test_consecutive_transitions_keep_absolute_offsets_and_unique_chain_labels(
 
 def test_hard_cuts_and_transition_form_one_pairwise_chain(tmp_path: Path) -> None:
     tools = _tools(tmp_path)
-    material_ids = tuple(uuid4() for _ in range(4))
+    material_ids = tuple(uuid4() for _ in range(5))
     sources = tuple(
         _source(tmp_path, material_id, SegmentSelectionMaterialKind.IMAGE, f"{index}.png")
         for index, material_id in enumerate(material_ids, start=1)
@@ -402,21 +402,34 @@ def test_hard_cuts_and_transition_form_one_pairwise_chain(tmp_path: Path) -> Non
                 transition_ms=50,
             ),
             _clip(4, material_ids[3], sources[3].kind, start_ms=600, duration_ms=200),
+            _clip(
+                5,
+                material_ids[4],
+                sources[4].kind,
+                start_ms=750,
+                duration_ms=250,
+                transition_ms=50,
+                transition_kind=LocalEditingVisualTransitionKind.DISSOLVE,
+            ),
         ),
-        duration_ms=800,
+        duration_ms=1000,
         fps=20,
     )
 
     result = compile_visual_ffmpeg_command(tools, plan, sources, tmp_path / "result.mp4")
 
-    assert "[v1][v2]concat=n=2:v=1:a=0[out2]" in result.filter_complex
+    assert "[v1][v2]concat=n=2:v=1:a=0,settb=1/20[out2]" in result.filter_complex
     assert (
         "[out2][v3]xfade=transition=fade:duration=0.050000000:"
         "offset=0.350000000[out3]"
     ) in result.filter_complex
-    assert "[out3][v4]concat=n=2:v=1:a=0[out4]" in result.filter_complex
-    assert result.argv[result.argv.index("-map") + 1] == "[out4]"
-    assert result.target_frames == 16
+    assert "[out3][v4]concat=n=2:v=1:a=0,settb=1/20[out4]" in result.filter_complex
+    assert (
+        "[out4][v5]xfade=transition=dissolve:duration=0.050000000:"
+        "offset=0.750000000[out5]"
+    ) in result.filter_complex
+    assert result.argv[result.argv.index("-map") + 1] == "[out5]"
+    assert result.target_frames == 20
 
 
 @pytest.mark.parametrize("output", [Path("relative.mp4"), Path("/private/tmp/result.mov")])

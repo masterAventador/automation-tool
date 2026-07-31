@@ -365,7 +365,8 @@ def compile_visual_ffmpeg_command(
             next_label = f"out{clip.sequence}"
             if clip.transition_kind is None:
                 filter_parts.append(
-                    f"[{output_label}][v{clip.sequence}]concat=n=2:v=1:a=0[{next_label}]"
+                    f"[{output_label}][v{clip.sequence}]concat=n=2:v=1:a=0,"
+                    f"settb=1/{frame_plan.output_fps}[{next_label}]"
                 )
             else:
                 filter_parts.append(
