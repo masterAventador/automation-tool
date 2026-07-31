@@ -197,10 +197,36 @@ test("P9-05 rejects a valid PEM private key whose header has trailing whitespace
     });
     const spaced = privateKey.replace(
       "-----BEGIN PRIVATE KEY-----\n",
-      "-----BEGIN PRIVATE KEY----- \t\r\n",
+      "-----BEGIN PRIVATE KEY----- \t\v\f\r\n",
     );
     assert.doesNotThrow(() => createPrivateKey(spaced));
     await writeFile(join(fixture.bundle, "valid-private.pem"), spaced);
+    await assert.rejects(
+      auditReleaseBundle({
+        bundleRoot: fixture.bundle,
+        executorPackagePath: fixture.executor,
+        platform: "windows",
+      }),
+      /forbidden content marker/u,
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("P9-05 checks every private-key header before carrying a chunk-boundary candidate", async () => {
+  const fixture = await createBundle("windows");
+  try {
+    const rejectedHeader = Buffer.from("-----BEGIN RSA PRIVATE KEY-----\nsecret");
+    const boundaryHeader = Buffer.from("-----BEGIN PRIVATE KEY-----");
+    const padding = Buffer.alloc(
+      1024 * 1024 - rejectedHeader.length - boundaryHeader.length,
+      0x61,
+    );
+    await writeFile(
+      join(fixture.bundle, "masked-private.bin"),
+      Buffer.concat([rejectedHeader, padding, boundaryHeader, Buffer.from([0])]),
+    );
     await assert.rejects(
       auditReleaseBundle({
         bundleRoot: fixture.bundle,

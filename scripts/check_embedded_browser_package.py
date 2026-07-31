@@ -94,10 +94,11 @@ class PackageSizeBounds:
     max_package_bytes: int
 
 
-# Declared composition of one single-architecture release bundle, taking the
-# larger measured value across macOS arm64 and Windows x86_64. Every entry is a
-# resource the product cannot run without, so the package ceiling is derived
-# from their sum instead of being picked by hand.
+# Declared composition of one single-architecture release bundle. This remains
+# a reviewable list of every payload; platform-specific measured baselines below
+# set the actual size envelope because summing each platform's larger component
+# creates a package that has never existed and leaves enough room for a duplicate
+# runtime.
 RELEASE_PAYLOAD_PARTS_MIB: Final = {
     # Locked Chrome for Testing 149.0.7827.55 after Widevine exclusion
     # (Windows x86_64: 310 files, 435,703,601 bytes).
@@ -123,21 +124,35 @@ RELEASE_PAYLOAD_PARTS_MIB: Final = {
     "app-shell-and-web-assets": 24,
 }
 
-# The browser ceiling stays deliberately below two architectures so a
-# mixed-target package is rejected by weight alone. The package ceiling is the
-# declared cross-platform maximum plus 64 MiB of headroom. That remains below
-# the smallest duplicable runtime tree (the 108 MiB motion worker), so a second
-# browser, executor or video worker cannot hide inside the package allowance.
-_RELEASE_PACKAGE_HEADROOM_MIB: Final = 64
-RELEASE_SIZE_BOUNDS: Final = PackageSizeBounds(
-    min_browser_bytes=320 * _MEBIBYTE,
-    max_browser_bytes=420 * _MEBIBYTE,
-    min_package_bytes=340 * _MEBIBYTE,
-    max_package_bytes=(
-        sum(RELEASE_PAYLOAD_PARTS_MIB.values()) + _RELEASE_PACKAGE_HEADROOM_MIB
+# Windows is the 2026-07-31 installed-package audit. The macOS baseline starts
+# from the last whole-package audit (1,207,873,055), replaces the old 184,686,384
+# byte Executor with LE-14's 257,004,128 byte ONNX package, and adds PC-16's
+# 47,671,952 byte catalog. Both are target-shaped packages, never a sum of
+# unrelated cross-platform maxima.
+RELEASE_PACKAGE_BASELINE_BYTES: Final = {
+    "macos": 1_327_862_751,
+    "windows": 1_289_130_572,
+}
+
+# A symmetric drift band lets normal metadata/runtime movement through while
+# staying below the 113,124,957 byte motion Worker, the smallest complete
+# runtime tree that could be added or removed. Thus weight alone rejects both a
+# duplicate and a stripped required runtime on either target.
+_RELEASE_PACKAGE_DRIFT_BYTES: Final = 64 * _MEBIBYTE
+
+
+def release_size_bounds(platform: str) -> PackageSizeBounds:
+    """Return the size envelope for one real target-shaped package."""
+    baseline = RELEASE_PACKAGE_BASELINE_BYTES.get(platform)
+    if baseline is None:
+        _reject("unsupported package platform")
+        raise AssertionError("unreachable")
+    return PackageSizeBounds(
+        min_browser_bytes=320 * _MEBIBYTE,
+        max_browser_bytes=420 * _MEBIBYTE,
+        min_package_bytes=baseline - _RELEASE_PACKAGE_DRIFT_BYTES,
+        max_package_bytes=baseline + _RELEASE_PACKAGE_DRIFT_BYTES,
     )
-    * _MEBIBYTE,
-)
 
 
 class PackageRejected(RuntimeError):
@@ -220,7 +235,7 @@ def audit_embedded_browser_package(
     target_id: str,
     platform: str,
     enforce_archive_lock: bool = True,
-    size_bounds: PackageSizeBounds = RELEASE_SIZE_BOUNDS,
+    size_bounds: PackageSizeBounds | None = None,
 ) -> PackageAuditReport:
     """Audit one built release bundle; reject anything that is not the one."""
     prefix = _PLATFORM_TARGET_PREFIX.get(platform)
@@ -228,6 +243,7 @@ def audit_embedded_browser_package(
         _reject("unsupported package platform")
     if not target_id.startswith(str(prefix)):
         _reject("package target does not belong to the package platform")
+    effective_size_bounds = size_bounds or release_size_bounds(platform)
     if bundle_root.is_symlink() or not bundle_root.is_dir():
         _reject("package root is not a real directory")
 
@@ -271,13 +287,15 @@ def audit_embedded_browser_package(
     package_files += distribution.verified_files
     package_bytes += distribution.total_bytes
     if not (
-        size_bounds.min_browser_bytes
+        effective_size_bounds.min_browser_bytes
         <= distribution.total_bytes
-        <= size_bounds.max_browser_bytes
+        <= effective_size_bounds.max_browser_bytes
     ):
         _reject("packaged browser tree is outside the release size bounds")
     if not (
-        size_bounds.min_package_bytes <= package_bytes <= size_bounds.max_package_bytes
+        effective_size_bounds.min_package_bytes
+        <= package_bytes
+        <= effective_size_bounds.max_package_bytes
     ):
         _reject("release package is outside the release size bounds")
 
@@ -315,13 +333,14 @@ def main(argv: list[str] | None = None) -> int:
 
 
 __all__ = [
+    "RELEASE_PACKAGE_BASELINE_BYTES",
     "RELEASE_PAYLOAD_PARTS_MIB",
-    "RELEASE_SIZE_BOUNDS",
     "PackageAuditReport",
     "PackageRejected",
     "PackageSizeBounds",
     "audit_embedded_browser_package",
     "browser_resource_root",
+    "release_size_bounds",
 ]
 
 

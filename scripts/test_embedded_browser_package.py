@@ -36,12 +36,13 @@ from build_embedded_chromium_staging import (  # noqa: E402
     sha256_file,
 )
 from check_embedded_browser_package import (  # noqa: E402
+    RELEASE_PACKAGE_BASELINE_BYTES,
     RELEASE_PAYLOAD_PARTS_MIB,
-    RELEASE_SIZE_BOUNDS,
     PackageRejected,
     PackageSizeBounds,
     audit_embedded_browser_package,
     browser_resource_root,
+    release_size_bounds,
 )
 
 STAGING_CONTRACT_PATH = ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
@@ -91,22 +92,35 @@ class ReleaseSizeBoundsTests(unittest.TestCase):
     """Pure release-envelope checks must run even without macOS fixture support."""
 
     def test_release_size_bounds_are_a_real_gate(self) -> None:
-        bounds = RELEASE_SIZE_BOUNDS
-        self.assertLess(bounds.min_browser_bytes, bounds.max_browser_bytes)
-        self.assertLess(bounds.min_package_bytes, bounds.max_package_bytes)
-        self.assertGreaterEqual(bounds.min_browser_bytes, 300 * 1024 * 1024)
-        self.assertLessEqual(bounds.max_browser_bytes, 500 * 1024 * 1024)
-        self.assertGreaterEqual(bounds.min_package_bytes, bounds.min_browser_bytes)
+        for platform in ("macos", "windows"):
+            bounds = release_size_bounds(platform)
+            self.assertLess(bounds.min_browser_bytes, bounds.max_browser_bytes)
+            self.assertLess(bounds.min_package_bytes, bounds.max_package_bytes)
+            self.assertGreaterEqual(bounds.min_browser_bytes, 300 * 1024 * 1024)
+            self.assertLessEqual(bounds.max_browser_bytes, 500 * 1024 * 1024)
+            self.assertGreaterEqual(bounds.min_package_bytes, bounds.min_browser_bytes)
 
-    def test_release_size_bounds_admit_the_declared_production_payload(self) -> None:
-        payload = sum(RELEASE_PAYLOAD_PARTS_MIB.values()) * 1024 * 1024
+    def test_release_size_bounds_admit_each_target_baseline_without_a_runtime_gap(
+        self,
+    ) -> None:
         self.assertEqual(RELEASE_PAYLOAD_PARTS_MIB["embedded-chromium"], 416)
         self.assertEqual(RELEASE_PAYLOAD_PARTS_MIB["local-executor"], 246)
-        self.assertGreaterEqual(RELEASE_SIZE_BOUNDS.max_package_bytes, payload)
+        motion_worker = 113_124_957
+        for platform, baseline in RELEASE_PACKAGE_BASELINE_BYTES.items():
+            bounds = release_size_bounds(platform)
+            self.assertLessEqual(bounds.min_package_bytes, baseline)
+            self.assertGreaterEqual(bounds.max_package_bytes, baseline)
+            self.assertGreater(bounds.min_package_bytes, baseline - motion_worker)
+            self.assertLess(bounds.max_package_bytes, baseline + motion_worker)
+
+    def test_windows_bound_rejects_one_more_complete_motion_worker(self) -> None:
+        measured_package = 1_289_130_572
+        measured_motion_worker = 113_124_957
+        bounds = release_size_bounds("windows")
+        self.assertGreaterEqual(bounds.max_package_bytes, measured_package)
         self.assertLess(
-            RELEASE_SIZE_BOUNDS.max_package_bytes,
-            payload
-            + RELEASE_PAYLOAD_PARTS_MIB["motion-video-worker"] * 1024 * 1024,
+            bounds.max_package_bytes,
+            measured_package + measured_motion_worker,
         )
 
     def test_declared_production_payload_lists_every_shipped_part(self) -> None:

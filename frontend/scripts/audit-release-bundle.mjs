@@ -95,10 +95,11 @@ const privateKeyHeaders = [
   "-----BEGIN EC PRIVATE KEY-----",
   "-----BEGIN OPENSSH PRIVATE KEY-----",
 ].map((header) => Buffer.from(header));
+const privateKeyLineWhitespace = new Set([0x09, 0x0b, 0x0c, 0x20]);
 // FFmpeg and other crypto-capable binaries legitimately embed the names of
 // supported PEM formats as null-terminated strings. A private key header is a
-// line, so require optional horizontal whitespace plus a line ending instead
-// of rejecting a compiled capability string that contains no key material.
+// line, so require optional OpenSSL-accepted horizontal whitespace plus a line
+// ending instead of rejecting a compiled capability string with no key data.
 forbiddenContentMarkers.push(Buffer.from(developmentVerifyingKey, "base64url"));
 const maximumMarkerLength = Math.max(
   ...forbiddenContentMarkers.map((marker) => marker.length),
@@ -233,57 +234,56 @@ function assertSafePath(rendered, state) {
 
 async function assertSafeContent(path, rendered) {
   let tail = Buffer.alloc(0);
-  let pendingPrivateKeyHeader = false;
-  let pendingCarriageReturn = false;
+  let pendingPrivateKeyWhitespace = false;
+  let pendingPrivateKeyCarriageReturn = false;
   for await (const chunk of createReadStream(path, { highWaterMark: scanChunkSize })) {
     let offset = 0;
-    if (pendingPrivateKeyHeader) {
-      while (offset < chunk.length) {
-        const byte = chunk[offset];
-        if (pendingCarriageReturn) {
-          if (byte === 0x0a) {
-            throw rejected("forbidden content marker", rendered);
-          }
-          pendingPrivateKeyHeader = false;
-          pendingCarriageReturn = false;
-          break;
-        }
-        if (byte === 0x20 || byte === 0x09) {
-          offset += 1;
-          continue;
-        }
-        if (byte === 0x0a) {
-          throw rejected("forbidden content marker", rendered);
-        }
-        if (byte === 0x0d) {
-          pendingCarriageReturn = true;
-          offset += 1;
-          continue;
-        }
-        pendingPrivateKeyHeader = false;
+    while (
+      (pendingPrivateKeyWhitespace || pendingPrivateKeyCarriageReturn) &&
+      offset < chunk.length
+    ) {
+      const byte = chunk[offset];
+      if (
+        (pendingPrivateKeyWhitespace && byte === 0x0a) ||
+        (pendingPrivateKeyCarriageReturn && byte === 0x0a)
+      ) {
+        throw rejected("forbidden content marker", rendered);
+      }
+      const nextWhitespace =
+        pendingPrivateKeyWhitespace && privateKeyLineWhitespace.has(byte);
+      const nextCarriageReturn = pendingPrivateKeyWhitespace && byte === 0x0d;
+      pendingPrivateKeyWhitespace = nextWhitespace;
+      pendingPrivateKeyCarriageReturn = nextCarriageReturn;
+      if (!nextWhitespace && !nextCarriageReturn) {
         break;
       }
-      if (pendingPrivateKeyHeader && offset === chunk.length) {
-        tail = Buffer.alloc(0);
-        continue;
-      }
+      offset += 1;
+    }
+    if (
+      (pendingPrivateKeyWhitespace || pendingPrivateKeyCarriageReturn) &&
+      offset === chunk.length
+    ) {
+      tail = Buffer.alloc(0);
+      continue;
     }
     const combined = Buffer.concat([tail, chunk.subarray(offset)]);
     if (forbiddenContentMarkers.some((marker) => combined.indexOf(marker) !== -1)) {
       throw rejected("forbidden content marker", rendered);
     }
+    let nextPendingWhitespace = false;
+    let nextPendingCarriageReturn = false;
     for (const header of privateKeyHeaders) {
       let index = combined.indexOf(header);
       while (index !== -1) {
         let cursor = index + header.length;
         while (
           cursor < combined.length &&
-          (combined[cursor] === 0x20 || combined[cursor] === 0x09)
+          privateKeyLineWhitespace.has(combined[cursor])
         ) {
           cursor += 1;
         }
         if (cursor === combined.length) {
-          pendingPrivateKeyHeader = true;
+          nextPendingWhitespace = true;
           break;
         }
         if (combined[cursor] === 0x0a) {
@@ -291,8 +291,7 @@ async function assertSafeContent(path, rendered) {
         }
         if (combined[cursor] === 0x0d) {
           if (cursor + 1 === combined.length) {
-            pendingPrivateKeyHeader = true;
-            pendingCarriageReturn = true;
+            nextPendingCarriageReturn = true;
             break;
           }
           if (combined[cursor + 1] === 0x0a) {
@@ -301,9 +300,10 @@ async function assertSafeContent(path, rendered) {
         }
         index = combined.indexOf(header, index + 1);
       }
-      if (pendingPrivateKeyHeader) break;
     }
-    if (pendingPrivateKeyHeader) {
+    pendingPrivateKeyWhitespace = nextPendingWhitespace;
+    pendingPrivateKeyCarriageReturn = nextPendingCarriageReturn;
+    if (pendingPrivateKeyWhitespace || pendingPrivateKeyCarriageReturn) {
       tail = Buffer.alloc(0);
       continue;
     }
