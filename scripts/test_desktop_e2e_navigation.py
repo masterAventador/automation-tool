@@ -32,7 +32,6 @@ than rot for another redesign.
 from __future__ import annotations
 
 import re
-import sys
 import unittest
 from pathlib import Path
 
@@ -151,6 +150,16 @@ class DesktopNavigationTests(unittest.TestCase):
             "the sidebar route belongs to navigation.ts alone; a spec that spells "
             f"its own menu XPath is the next redesign's 46 files: {offenders}",
         )
+
+    def test_both_packaged_update_specs_remain_drivable_from_repair(self) -> None:
+        """Acceptance bundles omit production resources and therefore boot to repair."""
+        for platform in ("macos", "windows"):
+            source = (
+                DESKTOP_SUITE / f"update-{platform}-package.spec.ts"
+            ).read_text(encoding="utf-8")
+            with self.subTest(platform=platform):
+                self.assertIn("waitForStartup({ allowRepair: true })", source)
+                self.assertIn("openUpdateControls(mode)", source)
 
     def test_both_suites_name_the_same_destinations(self) -> None:
         """The two modules must agree, because only one of them is exercised.

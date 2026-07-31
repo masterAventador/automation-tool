@@ -36,9 +36,10 @@ from __future__ import annotations
 import html
 import json
 import re
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Final, Iterable, Mapping, Sequence
+from typing import Final
 
 from automation_tool.executor.motion_authoring.resources import CONTRACTS_ROOT
 
@@ -250,13 +251,21 @@ def face_artifact(
     lock: Mapping[str, object], source_family: str, weight: int
 ) -> tuple[str, ...]:
     """The locked woff2 paths that serve one source family at one weight."""
-    paths: list[str] = []
+    matches: list[tuple[bool, str]] = []
     for sheet in lock["stylesheets"]:  # type: ignore[index]
         for face in sheet["faces"]:
             if face["family"] == source_family and int(face["weight"]) == weight:
-                if face["artifactPath"] not in paths:
-                    paths.append(face["artifactPath"])
-    return tuple(paths)
+                path = face["artifactPath"]
+                if any(existing == path for _, existing in matches):
+                    continue
+                # Google Fonts lists latin-ext before latin. A single broad
+                # Latin rule must point at the subset that contains ASCII, or
+                # ordinary English silently falls through to the host font.
+                basic_latin = face.get("subset") == "latin" or "U+0000" in str(
+                    face.get("unicodeRange", "")
+                )
+                matches.append((basic_latin, path))
+    return tuple(path for _, path in sorted(matches, key=lambda item: not item[0]))
 
 
 def _load(path: Path) -> Mapping[str, object]:

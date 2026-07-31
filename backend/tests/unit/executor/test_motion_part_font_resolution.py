@@ -85,6 +85,40 @@ def test_each_requested_pair_becomes_a_latin_rule_and_a_chinese_one() -> None:
     assert css.count(CHINESE_ARTIFACT) == 2
 
 
+def test_the_basic_latin_subset_is_not_replaced_by_latin_ext() -> None:
+    """Google CSS lists latin-ext first; ASCII must still use packaged bytes."""
+    lock = {
+        "stylesheets": [
+            {
+                "faces": [
+                    {
+                        "family": "Inter",
+                        "weight": "400",
+                        "subset": "latin-ext",
+                        "artifactPath": "fonts/inter-latin-ext.woff2",
+                    },
+                    {
+                        "family": "Inter",
+                        "weight": "400",
+                        "subset": "latin",
+                        "artifactPath": "fonts/inter-latin.woff2",
+                    },
+                ]
+            }
+        ]
+    }
+    css = document_font_css(
+        "<style>.a{font-family:'Inter';font-weight:400}</style>",
+        typography_contract=contract(
+            [{"family": "Inter", "policy": "packaged", "replacement": None}]
+        ),
+        offline_lock=lock,
+    )
+
+    assert "fonts/inter-latin.woff2" in css
+    assert "fonts/inter-latin-ext.woff2" not in css
+
+
 def test_a_substituted_family_keeps_the_name_the_part_wrote() -> None:
     """`SF Pro` cannot be redistributed; the part still asks for it by name."""
     css = document_font_css(

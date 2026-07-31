@@ -90,6 +90,44 @@ _REQUIRES_SYMLINKS = unittest.skipUnless(
 )
 
 
+class ReleaseSizeBoundsTests(unittest.TestCase):
+    """Pure release-envelope checks must run even without macOS fixture support."""
+
+    def test_release_size_bounds_are_a_real_gate(self) -> None:
+        bounds = RELEASE_SIZE_BOUNDS
+        self.assertLess(bounds.min_browser_bytes, bounds.max_browser_bytes)
+        self.assertLess(bounds.min_package_bytes, bounds.max_package_bytes)
+        self.assertGreaterEqual(bounds.min_browser_bytes, 300 * 1024 * 1024)
+        self.assertLessEqual(bounds.max_browser_bytes, 500 * 1024 * 1024)
+        self.assertGreaterEqual(bounds.min_package_bytes, bounds.min_browser_bytes)
+
+    def test_release_size_bounds_admit_the_declared_production_payload(self) -> None:
+        payload = sum(RELEASE_PAYLOAD_PARTS_MIB.values()) * 1024 * 1024
+        self.assertEqual(
+            RELEASE_SIZE_BOUNDS.max_package_bytes,
+            ((payload * 11 + 9) // 10),
+        )
+        self.assertGreaterEqual(RELEASE_SIZE_BOUNDS.max_package_bytes, payload)
+        self.assertLessEqual(
+            RELEASE_SIZE_BOUNDS.max_package_bytes, payload + (payload + 9) // 10
+        )
+
+    def test_declared_production_payload_lists_every_shipped_part(self) -> None:
+        self.assertEqual(
+            set(RELEASE_PAYLOAD_PARTS_MIB),
+            {
+                "embedded-chromium",
+                "local-executor",
+                "material-video-worker",
+                "motion-video-worker",
+                "media-toolchain",
+                "motion-catalog",
+                "app-shell-and-web-assets",
+            },
+        )
+        self.assertTrue(all(value > 0 for value in RELEASE_PAYLOAD_PARTS_MIB.values()))
+
+
 def _write_zip(
     path: Path, entries: dict[str, bytes], symlinks: dict[str, str] | None = None
 ) -> str:
@@ -158,40 +196,6 @@ class EmbeddedBrowserPackageTests(unittest.TestCase):
         }
         arguments.update(overrides)
         return audit_embedded_browser_package(**arguments)  # type: ignore[arg-type]
-
-    def test_release_size_bounds_are_a_real_gate(self) -> None:
-        bounds = RELEASE_SIZE_BOUNDS
-        self.assertLess(bounds.min_browser_bytes, bounds.max_browser_bytes)
-        self.assertLess(bounds.min_package_bytes, bounds.max_package_bytes)
-        self.assertGreaterEqual(bounds.min_browser_bytes, 300 * 1024 * 1024)
-        self.assertLessEqual(bounds.max_browser_bytes, 500 * 1024 * 1024)
-        self.assertGreaterEqual(bounds.min_package_bytes, bounds.min_browser_bytes)
-
-    def test_release_size_bounds_admit_the_declared_production_payload(self) -> None:
-        payload = sum(RELEASE_PAYLOAD_PARTS_MIB.values()) * 1024 * 1024
-        self.assertEqual(RELEASE_PAYLOAD_PARTS_MIB["embedded-chromium"], 324)
-        self.assertEqual(
-            RELEASE_SIZE_BOUNDS.max_package_bytes,
-            1125 * 1024 * 1024,
-        )
-        self.assertGreaterEqual(RELEASE_SIZE_BOUNDS.max_package_bytes, payload)
-        self.assertLessEqual(
-            RELEASE_SIZE_BOUNDS.max_package_bytes, payload + payload // 10
-        )
-
-    def test_declared_production_payload_lists_every_shipped_part(self) -> None:
-        self.assertEqual(
-            set(RELEASE_PAYLOAD_PARTS_MIB),
-            {
-                "embedded-chromium",
-                "local-executor",
-                "material-video-worker",
-                "motion-video-worker",
-                "media-toolchain",
-                "app-shell-and-web-assets",
-            },
-        )
-        self.assertTrue(all(value > 0 for value in RELEASE_PAYLOAD_PARTS_MIB.values()))
 
     def test_one_complete_target_browser_passes_and_is_measured(self) -> None:
         report = self._audit()

@@ -94,27 +94,31 @@ class PackageSizeBounds:
     max_package_bytes: int
 
 
-# Declared composition of one single-architecture release bundle, rounded up
-# from the measured macOS arm64 build. Every entry is a resource the product
-# cannot run without, so the package ceiling is derived from their sum instead
-# of being picked by hand.
+# Declared composition of one single-architecture release bundle, taking the
+# larger measured value across macOS arm64 and Windows x86_64. Every entry is a
+# resource the product cannot run without, so the package ceiling is derived
+# from their sum instead of being picked by hand.
 RELEASE_PAYLOAD_PARTS_MIB: Final = {
     # Locked Chrome for Testing 149.0.7827.55 after Widevine exclusion
-    # (328 files, 339,257,128 bytes).
-    "embedded-chromium": 324,
+    # (Windows x86_64: 310 files, 435,703,601 bytes).
+    "embedded-chromium": 416,
     # Frozen RPA Executor sidecar (284 files, 184,686,384 bytes).
     "local-executor": 177,
     # Frozen intelligent-material worker after the unreachable-module trim, the
     # unlicensed background-music removal and the replacement of the four
-    # proprietary system fonts with two open-licensed ones (369,452,875 bytes;
-    # see contracts/quality/material-video-worker-package.v1.json).
-    "material-video-worker": 353,
+    # proprietary system fonts with two open-licensed ones (Windows x86_64:
+    # 2,775 files, 484,087,573 bytes).
+    "material-video-worker": 462,
     # Frozen brand-motion worker with its private Node runtime (113,124,957 bytes).
     "motion-video-worker": 108,
-    # Packaged ffmpeg/ffprobe plus the GPL source archive (44,095,804 bytes).
-    "media-toolchain": 43,
+    # Packaged ffmpeg/ffprobe plus the GPL source archive (Windows x86_64:
+    # 51,168,139 bytes).
+    "media-toolchain": 49,
+    # Frozen 134-part catalog including its manifest and offline assets
+    # (338 files, 47,671,952 bytes).
+    "motion-catalog": 46,
     # Tauri shell, WebView assets, icons and manifests.
-    "app-shell-and-web-assets": 22,
+    "app-shell-and-web-assets": 24,
 }
 
 # The browser ceiling stays deliberately below two architectures so a
@@ -125,7 +129,10 @@ RELEASE_SIZE_BOUNDS: Final = PackageSizeBounds(
     min_browser_bytes=320 * _MEBIBYTE,
     max_browser_bytes=420 * _MEBIBYTE,
     min_package_bytes=340 * _MEBIBYTE,
-    max_package_bytes=1125 * _MEBIBYTE,
+    max_package_bytes=(
+        sum(RELEASE_PAYLOAD_PARTS_MIB.values()) * _MEBIBYTE * 11 + 9
+    )
+    // 10,
 )
 
 

@@ -191,7 +191,7 @@ class AssemblerIsTheOnlyPathTests(unittest.TestCase):
         # the verified path and the shipped path could drift apart again.
         self.assertNotIn("install_distribution(", source)
 
-    def test_every_release_path_installs_and_gates_every_post_bundle_resource(self) -> None:
+    def test_every_release_path_installs_and_gates_all_declared_resources(self) -> None:
         # Writing the assembler without wiring it into the paths that produce a
         # shipped package is exactly how the browser gap survived its first fix,
         # and how `TauriPublishWorkspaceGateway` shipped unreachable. The gate
