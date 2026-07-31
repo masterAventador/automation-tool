@@ -96,9 +96,45 @@ def require_untouched(
         )
 
 
+def require_isolated_transition(
+    *,
+    before: dict[str, bool],
+    after: dict[str, bool],
+    stopped: set[str],
+    scenario: str,
+) -> None:
+    """验证一次取消、崩溃或全局停止只影响点名的进程树。
+
+    ``before`` 必须是所有参与线都存活的非空基线；否则“另一条线仍然存活”可能在动作
+    发生前就是假命题。动作后，``stopped`` 中的线必须全部退出，其余线必须全部存活。
+    """
+    if not before:
+        _reject(f"{scenario}: no concurrent lines were observed before the transition")
+    if set(before) != set(after):
+        _reject(
+            f"{scenario}: line set changed across the transition "
+            f"(before={sorted(before)}, after={sorted(after)})"
+        )
+    unknown = stopped - set(before)
+    if unknown:
+        _reject(f"{scenario}: unknown stopped lines: {sorted(unknown)}")
+    if not stopped:
+        _reject(f"{scenario}: no stopped line was declared")
+    for name, alive in before.items():
+        if not alive:
+            _reject(f"{scenario}: {name} was not running before the transition")
+    for name, alive in after.items():
+        if name in stopped:
+            if alive:
+                _reject(f"{scenario}: {name} is still running")
+        elif not alive:
+            _reject(f"{scenario}: {name} unexpectedly stopped")
+
+
 __all__ = [
     "ConcurrentIsolationRejected",
     "directory_fingerprint",
     "require_disjoint_profiles",
+    "require_isolated_transition",
     "require_untouched",
 ]
