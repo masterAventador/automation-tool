@@ -22,12 +22,11 @@ class VideoEditingProductionWiringTests(unittest.TestCase):
         gaps = video_editing_production_wiring_gaps(
             ROOT / "frontend/src/main.tsx",
             ROOT / "frontend/src/app/production-wiring.test.ts",
+            ROOT / "frontend/src-tauri/src/video_editing_workspace.rs",
         )
         self.assertEqual(
             (
-                "production App still constructs the sessionStorage editing gateway",
-                "production wiring still marks the real Tauri editing gateway as expected failure",
-                "production App constructs no real Tauri videoEditingGateway",
+                "production editing submission still fails closed before provider dispatch",
             ),
             gaps,
         )

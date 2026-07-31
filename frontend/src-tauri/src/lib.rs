@@ -33,6 +33,7 @@ mod runtime_compatibility;
 pub mod secure_store;
 pub mod startup_environment;
 pub mod video_editing_service_settings;
+pub mod video_editing_workspace;
 pub mod video_job_workspace;
 pub mod video_media_toolchain;
 
@@ -87,6 +88,28 @@ struct ExecutorDiagnosticsSnapshot {
 struct DiagnosticExportCommandError {
     code: &'static str,
     retryable: bool,
+}
+
+struct VideoEditingWorkspaceCommandError {
+    code: &'static str,
+    retryable: bool,
+}
+
+impl From<video_editing_workspace::VideoEditingWorkspaceError>
+    for VideoEditingWorkspaceCommandError
+{
+    fn from(error: video_editing_workspace::VideoEditingWorkspaceError) -> Self {
+        Self {
+            code: error.code().as_str(),
+            retryable: error.code().retryable(),
+        }
+    }
+}
+
+impl serde::Serialize for VideoEditingWorkspaceCommandError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        command_error::serialize(&self.code, Some(self.retryable), serializer)
+    }
 }
 
 impl serde::Serialize for DiagnosticExportCommandError {
@@ -306,6 +329,60 @@ async fn test_video_editing_service_connection(
     video_editing_service_settings::VideoEditingServiceCommandError,
 > {
     settings.test_connection().await.map_err(Into::into)
+}
+
+#[tauri::command]
+fn list_video_editing_projects(
+    workspace: tauri::State<'_, video_editing_workspace::VideoEditingWorkspace>,
+) -> Result<Vec<video_editing_workspace::EditingProjectSnapshot>, VideoEditingWorkspaceCommandError>
+{
+    workspace.list_projects().map_err(Into::into)
+}
+
+#[tauri::command]
+fn create_video_editing_project(
+    request: video_editing_workspace::CreateEditingProjectRequest,
+    workspace: tauri::State<'_, video_editing_workspace::VideoEditingWorkspace>,
+) -> Result<video_editing_workspace::EditingProjectSnapshot, VideoEditingWorkspaceCommandError> {
+    workspace.create_project(request).map_err(Into::into)
+}
+
+#[tauri::command]
+fn get_video_editing_timeline(
+    project_id: uuid::Uuid,
+    workspace: tauri::State<'_, video_editing_workspace::VideoEditingWorkspace>,
+) -> Result<
+    Option<video_editing_workspace::EditingTimelineSnapshot>,
+    VideoEditingWorkspaceCommandError,
+> {
+    workspace.get_timeline(project_id).map_err(Into::into)
+}
+
+#[tauri::command]
+fn save_video_editing_timeline(
+    project_id: uuid::Uuid,
+    draft: video_editing_workspace::EditingTimelineDraft,
+    workspace: tauri::State<'_, video_editing_workspace::VideoEditingWorkspace>,
+) -> Result<video_editing_workspace::EditingTimelineSnapshot, VideoEditingWorkspaceCommandError> {
+    workspace
+        .save_timeline(project_id, draft)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+fn list_video_editing_jobs(
+    project_id: uuid::Uuid,
+    workspace: tauri::State<'_, video_editing_workspace::VideoEditingWorkspace>,
+) -> Result<Vec<video_editing_workspace::EditingJobSnapshot>, VideoEditingWorkspaceCommandError> {
+    workspace.list_editing_jobs(project_id).map_err(Into::into)
+}
+
+#[tauri::command]
+fn submit_video_editing_job(
+    project_id: uuid::Uuid,
+    workspace: tauri::State<'_, video_editing_workspace::VideoEditingWorkspace>,
+) -> Result<video_editing_workspace::EditingJobSnapshot, VideoEditingWorkspaceCommandError> {
+    workspace.submit_editing_job(project_id).map_err(Into::into)
 }
 
 #[tauri::command]
@@ -4600,6 +4677,9 @@ pub fn run() {
                     &app_data_directory,
                 )?,
             );
+            app.manage(video_editing_workspace::VideoEditingWorkspace::initialize(
+                &app_data_directory,
+            )?);
             app.manage(PublishWorkspaceState(std::sync::Mutex::new(
                 publish_workspace::PublishWorkspace::new(false),
             )));
@@ -4700,6 +4780,12 @@ pub fn run() {
         configure_video_editing_service,
         clear_video_editing_service,
         test_video_editing_service_connection,
+        list_video_editing_projects,
+        create_video_editing_project,
+        get_video_editing_timeline,
+        save_video_editing_timeline,
+        list_video_editing_jobs,
+        submit_video_editing_job,
         open_material_video_studio,
         update_material_video_studio_view,
         close_material_video_studio,
@@ -4769,6 +4855,12 @@ pub fn run() {
         configure_video_editing_service,
         clear_video_editing_service,
         test_video_editing_service_connection,
+        list_video_editing_projects,
+        create_video_editing_project,
+        get_video_editing_timeline,
+        save_video_editing_timeline,
+        list_video_editing_jobs,
+        submit_video_editing_job,
         open_material_video_studio,
         update_material_video_studio_view,
         close_material_video_studio,
@@ -4869,6 +4961,12 @@ pub fn run() {
         configure_video_editing_service,
         clear_video_editing_service,
         test_video_editing_service_connection,
+        list_video_editing_projects,
+        create_video_editing_project,
+        get_video_editing_timeline,
+        save_video_editing_timeline,
+        list_video_editing_jobs,
+        submit_video_editing_job,
         open_material_video_studio,
         update_material_video_studio_view,
         close_material_video_studio,

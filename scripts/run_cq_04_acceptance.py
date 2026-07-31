@@ -104,7 +104,9 @@ def probe_production_readiness() -> dict[str, bool]:
     """凭据之外，正式 App 自己也必须真的把能力装进去。"""
     try:
         gaps = video_editing_production_wiring_gaps(
-            PRODUCTION_MAIN, PRODUCTION_WIRING_TEST
+            PRODUCTION_MAIN,
+            PRODUCTION_WIRING_TEST,
+            ROOT / "frontend/src-tauri/src/video_editing_workspace.rs",
         )
     except VerticalReadinessRejected as error:
         fail(str(error))

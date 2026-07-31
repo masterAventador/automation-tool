@@ -133,7 +133,7 @@
 
 | ID | 任务 | 并行 | 为什么冻结 |
 |---|---|---|---|
-| T4 | 补 VE 剪辑装配任务 | ❌ 需设计 | 大工程，Demo 不演。你此前明确困惑过「剪辑不需要上传素材吗」。07-27 复核：无相关提交 |
+| T4 | 补 VE 剪辑装配任务 | 🔄 进行中 | 07-31 第一片已把正式 App 从 `sessionStorage` 替身切到真实 Tauri Gateway；项目/时间线进入 App 私有原子持久化，重开可读回，六条固定 IPC 与 strict DTO 已锁定。云端提交仍明确 fail closed，下一片接 Control Plane API、同地域素材暂存、Provider 对账和成片回流；尚不可演示。见 `docs/development/T4-video-editing-assembly.md` |
 | T19 | 动效零件接 AI 一句话制作链路（方案 B） | ❌ 需设计 | 大工程。07-27 复核：无相关提交 |
 | T37 | 四条合规决策 | 👤 | 你已定：Demo 后处理 |
 

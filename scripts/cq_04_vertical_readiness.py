@@ -18,6 +18,10 @@ _EXPECTED_FAILURE = re.compile(
 _REAL_TAURI_ASSIGNMENT = re.compile(
     r"const\s+videoEditingGateway\s*=\s*new\s+Tauri[A-Za-z0-9_]*Gateway\s*\("
 )
+_FAIL_CLOSED_SUBMISSION = re.compile(
+    r"pub fn submit_editing_job[\s\S]{0,1600}"
+    r"VideoEditingWorkspaceErrorCode::EditingServiceUnavailable"
+)
 
 
 class VerticalReadinessRejected(RuntimeError):
@@ -25,12 +29,17 @@ class VerticalReadinessRejected(RuntimeError):
 
 
 def video_editing_production_wiring_gaps(
-    main_source: Path, production_wiring_test: Path
+    main_source: Path,
+    production_wiring_test: Path,
+    execution_source: Path | None = None,
 ) -> tuple[str, ...]:
     """返回正式独立剪辑装配缺口；空元组才表示生产 wiring 已闭合。"""
+    sources = (main_source, production_wiring_test) + (
+        () if execution_source is None else (execution_source,)
+    )
     missing = [
         path
-        for path in (main_source, production_wiring_test)
+        for path in sources
         if not path.is_file()
     ]
     if missing:
@@ -52,6 +61,12 @@ def video_editing_production_wiring_gaps(
         )
     if _REAL_TAURI_ASSIGNMENT.search(main_text) is None:
         gaps.append("production App constructs no real Tauri videoEditingGateway")
+    if execution_source is not None and _FAIL_CLOSED_SUBMISSION.search(
+        execution_source.read_text(encoding="utf-8")
+    ):
+        gaps.append(
+            "production editing submission still fails closed before provider dispatch"
+        )
     return tuple(gaps)
 
 

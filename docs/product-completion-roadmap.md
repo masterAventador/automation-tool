@@ -543,11 +543,17 @@ xiaohongshu.com  0           kuaishou.com   0           channels.weixin.qq.com  
 
 ## P4 · 视频剪辑接线
 
-**现状**：有壳无芯。`VideoEditingWorkbench.tsx` **842 行** UI 完整；数据存 **localStorage**（`automation-tool.video-editing.local-draft.v1`）；后端 `api/` 下**没有任何 video_editing 端点**——领域层（`domain/video_editing.py`、`aliyun_ims_editing_*.py`）与 Provider 抽象都写了，**没有一条 HTTP 路由把它暴露出去**。提交必然 fail closed。
+**现状（2026-07-31 第一片后）**：工作台 UI 已从 WebView `sessionStorage` 替身切到
+`TauriVideoEditingGateway`；项目和时间线保存在 App 私有目录的原子状态文件中，关闭 App 后
+仍可读回，六条固定 IPC 与 strict DTO 已接进正式 `main.tsx`。提交仍明确 fail closed：
+后端 `api/` 下还没有 video editing 端点，既有 `domain/video_editing.py`、
+`aliyun_ims_editing_*.py` 与持久意图/成片账本还未装配到用户路径。
 
 代码注释自己写着：`the cloud editing provider chain (VE-04+) is not connected yet... there are no editing jobs and submission always fails closed as unavailable.`
 
-**这是全项目投入产出比最高的一块**：领域层、Provider 抽象、一致性契约、842 行 UI 都在，缺的只是中间那段接线——API 端点 + 网关从 local 切到真实实现 + 任务状态回流。
+**这是全项目投入产出比最高的一块**：领域层、Provider 抽象、一致性契约和 UI 都在；设备
+持久化与正式前端装配已完成，剩余是 Control Plane API、素材暂存、Provider 调度与任务/成片
+状态回流。
 
 **判据**：从剪辑工作台提交一个任务，阿里云 IMS 真实返回成片，产物出现在成片列表并可发布。
 
