@@ -1046,7 +1046,7 @@ def test_sleep_until_cancelled() -> None:
             )
 
         self.assertEqual(existing, (4850,))
-        self.assertNotIn("env", process.call_args.kwargs)
+        self.assertEqual(process.call_args.kwargs["input"], "4850,4849")
         self.assertNotIn("4850", process.call_args.args[0])
         self.assertGreater(process.call_args.kwargs["timeout"], 0)
         self.assertLessEqual(

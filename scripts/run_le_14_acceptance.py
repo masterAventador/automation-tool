@@ -388,6 +388,18 @@ def _windows_existing_process_ids(
     timeout = _remaining_cleanup_seconds(deadline, PROCESS_STOP_TIMEOUT_SECONDS)
     if timeout <= 0:
         return None
+    rendered_process_ids = ",".join(
+        str(process_id) for process_id in ordered_process_ids
+    )
+    script = (
+        "$targets = @{}; "
+        "([Console]::In.ReadToEnd() -split ',') | ForEach-Object { "
+        "$targets[[int]$_] = $true "
+        "}; "
+        "Get-CimInstance Win32_Process | Where-Object { "
+        "$targets.ContainsKey([int]$_.ProcessId) "
+        "} | ForEach-Object { [int]$_.ProcessId }"
+    )
     try:
         completed = subprocess.run(
             [
@@ -395,11 +407,9 @@ def _windows_existing_process_ids(
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                (
-                    "Get-CimInstance Win32_Process | "
-                    "ForEach-Object { [int]$_.ProcessId }"
-                ),
+                script,
             ],
+            input=rendered_process_ids,
             capture_output=True,
             text=True,
             check=False,
