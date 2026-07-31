@@ -96,9 +96,9 @@ export function createLocalVideoEditingGateway(
       const candidate = {
         projectId: crypto.randomUUID(),
         title: input.title,
-        sourceArtifactIds: [...input.sourceArtifactIds],
+        output: input.output,
+        captionStyle: input.captionStyle,
         createdAt: now,
-        updatedAt: now,
       };
       const project = editingProjectSchema.safeParse(candidate);
       if (!project.success) {

@@ -1,5 +1,7 @@
 import type {
+  EditingCaptionStyle,
   EditingJobSnapshot,
+  EditingOutputSpec,
   EditingProjectSnapshot,
   EditingTimelineDraft,
   EditingTimelineSnapshot,
@@ -23,7 +25,8 @@ export class VideoEditingGatewayError extends Error {
 
 export interface CreateEditingProjectInput {
   readonly title: string;
-  readonly sourceArtifactIds: readonly string[];
+  readonly output: EditingOutputSpec;
+  readonly captionStyle: EditingCaptionStyle;
 }
 
 export interface VideoEditingGateway {

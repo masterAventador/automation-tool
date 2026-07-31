@@ -8,6 +8,7 @@ import type {
   EditingTimelineDraft,
   EditingProjectSnapshot,
   EditingTimelineSnapshot,
+  OriginalAudioMode,
   TimelineTrackKind,
 } from "./video-editing-dto";
 import {
@@ -17,19 +18,22 @@ import {
 
 const TRACK_KIND_LABELS: Record<TimelineTrackKind, string> = {
   visual: "画面轨道",
-  audio: "音频轨道",
+  narration: "旁白轨道",
+  ambient: "原声轨道",
+  music: "音乐轨道",
   caption: "字幕轨道",
 };
 
 const TRACK_KIND_SHORT_LABELS: Record<TimelineTrackKind, string> = {
   visual: "画面",
-  audio: "音频",
+  narration: "旁白",
+  ambient: "原声",
+  music: "音乐",
   caption: "字幕",
 };
 
 const TRANSITION_OPTIONS = [
-  { value: "none", label: "无转场" },
-  { value: "cut", label: "硬切" },
+  { value: "none", label: "硬切" },
   { value: "fade", label: "淡入淡出" },
   { value: "dissolve", label: "叠化" },
   { value: "wipe", label: "划像" },
@@ -38,8 +42,7 @@ const TRANSITION_OPTIONS = [
 type TransitionChoice = (typeof TRANSITION_OPTIONS)[number]["value"];
 
 const TRANSITION_LABELS: Record<TransitionChoice, string> = {
-  none: "无转场",
-  cut: "硬切",
+  none: "硬切",
   fade: "淡入淡出",
   dissolve: "叠化",
   wipe: "划像",
@@ -48,12 +51,10 @@ const TRANSITION_LABELS: Record<TransitionChoice, string> = {
 const JOB_STATUS_LABELS: Record<EditingJobStatus, string> = {
   queued: "排队中",
   running: "剪辑中",
-  paused: "已暂停",
   cancelling: "正在取消",
   succeeded: "已完成",
   failed: "剪辑失败",
   cancelled: "已取消",
-  outcome_uncertain: "结果待确认",
 };
 
 const STORAGE_UNAVAILABLE_TEXT = "本机剪辑草稿暂时无法读取，请稍后重试。";
@@ -64,35 +65,49 @@ const SERVICE_UNAVAILABLE_TEXT =
 
 interface ClipForm {
   readonly formId: string;
+  readonly clipId: string;
   readonly durationText: string;
-  readonly artifactText: string;
+  readonly materialText: string;
+  readonly sourceInText: string;
   readonly captionText: string;
+  readonly gainText: string;
+  readonly originalAudioMode: OriginalAudioMode;
   readonly transition: TransitionChoice;
   readonly transitionDurationText: string;
 }
 
 interface TrackForm {
   readonly formId: string;
+  readonly trackId: string;
   readonly kind: TimelineTrackKind;
   readonly clips: readonly ClipForm[];
 }
 
-function newClipForm(artifactText: string): ClipForm {
+function newLocalId(prefix: "clip" | "track"): string {
+  return `${prefix}-${crypto.randomUUID()}`;
+}
+
+function newClipForm(materialText: string): ClipForm {
   return {
     formId: crypto.randomUUID(),
+    clipId: newLocalId("clip"),
     durationText: "3000",
-    artifactText,
+    materialText,
+    sourceInText: "0",
     captionText: "",
+    gainText: "-6.5",
+    originalAudioMode: "auto_duck",
     transition: "none",
     transitionDurationText: "500",
   };
 }
 
-function newTrackForm(kind: TimelineTrackKind, artifactText: string): TrackForm {
+function newTrackForm(kind: TimelineTrackKind, materialText: string): TrackForm {
   return {
     formId: crypto.randomUUID(),
+    trackId: newLocalId("track"),
     kind,
-    clips: [newClipForm(kind === "caption" ? "" : artifactText)],
+    clips: [newClipForm(kind === "caption" ? "" : materialText)],
   };
 }
 
@@ -101,33 +116,55 @@ function parseMilliseconds(text: string): number {
   return /^\d+$/.test(value) ? Number(value) : Number.NaN;
 }
 
+function parseLevel(text: string): number {
+  const value = text.trim();
+  return /^-?(?:\d+\.\d+|\d+)$/.test(value) ? Number(value) : Number.NaN;
+}
+
 function buildDraft(tracks: readonly TrackForm[]): EditingTimelineDraft {
   let durationMs = 0;
-  const draftTracks = tracks.map((track, trackIndex) => {
+  const draftTracks = tracks.map((track) => {
     let cursor = 0;
-    const clips = track.clips.map((clip, clipIndex) => {
+    const clips = track.clips.map((clip) => {
       const clipDuration = parseMilliseconds(clip.durationText);
-      const startMs = cursor;
-      cursor += Number.isNaN(clipDuration) ? 0 : clipDuration;
-      const artifact = clip.artifactText.trim();
+      const transition =
+        track.kind === "visual" && clip.transition !== "none"
+          ? {
+              kind: clip.transition,
+              durationMs: parseMilliseconds(clip.transitionDurationText),
+            }
+          : null;
+      const overlap = transition?.durationMs ?? 0;
+      const startMs = track.kind === "visual" ? cursor - overlap : cursor;
+      cursor = startMs + (Number.isNaN(clipDuration) ? 0 : clipDuration);
+      const material = clip.materialText.trim();
       const caption = clip.captionText.trim();
+      const isCaption = track.kind === "caption";
+      const sourceInMs =
+        isCaption || clip.sourceInText.trim() === ""
+          ? null
+          : parseMilliseconds(clip.sourceInText);
       return {
-        clipId: `clip-${clipIndex + 1}`,
+        clipId: clip.clipId,
         startMs,
         durationMs: clipDuration,
-        sourceArtifactId: track.kind === "caption" || artifact === "" ? null : artifact,
-        text: track.kind !== "caption" || caption === "" ? null : caption,
-        transitionIn:
-          clip.transition === "none"
+        sourceMaterialId: isCaption || material === "" ? null : material,
+        sourceInMs,
+        sourceOutMs:
+          sourceInMs === null || Number.isNaN(sourceInMs) || Number.isNaN(clipDuration)
             ? null
-            : {
-                kind: clip.transition,
-                durationMs: parseMilliseconds(clip.transitionDurationText),
-              },
+            : sourceInMs + clipDuration,
+        text: !isCaption || caption === "" ? null : caption,
+        gainDb:
+          track.kind === "narration" || track.kind === "ambient" || track.kind === "music"
+            ? parseLevel(clip.gainText)
+            : null,
+        transitionIn: transition,
+        originalAudioMode: track.kind === "ambient" ? clip.originalAudioMode : null,
       };
     });
     durationMs = Math.max(durationMs, cursor);
-    return { trackId: `track-${trackIndex + 1}`, kind: track.kind, clips };
+    return { trackId: track.trackId, kind: track.kind, clips };
   });
   return { durationMs: Math.max(durationMs, 100), tracks: draftTracks };
 }
@@ -135,12 +172,17 @@ function buildDraft(tracks: readonly TrackForm[]): EditingTimelineDraft {
 function hydrateForm(timeline: EditingTimelineSnapshot): TrackForm[] {
   return timeline.tracks.map((track) => ({
     formId: crypto.randomUUID(),
+    trackId: track.trackId,
     kind: track.kind,
     clips: track.clips.map((clip) => ({
       formId: crypto.randomUUID(),
+      clipId: clip.clipId,
       durationText: String(clip.durationMs),
-      artifactText: clip.sourceArtifactId ?? "",
+      materialText: clip.sourceMaterialId ?? "",
+      sourceInText: clip.sourceInMs === null ? "" : String(clip.sourceInMs),
       captionText: clip.text ?? "",
+      gainText: String(clip.gainDb ?? -6.5),
+      originalAudioMode: clip.originalAudioMode ?? "auto_duck",
       transition: clip.transitionIn?.kind ?? "none",
       transitionDurationText: String(clip.transitionIn?.durationMs ?? 500),
     })),
@@ -172,12 +214,11 @@ function ProjectsPage({
 }: {
   readonly projects: readonly EditingProjectSnapshot[];
   readonly storageBroken: boolean;
-  readonly onCreate: (title: string, sourceReferences: string) => void;
+  readonly onCreate: (title: string) => void;
   readonly onOpen: (projectId: string) => void;
   readonly message: Message | null;
 }) {
   const [title, setTitle] = useState("");
-  const [sourceReferences, setSourceReferences] = useState("");
   return (
     <Space orientation="vertical" size="middle" className="video-editing-projects">
       {/*
@@ -199,7 +240,7 @@ function ProjectsPage({
       <Card className="video-editing-panel">
         <Space orientation="vertical" size="middle" className="video-editing-create-form">
           <Typography.Text type="secondary">
-            输入项目标题和要剪辑的素材引用，素材可以来自视频制作的成片或已导入的文件。
+            输入项目标题。创建后可在时间轴中填写已导入的素材编号。
           </Typography.Text>
           <Input
             aria-label="剪辑项目标题"
@@ -207,18 +248,11 @@ function ProjectsPage({
             value={title}
             onChange={(event) => setTitle(event.target.value)}
           />
-          <Input.TextArea
-            aria-label="输入素材引用"
-            rows={3}
-            placeholder="每行一个素材编号，可以先留空"
-            value={sourceReferences}
-            onChange={(event) => setSourceReferences(event.target.value)}
-          />
           <div>
             <Button
               type="primary"
               disabled={storageBroken}
-              onClick={() => onCreate(title, sourceReferences)}
+              onClick={() => onCreate(title)}
             >
               创建剪辑项目
             </Button>
@@ -246,7 +280,7 @@ function ProjectsPage({
             <Space key={project.projectId} className="video-editing-project-row">
               <Typography.Text strong>{project.title}</Typography.Text>
               <Typography.Text type="secondary">
-                输入素材 {project.sourceArtifactIds.length} 个
+                {project.output.width}×{project.output.height} · {project.output.fps} 帧/秒
               </Typography.Text>
               <Button onClick={() => onOpen(project.projectId)}>打开时间轴编辑</Button>
             </Space>
@@ -298,38 +332,78 @@ function ClipEditor({
             onChange={(event) => onChange({ ...clip, captionText: event.target.value })}
           />
         ) : (
-          <Input
-            aria-label={`${position}素材引用`}
-            placeholder="素材编号"
-            value={clip.artifactText}
-            onChange={(event) => onChange({ ...clip, artifactText: event.target.value })}
-          />
+          <>
+            <Input
+              aria-label={`${position}素材编号`}
+              placeholder="素材编号"
+              value={clip.materialText}
+              onChange={(event) => onChange({ ...clip, materialText: event.target.value })}
+            />
+            <Input
+              aria-label={`${position}素材起点毫秒`}
+              className="video-editing-duration-input"
+              placeholder="静态图片留空"
+              value={clip.sourceInText}
+              onChange={(event) => onChange({ ...clip, sourceInText: event.target.value })}
+              suffix="毫秒"
+            />
+          </>
         )}
-        <select
-          aria-label={`${position}转场`}
-          className="video-editing-transition-select"
-          value={clip.transition}
-          onChange={(event) =>
-            onChange({ ...clip, transition: event.target.value as TransitionChoice })
-          }
-        >
-          {TRANSITION_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        {clip.transition === "none" ? null : (
+        {trackKind === "narration" || trackKind === "ambient" || trackKind === "music" ? (
           <Input
-            aria-label={`${position}转场时长毫秒`}
+            aria-label={`${position}音量分贝`}
             className="video-editing-duration-input"
-            value={clip.transitionDurationText}
-            onChange={(event) =>
-              onChange({ ...clip, transitionDurationText: event.target.value })
-            }
-            suffix="毫秒"
+            value={clip.gainText}
+            onChange={(event) => onChange({ ...clip, gainText: event.target.value })}
+            suffix="分贝"
           />
-        )}
+        ) : null}
+        {trackKind === "ambient" ? (
+          <select
+            aria-label={`${position}原声处理`}
+            className="video-editing-transition-select"
+            value={clip.originalAudioMode}
+            onChange={(event) =>
+              onChange({
+                ...clip,
+                originalAudioMode: event.target.value as OriginalAudioMode,
+              })
+            }
+          >
+            <option value="auto_duck">自动闪避</option>
+            <option value="fixed_volume">固定音量</option>
+            <option value="muted">静音</option>
+          </select>
+        ) : null}
+        {trackKind === "visual" ? (
+          <>
+            <select
+              aria-label={`${position}转场`}
+              className="video-editing-transition-select"
+              value={clip.transition}
+              onChange={(event) =>
+                onChange({ ...clip, transition: event.target.value as TransitionChoice })
+              }
+            >
+              {TRANSITION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            {clip.transition === "none" ? null : (
+              <Input
+                aria-label={`${position}转场时长毫秒`}
+                className="video-editing-duration-input"
+                value={clip.transitionDurationText}
+                onChange={(event) =>
+                  onChange({ ...clip, transitionDurationText: event.target.value })
+                }
+                suffix="毫秒"
+              />
+            )}
+          </>
+        ) : null}
         <Button
           size="small"
           aria-label={`上移${position}`}
@@ -392,7 +466,7 @@ function TimelinePage({
       </Card>
     );
   }
-  const defaultArtifact = project.sourceArtifactIds[0] ?? "";
+  const defaultMaterial = "";
   const replaceTrack = (index: number, next: TrackForm | null) => {
     const updated = tracks.flatMap((track, candidate) =>
       candidate === index ? (next === null ? [] : [next]) : [track],
@@ -435,7 +509,7 @@ function TimelinePage({
                     ...track,
                     clips: [
                       ...track.clips,
-                      newClipForm(track.kind === "caption" ? "" : defaultArtifact),
+                      newClipForm(track.kind === "caption" ? "" : defaultMaterial),
                     ],
                   })
                 }
@@ -484,11 +558,17 @@ function TimelinePage({
           </div>
         ))}
         <Space wrap size="small">
-          <Button onClick={() => onTracksChange([...tracks, newTrackForm("visual", defaultArtifact)])}>
+          <Button onClick={() => onTracksChange([...tracks, newTrackForm("visual", defaultMaterial)])}>
             添加画面轨道
           </Button>
-          <Button onClick={() => onTracksChange([...tracks, newTrackForm("audio", defaultArtifact)])}>
-            添加音频轨道
+          <Button onClick={() => onTracksChange([...tracks, newTrackForm("narration", defaultMaterial)])}>
+            添加旁白轨道
+          </Button>
+          <Button onClick={() => onTracksChange([...tracks, newTrackForm("ambient", defaultMaterial)])}>
+            添加原声轨道
+          </Button>
+          <Button onClick={() => onTracksChange([...tracks, newTrackForm("music", defaultMaterial)])}>
+            添加音乐轨道
           </Button>
           <Button onClick={() => onTracksChange([...tracks, newTrackForm("caption", "")])}>
             添加字幕轨道
@@ -607,7 +687,7 @@ function JobsPage({
         <Card className="video-editing-panel" title="剪辑任务">
           {jobs.map((job) => (
             <Space
-              key={job.editingJobId}
+              key={job.jobId}
               orientation="vertical"
               size="small"
               className="video-editing-job"
@@ -619,8 +699,7 @@ function JobsPage({
                 </Typography.Text>
               </Space>
               <Typography.Text type="secondary">
-                输入素材 {job.inputArtifactIds.length} 个 · 产出成片{" "}
-                {job.outputArtifactIds.length} 个
+                {job.outputArtifactId === null ? "尚未产出成片" : "成片已入库"}
               </Typography.Text>
               {job.status === "failed" ? (
                 <Alert type="error" showIcon title="本次剪辑未成功，可以调整时间轴后重新提交。" />
@@ -686,7 +765,7 @@ export function VideoEditingWorkbench({
         setSavedTimeline(timeline);
         setTracks(
           timeline === null
-            ? [newTrackForm("visual", project.sourceArtifactIds[0] ?? "")]
+            ? [newTrackForm("visual", "")]
             : hydrateForm(timeline),
         );
       })
@@ -697,13 +776,18 @@ export function VideoEditingWorkbench({
       .catch(() => failStorage());
   };
 
-  const createProject = (title: string, sourceReferences: string) => {
-    const sourceArtifactIds = sourceReferences
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line !== "");
+  const createProject = (title: string) => {
     void gateway
-      .createProject({ title: title.trim(), sourceArtifactIds })
+      .createProject({
+        title: title.trim(),
+        output: { width: 720, height: 1280, fps: 20 },
+        captionStyle: {
+          fontKey: "noto-sans-cjk-sc-bold",
+          fontPx: 48,
+          strokePx: 3,
+          lineSpacing: 1.2,
+        },
+      })
       .then((project) => {
         setProjects((current) => [...current, project]);
         setProjectMessage({ type: "success", text: `已创建剪辑项目：${project.title}` });
@@ -719,7 +803,7 @@ export function VideoEditingWorkbench({
         }
         setProjectMessage({
           type: "error",
-          text: "无法创建剪辑项目：请填写项目标题，素材引用需为有效的素材编号且不能重复。",
+          text: "无法创建剪辑项目：请填写有效的项目标题。",
         });
       });
   };

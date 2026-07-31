@@ -75,7 +75,7 @@
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| LE-17 | 工作台接真实网关 | `main.tsx` 生产组合根从 sessionStorage 草稿网关换成真实 Control Plane 网关；提交路径打通不再固定抛错；重写 `e2e-tauri/video-editing.spec.ts`，断言目标从"诚实展示不可用"改为真实出片；**同任务内必须重写前端 Timeline 契约**——`video-editing-dto.ts` 那份手写 zod 副本与新后端模型**整体不兼容，需按 `timeline.py` 重写而非逐点修补**（drift 由 LE-03 在 T2/T3/T4 改后端时造成，终审核基线 `d00f547` 确认此前前后端逐字同步）。LE-03 终审用真实 zod 探针实测：带转场的后端时间轴、带 `sourceInMs`/`sourceOutMs`/`gainDb` 的 clip、`narration`/`ambient`/`music` 三种轨道，**前端一律拒绝**。分歧至少七处：① `timelineClipSchema` 是 `z.strictObject` 且缺三个新字段，后端快照是硬报错不是静默忽略；② 仍用 `sourceArtifactId`（`ArtifactId`），后端已改指 `MaterialId`；③ 布局 refine 对所有轨道要求「不许重叠」，而新后端转场靠真实重叠实现；④ 无画面轨首尾相接、`visual.end == duration`、每种轨道至多一条等核心不变式；⑤ `transitionKindSchema` 仍含 `"cut"`；⑥ `timelineTrackKindSchema` 仍是单一音频轨；⑦ `MAX_TRACKS = 32`（应为 5） | LE-06 | ⬜ 未开始 |
+| LE-17 | 工作台接真实网关 | `main.tsx` 生产组合根从 sessionStorage 草稿网关换成真实 Control Plane 网关；提交路径打通不再固定抛错；重写 `e2e-tauri/video-editing.spec.ts`，断言目标从"诚实展示不可用"改为真实出片；**同任务内必须重写前端 Timeline 契约**——`video-editing-dto.ts` 那份手写 zod 副本与新后端模型**整体不兼容，需按 `timeline.py` 重写而非逐点修补**（drift 由 LE-03 在 T2/T3/T4 改后端时造成，终审核基线 `d00f547` 确认此前前后端逐字同步）。LE-03 终审用真实 zod 探针实测：带转场的后端时间轴、带 `sourceInMs`/`sourceOutMs`/`gainDb` 的 clip、`narration`/`ambient`/`music` 三种轨道，**前端一律拒绝**。分歧至少七处：① `timelineClipSchema` 是 `z.strictObject` 且缺三个新字段，后端快照是硬报错不是静默忽略；② 仍用 `sourceArtifactId`（`ArtifactId`），后端已改指 `MaterialId`；③ 布局 refine 对所有轨道要求「不许重叠」，而新后端转场靠真实重叠实现；④ 无画面轨首尾相接、`visual.end == duration`、每种轨道至多一条等核心不变式；⑤ `transitionKindSchema` 仍含 `"cut"`；⑥ `timelineTrackKindSchema` 仍是单一音频轨；⑦ `MAX_TRACKS = 32`（应为 5）。2026-08-01 已按 `docs/development/LE-17.md` 拆为六项；T1 已完成前端契约整体重写、审查与专项验收，当前进入 T2 Rust client/Tauri command | LE-06 | 🧪 RED |
 | LE-18 | 素材库界面 | 导入素材、展示 AI 描述与标签、**标注哪些素材有人说话并可试听/查看转写**、编辑描述、去重提示、缺失素材提示；**LE-07 交接**：`MaterialPathRegistry` **没有 forget/删除接口**（T6 未要求、当时无调用方），素材删除必须先补；缺失素材提示要分三种理由——`FILE_MISSING`（不在了，去找回来）、`FILE_UNREADABLE`（还在原地但读不了，别让用户去找）、`FILE_CHANGED`（换过了，重新导入）。依据见 `docs/development/LE-07.md` T6 修复轮 Q5；用户可见文案全中文且无未解释术语。**LE-07 交接的硬约束**：`UNDECODABLE` 的文案不得写死成「文件已损坏」——实测默认布局 MP4（浏览器/yt-dlp 常态）在下载完成前一律报这个码，必须留「稍后重试」路径；`SOURCE_NOT_AT_REST` 才是明确的「还在写，等一下」。依据见 `docs/development/LE-07.md`「交接给 LE-18」。**修复轮新增三条**：① 导入配方是四步且都是公开的——`approve_source` 取受守卫的首个 stat → `probe_material` → `register` → `require_source_unchanged` 闭窗，**不要自己 `Path.stat()`**（裸 `FileNotFoundError` 会带出操作者私有路径）；② 新拒绝码 `WORKSPACE_UNUSABLE` 的文案是「本机暂存空间不够/不可写」，既不是「文件坏了」也不是「重试」，实测卷满时每条素材都会撞上它；③ 注册表**有意不自建目录**，调用方用普通 `mkdir` 建的子目录在 umask 022 下是 0755，会被判 `REGISTRY_UNREADABLE`——负担在调用方，建目录要显式 0700。依据见 `docs/development/LE-07.md` T7 修复轮 | LE-17 | ⬜ 未开始 |
 | LE-19 | 智能剪辑入口 | 一句话输入 → 生成 Timeline 草稿落进工作台；"一键直出片"跳过审阅走同一生成器；进度与取消可见；**剪辑模块的产品形态在此最终确定，同任务内复核 `contracts/quality/user-facing-terminology.v1.json` 的 `video_editing_module` 条目与实际界面一致，并让当前已绿的 `check_user_facing_branding.py` 保持绿色**（见 §7 现状） | LE-16,LE-18 | ⬜ 未开始 |
 | LE-24 | 深度思考开关与耗时告知 | 智能剪辑入口的高级选项里增加一个总开关，统一控制素材理解、文案分句、语义匹配三处模型调用是否开启深度思考；默认关闭；用户偏好持久化并在下次进入时保持；**开关旁必须显示开启后预计多花的时间，该数字由实测得出，禁止估计或编造**——先用固定素材集实测开/关两种模式的端到端耗时差，若耗时随素材条数线性增长则按条数动态计算展示（如"约多花 3 秒 × 素材条数"），否则展示实测区间；实测数据与计算方式写入 `docs/development/LE-24.md`；用户可见文案无未解释术语，过 `check_user_facing_branding.py`；开关状态真实传达到模型请求参数，断言请求体中该字段随开关变化 | LE-16,LE-19 | ⬜ 未开始 |
@@ -101,8 +101,8 @@
 - 任务总数：24
 - ✅ 已完成：6
 - 🔍 待验收：10
-- 🧪 RED / 🚧 实现中：0
-- ⬜ 未开始：8
+- 🧪 RED / 🚧 实现中：1
+- ⬜ 未开始：7
 
 ## 5. 当前下一步
 
