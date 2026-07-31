@@ -132,6 +132,26 @@ class ReleaseSizeBoundsTests(unittest.TestCase):
             measured_package + measured_motion_worker,
         )
 
+    def test_macos_bound_uses_the_signed_media_toolchain_size(self) -> None:
+        signed_media_toolchain = 43_950_318
+        baseline = RELEASE_PACKAGE_BASELINE_BYTES["macos"]
+        bounds = release_size_bounds("macos")
+
+        self.assertEqual(
+            MINIMUM_COMPLETE_RUNTIME_BYTES["macos"],
+            signed_media_toolchain,
+        )
+        self.assertGreater(
+            bounds.min_package_bytes + signed_media_toolchain,
+            bounds.max_package_bytes,
+        )
+        self.assertLess(
+            bounds.max_package_bytes - signed_media_toolchain,
+            bounds.min_package_bytes,
+        )
+        self.assertLessEqual(bounds.min_package_bytes, baseline)
+        self.assertGreaterEqual(bounds.max_package_bytes, baseline)
+
     def test_declared_production_payload_lists_every_shipped_part(self) -> None:
         self.assertEqual(
             set(RELEASE_PAYLOAD_PARTS_MIB),

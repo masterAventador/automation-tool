@@ -83,12 +83,13 @@ _FORBIDDEN_PATH_SEGMENTS: Final = frozenset({"ms-playwright"})
 
 _MEBIBYTE: Final = 1024 * 1024
 
-# The smallest required video runtime on each platform is the media toolchain,
-# measured from the real packages recorded in RELEASE-package-clean-rebuild.md
-# (macOS) and PC-16.md (Windows). The whole-package drift window is derived
-# from these facts below; it must never be wide enough to hide a second copy.
+# The smallest required video runtime on each platform is the media toolchain.
+# The macOS value is measured after the release path re-signs ffmpeg/ffprobe;
+# the Windows value is measured from the installed package recorded in PC-16.md.
+# The whole-package drift window is derived from these facts below; it must
+# never be wide enough to hide a second copy.
 MINIMUM_COMPLETE_RUNTIME_BYTES: Final = {
-    "macos": 44_095_804,
+    "macos": 43_950_318,
     "windows": 51_168_139,
 }
 
