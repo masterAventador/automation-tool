@@ -1,11 +1,9 @@
 import os
 import secrets
-import signal
 import socket
 import subprocess
 import sys
 from collections.abc import Iterator
-from contextlib import suppress
 from pathlib import Path
 from typing import Protocol
 
@@ -18,6 +16,10 @@ BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 sys.path.insert(0, os.fspath(REPOSITORY_ROOT))
 from scripts.acceptance_postgres import (  # type: ignore[import-not-found]  # noqa: E402
     managed_test_postgres,
+)
+from scripts.process_inspection import (  # type: ignore[import-not-found]  # noqa: E402, F401
+    process_ids_matching,
+    terminate_process,
 )
 
 
@@ -46,64 +48,6 @@ def create_private_profile_directory(path: Path) -> Path:
     """Create a profile directory as privately as the platform allows."""
     path.mkdir(mode=0o700)
     return path
-
-
-def process_ids_matching(needle: str) -> set[int]:
-    """Live process ids whose command line contains ``needle``, minus this one.
-
-    POSIX has ``pgrep -f``. Windows has neither ``pgrep`` nor a command-line
-    filter in ``tasklist``, so it queries the CIM process table instead. The
-    needle travels through the environment rather than the command line, so no
-    PowerShell quoting rule can alter a path containing spaces or backslashes.
-    """
-    if os.name == "nt":
-        script = (
-            "$needle = $env:AUTOMATION_TOOL_PROCESS_NEEDLE; "
-            "Get-CimInstance Win32_Process | "
-            "Where-Object { $_.CommandLine -and $_.CommandLine.Contains($needle) } | "
-            "ForEach-Object { $_.ProcessId }"
-        )
-        command = [
-            "powershell",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            script,
-        ]
-        environment = {**os.environ, "AUTOMATION_TOOL_PROCESS_NEEDLE": needle}
-    else:
-        command = ["pgrep", "-f", needle]
-        environment = None
-    completed = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        check=False,
-        env=environment,
-        timeout=60,
-    )
-    return {
-        int(line)
-        for line in completed.stdout.split()
-        if line.strip().isdigit() and int(line) != os.getpid()
-    }
-
-
-def terminate_process(pid: int) -> None:
-    """Kill one process outright, ignoring one that is already gone.
-
-    ``SIGKILL`` does not exist on Windows; ``taskkill /F`` is its equivalent.
-    """
-    if os.name == "nt":
-        subprocess.run(
-            ["taskkill", "/F", "/PID", str(pid)],
-            capture_output=True,
-            check=False,
-            timeout=60,
-        )
-        return
-    with suppress(ProcessLookupError):
-        os.kill(pid, signal.SIGKILL)
 
 
 def unused_loopback_port() -> int:
@@ -199,8 +143,8 @@ def staged_embedded_chromium(tmp_path_factory: pytest.TempPathFactory) -> Path:
     Tests depending on this fixture never fall back to a system browser; a
     missing archive cache skips instead of downloading anything.
     """
-    # PB-08 让同一套集成测试跑在**正式安装包内**的 Chromium 上，而不是构建期暂存
-    # 目录。路径由 PB-08 的验收脚本从包的发行物 Manifest 解析并校验落在包内，
+    # PB-08 让同一套集成测试跑在**正式安装包内**的 Chromium 上, 而不是构建期暂存
+    # 目录。路径由 PB-08 的验收脚本从包的发行物 Manifest 解析并校验落在包内,
     # 这里只负责用它——测试本身不该知道包长什么样。
     packaged = os.environ.get("AUTOMATION_TOOL_PACKAGED_BROWSER_EXECUTABLE")
     if packaged:
