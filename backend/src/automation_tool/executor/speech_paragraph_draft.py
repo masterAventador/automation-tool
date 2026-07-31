@@ -55,6 +55,19 @@ def _valid_narration_path(value: object, *, sequence: int) -> bool:
     return match is not None and int(match.group(1)) == sequence
 
 
+def _validated_fitting_segment(segment: FittingMaterialSegment) -> FittingMaterialSegment:
+    try:
+        return FittingMaterialSegment(
+            material_id=segment.material_id,
+            score=segment.score,
+            duration_ms=segment.duration_ms,
+            source_in_ms=segment.source_in_ms,
+            source_out_ms=segment.source_out_ms,
+        )
+    except Exception:
+        _reject()
+
+
 @dataclass(frozen=True, slots=True)
 class NarratedParagraphDraft:
     """Existing sentence, TTS and T2 candidates retained for later T4 choice."""
@@ -186,6 +199,8 @@ class SpeechAwareParagraphDraft:
                 for material_id in self.silent_material_ids
             )
             or len(set(self.silent_material_ids)) != len(self.silent_material_ids)
+            or len(self.original_speech_paragraphs) + len(self.silent_material_ids)
+            > MAX_LOCAL_EDITING_SEMANTIC_MATERIALS
             or not isinstance(self.narrated_paragraphs, tuple)
             or len(self.narrated_paragraphs) > MAX_LOCAL_EDITING_SCRIPT_SENTENCES
             or not all(
@@ -243,14 +258,30 @@ class SelectedNarratedParagraphDraft:
     def __post_init__(self) -> None:
         if not isinstance(self.segment, FittingMaterialSegment):
             _reject()
+        validated_segment = _validated_fitting_segment(self.segment)
         NarratedParagraphDraft(
             sequence=self.sequence,
             caption_text=self.caption_text,
             narration_relative_path=self.narration_relative_path,
             duration_ms=self.duration_ms,
-            qualified_material_ids=(self.segment.material_id,),
-            candidates=(self.segment,),
+            qualified_material_ids=(validated_segment.material_id,),
+            candidates=(validated_segment,),
         )
+
+
+def _validated_selected_paragraph(
+    paragraph: SelectedNarratedParagraphDraft,
+) -> SelectedNarratedParagraphDraft:
+    try:
+        return SelectedNarratedParagraphDraft(
+            sequence=paragraph.sequence,
+            caption_text=paragraph.caption_text,
+            narration_relative_path=paragraph.narration_relative_path,
+            duration_ms=paragraph.duration_ms,
+            segment=_validated_fitting_segment(paragraph.segment),
+        )
+    except Exception:
+        _reject()
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,23 +298,38 @@ class ResolvedSpeechAwareParagraphDraft:
                 isinstance(paragraph, OriginalSpeechParagraphDraft)
                 for paragraph in self.original_speech_paragraphs
             )
-            or len({paragraph.material_id for paragraph in self.original_speech_paragraphs})
-            != len(self.original_speech_paragraphs)
             or not isinstance(self.narrated_paragraphs, tuple)
             or not all(
                 isinstance(paragraph, SelectedNarratedParagraphDraft)
                 for paragraph in self.narrated_paragraphs
             )
-            or tuple(paragraph.sequence for paragraph in self.narrated_paragraphs)
-            != tuple(range(1, len(self.narrated_paragraphs) + 1))
-            or len({paragraph.segment.material_id for paragraph in self.narrated_paragraphs})
-            != len(self.narrated_paragraphs)
+        ):
+            _reject()
+        try:
+            validated_originals = tuple(
+                _validated_original_paragraph(paragraph)
+                for paragraph in self.original_speech_paragraphs
+            )
+            validated_narrated = tuple(
+                _validated_selected_paragraph(paragraph) for paragraph in self.narrated_paragraphs
+            )
+        except Exception:
+            _reject()
+        if (
+            len({paragraph.material_id for paragraph in validated_originals})
+            != len(validated_originals)
+            or len(validated_originals) + len(validated_narrated)
+            > MAX_LOCAL_EDITING_SEMANTIC_MATERIALS
+            or tuple(paragraph.sequence for paragraph in validated_narrated)
+            != tuple(range(1, len(validated_narrated) + 1))
+            or len({paragraph.segment.material_id for paragraph in validated_narrated})
+            != len(validated_narrated)
             or any(
                 narrated.segment.material_id == original.material_id
-                for narrated in self.narrated_paragraphs
-                for original in self.original_speech_paragraphs
+                for narrated in validated_narrated
+                for original in validated_originals
             )
-            or not (self.original_speech_paragraphs or self.narrated_paragraphs)
+            or not (validated_originals or validated_narrated)
         ):
             _reject()
 
@@ -314,14 +360,7 @@ def _validated_narrated_paragraph(
 ) -> NarratedParagraphDraft:
     try:
         candidates = tuple(
-            FittingMaterialSegment(
-                material_id=candidate.material_id,
-                score=candidate.score,
-                duration_ms=candidate.duration_ms,
-                source_in_ms=candidate.source_in_ms,
-                source_out_ms=candidate.source_out_ms,
-            )
-            for candidate in paragraph.candidates
+            _validated_fitting_segment(candidate) for candidate in paragraph.candidates
         )
         return NarratedParagraphDraft(
             sequence=paragraph.sequence,

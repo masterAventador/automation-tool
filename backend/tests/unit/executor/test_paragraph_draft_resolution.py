@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import cast
 from uuid import UUID, uuid4
 
@@ -20,6 +20,7 @@ from automation_tool.executor.speech_paragraph_draft import (
     SpeechParagraphDraftRejected,
     resolve_speech_aware_paragraph_draft,
 )
+from automation_tool.protocol.local_editing import MAX_LOCAL_EDITING_SEMANTIC_MATERIALS
 
 
 def _candidate(
@@ -359,6 +360,94 @@ def test_public_t4_values_fail_closed() -> None:
             construct()
         assert str(error.value) == "speech paragraph draft rejected"
         assert error.value.__cause__ is None
+
+
+def test_selected_paragraph_revalidates_mutated_fitting_segment() -> None:
+    segment = _candidate(uuid4())
+    object.__setattr__(segment, "score", 0)
+
+    with pytest.raises(SpeechParagraphDraftRejected):
+        SelectedNarratedParagraphDraft(
+            sequence=1,
+            caption_text="第一句",
+            narration_relative_path="voiceover/sentence-0001.wav",
+            duration_ms=1_000,
+            segment=segment,
+        )
+
+
+def test_resolved_draft_revalidates_mutated_original_paragraph() -> None:
+    original = _original(uuid4())
+    object.__setattr__(original, "source_in_ms", "C:/Users/private/movie.mp4")
+
+    with pytest.raises(SpeechParagraphDraftRejected):
+        ResolvedSpeechAwareParagraphDraft(
+            original_speech_paragraphs=(original,),
+            narrated_paragraphs=(),
+        )
+
+
+def test_resolved_draft_revalidates_mutated_selected_paragraph() -> None:
+    selected = SelectedNarratedParagraphDraft(
+        sequence=1,
+        caption_text="第一句",
+        narration_relative_path="voiceover/sentence-0001.wav",
+        duration_ms=1_000,
+        segment=_candidate(uuid4()),
+    )
+    object.__setattr__(selected, "narration_relative_path", "C:/Users/private/voice.wav")
+
+    with pytest.raises(SpeechParagraphDraftRejected):
+        ResolvedSpeechAwareParagraphDraft(
+            original_speech_paragraphs=(),
+            narrated_paragraphs=(selected,),
+        )
+
+
+def test_speech_aware_draft_caps_original_and_silent_materials_together() -> None:
+    originals = tuple(_original(uuid4()) for _ in range(MAX_LOCAL_EDITING_SEMANTIC_MATERIALS))
+    silent = uuid4()
+
+    with pytest.raises(SpeechParagraphDraftRejected):
+        SpeechAwareParagraphDraft(
+            original_speech_paragraphs=originals,
+            silent_material_ids=(silent,),
+            narrated_paragraphs=(
+                _paragraph(1, qualified_material_ids=(silent,), fitting_material_ids=(silent,)),
+            ),
+        )
+
+
+def test_resolved_draft_caps_total_materials() -> None:
+    originals = tuple(_original(uuid4()) for _ in range(MAX_LOCAL_EDITING_SEMANTIC_MATERIALS + 1))
+
+    with pytest.raises(SpeechParagraphDraftRejected):
+        ResolvedSpeechAwareParagraphDraft(
+            original_speech_paragraphs=originals,
+            narrated_paragraphs=(),
+        )
+
+
+def test_resolved_draft_rejects_wrong_container_before_iterating_it() -> None:
+    class _IterationCountingList(list[OriginalSpeechParagraphDraft]):
+        iterations = 0
+
+        def __iter__(self) -> Iterator[OriginalSpeechParagraphDraft]:
+            self.iterations += 1
+            return super().__iter__()
+
+    originals = _IterationCountingList([_original(uuid4())])
+
+    with pytest.raises(SpeechParagraphDraftRejected):
+        ResolvedSpeechAwareParagraphDraft(
+            original_speech_paragraphs=cast(
+                tuple[OriginalSpeechParagraphDraft, ...],
+                originals,
+            ),
+            narrated_paragraphs=(),
+        )
+
+    assert originals.iterations == 0
 
 
 def test_resolution_rejects_mutated_silent_material_container_at_public_boundary() -> None:
