@@ -407,6 +407,12 @@ def check_slow_checkout_preparation_is_isolated_and_reconstructible() -> None:
         cached = source / ".local/offline-motion-deps/catalog"
         cached.mkdir(parents=True)
         (cached / "locked.txt").write_text("digest-pinned\n", encoding="utf-8")
+        modules = source / "frontend/node_modules"
+        modules.mkdir(parents=True)
+        (modules / "runtime.txt").write_text("dependency only\n", encoding="utf-8")
+        checkout_modules = checkout / "frontend/node_modules"
+        checkout_modules.parent.mkdir(parents=True)
+        commit_gate._link_directory(checkout_modules, modules)
 
         def build_release(tree: Path) -> None:
             generated = tree / ".local/motion-catalog-release/1.0.0"
@@ -424,6 +430,8 @@ def check_slow_checkout_preparation_is_isolated_and_reconstructible() -> None:
         ).splitlines()
         if tracked != [".gitignore", "tracked.txt"]:
             _fail(f"slow checkout snapshot tracked build inputs: {tracked}")
+        if not (checkout_modules / "runtime.txt").is_file():
+            _fail("slow checkout lost the Node dependency linked by the fast tier")
         if not (checkout / "backend/.venv" / executable[0] / executable[1]).is_file():
             _fail("slow checkout cannot resolve the project interpreter layout")
         copied = checkout / ".local/offline-motion-deps/catalog/locked.txt"

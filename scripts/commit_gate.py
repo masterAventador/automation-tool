@@ -229,7 +229,23 @@ def _initialize_slow_checkout_repository(checkout: Path) -> None:
     if (checkout / ".git").exists():
         raise RuntimeError("the slow checkout unexpectedly already contains .git")
     _run_checkout_command(["git", "init", "--quiet"], checkout)
-    _run_checkout_command(["git", "add", "--all"], checkout)
+    # The fast TypeScript tier has already linked ``node_modules`` into this
+    # same checkout. A symlink itself is not matched by a trailing-slash
+    # ``node_modules/`` ignore rule, so an unrestricted ``git add --all`` would
+    # commit an absolute host link. The nested checkout self-test then (rightly)
+    # refuses to extract that archive. Keep the runtime available on disk while
+    # excluding it from the disposable source snapshot.
+    _run_checkout_command(
+        [
+            "git",
+            "add",
+            "--all",
+            "--",
+            ".",
+            ":(exclude)frontend/node_modules",
+        ],
+        checkout,
+    )
     _run_checkout_command(
         [
             "git",
