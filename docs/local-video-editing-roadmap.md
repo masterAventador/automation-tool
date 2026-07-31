@@ -106,10 +106,10 @@
 
 ## 5. 当前下一步
 
-**LE-15 文案分句与旁白合成 T1 提交 Codex Review。** 供应商无关协议、`script` 目录
-选择、thinking 配置、严格有界 JSON 与固定安全错误已按多轮 RED→GREEN 完成，22 条专项
-及静态门禁全绿；提交推送后执行 Review，有 finding 则继续 TDD 修复，无 finding 进入
-T2 逐句 TTS 与 ffprobe 真实时长。
+**LE-15 文案分句与旁白合成进入 T2。** T1 的供应商无关协议、`script` 目录选择、
+thinking 配置、严格有界 JSON 与固定安全错误已按多轮 RED→GREEN 完成；首轮 Review
+六项 finding 已按 TDD 修复，32 条专项及静态门禁全绿，复审无 finding。下一步先写
+逐句 TTS 与 ffprobe 真实时长 RED，再做最小实现。
 
 ## 7. 用户可见文案门禁现已恢复绿色
 
