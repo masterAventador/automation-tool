@@ -140,6 +140,7 @@
         "run_bm_07_acceptance.py",
         "run_bm_15_acceptance.py",
         "run_cq_01_acceptance.py",
+        "run_cq_02_acceptance.py",
         "run_ve_03_acceptance.py",
         "run_vf_05_acceptance.py",
         "run_vf_07_acceptance.py"
