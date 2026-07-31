@@ -1,10 +1,12 @@
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use regex::Regex;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE};
 use reqwest::redirect::Policy;
 use serde::{Deserialize, Serialize};
@@ -60,17 +62,23 @@ enum ControlPlaneOperation {
     RotateDeviceCredential,
     RevokeDeviceCredential,
     ExchangeDeviceSession,
+    #[allow(dead_code)]
     FindEditingMaterialByDigest,
+    #[allow(dead_code)]
     RegisterEditingMaterial,
+    #[allow(dead_code)]
     GetEditingMaterial,
+    #[allow(dead_code)]
     UpdateEditingMaterialDescription,
     ListEditingProjects,
     CreateEditingProject,
+    #[allow(dead_code)]
     GetEditingProject,
     GetEditingProjectTimeline,
     SaveEditingProjectTimeline,
     ListEditingJobs,
     SubmitEditingJob,
+    #[allow(dead_code)]
     GetEditingJob,
     CreateTask,
     StartTaskDiscovery,
@@ -222,7 +230,6 @@ impl ControlPlaneOperation {
             | Self::ListEditingProjects
             | Self::GetEditingProject
             | Self::GetEditingProjectTimeline
-            | Self::SaveEditingProjectTimeline
             | Self::ListEditingJobs
             | Self::GetEditingJob
             | Self::GetTaskTargetPreview
@@ -243,6 +250,7 @@ impl ControlPlaneOperation {
             | Self::ExchangeDeviceSession
             | Self::RegisterEditingMaterial
             | Self::CreateEditingProject
+            | Self::SaveEditingProjectTimeline
             | Self::SubmitEditingJob
             | Self::CreateTask
             | Self::LoginAccountSession
@@ -288,6 +296,9 @@ impl ControlPlaneOperation {
                 | Self::LogoutAccountSession
                 | Self::ChangeAccountPassword
                 | Self::RecoverAccountPassword
+                | Self::CreateEditingProject
+                | Self::SaveEditingProjectTimeline
+                | Self::SubmitEditingJob
         )
     }
 }
@@ -314,6 +325,17 @@ enum ControlPlaneRequestTarget<'a> {
         installation_id: &'a str,
         expected_revision: u32,
     },
+    EditingProjectList {
+        cursor: Option<&'a str>,
+        limit: u16,
+    },
+    EditingTimeline(&'a str),
+    EditingJobList {
+        project_id: &'a str,
+        cursor: Option<&'a str>,
+        limit: u16,
+    },
+    EditingProjectJobs(&'a str),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -331,6 +353,7 @@ pub enum ControlPlaneErrorCode {
     AuthenticationInvalid,
     RecoveryInvalid,
     AccountSessionInvalid,
+    ResourceNotFound,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -442,6 +465,204 @@ struct AccountDeviceListResponse {
 pub struct ControlPlaneHealth {
     status: &'static str,
     service_version: String,
+}
+
+const MAX_EDITING_TIMELINE_DURATION_MS: u64 = 600_000;
+const MAX_EDITING_MATERIAL_DURATION_MS: u64 = 14_400_000;
+const MAX_EDITING_CLIPS_PER_TRACK: usize = 512;
+
+fn deserialize_required_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EditingOutputSpec {
+    width: u16,
+    height: u16,
+    fps: u8,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EditingCaptionStyle {
+    font_key: String,
+    font_px: u16,
+    stroke_px: u8,
+    line_spacing: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EditingProjectCreateRequest {
+    title: String,
+    output: EditingOutputSpec,
+    caption_style: EditingCaptionStyle,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EditingProjectSnapshot {
+    project_id: String,
+    title: String,
+    output: EditingOutputSpec,
+    caption_style: EditingCaptionStyle,
+    created_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EditingProjectListResponse {
+    items: Vec<EditingProjectSnapshot>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    next_cursor: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditingProjectListPage {
+    items: Vec<EditingProjectSnapshot>,
+    next_cursor: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum EditingTrackKind {
+    Visual,
+    Narration,
+    Ambient,
+    Music,
+    Caption,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum EditingOriginalAudioMode {
+    AutoDuck,
+    FixedVolume,
+    Muted,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum EditingTransitionKind {
+    Fade,
+    Dissolve,
+    Wipe,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EditingTimelineTransition {
+    kind: EditingTransitionKind,
+    duration_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EditingTimelineClip {
+    clip_id: String,
+    start_ms: u64,
+    duration_ms: u64,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    source_material_id: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    source_in_ms: Option<u64>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    source_out_ms: Option<u64>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    text: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    gain_db: Option<f64>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    transition_in: Option<EditingTimelineTransition>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    original_audio_mode: Option<EditingOriginalAudioMode>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EditingTimelineTrack {
+    track_id: String,
+    kind: EditingTrackKind,
+    clips: Vec<EditingTimelineClip>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EditingTimelineDraft {
+    duration_ms: u64,
+    tracks: Vec<EditingTimelineTrack>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EditingTimelineSnapshot {
+    timeline_id: String,
+    project_id: String,
+    revision: u64,
+    duration_ms: u64,
+    tracks: Vec<EditingTimelineTrack>,
+    created_at: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum EditingJobStatus {
+    Queued,
+    Running,
+    Cancelling,
+    Succeeded,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum EditingJobFailureCode {
+    InvalidTimeline,
+    MaterialUnavailable,
+    MaterialUnsupported,
+    FontUnavailable,
+    RenderFailed,
+    ResourceExhausted,
+    PermissionDenied,
+    WorkerLost,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EditingJobSnapshot {
+    job_id: String,
+    project_id: String,
+    timeline_id: String,
+    timeline_revision: u64,
+    status: EditingJobStatus,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    failure_code: Option<EditingJobFailureCode>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    output_artifact_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EditingJobListResponse {
+    items: Vec<EditingJobSnapshot>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    next_cursor: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditingJobListPage {
+    items: Vec<EditingJobSnapshot>,
+    next_cursor: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1045,6 +1266,185 @@ impl ControlPlaneClient {
             .delete()
             .map_err(|_| ControlPlaneError::new(ControlPlaneErrorCode::OutcomeUncertain, false))?;
         Ok(revoked.version)
+    }
+
+    pub async fn list_editing_projects<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<EditingProjectListPage, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        validate_editing_page(cursor, limit)?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let body = self
+            .execute(
+                ControlPlaneOperation::ListEditingProjects,
+                Some(session.token()),
+                None,
+                None,
+                Some(ControlPlaneRequestTarget::EditingProjectList { cursor, limit }),
+            )
+            .await?;
+        parse_editing_project_list(&body)
+    }
+
+    pub async fn create_editing_project<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        request: &EditingProjectCreateRequest,
+    ) -> Result<EditingProjectSnapshot, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        request.validate()?;
+        let body = serde_json::to_value(request).map_err(|_| protocol_invalid())?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response = self
+            .execute(
+                ControlPlaneOperation::CreateEditingProject,
+                Some(session.token()),
+                Some(&body),
+                None,
+                None,
+            )
+            .await?;
+        parse_editing_project(&response)
+    }
+
+    pub async fn get_editing_project_timeline<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        project_id: &str,
+    ) -> Result<Option<EditingTimelineSnapshot>, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_canonical_uuid_v4(project_id)?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response = self
+            .execute(
+                ControlPlaneOperation::GetEditingProjectTimeline,
+                Some(session.token()),
+                None,
+                None,
+                Some(ControlPlaneRequestTarget::EditingTimeline(project_id)),
+            )
+            .await;
+        match response {
+            Ok(body) => {
+                let timeline = parse_editing_timeline(&body)?;
+                if timeline.project_id != project_id {
+                    return Err(protocol_invalid());
+                }
+                Ok(Some(timeline))
+            }
+            Err(error) if error.code() == ControlPlaneErrorCode::ResourceNotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub async fn save_editing_project_timeline<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        project_id: &str,
+        draft: &EditingTimelineDraft,
+    ) -> Result<EditingTimelineSnapshot, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_canonical_uuid_v4(project_id)?;
+        draft.validate()?;
+        let body = serde_json::to_value(draft).map_err(|_| protocol_invalid())?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response = self
+            .execute(
+                ControlPlaneOperation::SaveEditingProjectTimeline,
+                Some(session.token()),
+                Some(&body),
+                None,
+                Some(ControlPlaneRequestTarget::EditingTimeline(project_id)),
+            )
+            .await?;
+        let timeline = parse_editing_timeline(&response)?;
+        if timeline.project_id != project_id {
+            return Err(protocol_invalid());
+        }
+        Ok(timeline)
+    }
+
+    pub async fn list_editing_jobs<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        project_id: &str,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<EditingJobListPage, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_canonical_uuid_v4(project_id)?;
+        validate_editing_page(cursor, limit)?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let body = self
+            .execute(
+                ControlPlaneOperation::ListEditingJobs,
+                Some(session.token()),
+                None,
+                None,
+                Some(ControlPlaneRequestTarget::EditingJobList {
+                    project_id,
+                    cursor,
+                    limit,
+                }),
+            )
+            .await?;
+        let page = parse_editing_job_list(&body)?;
+        if page.items.iter().any(|job| job.project_id != project_id) {
+            return Err(protocol_invalid());
+        }
+        Ok(page)
+    }
+
+    pub async fn submit_editing_job<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        project_id: &str,
+    ) -> Result<EditingJobSnapshot, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_canonical_uuid_v4(project_id)?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let body = serde_json::json!({});
+        let response = self
+            .execute(
+                ControlPlaneOperation::SubmitEditingJob,
+                Some(session.token()),
+                Some(&body),
+                None,
+                Some(ControlPlaneRequestTarget::EditingProjectJobs(project_id)),
+            )
+            .await?;
+        let job = parse_editing_job(&response)?;
+        if job.project_id != project_id {
+            return Err(protocol_invalid());
+        }
+        Ok(job)
     }
 
     pub async fn create_task<S>(
@@ -1735,6 +2135,51 @@ fn request_path(
 ) -> Result<String, ControlPlaneError> {
     match (operation, target) {
         (
+            ControlPlaneOperation::ListEditingProjects,
+            Some(ControlPlaneRequestTarget::EditingProjectList { cursor, limit }),
+        ) if (1..=100).contains(&limit) => {
+            let mut path = format!("/api/v1/editing-projects?limit={limit}");
+            if let Some(value) = cursor {
+                require_list_cursor(value)?;
+                path.push_str("&cursor=");
+                path.push_str(value);
+            }
+            Ok(path)
+        }
+        (
+            operation @ (ControlPlaneOperation::GetEditingProjectTimeline
+            | ControlPlaneOperation::SaveEditingProjectTimeline),
+            Some(ControlPlaneRequestTarget::EditingTimeline(project_id)),
+        ) => {
+            require_canonical_uuid_v4(project_id)?;
+            let _ = operation;
+            Ok(format!("/api/v1/editing-projects/{project_id}/timeline"))
+        }
+        (
+            ControlPlaneOperation::ListEditingJobs,
+            Some(ControlPlaneRequestTarget::EditingJobList {
+                project_id,
+                cursor,
+                limit,
+            }),
+        ) if (1..=100).contains(&limit) => {
+            require_canonical_uuid_v4(project_id)?;
+            let mut path = format!("/api/v1/editing-projects/{project_id}/jobs?limit={limit}");
+            if let Some(value) = cursor {
+                require_list_cursor(value)?;
+                path.push_str("&cursor=");
+                path.push_str(value);
+            }
+            Ok(path)
+        }
+        (
+            ControlPlaneOperation::SubmitEditingJob,
+            Some(ControlPlaneRequestTarget::EditingProjectJobs(project_id)),
+        ) => {
+            require_canonical_uuid_v4(project_id)?;
+            Ok(format!("/api/v1/editing-projects/{project_id}/jobs"))
+        }
+        (
             ControlPlaneOperation::RevokeAccountInstallation,
             Some(ControlPlaneRequestTarget::AccountDevice {
                 installation_id,
@@ -1835,6 +2280,13 @@ fn request_path(
         }
         (
             ControlPlaneOperation::ListTasks
+            | ControlPlaneOperation::ListEditingProjects
+            | ControlPlaneOperation::GetEditingProject
+            | ControlPlaneOperation::GetEditingProjectTimeline
+            | ControlPlaneOperation::SaveEditingProjectTimeline
+            | ControlPlaneOperation::ListEditingJobs
+            | ControlPlaneOperation::SubmitEditingJob
+            | ControlPlaneOperation::GetEditingJob
             | ControlPlaneOperation::GetTask
             | ControlPlaneOperation::GetTaskTargetResults
             | ControlPlaneOperation::GetTaskTargetPreview
@@ -1999,6 +2451,15 @@ fn validate_response_metadata(
             )
         {
             ControlPlaneErrorCode::InstallationAccessDenied
+        } else if metadata.status == 404
+            && matches!(
+                operation,
+                ControlPlaneOperation::GetEditingProject
+                    | ControlPlaneOperation::GetEditingProjectTimeline
+                    | ControlPlaneOperation::GetEditingJob
+            )
+        {
+            ControlPlaneErrorCode::ResourceNotFound
         } else {
             ControlPlaneErrorCode::RequestRejected
         };
@@ -3815,6 +4276,358 @@ fn parse_device_session(
     })
 }
 
+fn editing_text_has_forbidden_character(value: &str, allow_layout_whitespace: bool) -> bool {
+    static UNICODE_OTHER: OnceLock<Regex> = OnceLock::new();
+    UNICODE_OTHER
+        .get_or_init(|| Regex::new(r"\p{C}").expect("Unicode Other regex is valid"))
+        .find_iter(value)
+        .any(|matched| !allow_layout_whitespace || !matches!(matched.as_str(), "\n" | "\t"))
+}
+
+fn validate_editing_title(value: &str) -> Result<(), ControlPlaneError> {
+    if value.is_empty()
+        || value.trim() != value
+        || value.chars().count() > 200
+        || editing_text_has_forbidden_character(value, false)
+    {
+        return Err(protocol_invalid());
+    }
+    Ok(())
+}
+
+fn validate_editing_local_id(value: &str) -> Result<(), ControlPlaneError> {
+    let mut bytes = value.bytes();
+    if value.len() > 64
+        || !bytes.next().is_some_and(|byte| byte.is_ascii_lowercase())
+        || !bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        return Err(protocol_invalid());
+    }
+    Ok(())
+}
+
+fn validate_editing_page(cursor: Option<&str>, limit: u16) -> Result<(), ControlPlaneError> {
+    if !(1..=100).contains(&limit) {
+        return Err(protocol_invalid());
+    }
+    if let Some(value) = cursor {
+        require_list_cursor(value)?;
+    }
+    Ok(())
+}
+
+impl EditingOutputSpec {
+    fn validate(&self) -> Result<(), ControlPlaneError> {
+        if !(128..=4096).contains(&self.width)
+            || !(128..=4096).contains(&self.height)
+            || !self.width.is_multiple_of(2)
+            || !self.height.is_multiple_of(2)
+            || !(12..=60).contains(&self.fps)
+        {
+            return Err(protocol_invalid());
+        }
+        Ok(())
+    }
+}
+
+impl EditingCaptionStyle {
+    fn validate(&self) -> Result<(), ControlPlaneError> {
+        validate_editing_local_id(&self.font_key)?;
+        if !(12..=200).contains(&self.font_px)
+            || self.stroke_px > 20
+            || u16::from(self.stroke_px) * 2 >= self.font_px
+            || !self.line_spacing.is_finite()
+            || !(1.0..=3.0).contains(&self.line_spacing)
+        {
+            return Err(protocol_invalid());
+        }
+        Ok(())
+    }
+}
+
+impl EditingProjectCreateRequest {
+    fn validate(&self) -> Result<(), ControlPlaneError> {
+        validate_editing_title(&self.title)?;
+        self.output.validate()?;
+        self.caption_style.validate()?;
+        if self.caption_style.font_px > self.output.height {
+            return Err(protocol_invalid());
+        }
+        Ok(())
+    }
+}
+
+impl EditingProjectSnapshot {
+    fn validate(&self) -> Result<(), ControlPlaneError> {
+        require_canonical_uuid_v4(&self.project_id)?;
+        EditingProjectCreateRequest {
+            title: self.title.clone(),
+            output: self.output.clone(),
+            caption_style: self.caption_style.clone(),
+        }
+        .validate()?;
+        require_bounded_timestamp(&self.created_at)?;
+        Ok(())
+    }
+}
+
+impl EditingTimelineClip {
+    fn validate(&self) -> Result<(), ControlPlaneError> {
+        validate_editing_local_id(&self.clip_id)?;
+        if self.duration_ms == 0
+            || self.duration_ms > MAX_EDITING_TIMELINE_DURATION_MS
+            || self.start_ms > MAX_EDITING_TIMELINE_DURATION_MS
+            || self.start_ms + self.duration_ms > MAX_EDITING_TIMELINE_DURATION_MS
+        {
+            return Err(protocol_invalid());
+        }
+        if let Some(material_id) = self.source_material_id.as_deref() {
+            require_canonical_uuid_v4(material_id)?;
+        }
+        if let Some(text) = self.text.as_deref() {
+            if text.is_empty()
+                || text.trim() != text
+                || text.chars().count() > 2_000
+                || editing_text_has_forbidden_character(text, true)
+            {
+                return Err(protocol_invalid());
+            }
+        }
+        if self.source_material_id.is_none() == self.text.is_none()
+            || self.source_in_ms.is_none() != self.source_out_ms.is_none()
+        {
+            return Err(protocol_invalid());
+        }
+        match (self.source_in_ms, self.source_out_ms) {
+            (Some(source_in), Some(source_out)) => {
+                if self.source_material_id.is_none()
+                    || source_out > MAX_EDITING_MATERIAL_DURATION_MS
+                    || source_out.checked_sub(source_in) != Some(self.duration_ms)
+                {
+                    return Err(protocol_invalid());
+                }
+            }
+            (None, None) => {}
+            _ => return Err(protocol_invalid()),
+        }
+        if self.gain_db.is_some_and(|gain| {
+            self.source_in_ms.is_none() || !gain.is_finite() || !(-60.0..=12.0).contains(&gain)
+        }) {
+            return Err(protocol_invalid());
+        }
+        if self.transition_in.as_ref().is_some_and(|transition| {
+            transition.duration_ms == 0
+                || transition.duration_ms > 10_000
+                || transition.duration_ms >= self.duration_ms
+        }) {
+            return Err(protocol_invalid());
+        }
+        Ok(())
+    }
+
+    fn end_ms(&self) -> u64 {
+        self.start_ms + self.duration_ms
+    }
+}
+
+impl EditingTimelineTrack {
+    fn validate(&self) -> Result<(), ControlPlaneError> {
+        validate_editing_local_id(&self.track_id)?;
+        if self.clips.is_empty() || self.clips.len() > MAX_EDITING_CLIPS_PER_TRACK {
+            return Err(protocol_invalid());
+        }
+        let mut clip_ids = HashSet::new();
+        let mut previous_end: u64 = 0;
+        let mut previous_tail: u64 = 0;
+        for clip in &self.clips {
+            clip.validate()?;
+            if !clip_ids.insert(&clip.clip_id) {
+                return Err(protocol_invalid());
+            }
+            let shape_matches = match self.kind {
+                EditingTrackKind::Caption => {
+                    clip.text.is_some()
+                        && clip.source_material_id.is_none()
+                        && clip.gain_db.is_none()
+                        && clip.transition_in.is_none()
+                        && clip.original_audio_mode.is_none()
+                }
+                EditingTrackKind::Visual => {
+                    clip.text.is_none()
+                        && clip.source_material_id.is_some()
+                        && clip.gain_db.is_none()
+                        && clip.original_audio_mode.is_none()
+                }
+                EditingTrackKind::Ambient => {
+                    clip.text.is_none()
+                        && clip.source_material_id.is_some()
+                        && clip.gain_db.is_some()
+                        && clip.transition_in.is_none()
+                        && clip.original_audio_mode.is_some()
+                }
+                EditingTrackKind::Narration | EditingTrackKind::Music => {
+                    clip.text.is_none()
+                        && clip.source_material_id.is_some()
+                        && clip.gain_db.is_some()
+                        && clip.transition_in.is_none()
+                        && clip.original_audio_mode.is_none()
+                }
+            };
+            if !shape_matches {
+                return Err(protocol_invalid());
+            }
+            if self.kind == EditingTrackKind::Visual {
+                let overlap = clip
+                    .transition_in
+                    .as_ref()
+                    .map_or(0, |transition| transition.duration_ms);
+                if clip.transition_in.is_some() && overlap >= previous_tail
+                    || clip.start_ms != previous_end.saturating_sub(overlap)
+                {
+                    return Err(protocol_invalid());
+                }
+                previous_tail = clip.duration_ms - overlap;
+            } else if clip.start_ms < previous_end {
+                return Err(protocol_invalid());
+            }
+            previous_end = clip.end_ms();
+        }
+        Ok(())
+    }
+}
+
+impl EditingTimelineDraft {
+    fn validate(&self) -> Result<(), ControlPlaneError> {
+        if !(100..=MAX_EDITING_TIMELINE_DURATION_MS).contains(&self.duration_ms)
+            || self.tracks.is_empty()
+            || self.tracks.len() > 5
+        {
+            return Err(protocol_invalid());
+        }
+        let mut track_ids = HashSet::new();
+        let mut kinds = HashSet::new();
+        let mut visual_end = None;
+        for track in &self.tracks {
+            track.validate()?;
+            if !track_ids.insert(&track.track_id) || !kinds.insert(track.kind) {
+                return Err(protocol_invalid());
+            }
+            if track
+                .clips
+                .iter()
+                .any(|clip| clip.end_ms() > self.duration_ms)
+            {
+                return Err(protocol_invalid());
+            }
+            if track.kind == EditingTrackKind::Visual {
+                visual_end = track.clips.last().map(EditingTimelineClip::end_ms);
+            }
+        }
+        if visual_end != Some(self.duration_ms) {
+            return Err(protocol_invalid());
+        }
+        Ok(())
+    }
+}
+
+impl EditingTimelineSnapshot {
+    fn validate(&self) -> Result<(), ControlPlaneError> {
+        require_canonical_uuid_v4(&self.timeline_id)?;
+        require_canonical_uuid_v4(&self.project_id)?;
+        if self.revision == 0 || self.revision > MAX_CROSS_RUNTIME_SEQUENCE {
+            return Err(protocol_invalid());
+        }
+        EditingTimelineDraft {
+            duration_ms: self.duration_ms,
+            tracks: self.tracks.clone(),
+        }
+        .validate()?;
+        require_bounded_timestamp(&self.created_at)?;
+        Ok(())
+    }
+}
+
+impl EditingJobSnapshot {
+    fn validate(&self) -> Result<(), ControlPlaneError> {
+        for identifier in [&self.job_id, &self.project_id, &self.timeline_id] {
+            require_canonical_uuid_v4(identifier)?;
+        }
+        if let Some(artifact_id) = self.output_artifact_id.as_deref() {
+            require_canonical_uuid_v4(artifact_id)?;
+        }
+        if self.timeline_revision == 0 || self.timeline_revision > MAX_CROSS_RUNTIME_SEQUENCE {
+            return Err(protocol_invalid());
+        }
+        let created_at = require_bounded_timestamp(&self.created_at)?;
+        let updated_at = require_bounded_timestamp(&self.updated_at)?;
+        let facts_match = match self.status {
+            EditingJobStatus::Succeeded => {
+                self.output_artifact_id.is_some() && self.failure_code.is_none()
+            }
+            EditingJobStatus::Failed => {
+                self.output_artifact_id.is_none() && self.failure_code.is_some()
+            }
+            _ => self.output_artifact_id.is_none() && self.failure_code.is_none(),
+        };
+        if updated_at < created_at || !facts_match {
+            return Err(protocol_invalid());
+        }
+        Ok(())
+    }
+}
+
+fn parse_editing_project(body: &[u8]) -> Result<EditingProjectSnapshot, ControlPlaneError> {
+    let project: EditingProjectSnapshot = parse_exact_json(body)?;
+    project.validate()?;
+    Ok(project)
+}
+
+fn parse_editing_project_list(body: &[u8]) -> Result<EditingProjectListPage, ControlPlaneError> {
+    let response: EditingProjectListResponse = parse_exact_json(body)?;
+    if response.items.len() > 100 {
+        return Err(protocol_invalid());
+    }
+    for project in &response.items {
+        project.validate()?;
+    }
+    if let Some(cursor) = response.next_cursor.as_deref() {
+        require_list_cursor(cursor)?;
+    }
+    Ok(EditingProjectListPage {
+        items: response.items,
+        next_cursor: response.next_cursor,
+    })
+}
+
+fn parse_editing_timeline(body: &[u8]) -> Result<EditingTimelineSnapshot, ControlPlaneError> {
+    let timeline: EditingTimelineSnapshot = parse_exact_json(body)?;
+    timeline.validate()?;
+    Ok(timeline)
+}
+
+fn parse_editing_job(body: &[u8]) -> Result<EditingJobSnapshot, ControlPlaneError> {
+    let job: EditingJobSnapshot = parse_exact_json(body)?;
+    job.validate()?;
+    Ok(job)
+}
+
+fn parse_editing_job_list(body: &[u8]) -> Result<EditingJobListPage, ControlPlaneError> {
+    let response: EditingJobListResponse = parse_exact_json(body)?;
+    if response.items.len() > 100 {
+        return Err(protocol_invalid());
+    }
+    for job in &response.items {
+        job.validate()?;
+    }
+    if let Some(cursor) = response.next_cursor.as_deref() {
+        require_list_cursor(cursor)?;
+    }
+    Ok(EditingJobListPage {
+        items: response.items,
+        next_cursor: response.next_cursor,
+    })
+}
+
 fn parse_exact_json<T>(body: &[u8]) -> Result<T, ControlPlaneError>
 where
     T: for<'de> Deserialize<'de>,
@@ -3892,8 +4705,11 @@ fn protocol_invalid() -> ControlPlaneError {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use std::collections::{BTreeSet, HashSet};
+    use std::collections::{BTreeSet, HashMap, HashSet};
     use std::error::Error;
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::thread;
 
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine;
@@ -3902,16 +4718,17 @@ mod tests {
     use super::{
         new_request_id, parse_account_device, parse_account_device_list, parse_account_session,
         parse_created_task, parse_device_session, parse_douyin_platform_session,
-        parse_douyin_platform_session_logout_prepare, parse_health_response,
-        parse_installation_access, parse_installation_registration, parse_registration_challenge,
-        parse_revoked_credential, parse_rotated_credential, parse_sse_frame,
-        parse_system_version_response, parse_task_control, parse_task_discovery, parse_task_list,
-        parse_task_snapshot_body, parse_task_target_preview, parse_task_target_results,
-        parse_workbench_metrics, parse_workbench_status, request_path, require_idempotency_key,
-        require_list_cursor, require_preview_cursor, required_credential, sse_frame_end,
-        transport_error, validate_preview_command, validate_response_metadata,
-        validated_demo_origin, validated_loopback_origin, ControlPlaneErrorCode,
-        ControlPlaneOperation, ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
+        parse_douyin_platform_session_logout_prepare, parse_editing_job, parse_editing_project,
+        parse_editing_timeline, parse_health_response, parse_installation_access,
+        parse_installation_registration, parse_registration_challenge, parse_revoked_credential,
+        parse_rotated_credential, parse_sse_frame, parse_system_version_response,
+        parse_task_control, parse_task_discovery, parse_task_list, parse_task_snapshot_body,
+        parse_task_target_preview, parse_task_target_results, parse_workbench_metrics,
+        parse_workbench_status, request_path, require_idempotency_key, require_list_cursor,
+        require_preview_cursor, required_credential, sse_frame_end, transport_error,
+        validate_preview_command, validate_response_metadata, validated_demo_origin,
+        validated_loopback_origin, ControlPlaneErrorCode, ControlPlaneOperation,
+        ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
         DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition, ResponseMetadata,
     };
     use crate::device_credentials::DeviceCredentialVault;
@@ -3955,6 +4772,142 @@ mod tests {
             "{prefix}.{IDENTIFIER}.{}",
             URL_SAFE_NO_PAD.encode([7_u8; 32])
         )
+    }
+
+    struct ExpectedHttpExchange {
+        method: &'static str,
+        path: String,
+        authorization: String,
+        body: Option<serde_json::Value>,
+        status: u16,
+        response: serde_json::Value,
+    }
+
+    struct CapturedHttpRequest {
+        method: String,
+        path: String,
+        headers: HashMap<String, String>,
+        body: Vec<u8>,
+    }
+
+    fn read_http_request(stream: &mut TcpStream) -> CapturedHttpRequest {
+        let mut bytes = Vec::new();
+        let header_end = loop {
+            let mut chunk = [0_u8; 1024];
+            let count = stream.read(&mut chunk).expect("read HTTP request");
+            assert!(count > 0, "HTTP request ended before its headers");
+            bytes.extend_from_slice(&chunk[..count]);
+            if let Some(position) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                break position + 4;
+            }
+            assert!(bytes.len() <= 16 * 1024, "HTTP request headers are bounded");
+        };
+        let header_text =
+            std::str::from_utf8(&bytes[..header_end - 4]).expect("HTTP request headers are UTF-8");
+        let mut lines = header_text.split("\r\n");
+        let mut request_line = lines.next().expect("HTTP request line").split(' ');
+        let method = request_line.next().expect("HTTP method").to_owned();
+        let path = request_line.next().expect("HTTP path").to_owned();
+        assert_eq!(request_line.next(), Some("HTTP/1.1"));
+        assert_eq!(request_line.next(), None);
+        let headers: HashMap<String, String> = lines
+            .map(|line| {
+                let (name, value) = line.split_once(':').expect("HTTP header");
+                (name.to_ascii_lowercase(), value.trim().to_owned())
+            })
+            .collect();
+        let content_length = headers
+            .get("content-length")
+            .map_or(0, |value| value.parse().expect("HTTP content length"));
+        while bytes.len() - header_end < content_length {
+            let mut chunk = [0_u8; 1024];
+            let count = stream.read(&mut chunk).expect("read HTTP body");
+            assert!(count > 0, "HTTP request ended before its body");
+            bytes.extend_from_slice(&chunk[..count]);
+        }
+        CapturedHttpRequest {
+            method,
+            path,
+            headers,
+            body: bytes[header_end..header_end + content_length].to_vec(),
+        }
+    }
+
+    fn spawn_http_contract_server(
+        exchanges: Vec<ExpectedHttpExchange>,
+    ) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback HTTP server");
+        let origin = format!(
+            "http://{}",
+            listener.local_addr().expect("loopback server address")
+        );
+        let handle = thread::spawn(move || {
+            for expected in exchanges {
+                let (mut stream, _) = listener.accept().expect("accept HTTP request");
+                let request = read_http_request(&mut stream);
+                assert_eq!(request.method, expected.method);
+                assert_eq!(request.path, expected.path);
+                assert_eq!(
+                    request.headers.get("authorization"),
+                    Some(&expected.authorization)
+                );
+                assert_eq!(
+                    request.headers.get("accept").map(String::as_str),
+                    Some("application/json")
+                );
+                match expected.body {
+                    Some(expected_body) => assert_eq!(
+                        serde_json::from_slice::<serde_json::Value>(&request.body)
+                            .expect("request body is JSON"),
+                        expected_body
+                    ),
+                    None => assert!(request.body.is_empty()),
+                }
+                let request_id = request
+                    .headers
+                    .get("x-request-id")
+                    .expect("request ID header");
+                let response_body = serde_json::to_vec(&expected.response).expect("response JSON");
+                let status_text = match expected.status {
+                    200 => "OK",
+                    201 => "Created",
+                    status => panic!("unsupported test HTTP status {status}"),
+                };
+                let response = format!(
+                    "HTTP/1.1 {} {}\r\ncontent-type: application/json\r\ncache-control: no-store\r\nx-request-id: {}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                    expected.status,
+                    status_text,
+                    request_id,
+                    response_body.len()
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write HTTP response headers");
+                stream
+                    .write_all(&response_body)
+                    .expect("write HTTP response body");
+            }
+        });
+        (origin, handle)
+    }
+
+    fn device_session_exchange(
+        device_credential: &str,
+        session_token: &str,
+    ) -> ExpectedHttpExchange {
+        ExpectedHttpExchange {
+            method: "POST",
+            path: "/api/v1/device-sessions".to_owned(),
+            authorization: format!("Bearer {device_credential}"),
+            body: Some(serde_json::json!({"capability": "app.control-plane"})),
+            status: 201,
+            response: serde_json::json!({
+                "sessionToken": session_token,
+                "capability": "app.control-plane",
+                "issuedAt": "2026-08-01T00:00:00Z",
+                "expiresAt": "2026-08-01T00:05:00Z"
+            }),
+        }
     }
 
     fn bootstrap_error(
@@ -4126,7 +5079,7 @@ mod tests {
                 ControlPlaneOperation::SaveEditingProjectTimeline,
                 "PUT",
                 "/api/v1/editing-projects/{project_id}/timeline",
-                200,
+                201,
             ),
             (
                 ControlPlaneOperation::ListEditingJobs,
@@ -4589,6 +5542,316 @@ mod tests {
             let error = invalid.expect_err("invalid target");
             assert_eq!(error.code(), ControlPlaneErrorCode::ProtocolInvalid);
         }
+    }
+
+    #[test]
+    fn editing_query_targets_build_only_validated_fixed_paths() {
+        assert_eq!(
+            request_path(
+                ControlPlaneOperation::ListEditingProjects,
+                Some(ControlPlaneRequestTarget::EditingProjectList {
+                    cursor: Some("YWJj"),
+                    limit: 20,
+                }),
+            )
+            .expect("valid project page"),
+            "/api/v1/editing-projects?limit=20&cursor=YWJj"
+        );
+        assert_eq!(
+            request_path(
+                ControlPlaneOperation::GetEditingProjectTimeline,
+                Some(ControlPlaneRequestTarget::EditingTimeline(IDENTIFIER)),
+            )
+            .expect("valid timeline detail"),
+            format!("/api/v1/editing-projects/{IDENTIFIER}/timeline")
+        );
+        assert_eq!(
+            request_path(
+                ControlPlaneOperation::ListEditingJobs,
+                Some(ControlPlaneRequestTarget::EditingJobList {
+                    project_id: IDENTIFIER,
+                    cursor: None,
+                    limit: 100,
+                }),
+            )
+            .expect("valid job page"),
+            format!("/api/v1/editing-projects/{IDENTIFIER}/jobs?limit=100")
+        );
+        assert_eq!(
+            request_path(
+                ControlPlaneOperation::SubmitEditingJob,
+                Some(ControlPlaneRequestTarget::EditingProjectJobs(IDENTIFIER)),
+            )
+            .expect("valid job submission"),
+            format!("/api/v1/editing-projects/{IDENTIFIER}/jobs")
+        );
+        assert!(request_path(ControlPlaneOperation::ListEditingProjects, None).is_err());
+        assert!(request_path(
+            ControlPlaneOperation::SubmitEditingJob,
+            Some(ControlPlaneRequestTarget::EditingTimeline(IDENTIFIER)),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn editing_response_parsers_accept_only_the_current_closed_contract() {
+        let project = serde_json::json!({
+            "projectId": IDENTIFIER,
+            "title": "发布会剪辑",
+            "output": {"width": 720, "height": 1280, "fps": 20},
+            "captionStyle": {
+                "fontKey": "noto-sans-cjk-sc-bold",
+                "fontPx": 48,
+                "strokePx": 3,
+                "lineSpacing": 1.2
+            },
+            "createdAt": "2026-08-01T00:00:00Z"
+        });
+        parse_editing_project(&serde_json::to_vec(&project).expect("project JSON"))
+            .expect("current project");
+        let mut unassigned_text_project = project.clone();
+        unassigned_text_project["title"] = serde_json::json!("发布\u{0378}会剪辑");
+        assert!(parse_editing_project(
+            &serde_json::to_vec(&unassigned_text_project).expect("unsafe project JSON")
+        )
+        .is_err());
+        let duplicate_project = format!(
+            r#"{{"projectId":"{IDENTIFIER}","title":"first","title":"second","output":{{"width":720,"height":1280,"fps":20}},"captionStyle":{{"fontKey":"noto-sans-cjk-sc-bold","fontPx":48,"strokePx":3,"lineSpacing":1.2}},"createdAt":"2026-08-01T00:00:00Z"}}"#
+        );
+        assert!(parse_editing_project(duplicate_project.as_bytes()).is_err());
+        let old_project = serde_json::json!({
+            "projectId": IDENTIFIER,
+            "title": "发布会剪辑",
+            "sourceArtifactIds": [],
+            "createdAt": "2026-08-01T00:00:00Z",
+            "updatedAt": "2026-08-01T00:00:00Z"
+        });
+        assert!(parse_editing_project(
+            &serde_json::to_vec(&old_project).expect("old project JSON")
+        )
+        .is_err());
+
+        let timeline = serde_json::json!({
+            "timelineId": "0a48954d-2df1-4168-8f33-b62c5772845a",
+            "projectId": IDENTIFIER,
+            "revision": 1,
+            "durationMs": 3000,
+            "tracks": [{
+                "trackId": "picture-main",
+                "kind": "visual",
+                "clips": [{
+                    "clipId": "opening-shot",
+                    "startMs": 0,
+                    "durationMs": 3000,
+                    "sourceMaterialId": "9f48954d-2df1-4168-8f33-b62c5772845b",
+                    "sourceInMs": 0,
+                    "sourceOutMs": 3000,
+                    "text": null,
+                    "gainDb": null,
+                    "transitionIn": null,
+                    "originalAudioMode": null
+                }]
+            }],
+            "createdAt": "2026-08-01T00:00:00Z"
+        });
+        parse_editing_timeline(&serde_json::to_vec(&timeline).expect("timeline JSON"))
+            .expect("current timeline");
+        let mut missing_original_audio_mode = timeline.clone();
+        missing_original_audio_mode["tracks"][0]["clips"][0]
+            .as_object_mut()
+            .expect("timeline clip object")
+            .remove("originalAudioMode");
+        assert!(parse_editing_timeline(
+            &serde_json::to_vec(&missing_original_audio_mode).expect("incomplete timeline JSON")
+        )
+        .is_err());
+
+        let job = serde_json::json!({
+            "jobId": "3d594650-b5f4-4498-8e38-0cf85d6dfa72",
+            "projectId": IDENTIFIER,
+            "timelineId": "0a48954d-2df1-4168-8f33-b62c5772845a",
+            "timelineRevision": 1,
+            "status": "succeeded",
+            "failureCode": null,
+            "outputArtifactId": "8e48954d-2df1-4168-8f33-b62c5772845c",
+            "createdAt": "2026-08-01T00:00:00Z",
+            "updatedAt": "2026-08-01T00:00:01Z"
+        });
+        parse_editing_job(&serde_json::to_vec(&job).expect("job JSON")).expect("current job");
+    }
+
+    #[test]
+    fn editing_mutations_have_exact_status_and_uncertain_transport_semantics() {
+        assert_eq!(
+            ControlPlaneOperation::SaveEditingProjectTimeline.success_status(),
+            201
+        );
+        for operation in [
+            ControlPlaneOperation::CreateEditingProject,
+            ControlPlaneOperation::SaveEditingProjectTimeline,
+            ControlPlaneOperation::SubmitEditingJob,
+        ] {
+            assert_eq!(
+                transport_error(operation).code(),
+                ControlPlaneErrorCode::OutcomeUncertain
+            );
+        }
+    }
+
+    #[test]
+    fn editing_client_crosses_the_real_http_boundary_with_exact_contracts() {
+        let device_credential = opaque_bearer("atdc1");
+        let session_token = opaque_bearer("atds1");
+        let timeline_body = serde_json::json!({
+            "durationMs": 3000,
+            "tracks": [{
+                "trackId": "picture-main",
+                "kind": "visual",
+                "clips": [{
+                    "clipId": "opening-shot",
+                    "startMs": 0,
+                    "durationMs": 3000,
+                    "sourceMaterialId": "9f48954d-2df1-4168-8f33-b62c5772845b",
+                    "sourceInMs": 0,
+                    "sourceOutMs": 3000,
+                    "text": null,
+                    "gainDb": null,
+                    "transitionIn": null,
+                    "originalAudioMode": null
+                }]
+            }]
+        });
+        let mut timeline_response = timeline_body.clone();
+        let timeline_object = timeline_response
+            .as_object_mut()
+            .expect("timeline response object");
+        timeline_object.insert(
+            "timelineId".to_owned(),
+            serde_json::json!("0a48954d-2df1-4168-8f33-b62c5772845a"),
+        );
+        timeline_object.insert("projectId".to_owned(), serde_json::json!(IDENTIFIER));
+        timeline_object.insert("revision".to_owned(), serde_json::json!(1));
+        timeline_object.insert(
+            "createdAt".to_owned(),
+            serde_json::json!("2026-08-01T00:00:00Z"),
+        );
+        let job_response = serde_json::json!({
+            "jobId": "3d594650-b5f4-4498-8e38-0cf85d6dfa72",
+            "projectId": IDENTIFIER,
+            "timelineId": "0a48954d-2df1-4168-8f33-b62c5772845a",
+            "timelineRevision": 1,
+            "status": "queued",
+            "failureCode": null,
+            "outputArtifactId": null,
+            "createdAt": "2026-08-01T00:00:00Z",
+            "updatedAt": "2026-08-01T00:00:00Z"
+        });
+        let (origin, server) = spawn_http_contract_server(vec![
+            device_session_exchange(&device_credential, &session_token),
+            ExpectedHttpExchange {
+                method: "GET",
+                path: "/api/v1/editing-projects?limit=20&cursor=YWJj".to_owned(),
+                authorization: format!("Bearer {session_token}"),
+                body: None,
+                status: 200,
+                response: serde_json::json!({"items": [], "nextCursor": null}),
+            },
+            device_session_exchange(&device_credential, &session_token),
+            ExpectedHttpExchange {
+                method: "PUT",
+                path: format!("/api/v1/editing-projects/{IDENTIFIER}/timeline"),
+                authorization: format!("Bearer {session_token}"),
+                body: Some(timeline_body.clone()),
+                status: 201,
+                response: timeline_response,
+            },
+            device_session_exchange(&device_credential, &session_token),
+            ExpectedHttpExchange {
+                method: "POST",
+                path: format!("/api/v1/editing-projects/{IDENTIFIER}/jobs"),
+                authorization: format!("Bearer {session_token}"),
+                body: Some(serde_json::json!({})),
+                status: 201,
+                response: job_response,
+            },
+        ]);
+        let client = super::ControlPlaneClient::from_validated_origins(
+            validated_loopback_origin(&origin).expect("validated loopback origin"),
+        )
+        .expect("loopback control-plane client");
+        let vault =
+            DeviceCredentialVault::new(MemorySecretStore::with_value(device_credential.as_bytes()));
+        let timeline: super::EditingTimelineDraft =
+            serde_json::from_value(timeline_body).expect("timeline draft");
+
+        tauri::async_runtime::block_on(async {
+            client
+                .list_editing_projects(&vault, Some("YWJj"), 20)
+                .await
+                .expect("list projects over HTTP");
+            client
+                .save_editing_project_timeline(&vault, IDENTIFIER, &timeline)
+                .await
+                .expect("save timeline over HTTP");
+            client
+                .submit_editing_job(&vault, IDENTIFIER)
+                .await
+                .expect("submit job over HTTP");
+        });
+        server.join().expect("HTTP contract server");
+    }
+
+    #[test]
+    fn editing_timeline_get_rejects_a_cross_project_snapshot() {
+        let device_credential = opaque_bearer("atdc1");
+        let session_token = opaque_bearer("atds1");
+        let foreign_project_id = "8e48954d-2df1-4168-8f33-b62c5772845c";
+        let response = serde_json::json!({
+            "timelineId": "0a48954d-2df1-4168-8f33-b62c5772845a",
+            "projectId": foreign_project_id,
+            "revision": 1,
+            "durationMs": 3000,
+            "tracks": [{
+                "trackId": "picture-main",
+                "kind": "visual",
+                "clips": [{
+                    "clipId": "opening-shot",
+                    "startMs": 0,
+                    "durationMs": 3000,
+                    "sourceMaterialId": "9f48954d-2df1-4168-8f33-b62c5772845b",
+                    "sourceInMs": 0,
+                    "sourceOutMs": 3000,
+                    "text": null,
+                    "gainDb": null,
+                    "transitionIn": null,
+                    "originalAudioMode": null
+                }]
+            }],
+            "createdAt": "2026-08-01T00:00:00Z"
+        });
+        let (origin, server) = spawn_http_contract_server(vec![
+            device_session_exchange(&device_credential, &session_token),
+            ExpectedHttpExchange {
+                method: "GET",
+                path: format!("/api/v1/editing-projects/{IDENTIFIER}/timeline"),
+                authorization: format!("Bearer {session_token}"),
+                body: None,
+                status: 200,
+                response,
+            },
+        ]);
+        let client = super::ControlPlaneClient::from_validated_origins(
+            validated_loopback_origin(&origin).expect("validated loopback origin"),
+        )
+        .expect("loopback control-plane client");
+        let vault =
+            DeviceCredentialVault::new(MemorySecretStore::with_value(device_credential.as_bytes()));
+
+        let error =
+            tauri::async_runtime::block_on(client.get_editing_project_timeline(&vault, IDENTIFIER))
+                .expect_err("foreign timeline snapshot must be rejected");
+        assert_eq!(error.code(), ControlPlaneErrorCode::ProtocolInvalid);
+        server.join().expect("HTTP contract server");
     }
 
     #[test]

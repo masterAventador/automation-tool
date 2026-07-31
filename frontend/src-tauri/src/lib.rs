@@ -1331,7 +1331,8 @@ fn map_executor_connection_error(
         | control_plane::ControlPlaneErrorCode::RecoveryInvalid
         | control_plane::ControlPlaneErrorCode::AccountSessionInvalid => "operation_unavailable",
         control_plane::ControlPlaneErrorCode::ProtocolInvalid
-        | control_plane::ControlPlaneErrorCode::RequestRejected => "operation_unavailable",
+        | control_plane::ControlPlaneErrorCode::RequestRejected
+        | control_plane::ControlPlaneErrorCode::ResourceNotFound => "operation_unavailable",
     };
     ExecutorPlatformCommandError { code, retryable }
 }
@@ -2255,7 +2256,8 @@ fn map_control_plane_error(error: control_plane::ControlPlaneError) -> ControlPl
         control_plane::ControlPlaneErrorCode::RecoveryInvalid => "recovery_invalid",
         control_plane::ControlPlaneErrorCode::AccountSessionInvalid => "session_invalid",
         control_plane::ControlPlaneErrorCode::ProtocolInvalid
-        | control_plane::ControlPlaneErrorCode::RequestRejected => "operation_unavailable",
+        | control_plane::ControlPlaneErrorCode::RequestRejected
+        | control_plane::ControlPlaneErrorCode::ResourceNotFound => "operation_unavailable",
     };
     ControlPlaneCommandError {
         code,
@@ -2587,6 +2589,88 @@ async fn get_workbench_metrics(
 ) -> Result<control_plane::WorkbenchMetrics, ControlPlaneCommandError> {
     client
         .get_workbench_metrics(&vault)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn list_editing_projects(
+    cursor: Option<String>,
+    limit: u16,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::EditingProjectListPage, ControlPlaneCommandError> {
+    client
+        .list_editing_projects(&vault, cursor.as_deref(), limit)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn create_editing_project(
+    request: control_plane::EditingProjectCreateRequest,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::EditingProjectSnapshot, ControlPlaneCommandError> {
+    client
+        .create_editing_project(&vault, &request)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn get_editing_project_timeline(
+    project_id: String,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<Option<control_plane::EditingTimelineSnapshot>, ControlPlaneCommandError> {
+    client
+        .get_editing_project_timeline(&vault, &project_id)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn save_editing_project_timeline(
+    project_id: String,
+    draft: control_plane::EditingTimelineDraft,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::EditingTimelineSnapshot, ControlPlaneCommandError> {
+    client
+        .save_editing_project_timeline(&vault, &project_id, &draft)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn list_editing_jobs(
+    project_id: String,
+    cursor: Option<String>,
+    limit: u16,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::EditingJobListPage, ControlPlaneCommandError> {
+    client
+        .list_editing_jobs(&vault, &project_id, cursor.as_deref(), limit)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn submit_editing_job(
+    project_id: String,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::EditingJobSnapshot, ControlPlaneCommandError> {
+    client
+        .submit_editing_job(&vault, &project_id)
         .await
         .map_err(map_control_plane_error)
 }
@@ -4673,6 +4757,12 @@ pub fn run() {
         get_douyin_platform_session,
         get_workbench_status,
         get_workbench_metrics,
+        list_editing_projects,
+        create_editing_project,
+        get_editing_project_timeline,
+        save_editing_project_timeline,
+        list_editing_jobs,
+        submit_editing_job,
         open_douyin_login,
         recheck_douyin_login,
         logout_douyin_session,
@@ -4737,6 +4827,12 @@ pub fn run() {
         get_douyin_platform_session,
         get_workbench_status,
         get_workbench_metrics,
+        list_editing_projects,
+        create_editing_project,
+        get_editing_project_timeline,
+        save_editing_project_timeline,
+        list_editing_jobs,
+        submit_editing_job,
         open_douyin_login,
         recheck_douyin_login,
         logout_douyin_session,
