@@ -1103,6 +1103,18 @@ impl LocalVideoOrchestrator {
         Ok(Some(event))
     }
 
+    pub(crate) fn local_editing_job_owner(&self) -> Result<Option<Uuid>, VideoWorkerError> {
+        let workers = self.lock_workers()?;
+        let Some(running) = workers.get(&VideoWorkerKind::Python) else {
+            return Ok(None);
+        };
+        running
+            .editing_job
+            .as_ref()
+            .map(|state| Uuid::parse_str(&state.job_id).map_err(|_| authentication_rejected()))
+            .transpose()
+    }
+
     /// Request cooperative cancellation. The authoritative result remains an
     /// authenticated terminal event because completion can win the race.
     pub fn request_local_editing_cancel(&self, job_id: Uuid) -> Result<(), VideoWorkerError> {

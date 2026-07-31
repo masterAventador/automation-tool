@@ -3,7 +3,7 @@
 use crate::local_video_orchestrator::{
     LocalVideoOrchestrator, VideoWorkerError, VideoWorkerErrorCode, VideoWorkerKind,
     VideoWorkerLocalEditingEvent, VideoWorkerLocalEditingFailureCode,
-    VideoWorkerLocalEditingJobRequest, VideoWorkerLocalEditingPhase,
+    VideoWorkerLocalEditingJobRequest, VideoWorkerLocalEditingPhase, VideoWorkerState,
 };
 use crate::video_job_workspace::{
     VideoJobWorkspace, VideoJobWorkspaceStore, VideoWorkspaceDisposition, VideoWorkspaceError,
@@ -114,6 +114,7 @@ pub struct LocalEditingJobSnapshot {
     phase: Option<VideoWorkerLocalEditingPhase>,
     progress_per_mille: u16,
     worker_generation: u32,
+    recovery_attempts: u32,
     revision: u64,
     failure_code: Option<LocalEditingJobFailureCode>,
     output_artifact_id: Option<Uuid>,
@@ -158,6 +159,10 @@ impl LocalEditingJobSnapshot {
         self.worker_generation
     }
 
+    pub const fn recovery_attempts(&self) -> u32 {
+        self.recovery_attempts
+    }
+
     pub const fn revision(&self) -> u64 {
         self.revision
     }
@@ -180,6 +185,7 @@ impl LocalEditingJobSnapshot {
             || self.timeline_revision == 0
             || self.timeline_revision > i32::MAX as u32
             || self.revision == 0
+            || self.recovery_attempts > 8
             || self.progress_per_mille > 1000
             || (self.phase.is_none() && self.progress_per_mille != 0)
         {
@@ -190,6 +196,7 @@ impl LocalEditingJobSnapshot {
                 self.phase.is_none()
                     && self.progress_per_mille == 0
                     && self.worker_generation == 0
+                    && self.recovery_attempts == 0
                     && self.failure_code.is_none()
                     && self.output_artifact_id.is_none()
             }
@@ -235,6 +242,7 @@ struct StoredLocalEditingJob {
     progress_per_mille: u16,
     project_id: String,
     revision: u64,
+    recovery_attempts: u32,
     schema_version: String,
     status: LocalEditingJobStatus,
     timeline_id: String,
@@ -259,6 +267,7 @@ impl TryFrom<StoredLocalEditingJob> for LocalEditingJobSnapshot {
             progress_per_mille: value.progress_per_mille,
             worker_generation: value.worker_generation,
             revision: value.revision,
+            recovery_attempts: value.recovery_attempts,
             failure_code: value.failure_code,
             output_artifact_id: value
                 .output_artifact_id
@@ -283,6 +292,7 @@ impl From<&LocalEditingJobSnapshot> for StoredLocalEditingJob {
             progress_per_mille: value.progress_per_mille,
             project_id: value.project_id.hyphenated().to_string(),
             revision: value.revision,
+            recovery_attempts: value.recovery_attempts,
             schema_version: SCHEMA_VERSION.to_owned(),
             status: value.status,
             timeline_id: value.timeline_id.hyphenated().to_string(),
@@ -303,6 +313,26 @@ pub enum LocalEditingJobSchedulerErrorCode {
     Conflict,
     StateUnavailable,
     WorkerUnavailable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LocalEditingJobRecoveryPolicy {
+    maximum_recoveries: u32,
+}
+
+impl LocalEditingJobRecoveryPolicy {
+    pub fn new(maximum_recoveries: u32) -> Result<Self, LocalEditingJobSchedulerError> {
+        if maximum_recoveries > 8 {
+            return Err(LocalEditingJobSchedulerError::new(
+                LocalEditingJobSchedulerErrorCode::ConfigurationInvalid,
+            ));
+        }
+        Ok(Self { maximum_recoveries })
+    }
+
+    pub const fn maximum_recoveries(self) -> u32 {
+        self.maximum_recoveries
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -431,6 +461,44 @@ impl LocalEditingJobScheduler {
         else {
             return Ok(None);
         };
+        self.persist_event(store, orchestrator, job_id, event)
+            .map(Some)
+    }
+
+    pub fn poll_with_recovery(
+        &self,
+        store: &VideoJobWorkspaceStore,
+        orchestrator: &LocalVideoOrchestrator,
+        job_id: Uuid,
+        policy: LocalEditingJobRecoveryPolicy,
+    ) -> Result<Option<LocalEditingJobSnapshot>, LocalEditingJobSchedulerError> {
+        let _guard = self.lock()?;
+        match orchestrator.try_local_editing_event(job_id) {
+            Ok(Some(event)) => self
+                .persist_event(store, orchestrator, job_id, event)
+                .map(Some),
+            Ok(None) => Ok(None),
+            Err(error)
+                if matches!(
+                    error.code(),
+                    VideoWorkerErrorCode::NotRunning | VideoWorkerErrorCode::ProcessUnavailable
+                ) =>
+            {
+                let current = self.ledger.load(store, job_id).map_err(map_ledger_error)?;
+                self.reconcile_loaded(store, orchestrator, current, policy)
+                    .map(Some)
+            }
+            Err(error) => Err(map_worker_error(error)),
+        }
+    }
+
+    fn persist_event(
+        &self,
+        store: &VideoJobWorkspaceStore,
+        orchestrator: &LocalVideoOrchestrator,
+        job_id: Uuid,
+        event: VideoWorkerLocalEditingEvent,
+    ) -> Result<LocalEditingJobSnapshot, LocalEditingJobSchedulerError> {
         let snapshot = self
             .ledger
             .apply_event(store, job_id, &event)
@@ -441,7 +509,7 @@ impl LocalEditingJobScheduler {
             // impossible, but must not hide the already-durable terminal fact.
             let _ = orchestrator.finish_local_editing_job(job_id);
         }
-        Ok(Some(snapshot))
+        Ok(snapshot)
     }
 
     pub fn request_cancel(
@@ -511,6 +579,111 @@ impl LocalEditingJobScheduler {
             .map_err(map_ledger_error)
     }
 
+    pub fn reconcile_job(
+        &self,
+        store: &VideoJobWorkspaceStore,
+        orchestrator: &LocalVideoOrchestrator,
+        job_id: Uuid,
+        policy: LocalEditingJobRecoveryPolicy,
+    ) -> Result<LocalEditingJobSnapshot, LocalEditingJobSchedulerError> {
+        let _guard = self.lock()?;
+        let current = self.ledger.load(store, job_id).map_err(map_ledger_error)?;
+        self.reconcile_loaded(store, orchestrator, current, policy)
+    }
+
+    pub fn reconcile_all(
+        &self,
+        store: &VideoJobWorkspaceStore,
+        orchestrator: &LocalVideoOrchestrator,
+        policy: LocalEditingJobRecoveryPolicy,
+    ) -> Result<Vec<LocalEditingJobSnapshot>, LocalEditingJobSchedulerError> {
+        let _guard = self.lock()?;
+        let workspaces = store
+            .list_workspaces()
+            .map_err(map_workspace_error)
+            .map_err(map_ledger_error)?;
+        let mut candidates = Vec::new();
+        for workspace in workspaces {
+            let current = match self.ledger.load(store, workspace.job_id()) {
+                Ok(snapshot) => snapshot,
+                Err(error) if error.code() == LocalEditingJobLedgerErrorCode::NotFound => continue,
+                Err(error) => return Err(map_ledger_error(error)),
+            };
+            candidates.push(current);
+        }
+        let mut snapshots = Vec::with_capacity(candidates.len());
+        for current in candidates {
+            snapshots.push(self.reconcile_loaded(store, orchestrator, current, policy)?);
+        }
+        Ok(snapshots)
+    }
+
+    fn reconcile_loaded(
+        &self,
+        store: &VideoJobWorkspaceStore,
+        orchestrator: &LocalVideoOrchestrator,
+        current: LocalEditingJobSnapshot,
+        policy: LocalEditingJobRecoveryPolicy,
+    ) -> Result<LocalEditingJobSnapshot, LocalEditingJobSchedulerError> {
+        let job_id = current.job_id;
+        if current.status.is_terminal() || current.status == LocalEditingJobStatus::Queued {
+            return Ok(current);
+        }
+
+        let worker = match orchestrator.status(VideoWorkerKind::Python) {
+            Ok(worker) => worker,
+            Err(_) => {
+                return self
+                    .ledger
+                    .fail_worker_lost(store, job_id)
+                    .map_err(map_ledger_error);
+            }
+        };
+        let owner = match orchestrator.local_editing_job_owner() {
+            Ok(owner) => owner,
+            Err(_) => {
+                return self
+                    .ledger
+                    .fail_worker_lost(store, job_id)
+                    .map_err(map_ledger_error);
+            }
+        };
+        if owner == Some(job_id) {
+            return Ok(current);
+        }
+        if current.status == LocalEditingJobStatus::Cancelling
+            || worker.state() != VideoWorkerState::Running
+            || owner.is_some()
+            || current.recovery_attempts >= policy.maximum_recoveries()
+        {
+            return self
+                .ledger
+                .fail_worker_lost(store, job_id)
+                .map_err(map_ledger_error);
+        }
+
+        let recovered = self
+            .ledger
+            .prepare_recovery(store, job_id, u32::from(worker.restart_count()))
+            .map_err(map_ledger_error)?;
+        let request = VideoWorkerLocalEditingJobRequest::new(
+            recovered.project_id,
+            recovered.timeline_id,
+            recovered.timeline_revision,
+        )
+        .map_err(map_worker_error)?;
+        if orchestrator
+            .start_local_editing_job(job_id, &request)
+            .is_err()
+        {
+            return self
+                .ledger
+                .fail_worker_lost(store, job_id)
+                .map_err(map_ledger_error);
+        }
+        Ok(recovered)
+    }
+
     fn lock(&self) -> Result<MutexGuard<'_, ()>, LocalEditingJobSchedulerError> {
         self.gate.lock().map_err(|_| scheduler_state_unavailable())
     }
@@ -552,6 +725,7 @@ impl LocalEditingJobLedger {
             phase: None,
             progress_per_mille: 0,
             worker_generation: 0,
+            recovery_attempts: 0,
             revision: 1,
             failure_code: None,
             output_artifact_id: None,
@@ -660,6 +834,32 @@ impl LocalEditingJobLedger {
             let mut next = current;
             next.status = LocalEditingJobStatus::Failed;
             next.failure_code = Some(LocalEditingJobFailureCode::WorkerLost);
+            next.bumped()
+        })
+    }
+
+    fn prepare_recovery(
+        &self,
+        store: &VideoJobWorkspaceStore,
+        job_id: Uuid,
+        observed_worker_generation: u32,
+    ) -> Result<LocalEditingJobSnapshot, LocalEditingJobLedgerError> {
+        self.mutate(store, job_id, |current| {
+            if current.status != LocalEditingJobStatus::Running {
+                return Err(conflict());
+            }
+            let mut next = current;
+            next.worker_generation = next
+                .worker_generation
+                .checked_add(1)
+                .ok_or_else(data_rejected)?
+                .max(observed_worker_generation);
+            next.recovery_attempts = next
+                .recovery_attempts
+                .checked_add(1)
+                .ok_or_else(data_rejected)?;
+            next.phase = None;
+            next.progress_per_mille = 0;
             next.bumped()
         })
     }

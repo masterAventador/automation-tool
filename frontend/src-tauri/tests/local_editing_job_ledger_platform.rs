@@ -97,3 +97,43 @@ fn native_platform_reopens_and_cancels_a_never_dispatched_job() {
         cancelled,
     );
 }
+
+#[test]
+fn startup_reconciliation_enumerates_only_local_editing_checkpoints() {
+    let app_data = TemporaryAppData::new();
+    let store = store(&app_data.path);
+    let scheduler = LocalEditingJobScheduler::new();
+    let job_id = Uuid::parse_str("123e4567-e89b-42d3-a456-426614174100").expect("job ID");
+    let foreign_job_id =
+        Uuid::parse_str("523e4567-e89b-42d3-a456-426614174104").expect("foreign job ID");
+    let request = VideoWorkerLocalEditingJobRequest::new(
+        Uuid::parse_str("223e4567-e89b-42d3-a456-426614174101").expect("project ID"),
+        Uuid::parse_str("323e4567-e89b-42d3-a456-426614174102").expect("timeline ID"),
+        7,
+    )
+    .expect("editing request");
+    scheduler
+        .create(&store, job_id, &request)
+        .expect("persist local editing job");
+    store
+        .create(foreign_job_id)
+        .expect("unrelated workspace without editing checkpoint");
+    let orchestrator =
+        automation_tool_desktop_lib::local_video_orchestrator::LocalVideoOrchestrator::new(
+            std::time::Duration::from_secs(1),
+            std::time::Duration::from_secs(1),
+        )
+        .expect("orchestrator");
+
+    let reconciled = scheduler
+        .reconcile_all(
+            &store,
+            &orchestrator,
+            automation_tool_desktop_lib::local_editing_job_ledger::LocalEditingJobRecoveryPolicy::new(2)
+                .expect("recovery policy"),
+        )
+        .expect("enumerate local editing checkpoints");
+    assert_eq!(reconciled.len(), 1);
+    assert_eq!(reconciled[0].job_id(), job_id);
+    assert_eq!(reconciled[0].status(), LocalEditingJobStatus::Queued);
+}

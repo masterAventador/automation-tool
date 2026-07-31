@@ -7,7 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use automation_tool_desktop_lib::local_editing_job_ledger::{
-    LocalEditingJobScheduler, LocalEditingJobStatus,
+    LocalEditingJobFailureCode, LocalEditingJobRecoveryPolicy, LocalEditingJobScheduler,
+    LocalEditingJobStatus,
 };
 use automation_tool_desktop_lib::local_video_orchestrator::{
     LocalVideoOrchestrator, VideoWorkerErrorCode, VideoWorkerKind, VideoWorkerLaunch,
@@ -253,7 +254,10 @@ fn editing_worker(outcome: &str) -> String {
         .expect("healthy Worker command loop")
         .0;
     format!(
-        r#"{prefix}def command_proof(command, job_id, detail=None):
+        r#"{prefix}import os, pathlib
+crash_marker = pathlib.Path(bootstrap["assetRoot"]) / "editing-crashed-once"
+
+def command_proof(command, job_id, detail=None):
     parts = [command, kind, protocol, job_id]
     if detail is not None:
         parts.append(detail)
@@ -281,6 +285,10 @@ def editing_event(event, job_id, detail, **facts):
     print(json.dumps(body, separators=(",", ":")), flush=True)
 
 outcome = {outcome:?}
+bootstrap_crash_marker = pathlib.Path(bootstrap["assetRoot"]) / "editing-bootstrap-crashed-once"
+if outcome == "precrashed-then-crash-once" and not bootstrap_crash_marker.exists():
+    bootstrap_crash_marker.write_text("crashed", encoding="utf-8")
+    os._exit(18)
 active_job = None
 for line in sys.stdin:
     command = json.loads(line)
@@ -298,7 +306,10 @@ for line in sys.stdin:
             "worker.editing.progress", job_id, job_id + "\0" + "preparing" + "\0" + "0",
             phase="preparing", progressPermille=0,
         )
-        if outcome == "success":
+        if outcome in ("crash-once", "precrashed-then-crash-once") and not crash_marker.exists():
+            crash_marker.write_text("crashed", encoding="utf-8")
+            os._exit(17)
+        if outcome in ("success", "crash-once", "precrashed-then-crash-once"):
             editing_event(
                 "worker.editing.progress", job_id, job_id + "\0" + "rendering" + "\0" + "600",
                 phase="rendering", progressPermille=600,
@@ -512,6 +523,302 @@ fn app_scheduler_persists_each_worker_event_before_exposing_it() {
         succeeded.output_artifact_id(),
         Some(Uuid::parse_str("423e4567-e89b-42d3-a456-426614174103").expect("artifact ID"))
     );
+}
+
+#[test]
+fn app_scheduler_recovers_a_crashed_worker_once_from_the_durable_generation() {
+    let fixture = TemporaryWorker::new(&editing_worker("crash-once"));
+    let store = editing_store(&fixture.root);
+    let orchestrator = orchestrator();
+    let scheduler = LocalEditingJobScheduler::new();
+    let recovery = LocalEditingJobRecoveryPolicy::new(2).expect("recovery policy");
+    orchestrator
+        .start(editing_launch(&fixture))
+        .expect("start crash-once Worker");
+    scheduler
+        .create(&store, editing_job_id(), &editing_request())
+        .expect("persist queued job");
+    scheduler
+        .dispatch(&store, &orchestrator, editing_job_id())
+        .expect("dispatch first generation");
+    let preparing = next_durable_editing_snapshot(&scheduler, &store, &orchestrator);
+    assert_eq!(preparing.progress_per_mille(), 0);
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let status = orchestrator
+            .status(VideoWorkerKind::Python)
+            .expect("restart crashed Worker");
+        if status.restart_count() == 1 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "crashed Worker was not replaced");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let recovered = scheduler
+        .reconcile_job(&store, &orchestrator, editing_job_id(), recovery)
+        .expect("reconcile replacement Worker");
+    assert_eq!(recovered.status(), LocalEditingJobStatus::Running);
+    assert_eq!(recovered.worker_generation(), 1);
+    assert_eq!(recovered.recovery_attempts(), 1);
+
+    let mut terminal = recovered;
+    while !matches!(terminal.status(), LocalEditingJobStatus::Succeeded) {
+        terminal = next_durable_editing_snapshot(&scheduler, &store, &orchestrator);
+    }
+    assert_eq!(terminal.status(), LocalEditingJobStatus::Succeeded);
+    assert_eq!(terminal.worker_generation(), 1);
+}
+
+#[test]
+fn a_new_app_scheduler_reconciles_persisted_running_but_not_terminal_jobs() {
+    let fixture = TemporaryWorker::new(&editing_worker("hold"));
+    let store = editing_store(&fixture.root);
+    let first_orchestrator = orchestrator();
+    let first_scheduler = LocalEditingJobScheduler::new();
+    first_orchestrator
+        .start(editing_launch(&fixture))
+        .expect("start first App Worker");
+    first_scheduler
+        .create(&store, editing_job_id(), &editing_request())
+        .expect("persist queued job");
+    first_scheduler
+        .dispatch(&store, &first_orchestrator, editing_job_id())
+        .expect("dispatch first App job");
+    next_durable_editing_snapshot(&first_scheduler, &store, &first_orchestrator);
+    drop(first_orchestrator);
+    drop(first_scheduler);
+
+    fs::write(&fixture.executable, editing_worker("success"))
+        .expect("replace fixture for the restarted App");
+    let restarted_orchestrator = orchestrator();
+    restarted_orchestrator
+        .start(editing_launch(&fixture))
+        .expect("start replacement App Worker");
+    let restarted_scheduler = LocalEditingJobScheduler::new();
+    let recovery = LocalEditingJobRecoveryPolicy::new(2).expect("recovery policy");
+    let recovered = restarted_scheduler
+        .reconcile_job(&store, &restarted_orchestrator, editing_job_id(), recovery)
+        .expect("reconcile after App restart");
+    assert_eq!(recovered.status(), LocalEditingJobStatus::Running);
+    assert_eq!(recovered.worker_generation(), 1);
+    assert_eq!(recovered.recovery_attempts(), 1);
+
+    let mut terminal = recovered;
+    while terminal.status() != LocalEditingJobStatus::Succeeded {
+        terminal =
+            next_durable_editing_snapshot(&restarted_scheduler, &store, &restarted_orchestrator);
+    }
+    let unchanged = restarted_scheduler
+        .reconcile_job(&store, &restarted_orchestrator, editing_job_id(), recovery)
+        .expect("terminal reconciliation is idempotent");
+    assert_eq!(unchanged, terminal);
+}
+
+#[test]
+fn recovery_budget_and_abandoned_cancellation_converge_to_worker_lost() {
+    let fixture = TemporaryWorker::new(&editing_worker("hold"));
+    let store = editing_store(&fixture.root);
+    let first_orchestrator = orchestrator();
+    let scheduler = LocalEditingJobScheduler::new();
+    first_orchestrator
+        .start(editing_launch(&fixture))
+        .expect("start first Worker");
+    scheduler
+        .create(&store, editing_job_id(), &editing_request())
+        .expect("persist queued job");
+    scheduler
+        .dispatch(&store, &first_orchestrator, editing_job_id())
+        .expect("dispatch job");
+    next_durable_editing_snapshot(&scheduler, &store, &first_orchestrator);
+    drop(first_orchestrator);
+
+    let restarted = orchestrator();
+    restarted
+        .start(editing_launch(&fixture))
+        .expect("start replacement Worker");
+    let no_recovery = LocalEditingJobRecoveryPolicy::new(0).expect("zero recovery budget");
+    let exhausted = LocalEditingJobScheduler::new()
+        .reconcile_job(&store, &restarted, editing_job_id(), no_recovery)
+        .expect("budget exhaustion is a durable terminal outcome");
+    assert_eq!(exhausted.status(), LocalEditingJobStatus::Failed);
+    assert_eq!(
+        exhausted.failure_code(),
+        Some(LocalEditingJobFailureCode::WorkerLost)
+    );
+
+    let other_root = TemporaryWorker::new(&editing_worker("hold"));
+    let other_store = editing_store(&other_root.root);
+    let cancelling_worker = orchestrator();
+    let cancelling_scheduler = LocalEditingJobScheduler::new();
+    cancelling_worker
+        .start(editing_launch(&other_root))
+        .expect("start cancellable Worker");
+    cancelling_scheduler
+        .create(&other_store, editing_job_id(), &editing_request())
+        .expect("persist second queued job");
+    cancelling_scheduler
+        .dispatch(&other_store, &cancelling_worker, editing_job_id())
+        .expect("dispatch second job");
+    next_durable_editing_snapshot(&cancelling_scheduler, &other_store, &cancelling_worker);
+    let cancelling = cancelling_scheduler
+        .request_cancel(&other_store, &cancelling_worker, editing_job_id())
+        .expect("persist cancellation latch");
+    assert_eq!(cancelling.status(), LocalEditingJobStatus::Cancelling);
+    drop(cancelling_worker);
+
+    let replacement = orchestrator();
+    replacement
+        .start(editing_launch(&other_root))
+        .expect("start Worker after abandoned cancellation");
+    let abandoned = LocalEditingJobScheduler::new()
+        .reconcile_job(
+            &other_store,
+            &replacement,
+            editing_job_id(),
+            LocalEditingJobRecoveryPolicy::new(2).unwrap(),
+        )
+        .expect("abandoned cancellation is reconciled");
+    assert_eq!(abandoned.status(), LocalEditingJobStatus::Failed);
+    assert_eq!(
+        abandoned.failure_code(),
+        Some(LocalEditingJobFailureCode::WorkerLost)
+    );
+}
+
+#[test]
+fn replacement_start_failure_is_persisted_as_worker_lost() {
+    let fixture = TemporaryWorker::new(&editing_worker("crash-once"));
+    let store = editing_store(&fixture.root);
+    let orchestrator = orchestrator();
+    let scheduler = LocalEditingJobScheduler::new();
+    orchestrator
+        .start(editing_launch(&fixture))
+        .expect("start crash-once Worker");
+    scheduler
+        .create(&store, editing_job_id(), &editing_request())
+        .expect("persist queued job");
+    scheduler
+        .dispatch(&store, &orchestrator, editing_job_id())
+        .expect("dispatch crash-once job");
+    next_durable_editing_snapshot(&scheduler, &store, &orchestrator);
+    fs::write(
+        &fixture.executable,
+        "#!/usr/bin/env python3\nraise SystemExit(17)\n",
+    )
+    .expect("make replacement fail before ready");
+    std::thread::sleep(Duration::from_millis(100));
+
+    let failed = scheduler
+        .reconcile_job(
+            &store,
+            &orchestrator,
+            editing_job_id(),
+            LocalEditingJobRecoveryPolicy::new(2).unwrap(),
+        )
+        .expect("replacement failure becomes a durable job failure");
+    assert_eq!(failed.status(), LocalEditingJobStatus::Failed);
+    assert_eq!(
+        failed.failure_code(),
+        Some(LocalEditingJobFailureCode::WorkerLost)
+    );
+}
+
+#[test]
+fn worker_restarts_before_dispatch_do_not_consume_the_job_recovery_budget() {
+    let fixture = TemporaryWorker::new(&editing_worker("precrashed-then-crash-once"));
+    let store = editing_store(&fixture.root);
+    let orchestrator = orchestrator();
+    let scheduler = LocalEditingJobScheduler::new();
+    orchestrator
+        .start(editing_launch(&fixture))
+        .expect("start pre-crashing Worker");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let status = orchestrator
+            .status(VideoWorkerKind::Python)
+            .expect("replace Worker before dispatch");
+        if status.restart_count() == 1 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "pre-dispatch crash timed out");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    scheduler
+        .create(&store, editing_job_id(), &editing_request())
+        .expect("persist queued job");
+    let dispatched = scheduler
+        .dispatch(&store, &orchestrator, editing_job_id())
+        .expect("dispatch after a prior Worker restart");
+    assert_eq!(dispatched.worker_generation(), 1);
+    next_durable_editing_snapshot(&scheduler, &store, &orchestrator);
+    loop {
+        let status = orchestrator
+            .status(VideoWorkerKind::Python)
+            .expect("replace Worker after job crash");
+        if status.restart_count() == 2 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "in-job crash timed out");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    let recovered = scheduler
+        .reconcile_job(
+            &store,
+            &orchestrator,
+            editing_job_id(),
+            LocalEditingJobRecoveryPolicy::new(1).expect("one job recovery"),
+        )
+        .expect("pre-job restarts do not spend the job budget");
+    assert_eq!(recovered.status(), LocalEditingJobStatus::Running);
+    assert_eq!(recovered.worker_generation(), 2);
+    assert_eq!(recovered.recovery_attempts(), 1);
+}
+
+#[test]
+fn recovery_aware_poll_replaces_a_crashed_worker_without_external_status_calls() {
+    let fixture = TemporaryWorker::new(&editing_worker("crash-once"));
+    let store = editing_store(&fixture.root);
+    let orchestrator = orchestrator();
+    let scheduler = LocalEditingJobScheduler::new();
+    let policy = LocalEditingJobRecoveryPolicy::new(2).expect("recovery policy");
+    orchestrator
+        .start(editing_launch(&fixture))
+        .expect("start crash-once Worker");
+    scheduler
+        .create(&store, editing_job_id(), &editing_request())
+        .expect("persist queued job");
+    scheduler
+        .dispatch(&store, &orchestrator, editing_job_id())
+        .expect("dispatch crash-once job");
+    next_durable_editing_snapshot(&scheduler, &store, &orchestrator);
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let recovered = loop {
+        let candidate = scheduler
+            .poll_with_recovery(&store, &orchestrator, editing_job_id(), policy)
+            .expect("poll or recover crashed Worker");
+        if let Some(snapshot) = candidate {
+            if snapshot.recovery_attempts() == 1 {
+                break snapshot;
+            }
+        }
+        assert!(Instant::now() < deadline, "recovery-aware poll timed out");
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    assert_eq!(recovered.status(), LocalEditingJobStatus::Running);
+    assert_eq!(recovered.worker_generation(), 1);
+
+    let mut terminal = recovered;
+    while terminal.status() != LocalEditingJobStatus::Succeeded {
+        terminal = scheduler
+            .poll_with_recovery(&store, &orchestrator, editing_job_id(), policy)
+            .expect("continue recovered job")
+            .unwrap_or(terminal);
+    }
+    assert_eq!(terminal.recovery_attempts(), 1);
 }
 
 #[test]

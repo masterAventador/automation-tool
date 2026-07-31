@@ -8,10 +8,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use automation_tool_desktop_lib::local_editing_job_ledger::{
     LocalEditingJobFailureCode, LocalEditingJobLedger, LocalEditingJobLedgerErrorCode,
+    LocalEditingJobRecoveryPolicy, LocalEditingJobScheduler, LocalEditingJobSchedulerErrorCode,
     LocalEditingJobStatus,
 };
 use automation_tool_desktop_lib::local_video_orchestrator::{
-    VideoWorkerLocalEditingEvent, VideoWorkerLocalEditingFailureCode,
+    LocalVideoOrchestrator, VideoWorkerLocalEditingEvent, VideoWorkerLocalEditingFailureCode,
     VideoWorkerLocalEditingJobRequest, VideoWorkerLocalEditingPhase,
 };
 use automation_tool_desktop_lib::video_job_workspace::{
@@ -326,6 +327,40 @@ fn checkpoint_with_broad_permissions_or_excess_size_fails_closed() {
             .expect_err("oversized checkpoint must fail closed")
             .code(),
         LocalEditingJobLedgerErrorCode::StorageUnavailable,
+    );
+}
+
+#[test]
+fn startup_reconciliation_preflights_every_checkpoint_before_mutating_any_job() {
+    let app_data = TemporaryAppData::new();
+    let store = store(&app_data.path);
+    let ledger = LocalEditingJobLedger::new();
+    let running = ledger.create(&store, job_id(), &request()).unwrap();
+    assert_eq!(running.status(), LocalEditingJobStatus::Queued);
+    let running = ledger.mark_running(&store, job_id(), 0).unwrap();
+    ledger.create(&store, other_job_id(), &request()).unwrap();
+    fs::write(checkpoint(&app_data.path, other_job_id()), b"{")
+        .expect("corrupt the later checkpoint");
+    let orchestrator = LocalVideoOrchestrator::new(
+        std::time::Duration::from_secs(1),
+        std::time::Duration::from_secs(1),
+    )
+    .expect("orchestrator");
+
+    let error = LocalEditingJobScheduler::new()
+        .reconcile_all(
+            &store,
+            &orchestrator,
+            LocalEditingJobRecoveryPolicy::new(2).unwrap(),
+        )
+        .expect_err("one corrupt checkpoint aborts the reconciliation set");
+    assert_eq!(
+        error.code(),
+        LocalEditingJobSchedulerErrorCode::StateUnavailable
+    );
+    assert_eq!(
+        ledger.load(&store, job_id()).expect("first job unchanged"),
+        running,
     );
 }
 
