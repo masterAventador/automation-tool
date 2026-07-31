@@ -73,27 +73,27 @@ def set_status(text: str, task_id: str, status: str) -> str:
     raise AssertionError(f"no row for {task_id}")
 
 
-def an_unfinished_task(text: str) -> str:
-    """A task whose evidence file does not claim completion.
+def contradict_evidence_status(text: str) -> str:
+    """Change one row to a status its evidence file does not declare.
 
-    Used to build the "ledger says done, evidence says otherwise" tamper. The
-    gate compares the two, so the tamper only bites on a task that has not
-    finished yet — and which task that is changes as the work proceeds.
+    Prefer the historical tamper — claim that an unfinished task is done — while
+    work remains. Once the roadmap reaches its legitimate all-finished terminal
+    state, invert the same mismatch: claim that a completed task is awaiting
+    acceptance even though its evidence says completed.
     """
+    first_completed: str | None = None
     for line in text.splitlines():
         if not line.startswith("| PC-"):
             continue
         fields = [field.strip() for field in line.strip().split("|")[1:-1]]
         task_id, status = fields[0], fields[4]
-        if status == "✅ 已完成":
-            continue
-        evidence = EVIDENCE_ROOT / f"{task_id}.md"
-        if evidence.is_file() and "> 状态：**已完成**" not in evidence.read_text(encoding="utf-8"):
-            return task_id
-    raise AssertionError(
-        "every task is finished, so this tamper can no longer be built; "
-        "replace it with one that does not depend on unfinished work"
-    )
+        if status != "✅ 已完成":
+            return set_status(text, task_id, "✅ 已完成")
+        if first_completed is None:
+            first_completed = task_id
+    if first_completed is None:
+        raise AssertionError("the ledger has no task row to tamper")
+    return set_status(text, first_completed, "🔍 待验收")
 
 
 def main() -> int:
@@ -124,8 +124,8 @@ def main() -> int:
 
     expect_failure("completion record appended to the ledger", f"{text}\n## RED\n")
 
-    # The table says done while the evidence file says otherwise: the shape of
-    # the defect this whole gate exists for.
+    # The table's status disagrees with the evidence file: the shape of the
+    # defect this whole gate exists for.
     #
     # The target is *derived*, not named. Naming one (it used to be PC-06) makes
     # this case rot on the day that task legitimately finishes: the tamper then
@@ -133,8 +133,8 @@ def main() -> int:
     # self-test fails for a reason that has nothing to do with the gate. Which
     # is exactly what happened on 2026-07-29.
     expect_failure(
-        "finished task whose evidence does not say so",
-        set_status(text, an_unfinished_task(text), "✅ 已完成"),
+        "task whose evidence states a different status",
+        contradict_evidence_status(text),
     )
 
     print("product completion ledger tests passed")

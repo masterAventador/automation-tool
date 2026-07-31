@@ -79,16 +79,29 @@ async function waitForInstalledBinary(): Promise<void> {
   throw new Error("official Windows updater did not replace the installed App binary");
 }
 
+/**
+ * The acceptance package deliberately omits the production Executor and
+ * embedded browser, so it correctly boots to the startup repair screen. The
+ * updater replaces the installed package and must remain reachable there.
+ */
+async function openUpdateControls(mode: "workbench" | "repair"): Promise<void> {
+  if (mode === "repair") {
+    await browser.$("button=打开本地修复工具").click();
+    return;
+  }
+  await openSettings();
+}
+
 describe("H8-22 unsigned Windows NSIS package update acceptance", () => {
   it("drives the requested package scenario through the original App", async () => {
-    await waitForStartup();
+    const mode = await waitForStartup({ allowRepair: true });
     const scenario = process.env.H822_WINDOWS_SCENARIO;
 
     if (scenario === "optional-decisions") {
       await waitForText("发现新版本 0.2.0");
       await clickEnabledButton("稍后提醒");
       await waitForState("ready", "deferred");
-      await openSettings();
+      await openUpdateControls(mode);
       await browser.$("button=检查更新").click();
       await waitForText("发现新版本 0.2.0");
       await clickEnabledButton("跳过此版本");
@@ -129,7 +142,7 @@ describe("H8-22 unsigned Windows NSIS package update acceptance", () => {
       const failed = await waitForState("failed");
       assert.equal(failed.stage, "install");
       assert.equal(failed.code, "installation_failed");
-      await openSettings();
+      await openUpdateControls(mode);
       await waitForText("更新当前不可用");
       return;
     }

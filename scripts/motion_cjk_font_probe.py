@@ -258,6 +258,144 @@ def _evaluate(pipe: CdpPipe, session: str, expression: str, await_promise: bool 
     return result.get("result", {}).get("value")
 
 
+def measure_document_windows(
+    *,
+    browser: Path,
+    document: Path,
+    selectors: Sequence[str],
+    width: int,
+    height: int,
+    screenshot: Path | None,
+    seek_seconds: float = 0.0,
+    frames_directory: Path | None = None,
+    frame_times: Sequence[float] = (),
+) -> dict:
+    """Measure with native Playwright/CDP on Windows.
+
+    Chromium's remote-debugging pipe uses inherited file descriptors 3 and 4
+    on POSIX. Windows has no ``pass_fds``/``preexec_fn`` equivalent, so the
+    Playwright transport owns the native pipe and exposes the same CDP
+    ``CSS.getPlatformFontsForNode`` call through a session.
+    """
+    from playwright.sync_api import sync_playwright
+
+    workdir = Path(tempfile.mkdtemp(prefix="automation-tool-pc13-probe-"))
+    try:
+        with sync_playwright() as driver:
+            context = driver.chromium.launch_persistent_context(
+                user_data_dir=str(workdir / "profile"),
+                executable_path=str(browser),
+                headless=True,
+                offline=True,
+                viewport={"width": width, "height": height},
+                args=[
+                    flag
+                    for flag in _RENDER_FLAGS
+                    if flag not in {"--headless", "--remote-debugging-pipe"}
+                ],
+            )
+            page = context.pages[0] if context.pages else context.new_page()
+            client = context.new_cdp_session(page)
+            client.send("DOM.enable")
+            client.send("CSS.enable")
+            page.goto(document.resolve().as_uri(), wait_until="load")
+            page.evaluate("() => document.fonts.ready.then(() => true)")
+            loaded = page.evaluate(
+                "() => Array.from(document.fonts).map((face) => "
+                "[face.family, face.weight, face.status].join('/'))"
+            )
+
+            def seek(moment: float) -> None:
+                page.evaluate(
+                    """async (seconds) => {
+                      for (const timeline of Object.values(window.__timelines ?? {})) {
+                        if (timeline && typeof timeline.seek === 'function') {
+                          timeline.seek(seconds, false);
+                        }
+                      }
+                      await new Promise((resolve) => requestAnimationFrame(
+                        () => requestAnimationFrame(() => resolve(true))));
+                      return true;
+                    }""",
+                    moment,
+                )
+
+            seek(seek_seconds)
+            root = client.send("DOM.getDocument", {"depth": 1})["root"]["nodeId"]
+            measurements = []
+            for selector in selectors:
+                node = client.send(
+                    "DOM.querySelector", {"nodeId": root, "selector": selector}
+                ).get("nodeId")
+                if not node:
+                    measurements.append({"selector": selector, "error": "not-found"})
+                    continue
+                fonts = client.send(
+                    "CSS.getPlatformFontsForNode", {"nodeId": node}
+                ).get("fonts", [])
+                box = page.eval_on_selector(
+                    selector,
+                    """(element) => {
+                      const rect = element.getBoundingClientRect();
+                      return {
+                        text: element.textContent,
+                        width: Math.round(rect.width * 100) / 100,
+                        height: Math.round(rect.height * 100) / 100,
+                      };
+                    }""",
+                )
+                measurements.append(
+                    {
+                        "selector": selector,
+                        "text": box.get("text"),
+                        "width": box.get("width"),
+                        "height": box.get("height"),
+                        "fonts": fonts,
+                    }
+                )
+
+            def capture(target: Path) -> dict:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                data = page.screenshot(path=str(target))
+                return {
+                    "path": str(target),
+                    "bytes": len(data),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                }
+
+            captured = capture(screenshot) if screenshot is not None else None
+            frames_written: list[dict] = []
+            if frames_directory is not None and frame_times:
+                for index, moment in enumerate(frame_times):
+                    seek(moment)
+                    frames_written.append(
+                        capture(frames_directory / f"frame-{index:04d}.png")
+                    )
+
+            version = context.browser.version if context.browser else ""
+            return {
+                "browser": f"Chrome/{version}" if version else "",
+                "document": str(document),
+                "loadedFaces": loaded,
+                "measurements": measurements,
+                "screenshot": captured,
+                "frames": {
+                    "count": len(frames_written),
+                    "bytes": sum(frame["bytes"] for frame in frames_written),
+                    "distinctDigests": len(
+                        {frame["sha256"] for frame in frames_written}
+                    ),
+                }
+                if frames_written
+                else None,
+            }
+    finally:
+        # Leaving ``sync_playwright`` closes the persistent context and its
+        # browser before this outer cleanup runs. Calling ``context.close``
+        # here would address an already stopped Windows event loop.
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
 def measure_document(
     *, browser: Path, document: Path, selectors: Sequence[str], width: int, height: int,
     screenshot: Path | None, seek_seconds: float = 0.0,
@@ -270,6 +408,18 @@ def measure_document(
     drew. A claim about which typeface a part ends up with is checkable against
     that number and nothing else.
     """
+    if os.name == "nt":
+        return measure_document_windows(
+            browser=browser,
+            document=document,
+            selectors=selectors,
+            width=width,
+            height=height,
+            screenshot=screenshot,
+            seek_seconds=seek_seconds,
+            frames_directory=frames_directory,
+            frame_times=frame_times,
+        )
     workdir = Path(tempfile.mkdtemp(prefix="automation-tool-pc13-probe-"))
     # `--remote-debugging-pipe` speaks on the child's fd 3 (browser reads) and
     # fd 4 (browser writes), which `Popen` cannot wire directly.

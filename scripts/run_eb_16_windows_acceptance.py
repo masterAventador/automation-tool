@@ -560,9 +560,9 @@ def main() -> int:
         payload = build_directory / "payload"
         announce("Preparing the pinned video runtime resources (cached per machine)")
         video_runtime = prepare_video_runtime(platform="windows")
-        announce("Staging the digest-locked catalog of 134 animation parts")
+        announce("Staging the frozen catalog of animation parts")
         motion_catalog = stage_motion_catalog(
-            staging=build_directory / "catalog-staging"
+            staging=build_directory / "catalog"
         ).parent
         announce("Assembling the release payload, verifying it, then sealing")
         installed_video = install_video_runtime(
@@ -570,9 +570,7 @@ def main() -> int:
         )
         announce(f"Video runtime staged into the payload: {sorted(installed_video)}")
         installed_catalog = install_motion_catalog(
-            application=payload,
-            staging=motion_catalog,
-            platform="windows",
+            application=payload, staging=motion_catalog, platform="windows"
         )
         announce(
             f"Motion catalog staged into the payload: {sorted(installed_catalog)}"

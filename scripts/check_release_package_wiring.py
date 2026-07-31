@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Refuse a release path that would ship a package with a resource missing.
 
-This gate exists because of a specific failure. The production Rust code
-resolves five resource trees out of the packaged resource directory. Three of
+This gate exists because of a specific failure. The production code resolves
+six resource trees out of the packaged resource directory. Three of
 them were absent from a shipped macOS package, and nothing objected: the only
 path that assembled them was a step inside an acceptance script no workflow
 ran, and the package audit's only statement about `bundle.resources` was a
@@ -64,6 +64,8 @@ CATEGORY_BUILDERS = {
 REQUIRED_RELEASE_CALLS = (
     "install_video_runtime(",
     "require_packaged_video_runtime(",
+    "install_motion_catalog(",
+    "require_packaged_motion_catalog(",
     "install_and_seal(",
     "require_packaged_browser(",
     '"--package-root"',
