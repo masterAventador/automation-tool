@@ -527,7 +527,7 @@ impl VideoJobWorkspaceStore {
         if metadata.len() == 0 || metadata.len() > MAX_CHECKPOINT_BYTES {
             return Err(storage_unavailable());
         }
-        read_bounded_file(&path, metadata.len())
+        read_private_checkpoint(&path, metadata)
     }
 
     pub fn import_output(
@@ -1240,6 +1240,44 @@ fn read_bounded_file(path: &Path, expected_bytes: u64) -> Result<Vec<u8>, VideoW
         return Err(storage_unavailable());
     }
     Ok(payload)
+}
+
+fn read_private_checkpoint(
+    path: &Path,
+    expected: fs::Metadata,
+) -> Result<Vec<u8>, VideoWorkspaceError> {
+    require_private_file_metadata(&expected)?;
+    let expected_bytes = expected.len();
+    let capacity = usize::try_from(expected_bytes).map_err(|_| storage_unavailable())?;
+    let mut payload = Vec::with_capacity(capacity);
+    let file = open_read_no_follow(path)?;
+    let opened = file.metadata().map_err(|_| storage_unavailable())?;
+    if !same_file(&expected, &opened) {
+        return Err(storage_unavailable());
+    }
+    require_private_file_metadata(&opened)?;
+    file.take(expected_bytes.saturating_add(1))
+        .read_to_end(&mut payload)
+        .map_err(|_| storage_unavailable())?;
+    if payload.len() as u64 != expected_bytes {
+        return Err(storage_unavailable());
+    }
+    Ok(payload)
+}
+
+fn require_private_file_metadata(metadata: &fs::Metadata) -> Result<(), VideoWorkspaceError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o7777 != 0o600 {
+            return Err(storage_unavailable());
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+    }
+    Ok(())
 }
 
 fn ensure_free_space(

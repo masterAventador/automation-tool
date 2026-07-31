@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use automation_tool_desktop_lib::local_editing_job_ledger::{
+    LocalEditingJobScheduler, LocalEditingJobStatus,
+};
 use automation_tool_desktop_lib::local_video_orchestrator::{
     LocalVideoOrchestrator, VideoWorkerErrorCode, VideoWorkerKind, VideoWorkerLaunch,
     VideoWorkerLocalEditingEvent, VideoWorkerLocalEditingFailureCode,
@@ -17,6 +20,9 @@ use automation_tool_desktop_lib::local_video_orchestrator::{
 use automation_tool_desktop_lib::motion_video_studio::{
     cancel_marker_file_name, TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR, TEMPLATE_CANVAS_HEIGHT,
     TEMPLATE_CANVAS_WIDTH,
+};
+use automation_tool_desktop_lib::video_job_workspace::{
+    VideoJobWorkspacePolicy, VideoJobWorkspaceStore,
 };
 use uuid::Uuid;
 
@@ -374,6 +380,39 @@ fn editing_job_id() -> Uuid {
     Uuid::parse_str("123e4567-e89b-42d3-a456-426614174100").expect("editing job ID")
 }
 
+fn editing_store(root: &Path) -> VideoJobWorkspaceStore {
+    VideoJobWorkspaceStore::initialize(
+        root,
+        VideoJobWorkspacePolicy::new(16 * 1024 * 1024, 8 * 1024 * 1024, 8, 3600, 0)
+            .expect("workspace policy"),
+    )
+    .expect("workspace store")
+}
+
+fn next_durable_editing_snapshot(
+    scheduler: &LocalEditingJobScheduler,
+    store: &VideoJobWorkspaceStore,
+    orchestrator: &LocalVideoOrchestrator,
+) -> automation_tool_desktop_lib::local_editing_job_ledger::LocalEditingJobSnapshot {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if let Some(snapshot) = scheduler
+            .poll(store, orchestrator, editing_job_id())
+            .expect("authenticated event persisted before exposure")
+        {
+            assert_eq!(
+                LocalEditingJobScheduler::new()
+                    .snapshot(store, editing_job_id())
+                    .expect("reopen event from checkpoint"),
+                snapshot,
+            );
+            return snapshot;
+        }
+        assert!(Instant::now() < deadline, "durable editing event timed out");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
 fn next_editing_event(orchestrator: &LocalVideoOrchestrator) -> VideoWorkerLocalEditingEvent {
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
@@ -436,6 +475,42 @@ fn local_editing_progress_and_success_are_authenticated_and_monotonic() {
             .expect_err("finished job is no longer active")
             .code(),
         VideoWorkerErrorCode::ConfigurationInvalid,
+    );
+}
+
+#[test]
+fn app_scheduler_persists_each_worker_event_before_exposing_it() {
+    let fixture = TemporaryWorker::new(&editing_worker("success"));
+    let store = editing_store(&fixture.root);
+    let orchestrator = orchestrator();
+    let scheduler = LocalEditingJobScheduler::new();
+    orchestrator
+        .start(editing_launch(&fixture))
+        .expect("start editing Worker");
+    let queued = scheduler
+        .create(&store, editing_job_id(), &editing_request())
+        .expect("persist queued job");
+    assert_eq!(queued.status(), LocalEditingJobStatus::Queued);
+    let running = scheduler
+        .dispatch(&store, &orchestrator, editing_job_id())
+        .expect("persist dispatch before Worker command");
+    assert_eq!(running.status(), LocalEditingJobStatus::Running);
+
+    for (phase, progress) in [
+        (VideoWorkerLocalEditingPhase::Preparing, 0),
+        (VideoWorkerLocalEditingPhase::Rendering, 600),
+        (VideoWorkerLocalEditingPhase::Publishing, 1000),
+    ] {
+        let snapshot = next_durable_editing_snapshot(&scheduler, &store, &orchestrator);
+        assert_eq!(snapshot.status(), LocalEditingJobStatus::Running);
+        assert_eq!(snapshot.phase(), Some(phase));
+        assert_eq!(snapshot.progress_per_mille(), progress);
+    }
+    let succeeded = next_durable_editing_snapshot(&scheduler, &store, &orchestrator);
+    assert_eq!(succeeded.status(), LocalEditingJobStatus::Succeeded);
+    assert_eq!(
+        succeeded.output_artifact_id(),
+        Some(Uuid::parse_str("423e4567-e89b-42d3-a456-426614174103").expect("artifact ID"))
     );
 }
 
@@ -1810,6 +1885,9 @@ fn tauri_composition_root_owns_the_orchestrator_without_a_webview_command() {
     )
     .expect("Tauri composition root");
     assert!(source.contains("app.manage(local_video_orchestrator::LocalVideoOrchestrator::new("));
+    assert!(
+        source.contains("app.manage(local_editing_job_ledger::LocalEditingJobScheduler::new())")
+    );
     assert!(!source.contains("start_video_worker"));
     assert!(!source.contains("stop_video_worker"));
 }

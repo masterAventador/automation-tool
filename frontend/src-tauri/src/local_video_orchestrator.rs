@@ -262,9 +262,22 @@ impl VideoWorkerLocalEditingJobRequest {
     fn canonical_json(&self) -> Result<String, VideoWorkerError> {
         serde_json::to_string(&self.document()).map_err(|_| process_unavailable())
     }
+
+    pub(crate) const fn project_id(&self) -> Uuid {
+        self.project_id
+    }
+
+    pub(crate) const fn timeline_id(&self) -> Uuid {
+        self.timeline_id
+    }
+
+    pub(crate) const fn timeline_revision(&self) -> u32 {
+        self.timeline_revision
+    }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum VideoWorkerLocalEditingPhase {
     Preparing,
     Rendering,

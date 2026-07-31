@@ -22,6 +22,7 @@ pub mod executor_manager;
 pub mod executor_package;
 pub mod executor_platform;
 pub mod executor_protocol;
+pub mod local_editing_job_ledger;
 pub mod local_registration;
 pub mod local_video_orchestrator;
 mod managed_process_tree;
@@ -4548,6 +4549,7 @@ pub fn run() {
                 local_video_orchestrator::DEFAULT_VIDEO_WORKER_START_TIMEOUT,
                 local_video_orchestrator::DEFAULT_VIDEO_WORKER_REQUEST_TIMEOUT,
             )?);
+            app.manage(local_editing_job_ledger::LocalEditingJobScheduler::new());
             app_logging::record(app_logging::DesktopLogEvent::LocalServicesInitialized);
             app.manage(video_job_workspace::VideoJobWorkspaceStore::initialize(
                 &app_data_directory,
