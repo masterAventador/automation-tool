@@ -33,7 +33,8 @@ CHECKER = ROOT / "scripts" / "check_video_media_toolchain.py"
 
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from check_video_media_toolchain import (  # noqa: E402
+from check_video_media_toolchain import (
+    capability_output_contains,
     create_test_directory_link,
     remove_test_directory_link,
     validate_contract,
@@ -119,6 +120,19 @@ class DirectoryLinkFixture(unittest.TestCase):
                 (target / "keep.txt").is_file(),
                 "removing the link must not delete what it pointed at",
             )
+
+
+class ExactCapabilityProbe(unittest.TestCase):
+    def test_aliases_are_exact_and_similarly_named_filters_do_not_match(self) -> None:
+        self.assertTrue(
+            capability_output_contains(" D  mov,mp4,m4a  QuickTime\n", "mp4")
+        )
+        self.assertTrue(capability_output_contains(" ... xfade  VV->V\n", "xfade"))
+        self.assertTrue(capability_output_contains("  file\n", "file"))
+        self.assertFalse(
+            capability_output_contains(" ... xfade_opencl  VV->V\n", "xfade")
+        )
+        self.assertFalse(capability_output_contains("  profile\n", "file"))
 
 
 if __name__ == "__main__":

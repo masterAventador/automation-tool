@@ -302,6 +302,29 @@ def command_output(binary: Path, *arguments: str) -> str:
     return result.stdout + result.stderr
 
 
+def capability_output_contains(output: str, required: str) -> bool:
+    """Match one FFmpeg capability identifier, including comma aliases.
+
+    FFmpeg's tables put a compact uppercase/dot flag column before names while
+    the protocol table contains bare names.  Looking for a substring is not a
+    capability check: for example, a build with only ``xfade_opencl`` would
+    otherwise satisfy the required software ``xfade`` filter.
+    """
+    for line in output.splitlines():
+        columns = line.split()
+        if not columns:
+            continue
+        token = columns[0]
+        if len(columns) > 1 and all(
+            character == "." or character == "|" or character.isupper()
+            for character in token
+        ):
+            token = columns[1]
+        if required in token.split(","):
+            return True
+    return False
+
+
 def run_checked(binary: Path, *arguments: str) -> None:
     result = subprocess.run(
         [str(binary), *arguments],
@@ -519,7 +542,7 @@ def validate_candidate(root: Path, target_id: str, document: dict[str, Any]) -> 
         if group == "programs":
             continue
         for name in names:
-            if name not in probes[group]:
+            if not capability_output_contains(probes[group], name):
                 raise ContractError(f"candidate missing {group} capability: {name}")
     compatibility_smoke(ffmpeg, ffprobe)
 
