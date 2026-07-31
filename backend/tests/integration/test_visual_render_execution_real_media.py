@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 from uuid import uuid4
 
@@ -28,6 +29,7 @@ from automation_tool.protocol.local_rendering import (
     LocalEditingCaptionRenderStyle,
     LocalEditingVisualRenderClip,
     LocalEditingVisualRenderPlan,
+    LocalEditingVisualTransitionKind,
 )
 
 TOOLCHAIN_ROOT_ENVIRONMENT = "AUTOMATION_TOOL_LE10_TOOLCHAIN_ROOT"
@@ -248,3 +250,144 @@ def test_real_packaged_ffmpeg_wrong_frame_shape_is_rejected_before_publication(
 
     assert raised.value.code is VisualRenderExecutionRejection.OUTPUT_INVALID
     assert list(task.iterdir()) == []
+
+
+def test_real_public_execution_combines_video_images_transitions_and_caption(
+    tmp_path: Path,
+) -> None:
+    tools = _tools()
+    video = tmp_path / "video.mp4"
+    subprocess.run(
+        (
+            os.fspath(tools.ffmpeg_path),
+            "-y",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=s=320x180:r=20:d=1",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            os.fspath(video),
+        ),
+        check=True,
+    )
+    first_image = tmp_path / "first.png"
+    second_image = tmp_path / "second.png"
+    Image.new("RGB", (320, 180), (180, 30, 50)).save(first_image)
+    Image.new("RGB", (320, 180), (20, 150, 90)).save(second_image)
+    paths = (video, first_image, second_image)
+    approvals = tuple(approve_source(path)[1] for path in paths)
+    material_ids = (uuid4(), uuid4(), uuid4())
+    project_id = uuid4()
+    timeline_id = uuid4()
+    plan = LocalEditingVisualRenderPlan(
+        project_id=project_id,
+        timeline_id=timeline_id,
+        timeline_revision=1,
+        output_width=720,
+        output_height=1280,
+        output_fps=20,
+        duration_ms=1000,
+        clips=(
+            LocalEditingVisualRenderClip(
+                sequence=1,
+                material_id=material_ids[0],
+                kind=SegmentSelectionMaterialKind.VIDEO,
+                start_ms=0,
+                duration_ms=500,
+                source_in_ms=0,
+                source_out_ms=500,
+                transition_kind=None,
+                transition_duration_ms=None,
+            ),
+            LocalEditingVisualRenderClip(
+                sequence=2,
+                material_id=material_ids[1],
+                kind=SegmentSelectionMaterialKind.IMAGE,
+                start_ms=400,
+                duration_ms=400,
+                source_in_ms=None,
+                source_out_ms=None,
+                transition_kind=LocalEditingVisualTransitionKind.FADE,
+                transition_duration_ms=100,
+            ),
+            LocalEditingVisualRenderClip(
+                sequence=3,
+                material_id=material_ids[2],
+                kind=SegmentSelectionMaterialKind.IMAGE,
+                start_ms=700,
+                duration_ms=300,
+                source_in_ms=None,
+                source_out_ms=None,
+                transition_kind=LocalEditingVisualTransitionKind.DISSOLVE,
+                transition_duration_ms=100,
+            ),
+        ),
+    )
+    sources = tuple(
+        VisualRenderSourceBinding(
+            material_id=material_id,
+            kind=(
+                SegmentSelectionMaterialKind.VIDEO
+                if sequence == 0
+                else SegmentSelectionMaterialKind.IMAGE
+            ),
+            source_path=path,
+        )
+        for sequence, (material_id, path) in enumerate(
+            zip(material_ids, paths, strict=True)
+        )
+    )
+    caption_plan = LocalEditingCaptionRenderPlan(
+        project_id=project_id,
+        timeline_id=timeline_id,
+        timeline_revision=1,
+        output_width=720,
+        output_height=1280,
+        output_fps=20,
+        duration_ms=1000,
+        style=LocalEditingCaptionRenderStyle(
+            font_key="noto-sans-cjk-sc-bold",
+            font_px=36,
+            stroke_px=2,
+            line_spacing=1.2,
+        ),
+        cues=(
+            LocalEditingCaptionRenderCue(
+                sequence=1,
+                start_ms=250,
+                duration_ms=500,
+                text="视频图片连续转场",
+            ),
+        ),
+    )
+    task = tmp_path / "complex-task"
+    task.mkdir()
+
+    receipt = execute_visual_render(
+        tools,
+        plan,
+        sources,
+        approvals,
+        task,
+        caption_plan=caption_plan,
+    )
+
+    assert (receipt.width, receipt.height) == (720, 1280)
+    assert receipt.fps == 20
+    assert receipt.frame_count == 20
+    assert receipt.duration_ms == 1000
+    assert (task / VISUAL_RENDER_OUTPUT_FILENAME).stat().st_size == receipt.bytes_written
+    assert [path.name for path in task.iterdir()] == [VISUAL_RENDER_OUTPUT_FILENAME]
+    print(
+        "complexVisualReceipt="
+        f"h264,{receipt.width}x{receipt.height},{receipt.fps}fps,"
+        f"{receipt.frame_count}frames,{receipt.duration_ms}ms,"
+        f"{receipt.bytes_written}bytes,sha256={receipt.sha256}"
+    )
