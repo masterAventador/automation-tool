@@ -715,6 +715,24 @@ impl VideoWorkerLaunch {
         Ok(launch)
     }
 
+    /// Bind one validated script to a Python Worker runtime.
+    ///
+    /// This is single-assignment and switches the child to the same cleared
+    /// environment used by the bundled Node runtime. Native media-tool paths
+    /// remain on the authenticated bootstrap channel rather than argv.
+    pub fn with_python_entrypoint(mut self, entrypoint: PathBuf) -> Result<Self, VideoWorkerError> {
+        if self.kind != VideoWorkerKind::Python
+            || !self.arguments.is_empty()
+            || entrypoint == self.executable_path
+        {
+            return Err(configuration_invalid());
+        }
+        validate_regular_file_path(&entrypoint)?;
+        self.arguments.push(entrypoint.into_os_string());
+        self.isolated_environment = true;
+        Ok(self)
+    }
+
     /// Tell the Worker where a packaged native dependency lives.
     ///
     /// Both video engines resolve FFmpeg through an environment variable
