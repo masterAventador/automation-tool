@@ -47,7 +47,7 @@ from release_assembly import (  # noqa: E402
 STAGING_CONTRACT = REPOSITORY_ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
 DEFAULT_PACKAGE = (
     REPOSITORY_ROOT
-    / ".local/eb-16/run/cargo-target/release/bundle/macos/自动化运营工具.app"
+    / ".local/release/cargo-target/release/bundle/macos/自动化运营工具.app"
 )
 
 # 发布链路在真实内置浏览器上的全部用例。PB-08 换掉它们脚下的浏览器，不改断言。
