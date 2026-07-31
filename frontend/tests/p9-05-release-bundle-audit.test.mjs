@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createPrivateKey, generateKeyPairSync } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -182,6 +183,32 @@ test("P9-05 does not mistake null-terminated crypto format names for a private k
       platform: "windows",
     });
     assert.equal(result.fileCount, 5);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("P9-05 rejects a valid PEM private key whose header has trailing whitespace", async () => {
+  const fixture = await createBundle("windows");
+  try {
+    const { privateKey } = generateKeyPairSync("ed25519", {
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+      publicKeyEncoding: { type: "spki", format: "pem" },
+    });
+    const spaced = privateKey.replace(
+      "-----BEGIN PRIVATE KEY-----\n",
+      "-----BEGIN PRIVATE KEY----- \t\r\n",
+    );
+    assert.doesNotThrow(() => createPrivateKey(spaced));
+    await writeFile(join(fixture.bundle, "valid-private.pem"), spaced);
+    await assert.rejects(
+      auditReleaseBundle({
+        bundleRoot: fixture.bundle,
+        executorPackagePath: fixture.executor,
+        platform: "windows",
+      }),
+      /forbidden content marker/u,
+    );
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }

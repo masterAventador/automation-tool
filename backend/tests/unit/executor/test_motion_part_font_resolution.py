@@ -24,7 +24,6 @@ machine and fine on another, which is the class of drift BM-16 exists to remove.
 from __future__ import annotations
 
 import pytest
-
 from automation_tool.executor.motion_authoring.part_typography import (
     FamilyPolicy,
     FontRequestUnmet,
@@ -38,8 +37,18 @@ LOCK = {
     "stylesheets": [
         {
             "faces": [
-                {"family": "Inter", "weight": "400", "artifactPath": "fonts/inter-400.woff2"},
-                {"family": "Inter", "weight": "700", "artifactPath": "fonts/inter-700.woff2"},
+                {
+                    "family": "Inter",
+                    "weight": "400",
+                    "artifactPath": "fonts/inter-400.woff2",
+                    "unicodeRange": "U+0000-00FF",
+                },
+                {
+                    "family": "Inter",
+                    "weight": "700",
+                    "artifactPath": "fonts/inter-700.woff2",
+                    "unicodeRange": "U+0000-00FF",
+                },
             ]
         }
     ]
@@ -58,9 +67,7 @@ def test_the_scanner_reads_a_font_stack_written_as_entities() -> None:
     Scanning the raw bytes reads the entity as part of the family name, so the
     request is missed and the text silently falls back.
     """
-    pairs = requested_faces(
-        "<style>.a{font-family:&quot;Inter&quot;;font-weight:700}</style>"
-    )
+    pairs = requested_faces("<style>.a{font-family:&quot;Inter&quot;;font-weight:700}</style>")
     assert ("Inter", 700) in pairs
 
 
@@ -85,8 +92,8 @@ def test_each_requested_pair_becomes_a_latin_rule_and_a_chinese_one() -> None:
     assert css.count(CHINESE_ARTIFACT) == 2
 
 
-def test_the_basic_latin_subset_is_not_replaced_by_latin_ext() -> None:
-    """Google CSS lists latin-ext first; ASCII must still use packaged bytes."""
+def test_each_latin_subset_keeps_its_locked_unicode_range() -> None:
+    """ASCII and Latin Extended must both use the packaged family."""
     lock = {
         "stylesheets": [
             {
@@ -96,12 +103,14 @@ def test_the_basic_latin_subset_is_not_replaced_by_latin_ext() -> None:
                         "weight": "400",
                         "subset": "latin-ext",
                         "artifactPath": "fonts/inter-latin-ext.woff2",
+                        "unicodeRange": "U+0100-02BA",
                     },
                     {
                         "family": "Inter",
                         "weight": "400",
                         "subset": "latin",
                         "artifactPath": "fonts/inter-latin.woff2",
+                        "unicodeRange": "U+0000-00FF",
                     },
                 ]
             }
@@ -116,7 +125,9 @@ def test_the_basic_latin_subset_is_not_replaced_by_latin_ext() -> None:
     )
 
     assert "fonts/inter-latin.woff2" in css
-    assert "fonts/inter-latin-ext.woff2" not in css
+    assert "fonts/inter-latin-ext.woff2" in css
+    assert css.count("unicode-range:U+0000-00FF;") == 1
+    assert css.count("unicode-range:U+0100-02BA;") == 1
 
 
 def test_a_substituted_family_keeps_the_name_the_part_wrote() -> None:
@@ -193,7 +204,8 @@ def test_the_rules_can_be_built_from_the_packaged_contracts_alone() -> None:
 
     # And a real packaged family produces real rules pointing at real files.
     css = document_font_css("<style>.a{font-family:'Anton';font-weight:400}</style>")
-    assert css.count("@font-face") == 2
+    assert css.count("@font-face") == 3
+    assert "U+0100-02BA" in css
     assert "noto-sans-sc-variable-full.woff2" in css
 
 

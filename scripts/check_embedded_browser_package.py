@@ -125,16 +125,18 @@ RELEASE_PAYLOAD_PARTS_MIB: Final = {
 
 # The browser ceiling stays deliberately below two architectures so a
 # mixed-target package is rejected by weight alone. The package ceiling is the
-# declared payload plus a 10% margin: large enough for normal drift, small
-# enough that a duplicated browser, executor or video worker still trips it.
+# declared cross-platform maximum plus 64 MiB of headroom. That remains below
+# the smallest duplicable runtime tree (the 108 MiB motion worker), so a second
+# browser, executor or video worker cannot hide inside the package allowance.
+_RELEASE_PACKAGE_HEADROOM_MIB: Final = 64
 RELEASE_SIZE_BOUNDS: Final = PackageSizeBounds(
     min_browser_bytes=320 * _MEBIBYTE,
     max_browser_bytes=420 * _MEBIBYTE,
     min_package_bytes=340 * _MEBIBYTE,
     max_package_bytes=(
-        sum(RELEASE_PAYLOAD_PARTS_MIB.values()) * _MEBIBYTE * 11 + 9
+        sum(RELEASE_PAYLOAD_PARTS_MIB.values()) + _RELEASE_PACKAGE_HEADROOM_MIB
     )
-    // 10,
+    * _MEBIBYTE,
 )
 
 
