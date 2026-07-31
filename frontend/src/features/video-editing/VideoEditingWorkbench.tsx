@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, Button, Card, Empty, Input, Space, Tabs, Tag, Typography } from "antd";
 
@@ -57,11 +57,12 @@ const JOB_STATUS_LABELS: Record<EditingJobStatus, string> = {
   cancelled: "已取消",
 };
 
-const STORAGE_UNAVAILABLE_TEXT = "本机剪辑草稿暂时无法读取，请稍后重试。";
+const SERVICE_UNAVAILABLE_TEXT =
+  "本机剪辑服务暂时不可用，请确认本机服务正在运行后再试。";
 const INVALID_TIMELINE_TEXT =
   "时间轴还不完整：请确认每个画面或音频片段已填写素材引用、字幕片段已填写文字，并且时长为有效的毫秒数。";
-const SERVICE_UNAVAILABLE_TEXT =
-  "云端剪辑功能尚未开通：时间轴修订会保留在本机，接入云端剪辑服务后才能提交剪辑任务。";
+const OUTCOME_UNCERTAIN_TEXT =
+  "提交结果暂时无法确认。请刷新任务列表确认最终结果，在确认前不要再次提交。";
 
 interface ClipForm {
   readonly formId: string;
@@ -207,15 +208,21 @@ function MessageAlert({ message }: { readonly message: Message | null }) {
 
 function ProjectsPage({
   projects,
-  storageBroken,
+  loaded,
+  loading,
+  creating,
   onCreate,
   onOpen,
+  onRefresh,
   message,
 }: {
   readonly projects: readonly EditingProjectSnapshot[];
-  readonly storageBroken: boolean;
+  readonly loaded: boolean;
+  readonly loading: boolean;
+  readonly creating: boolean;
   readonly onCreate: (title: string) => void;
   readonly onOpen: (projectId: string) => void;
+  readonly onRefresh: () => void;
   readonly message: Message | null;
 }) {
   const [title, setTitle] = useState("");
@@ -249,18 +256,30 @@ function ProjectsPage({
             onChange={(event) => setTitle(event.target.value)}
           />
           <div>
-            <Button
-              type="primary"
-              disabled={storageBroken}
-              onClick={() => onCreate(title)}
-            >
-              创建剪辑项目
-            </Button>
+            <Space size="small">
+              <Button
+                type="primary"
+                aria-label="创建剪辑项目"
+                loading={creating}
+                onClick={() => onCreate(title)}
+              >
+                创建剪辑项目
+              </Button>
+              <Button aria-label="刷新项目" loading={loading} onClick={onRefresh}>
+                刷新项目
+              </Button>
+            </Space>
           </div>
           <MessageAlert message={message} />
         </Space>
       </Card>
-      {storageBroken ? null : projects.length === 0 ? (
+      {!loaded ? (
+        loading ? (
+          <Card className="video-editing-panel">
+            <Typography.Text type="secondary">正在读取本机剪辑项目…</Typography.Text>
+          </Card>
+        ) : null
+      ) : projects.length === 0 ? (
         <Card className="video-editing-panel">
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -438,16 +457,24 @@ function TimelinePage({
   project,
   tracks,
   savedTimeline,
+  loading,
+  saving,
+  saveNeedsConfirmation,
   message,
   onTracksChange,
   onSave,
+  onRefresh,
 }: {
   readonly project: EditingProjectSnapshot | null;
   readonly tracks: readonly TrackForm[];
   readonly savedTimeline: EditingTimelineSnapshot | null;
+  readonly loading: boolean;
+  readonly saving: boolean;
+  readonly saveNeedsConfirmation: boolean;
   readonly message: Message | null;
   readonly onTracksChange: (tracks: readonly TrackForm[]) => void;
   readonly onSave: () => void;
+  readonly onRefresh: () => void;
 }) {
   if (project === null) {
     return (
@@ -481,7 +508,9 @@ function TimelinePage({
             片段按先后顺序排列，起止时间由各片段时长自动计算。
           </Typography.Text>
           <Tag>
-            {savedTimeline === null
+            {loading
+              ? "正在读取时间轴"
+              : savedTimeline === null
               ? "尚未保存"
               : `当前修订：第 ${savedTimeline.revision} 版`}
           </Tag>
@@ -573,7 +602,16 @@ function TimelinePage({
           <Button onClick={() => onTracksChange([...tracks, newTrackForm("caption", "")])}>
             添加字幕轨道
           </Button>
-          <Button type="primary" onClick={onSave}>
+          <Button aria-label="刷新时间轴" onClick={onRefresh} loading={loading}>
+            刷新时间轴
+          </Button>
+          <Button
+            type="primary"
+            aria-label="保存时间轴"
+            onClick={onSave}
+            loading={saving}
+            disabled={loading || saving || saveNeedsConfirmation}
+          >
             保存时间轴
           </Button>
         </Space>
@@ -630,7 +668,11 @@ function PreviewPage({
             </ul>
           </div>
         ))}
-        <Alert type="info" showIcon title="视频画面预览将在云端剪辑服务接入后提供。" />
+        <Alert
+          type="info"
+          showIcon
+          title="这里展示时间轴结构；本机剪辑完成后，任务列表会标记成片已入库。"
+        />
       </Space>
     </Card>
   );
@@ -639,32 +681,49 @@ function PreviewPage({
 function JobsPage({
   project,
   jobs,
+  loading,
   submitting,
+  submissionNeedsConfirmation,
   message,
   onSubmit,
+  onRefresh,
 }: {
   readonly project: EditingProjectSnapshot | null;
   readonly jobs: readonly EditingJobSnapshot[];
+  readonly loading: boolean;
   readonly submitting: boolean;
+  readonly submissionNeedsConfirmation: boolean;
   readonly message: Message | null;
   readonly onSubmit: () => void;
+  readonly onRefresh: () => void;
 }) {
   return (
     <Space orientation="vertical" size="middle" className="video-editing-jobs">
       <Card className="video-editing-panel" title="提交剪辑">
         <Space orientation="vertical" size="middle">
           <Typography.Text type="secondary">
-            提交后会按已保存的时间轴修订执行云端剪辑，执行进度和结果显示在下方任务列表。
+            提交后会按已保存的时间轴修订执行本机剪辑，执行状态和结果显示在下方任务列表。
           </Typography.Text>
           <div>
-            <Button
-              type="primary"
-              disabled={project === null || submitting}
-              loading={submitting}
-              onClick={onSubmit}
-            >
-              提交剪辑任务
-            </Button>
+            <Space size="small">
+              <Button
+                type="primary"
+                aria-label="提交剪辑任务"
+                disabled={project === null || submitting || submissionNeedsConfirmation}
+                loading={submitting}
+                onClick={onSubmit}
+              >
+                提交剪辑任务
+              </Button>
+              <Button
+                aria-label="刷新任务"
+                disabled={project === null}
+                loading={loading}
+                onClick={onRefresh}
+              >
+                刷新任务
+              </Button>
+            </Space>
           </div>
           <MessageAlert message={message} />
         </Space>
@@ -677,7 +736,7 @@ function JobsPage({
               <Space orientation="vertical" size={4}>
                 <Typography.Text strong>还没有剪辑任务</Typography.Text>
                 <Typography.Text type="secondary">
-                  云端剪辑服务接入后，提交的剪辑任务会显示在这里。
+                  提交本机剪辑任务后，执行状态会显示在这里。
                 </Typography.Text>
               </Space>
             }
@@ -718,150 +777,450 @@ export function VideoEditingWorkbench({
   readonly gateway: VideoEditingGateway;
 }) {
   const [projects, setProjects] = useState<readonly EditingProjectSnapshot[]>([]);
-  const [storageBroken, setStorageBroken] = useState(false);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [tracks, setTracks] = useState<readonly TrackForm[]>([]);
   const [savedTimeline, setSavedTimeline] = useState<EditingTimelineSnapshot | null>(null);
   const [jobs, setJobs] = useState<readonly EditingJobSnapshot[]>([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveNeedsConfirmation, setSaveNeedsConfirmation] = useState(false);
+  const [jobsLoading, setJobsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("projects");
   const [projectMessage, setProjectMessage] = useState<Message | null>(null);
   const [saveMessage, setSaveMessage] = useState<Message | null>(null);
   const [submitMessage, setSubmitMessage] = useState<Message | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [submissionNeedsConfirmation, setSubmissionNeedsConfirmation] = useState(false);
 
-  const failStorage = useCallback(() => {
-    setStorageBroken(true);
-  }, []);
+  const mountedRef = useRef(true);
+  const selectedProjectIdRef = useRef<string | null>(null);
+  const projectsRequestRef = useRef(0);
+  const timelineRequestRef = useRef(0);
+  const jobsRequestRef = useRef(0);
+  const creatingRef = useRef(false);
+  const savingRef = useRef(false);
+  const submittingRef = useRef(false);
+  const saveOperationRef = useRef(0);
+  const submitOperationRef = useRef(0);
+  const tracksVersionRef = useRef(0);
+  const autoLoadedGatewayRef = useRef<VideoEditingGateway | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    void gateway
-      .listProjects()
-      .then((value) => {
-        if (!cancelled) {
-          setProjects(value);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          failStorage();
-        }
-      });
+    mountedRef.current = true;
     return () => {
-      cancelled = true;
+      mountedRef.current = false;
+      projectsRequestRef.current += 1;
+      timelineRequestRef.current += 1;
+      jobsRequestRef.current += 1;
+      saveOperationRef.current += 1;
+      submitOperationRef.current += 1;
     };
-  }, [gateway, failStorage]);
+  }, []);
+
+  const loadProjects = useCallback(
+    async (clearMessage: boolean, requiredProjectId?: string): Promise<void> => {
+      const request = ++projectsRequestRef.current;
+      setProjectsLoading(true);
+      if (clearMessage) {
+        setProjectMessage(null);
+      }
+      try {
+        const value = await gateway.listProjects();
+        if (!mountedRef.current || request !== projectsRequestRef.current) {
+          return;
+        }
+        if (
+          requiredProjectId !== undefined &&
+          !value.some((project) => project.projectId === requiredProjectId)
+        ) {
+          return;
+        }
+        setProjects(value);
+        setProjectsLoaded(true);
+        const selectedId = selectedProjectIdRef.current;
+        if (selectedId !== null && !value.some((project) => project.projectId === selectedId)) {
+          selectedProjectIdRef.current = null;
+          setSelectedProjectId(null);
+          timelineRequestRef.current += 1;
+          jobsRequestRef.current += 1;
+          setSavedTimeline(null);
+          tracksVersionRef.current += 1;
+          setTracks([]);
+          setJobs([]);
+        }
+      } catch {
+        if (mountedRef.current && request === projectsRequestRef.current) {
+          setProjectMessage({ type: "error", text: SERVICE_UNAVAILABLE_TEXT });
+        }
+      } finally {
+        if (mountedRef.current && request === projectsRequestRef.current) {
+          setProjectsLoading(false);
+        }
+      }
+    },
+    [gateway],
+  );
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      if (mountedRef.current && autoLoadedGatewayRef.current !== gateway) {
+        autoLoadedGatewayRef.current = gateway;
+        void loadProjects(false);
+      }
+    });
+  }, [gateway, loadProjects]);
+
+  type LoadResult = "loaded" | "failed" | "stale";
+
+  const loadTimeline = useCallback(
+    async (
+      projectId: string,
+      reset: boolean,
+      reportFailure: boolean,
+      minimumRevision?: number,
+      preserveEditsAfterVersion?: number,
+    ): Promise<LoadResult> => {
+      const request = ++timelineRequestRef.current;
+      if (reset) {
+        setSavedTimeline(null);
+        tracksVersionRef.current += 1;
+        setTracks([newTrackForm("visual", "")]);
+      }
+      setTimelineLoading(true);
+      try {
+        const timeline = await gateway.getTimeline(projectId);
+        if (
+          !mountedRef.current ||
+          request !== timelineRequestRef.current ||
+          selectedProjectIdRef.current !== projectId
+        ) {
+          return "stale";
+        }
+        if (
+          minimumRevision !== undefined &&
+          (timeline === null || timeline.revision < minimumRevision)
+        ) {
+          return "failed";
+        }
+        setSavedTimeline(timeline);
+        if (
+          preserveEditsAfterVersion === undefined ||
+          tracksVersionRef.current === preserveEditsAfterVersion
+        ) {
+          tracksVersionRef.current += 1;
+          setTracks(timeline === null ? [newTrackForm("visual", "")] : hydrateForm(timeline));
+        }
+        return "loaded";
+      } catch {
+        if (
+          !mountedRef.current ||
+          request !== timelineRequestRef.current ||
+          selectedProjectIdRef.current !== projectId
+        ) {
+          return "stale";
+        }
+        if (reportFailure) {
+          setSaveMessage({ type: "error", text: SERVICE_UNAVAILABLE_TEXT });
+        }
+        return "failed";
+      } finally {
+        if (
+          mountedRef.current &&
+          request === timelineRequestRef.current &&
+          selectedProjectIdRef.current === projectId
+        ) {
+          setTimelineLoading(false);
+        }
+      }
+    },
+    [gateway],
+  );
+
+  const loadJobs = useCallback(
+    async (
+      projectId: string,
+      reset: boolean,
+      reportFailure: boolean,
+      retainedJobs: readonly EditingJobSnapshot[] = [],
+    ): Promise<LoadResult> => {
+      const request = ++jobsRequestRef.current;
+      if (reset) {
+        setJobs([]);
+      }
+      setJobsLoading(true);
+      try {
+        const value = await gateway.listEditingJobs(projectId);
+        if (
+          !mountedRef.current ||
+          request !== jobsRequestRef.current ||
+          selectedProjectIdRef.current !== projectId
+        ) {
+          return "stale";
+        }
+        const refreshedIds = new Set(value.map((job) => job.jobId));
+        setJobs([
+          ...retainedJobs.filter((job) => !refreshedIds.has(job.jobId)),
+          ...value,
+        ]);
+        return "loaded";
+      } catch {
+        if (
+          !mountedRef.current ||
+          request !== jobsRequestRef.current ||
+          selectedProjectIdRef.current !== projectId
+        ) {
+          return "stale";
+        }
+        if (reportFailure) {
+          setSubmitMessage({ type: "error", text: SERVICE_UNAVAILABLE_TEXT });
+        }
+        return "failed";
+      } finally {
+        if (
+          mountedRef.current &&
+          request === jobsRequestRef.current &&
+          selectedProjectIdRef.current === projectId
+        ) {
+          setJobsLoading(false);
+        }
+      }
+    },
+    [gateway],
+  );
+
+  const openProject = useCallback(
+    (project: EditingProjectSnapshot) => {
+      const reset = selectedProjectIdRef.current !== project.projectId;
+      if (reset) {
+        saveOperationRef.current += 1;
+        savingRef.current = false;
+        setSaving(false);
+        setSaveNeedsConfirmation(false);
+        submitOperationRef.current += 1;
+        submittingRef.current = false;
+        setSubmitting(false);
+        setSubmissionNeedsConfirmation(false);
+      }
+      selectedProjectIdRef.current = project.projectId;
+      setSelectedProjectId(project.projectId);
+      setSaveMessage(null);
+      setSubmitMessage(null);
+      void loadTimeline(project.projectId, reset, true);
+      void loadJobs(project.projectId, reset, true);
+    },
+    [loadJobs, loadTimeline],
+  );
 
   const selectedProject =
     projects.find((project) => project.projectId === selectedProjectId) ?? null;
 
-  const openProject = (project: EditingProjectSnapshot) => {
-    setSelectedProjectId(project.projectId);
-    setSaveMessage(null);
-    setSubmitMessage(null);
-    void gateway
-      .getTimeline(project.projectId)
-      .then((timeline) => {
-        setSavedTimeline(timeline);
-        setTracks(
-          timeline === null
-            ? [newTrackForm("visual", "")]
-            : hydrateForm(timeline),
-        );
-      })
-      .catch(() => failStorage());
-    void gateway
-      .listEditingJobs(project.projectId)
-      .then(setJobs)
-      .catch(() => failStorage());
-  };
-
   const createProject = (title: string) => {
-    void gateway
-      .createProject({
-        title: title.trim(),
-        output: { width: 720, height: 1280, fps: 20 },
-        captionStyle: {
-          fontKey: "noto-sans-cjk-sc-bold",
-          fontPx: 48,
-          strokePx: 3,
-          lineSpacing: 1.2,
-        },
-      })
-      .then((project) => {
-        setProjects((current) => [...current, project]);
+    if (creatingRef.current) {
+      return;
+    }
+    creatingRef.current = true;
+    setCreating(true);
+    setProjectMessage(null);
+    void (async () => {
+      try {
+        const project = await gateway.createProject({
+          title: title.trim(),
+          output: { width: 720, height: 1280, fps: 20 },
+          captionStyle: {
+            fontKey: "noto-sans-cjk-sc-bold",
+            fontPx: 48,
+            strokePx: 3,
+            lineSpacing: 1.2,
+          },
+        });
+        if (!mountedRef.current) {
+          return;
+        }
+        setProjectsLoaded(true);
+        setProjects((current) => [
+          ...current.filter((candidate) => candidate.projectId !== project.projectId),
+          project,
+        ]);
         setProjectMessage({ type: "success", text: `已创建剪辑项目：${project.title}` });
         openProject(project);
-      })
-      .catch((error: unknown) => {
-        if (
-          error instanceof VideoEditingGatewayError &&
-          error.code === "draft_storage_unavailable"
-        ) {
-          failStorage();
+        void loadProjects(false, project.projectId);
+      } catch (error: unknown) {
+        if (!mountedRef.current) {
           return;
         }
         setProjectMessage({
           type: "error",
-          text: "无法创建剪辑项目：请填写有效的项目标题。",
+          text:
+            error instanceof VideoEditingGatewayError && error.code === "invalid_project"
+              ? "无法创建剪辑项目：请填写有效的项目标题。"
+              : SERVICE_UNAVAILABLE_TEXT,
         });
-      });
+      } finally {
+        creatingRef.current = false;
+        if (mountedRef.current) {
+          setCreating(false);
+        }
+      }
+    })();
   };
 
   const saveTimeline = () => {
-    if (selectedProject === null) {
+    if (selectedProject === null || savingRef.current) {
       return;
     }
+    const projectId = selectedProject.projectId;
+    const operation = ++saveOperationRef.current;
+    const tracksVersion = tracksVersionRef.current;
+    savingRef.current = true;
+    setSaving(true);
     setSaveMessage(null);
-    void gateway
-      .saveTimeline(selectedProject.projectId, buildDraft(tracks))
-      .then((timeline) => {
-        setSavedTimeline(timeline);
-        setSaveMessage({
-          type: "success",
-          text: `已保存修订：第 ${timeline.revision} 版`,
-        });
-      })
-      .catch((error: unknown) => {
+    void (async () => {
+      try {
+        const timeline = await gateway.saveTimeline(projectId, buildDraft(tracks));
         if (
-          error instanceof VideoEditingGatewayError &&
-          error.code === "draft_storage_unavailable"
+          !mountedRef.current ||
+          operation !== saveOperationRef.current ||
+          selectedProjectIdRef.current !== projectId
         ) {
-          failStorage();
-          setSaveMessage({ type: "error", text: STORAGE_UNAVAILABLE_TEXT });
           return;
         }
-        setSaveMessage({ type: "error", text: INVALID_TIMELINE_TEXT });
-      });
+        setSavedTimeline(timeline);
+        setSaveNeedsConfirmation(false);
+        const refreshed = await loadTimeline(
+          projectId,
+          false,
+          false,
+          timeline.revision,
+          tracksVersion,
+        );
+        if (
+          operation === saveOperationRef.current &&
+          selectedProjectIdRef.current === projectId
+        ) {
+          setSaveMessage(
+            refreshed === "failed"
+              ? {
+                  type: "warning",
+                  text: `已保存第 ${timeline.revision} 版，但暂时无法刷新时间轴。`,
+                }
+              : {
+                  type: "success",
+                  text: `已保存修订：第 ${timeline.revision} 版`,
+                },
+          );
+        }
+      } catch (error: unknown) {
+        if (
+          !mountedRef.current ||
+          operation !== saveOperationRef.current ||
+          selectedProjectIdRef.current !== projectId
+        ) {
+          return;
+        }
+        if (error instanceof VideoEditingGatewayError && error.code === "outcome_uncertain") {
+          setSaveMessage({
+            type: "warning",
+            text: "保存结果暂时无法确认，请刷新时间轴确认当前修订，在确认前不要再次保存。",
+          });
+          setSaveNeedsConfirmation(true);
+        } else {
+          setSaveMessage({
+            type: "error",
+            text:
+              error instanceof VideoEditingGatewayError && error.code === "invalid_timeline"
+                ? INVALID_TIMELINE_TEXT
+                : SERVICE_UNAVAILABLE_TEXT,
+          });
+        }
+      } finally {
+        if (operation === saveOperationRef.current) {
+          savingRef.current = false;
+        }
+        if (
+          mountedRef.current &&
+          operation === saveOperationRef.current &&
+          selectedProjectIdRef.current === projectId
+        ) {
+          setSaving(false);
+        }
+      }
+    })();
   };
 
   const submitJob = () => {
-    if (selectedProject === null) {
+    if (selectedProject === null || submittingRef.current) {
       return;
     }
+    const projectId = selectedProject.projectId;
+    const operation = ++submitOperationRef.current;
+    submittingRef.current = true;
     setSubmitting(true);
     setSubmitMessage(null);
-    void gateway
-      .submitEditingJob(selectedProject.projectId)
-      .then(() => gateway.listEditingJobs(selectedProject.projectId).then(setJobs))
-      .catch((error: unknown) => {
+    void (async () => {
+      try {
+        const job = await gateway.submitEditingJob(projectId);
         if (
-          error instanceof VideoEditingGatewayError &&
-          error.code === "editing_service_unavailable"
+          !mountedRef.current ||
+          operation !== submitOperationRef.current ||
+          selectedProjectIdRef.current !== projectId
         ) {
-          setSubmitMessage({ type: "warning", text: SERVICE_UNAVAILABLE_TEXT });
           return;
         }
-        setSubmitMessage({ type: "error", text: "剪辑任务提交失败，请稍后重试。" });
-      })
-      .finally(() => setSubmitting(false));
+        setJobs((current) => [job, ...current.filter((candidate) => candidate.jobId !== job.jobId)]);
+        setSubmissionNeedsConfirmation(false);
+        setSubmitMessage({ type: "success", text: "已提交剪辑任务，正在排队。" });
+        const refreshed = await loadJobs(projectId, false, false, [job]);
+        if (
+          refreshed === "failed" &&
+          operation === submitOperationRef.current &&
+          selectedProjectIdRef.current === projectId
+        ) {
+          setSubmitMessage({
+            type: "warning",
+            text: "任务已提交，但暂时无法刷新任务列表。",
+          });
+        }
+      } catch (error: unknown) {
+        if (
+          !mountedRef.current ||
+          operation !== submitOperationRef.current ||
+          selectedProjectIdRef.current !== projectId
+        ) {
+          return;
+        }
+        setSubmitMessage({
+          type:
+            error instanceof VideoEditingGatewayError && error.code === "outcome_uncertain"
+              ? "warning"
+              : "error",
+          text:
+            error instanceof VideoEditingGatewayError && error.code === "outcome_uncertain"
+              ? OUTCOME_UNCERTAIN_TEXT
+              : SERVICE_UNAVAILABLE_TEXT,
+        });
+        if (error instanceof VideoEditingGatewayError && error.code === "outcome_uncertain") {
+          setSubmissionNeedsConfirmation(true);
+        }
+      } finally {
+        if (operation === submitOperationRef.current) {
+          submittingRef.current = false;
+        }
+        if (
+          mountedRef.current &&
+          operation === submitOperationRef.current &&
+          selectedProjectIdRef.current === projectId
+        ) {
+          setSubmitting(false);
+        }
+      }
+    })();
   };
 
   return (
     <section className="video-editing" aria-label="视频剪辑工作区">
-      {storageBroken ? (
-        <Alert type="error" showIcon title={STORAGE_UNAVAILABLE_TEXT} />
-      ) : null}
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
@@ -872,8 +1231,11 @@ export function VideoEditingWorkbench({
             children: (
               <ProjectsPage
                 projects={projects}
-                storageBroken={storageBroken}
+                loaded={projectsLoaded}
+                loading={projectsLoading}
+                creating={creating}
                 onCreate={createProject}
+                onRefresh={() => void loadProjects(true)}
                 onOpen={(projectId) => {
                   const project = projects.find(
                     (candidate) => candidate.projectId === projectId,
@@ -895,9 +1257,31 @@ export function VideoEditingWorkbench({
                 project={selectedProject}
                 tracks={tracks}
                 savedTimeline={savedTimeline}
+                loading={timelineLoading}
+                saving={saving}
+                saveNeedsConfirmation={saveNeedsConfirmation}
                 message={saveMessage}
-                onTracksChange={setTracks}
+                onTracksChange={(nextTracks) => {
+                  tracksVersionRef.current += 1;
+                  setTracks(nextTracks);
+                }}
                 onSave={saveTimeline}
+                onRefresh={() => {
+                  if (selectedProject !== null) {
+                    const projectId = selectedProject.projectId;
+                    setSaveMessage(null);
+                    void (async () => {
+                      const result = await loadTimeline(projectId, false, true);
+                      if (
+                        result === "loaded" &&
+                        mountedRef.current &&
+                        selectedProjectIdRef.current === projectId
+                      ) {
+                        setSaveNeedsConfirmation(false);
+                      }
+                    })();
+                  }
+                }}
               />
             ),
           },
@@ -913,9 +1297,27 @@ export function VideoEditingWorkbench({
               <JobsPage
                 project={selectedProject}
                 jobs={jobs}
+                loading={jobsLoading}
                 submitting={submitting}
+                submissionNeedsConfirmation={submissionNeedsConfirmation}
                 message={submitMessage}
                 onSubmit={submitJob}
+                onRefresh={() => {
+                  if (selectedProject !== null) {
+                    const projectId = selectedProject.projectId;
+                    setSubmitMessage(null);
+                    void (async () => {
+                      const result = await loadJobs(projectId, false, true);
+                      if (
+                        result === "loaded" &&
+                        mountedRef.current &&
+                        selectedProjectIdRef.current === projectId
+                      ) {
+                        setSubmissionNeedsConfirmation(false);
+                      }
+                    })();
+                  }
+                }}
               />
             ),
           },

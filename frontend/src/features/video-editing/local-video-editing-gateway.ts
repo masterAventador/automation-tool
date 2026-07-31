@@ -14,11 +14,11 @@ import {
 } from "./video-editing-gateway";
 
 /**
- * Local draft store for the standalone editing workbench.
+ * Deterministic local draft fixture for tests and the UI harness.
  *
- * The cloud editing provider chain (VE-04+) is not connected yet, so projects
- * and timeline revisions live in an App-local draft store; there are no
- * editing jobs and submission always fails closed as unavailable.
+ * Production uses the Tauri gateway. This fixture keeps projects and timeline
+ * revisions in caller-provided storage; there are no editing jobs and
+ * submission always fails closed as unavailable.
  */
 
 const STORAGE_KEY = "automation-tool.video-editing.local-draft.v1";
