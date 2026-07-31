@@ -60,6 +60,7 @@ def _narrated(
         caption_text=text,
         narration_relative_path=f"voiceover/sentence-{sequence:04d}.wav",
         duration_ms=duration_ms,
+        qualified_material_ids=(material.material_id,),
         candidates=(
             FittingMaterialSegment(
                 material_id=material.material_id,
@@ -188,6 +189,7 @@ def test_all_silent_materials_preserve_existing_narration_and_candidates() -> No
 
     assert result == SpeechAwareParagraphDraft(
         original_speech_paragraphs=(),
+        silent_material_ids=(video.material_id, image.material_id),
         narrated_paragraphs=narrated,
     )
     assert planner.calls == [(video.material_id, image.material_id)]
@@ -312,6 +314,7 @@ def test_narration_path_is_a_canonical_safe_relative_path(relative_path: object)
             caption_text="句子",
             narration_relative_path=cast(str, relative_path),
             duration_ms=1_200,
+            qualified_material_ids=tuple(item.material_id for item in candidate),
             candidates=candidate,
         )
 
@@ -337,6 +340,7 @@ def test_public_draft_values_fail_closed_instead_of_leaking_type_errors() -> Non
             caption_text="句子",
             narration_relative_path="voiceover/sentence.wav",
             duration_ms=1_201,
+            qualified_material_ids=(candidate.material_id,),
             candidates=(candidate,),
         ),
         lambda: NarratedParagraphDraft(
@@ -344,6 +348,7 @@ def test_public_draft_values_fail_closed_instead_of_leaking_type_errors() -> Non
             caption_text="句子",
             narration_relative_path="voiceover/sentence.wav",
             duration_ms=1_200,
+            qualified_material_ids=(candidate.material_id,),
             candidates=(candidate, candidate),
         ),
         lambda: OriginalSpeechParagraphDraft(
@@ -384,16 +389,19 @@ def test_public_draft_values_fail_closed_instead_of_leaking_type_errors() -> Non
         ),
         lambda: SpeechAwareParagraphDraft(
             original_speech_paragraphs=(),
+            silent_material_ids=(),
             narrated_paragraphs=(),
         ),
         lambda: SpeechAwareParagraphDraft(
             original_speech_paragraphs=(valid_original,),
+            silent_material_ids=(candidate.material_id,),
             narrated_paragraphs=(
                 NarratedParagraphDraft(
                     sequence=2,
                     caption_text="第二句",
                     narration_relative_path="voiceover/sentence-0002.wav",
                     duration_ms=1_200,
+                    qualified_material_ids=(candidate.material_id,),
                     candidates=(candidate,),
                 ),
             ),
