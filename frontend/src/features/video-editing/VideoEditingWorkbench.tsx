@@ -60,7 +60,7 @@ const STORAGE_UNAVAILABLE_TEXT = "本机剪辑草稿暂时无法读取，请稍�
 const INVALID_TIMELINE_TEXT =
   "时间轴还不完整：请确认每个画面或音频片段已填写素材引用、字幕片段已填写文字，并且时长为有效的毫秒数。";
 const SERVICE_UNAVAILABLE_TEXT =
-  "当前无法提交云端剪辑：请先检查剪辑服务配置；若已有“结果待确认”任务，请到云端核对，系统不会自动重发。";
+  "当前无法提交云端剪辑：请先检查剪辑服务配置；“结果待确认”任务会在 App 重启后自动续查，但系统不会自动重发。";
 
 interface ClipForm {
   readonly formId: string;
@@ -739,6 +739,42 @@ export function VideoEditingWorkbench({
 
   const selectedProject =
     projects.find((project) => project.projectId === selectedProjectId) ?? null;
+  const hasRecoverableJob = jobs.some((job) => job.status === "outcome_uncertain");
+
+  useEffect(() => {
+    if (selectedProjectId === null || !hasRecoverableJob) {
+      return;
+    }
+    let cancelled = false;
+    let timer: number | undefined;
+    const refresh = () => {
+      void gateway
+        .listEditingJobs(selectedProjectId)
+        .then((value) => {
+          if (!cancelled) {
+            setJobs(value);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            cancelled = true;
+            failStorage();
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            timer = window.setTimeout(refresh, 1_000);
+          }
+        });
+    };
+    timer = window.setTimeout(refresh, 1_000);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [gateway, failStorage, hasRecoverableJob, selectedProjectId]);
 
   const openProject = (project: EditingProjectSnapshot) => {
     setSelectedProjectId(project.projectId);

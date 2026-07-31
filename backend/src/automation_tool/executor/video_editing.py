@@ -32,11 +32,12 @@ from automation_tool.control_plane.domain.aliyun_ims_editing_output import (
     DirectoryEditingOutputPayloadSink,
 )
 from automation_tool.control_plane.domain.aliyun_ims_editing_provider import (
+    AliyunEditingIntent,
+    AliyunEditingIntentState,
     AliyunEditingOutputConfig,
     AliyunImsEditingProvider,
     AliyunImsTransportFailure,
     AliyunOssBucketName,
-    InMemoryAliyunEditingIntentStore,
 )
 from automation_tool.control_plane.domain.aliyun_ims_editing_reconciliation import (
     AliyunEditingReconciliationPolicy,
@@ -79,6 +80,9 @@ from automation_tool.control_plane.infrastructure.aliyun.editing import (
     AliyunEditingCredential,
     AliyunImsEditingTransport,
     AliyunOssEditingTransport,
+)
+from automation_tool.control_plane.infrastructure.aliyun.editing_intent_store import (
+    FileAliyunEditingIntentStore,
 )
 
 _SCHEMA_VERSION: Final = 1
@@ -194,6 +198,7 @@ class EditingAssetInput(_StrictModel):
 
 class EditingExecutionRequest(_StrictModel):
     schema_version: Literal[1] = Field(alias="schemaVersion")
+    execution_mode: Literal["submit", "reconcile"] = Field(alias="executionMode")
     credential: EditingCredentialInput
     editing_job_id: str = Field(alias="editingJobId")
     project_id: str = Field(alias="projectId")
@@ -201,6 +206,7 @@ class EditingExecutionRequest(_StrictModel):
     assets: Annotated[list[EditingAssetInput], Field(min_length=1, max_length=256)]
     input_directory: str = Field(alias="inputDirectory")
     output_directory: str = Field(alias="outputDirectory")
+    state_directory: str = Field(alias="stateDirectory")
     output_width: Annotated[int, Field(alias="outputWidth", ge=128, le=4096)]
     output_height: Annotated[int, Field(alias="outputHeight", ge=128, le=4096)]
 
@@ -209,10 +215,14 @@ class EditingExecutionRequest(_StrictModel):
 
         input_root = _private_directory(self.input_directory)
         output_root = _private_directory(self.output_directory)
+        state_root = _private_directory(self.state_directory)
         if (
-            input_root == output_root
+            input_root in (output_root, state_root)
+            or output_root == state_root
             or input_root in output_root.parents
             or output_root in input_root.parents
+            or input_root.parent != output_root.parent
+            or input_root.parent != state_root.parent
         ):
             _reject()
         seen: set[str] = set()
@@ -397,6 +407,17 @@ def _failed_result(
     )
 
 
+def _uncertain_result(editing_job_id: EditingJobId) -> EditingExecutionResult:
+    return EditingExecutionResult(
+        status="outcome_uncertain",
+        editingJobId=str(editing_job_id),
+        outputPath=None,
+        outputSha256=None,
+        outputSizeBytes=None,
+        failureCode=None,
+    )
+
+
 def _closed_failure_code(value: str) -> _FailureCode:
     if value == "invalid_input":
         return "invalid_input"
@@ -413,8 +434,7 @@ async def execute_video_editing(
     client: httpx2.AsyncClient,
     poll_interval_seconds: float = 5.0,
 ) -> EditingExecutionResult:
-    """Execute one complete provider chain and return only native-safe facts."""
-
+    """Execute one complete provider chain under one cross-process lease."""
     if (
         not isinstance(request, EditingExecutionRequest)
         or not isinstance(client, httpx2.AsyncClient)
@@ -423,6 +443,23 @@ async def execute_video_editing(
         or not 0 <= poll_interval_seconds <= 60
     ):
         _reject()
+    intent_store = FileAliyunEditingIntentStore(Path(request.state_directory))
+    with intent_store.execution_lease():
+        return await _execute_video_editing_with_store(
+            request,
+            client=client,
+            intent_store=intent_store,
+            poll_interval_seconds=poll_interval_seconds,
+        )
+
+
+async def _execute_video_editing_with_store(
+    request: EditingExecutionRequest,
+    *,
+    client: httpx2.AsyncClient,
+    intent_store: FileAliyunEditingIntentStore,
+    poll_interval_seconds: float,
+) -> EditingExecutionResult:
     request.verify_files()
     timeline = _domain_timeline(request)
     try:
@@ -458,6 +495,15 @@ async def execute_video_editing(
         AliyunOssObjectRef(bucket=bucket, object_key=entry.object_key) for entry in plan.objects
     )
     cleaner = AliyunEditingTempResourceCleaner(transport=oss, bucket=bucket)
+    existing = await intent_store.load(editing_job_id)
+    if request.execution_mode == "submit":
+        if existing is not None:
+            _reject()
+    elif existing is not None and existing.state in {
+        AliyunEditingIntentState.PREPARED,
+        AliyunEditingIntentState.UNCERTAIN,
+    }:
+        return _uncertain_result(editing_job_id)
 
     async def cleanup(outcome: AliyunEditingCleanupOutcome) -> None:
         with contextlib.suppress(AliyunImsTransportFailure):
@@ -467,20 +513,20 @@ async def execute_video_editing(
                 outcome=outcome,
             )
 
-    by_digest = {asset.sha256: asset for asset in request.assets}
-    try:
-        for entry, ref in zip(plan.objects, staged_refs, strict=True):
-            asset = by_digest[entry.sha256_hex]
-            await oss.put_object(
-                ref,
-                _file_chunks(Path(asset.path)),
-                content_length=asset.size_bytes,
-            )
-    except AliyunImsTransportFailure:
-        await cleanup(AliyunEditingCleanupOutcome.FAILED)
-        return _failed_result(editing_job_id, "dependency_unavailable")
+    if existing is None:
+        by_digest = {asset.sha256: asset for asset in request.assets}
+        try:
+            for entry, ref in zip(plan.objects, staged_refs, strict=True):
+                asset = by_digest[entry.sha256_hex]
+                await oss.put_object(
+                    ref,
+                    _file_chunks(Path(asset.path)),
+                    content_length=asset.size_bytes,
+                )
+        except AliyunImsTransportFailure:
+            await cleanup(AliyunEditingCleanupOutcome.FAILED)
+            return _failed_result(editing_job_id, "dependency_unavailable")
 
-    intent_store = InMemoryAliyunEditingIntentStore()
     ims = AliyunImsEditingTransport(client, credential)
     provider = AliyunImsEditingProvider(
         contract=contract,
@@ -515,17 +561,29 @@ async def execute_video_editing(
         failure_code = _closed_failure_code(failure.code.value)
         return _failed_result(editing_job_id, failure_code)
     if initial.status is EditingJobStatus.OUTCOME_UNCERTAIN:
-        return EditingExecutionResult(
-            status="outcome_uncertain",
-            editingJobId=str(editing_job_id),
-            outputPath=None,
-            outputSha256=None,
-            outputSizeBytes=None,
-            failureCode=None,
-        )
+        return _uncertain_result(editing_job_id)
 
     ledger = InMemoryEditingOutputLedger()
     sink = DirectoryEditingOutputPayloadSink(Path(request.output_directory))
+    if initial.status is EditingJobStatus.SUCCEEDED:
+        persisted = await intent_store.load(editing_job_id)
+        if persisted is None:
+            _reject()
+        result = _persisted_success_result(persisted, sink)
+        await cleanup(AliyunEditingCleanupOutcome.SUCCEEDED_IMPORTED)
+        return result
+    if initial.status in {
+        EditingJobStatus.FAILED,
+        EditingJobStatus.CANCELLED,
+    }:
+        persisted = await intent_store.load(editing_job_id)
+        raw_failure_code = (
+            persisted.failure_code.value
+            if persisted is not None and persisted.failure_code is not None
+            else "editing_failed"
+        )
+        await cleanup(AliyunEditingCleanupOutcome.FAILED)
+        return _failed_result(editing_job_id, _closed_failure_code(raw_failure_code))
     importer = AliyunEditingOutputImporter(
         intent_store=intent_store,
         transport=oss,
@@ -563,23 +621,9 @@ async def execute_video_editing(
     try:
         settled = await reconciler.reconcile_until_terminal(editing_job_id)
     except (AliyunImsTransportFailure, EditingProviderFailure):
-        return EditingExecutionResult(
-            status="outcome_uncertain",
-            editingJobId=str(editing_job_id),
-            outputPath=None,
-            outputSha256=None,
-            outputSizeBytes=None,
-            failureCode=None,
-        )
+        return _uncertain_result(editing_job_id)
     if settled.status is EditingJobStatus.OUTCOME_UNCERTAIN:
-        return EditingExecutionResult(
-            status="outcome_uncertain",
-            editingJobId=str(editing_job_id),
-            outputPath=None,
-            outputSha256=None,
-            outputSizeBytes=None,
-            failureCode=None,
-        )
+        return _uncertain_result(editing_job_id)
     if settled.status is not EditingJobStatus.SUCCEEDED:
         raw_failure_code = (
             settled.failure_code.value if settled.failure_code is not None else "editing_failed"
@@ -605,6 +649,45 @@ async def execute_video_editing(
         outputPath=os.fspath(output_path),
         outputSha256=video.sha256_hex,
         outputSizeBytes=video.byte_size,
+        failureCode=None,
+    )
+
+
+def _persisted_success_result(
+    intent: AliyunEditingIntent,
+    sink: DirectoryEditingOutputPayloadSink,
+) -> EditingExecutionResult:
+    if (
+        not isinstance(intent, AliyunEditingIntent)
+        or intent.status is not EditingJobStatus.SUCCEEDED
+        or len(intent.output_artifact_ids) != 1
+    ):
+        _reject()
+    path = sink.path_for(intent.output_artifact_ids[0], "video/mp4")
+    try:
+        metadata = path.lstat()
+    except OSError:
+        _reject()
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or path.is_symlink()
+        or metadata.st_nlink != 1
+        or not 0 < metadata.st_size <= 32 * 1024 * 1024 * 1024
+    ):
+        _reject()
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as source:
+            while chunk := source.read(_STREAM_CHUNK_BYTES):
+                digest.update(chunk)
+    except OSError:
+        _reject()
+    return EditingExecutionResult(
+        status="succeeded",
+        editingJobId=str(intent.editing_job_id),
+        outputPath=os.fspath(path),
+        outputSha256=digest.hexdigest(),
+        outputSizeBytes=metadata.st_size,
         failureCode=None,
     )
 

@@ -240,8 +240,9 @@ describe("video editing workbench", () => {
     expect(document.body).not.toHaveTextContent(/完成 100%|示例成片|假任务/u);
   });
 
-  it("renders job details from the internal DTO only", async () => {
+  it("renders internal job facts and refreshes an automatic reconciliation", async () => {
     const user = userEvent.setup();
+    let jobReads = 0;
     const gateway: VideoEditingGateway = {
       async listProjects() {
         return [
@@ -264,15 +265,17 @@ describe("video editing workbench", () => {
         throw new Error("unused");
       },
       async listEditingJobs() {
+        jobReads += 1;
         return [
           {
             editingJobId: "3d594650-b5f4-4498-8e38-0cf85d6dfa72",
             projectId: "0a48954d-2df1-4168-8f33-b62c5772845a",
             timelineId: "1b70168c-90d0-4ac7-938a-51eb4754f32a",
             timelineRevision: 2,
-            status: "outcome_uncertain",
+            status: jobReads === 1 ? "outcome_uncertain" : "succeeded",
             inputArtifactIds: [ARTIFACT_A],
-            outputArtifactIds: [],
+            outputArtifactIds:
+              jobReads === 1 ? [] : ["2c29395b-1015-43ae-84a7-6f1901caac09"],
             failureCode: null,
             createdAt: "2026-07-23T00:00:00.000Z",
             updatedAt: "2026-07-23T00:00:00.000Z",
@@ -294,6 +297,8 @@ describe("video editing workbench", () => {
     const job = await screen.findByText("结果待确认");
     expect(job).toBeVisible();
     expect(screen.getByText(/第 2 版/u)).toBeVisible();
+    expect(await screen.findByText("已完成", {}, { timeout: 2_500 })).toBeVisible();
+    expect(jobReads).toBeGreaterThanOrEqual(2);
     expect(document.body).not.toHaveTextContent(/provider|region|aliyun|阿里云|ims|ice/iu);
   });
 

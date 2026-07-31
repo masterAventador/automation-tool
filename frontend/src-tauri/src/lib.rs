@@ -414,8 +414,9 @@ fn submit_video_editing_job_off_thread(
     project_id: uuid::Uuid,
 ) -> Result<video_editing_workspace::EditingJobSnapshot, VideoEditingWorkspaceCommandError> {
     use video_editing_executor::{
-        build_video_editing_child_request, run_video_editing_child, VideoEditingChildErrorKind,
-        VideoEditingChildStatus,
+        build_video_editing_child_request, build_video_editing_recovery_checkpoint,
+        run_video_editing_child, VideoEditingChildErrorKind, VideoEditingChildStatus,
+        VIDEO_EDITING_RECOVERY_CHECKPOINT_NAME,
     };
     use video_editing_workspace::{EditingFailureCode, EditingJobTerminalOutcome};
     use video_job_workspace::{VideoWorkspaceDisposition, VideoWorkspaceErrorCode};
@@ -495,6 +496,35 @@ fn submit_video_editing_job_off_thread(
             return fail(EditingFailureCode::DependencyUnavailable);
         }
     };
+    let state_directory = match workspaces.worker_checkpoint_directory(&execution_workspace) {
+        Ok(value) => value,
+        Err(_) => {
+            finish(VideoWorkspaceDisposition::Delete);
+            return fail(EditingFailureCode::DependencyUnavailable);
+        }
+    };
+    let recovery_checkpoint = match build_video_editing_recovery_checkpoint(
+        prepared.snapshot(),
+        prepared.timeline(),
+        (1920, 1080),
+    ) {
+        Ok(value) => value,
+        Err(_) => {
+            finish(VideoWorkspaceDisposition::Delete);
+            return fail(EditingFailureCode::InvalidInput);
+        }
+    };
+    if workspaces
+        .save_checkpoint(
+            &execution_workspace,
+            VIDEO_EDITING_RECOVERY_CHECKPOINT_NAME,
+            &recovery_checkpoint,
+        )
+        .is_err()
+    {
+        finish(VideoWorkspaceDisposition::Delete);
+        return fail(EditingFailureCode::DependencyUnavailable);
+    }
     let request = match build_video_editing_child_request(
         &credential,
         prepared.snapshot(),
@@ -502,6 +532,7 @@ fn submit_video_editing_job_off_thread(
         &staged,
         &input_directory,
         &output_directory,
+        &state_directory,
         (1920, 1080),
     ) {
         Ok(value) => value,
@@ -593,14 +624,181 @@ fn submit_video_editing_job_off_thread(
                     return fail(code);
                 }
             };
-            let settled = editing
-                .settle_editing_job(
-                    editing_job_id,
-                    EditingJobTerminalOutcome::Succeeded(vec![artifact.artifact_id()]),
-                )
-                .map_err(VideoEditingWorkspaceCommandError::from);
-            finish(VideoWorkspaceDisposition::Delete);
-            settled
+            match editing.settle_editing_job(
+                editing_job_id,
+                EditingJobTerminalOutcome::Succeeded(vec![artifact.artifact_id()]),
+            ) {
+                Ok(snapshot) => {
+                    finish(VideoWorkspaceDisposition::Delete);
+                    Ok(snapshot)
+                }
+                Err(error) => {
+                    let _ = workspaces.delete_artifact(artifact.artifact_id());
+                    finish(VideoWorkspaceDisposition::Keep);
+                    Err(VideoEditingWorkspaceCommandError::from(error))
+                }
+            }
+        }
+    }
+}
+
+fn start_interrupted_video_editing_reconciliation(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            reconcile_interrupted_video_editing_jobs_off_thread(&app)
+        })
+        .await;
+    });
+}
+
+fn reconcile_interrupted_video_editing_jobs_off_thread(app: &tauri::AppHandle) {
+    let Some(editing) = app.try_state::<video_editing_workspace::VideoEditingWorkspace>() else {
+        return;
+    };
+    let Ok(jobs) = editing.list_recoverable_editing_jobs() else {
+        return;
+    };
+    for job in jobs {
+        reconcile_interrupted_video_editing_job_off_thread(app, &job);
+    }
+}
+
+fn reconcile_interrupted_video_editing_job_off_thread(
+    app: &tauri::AppHandle,
+    job: &video_editing_workspace::EditingJobSnapshot,
+) {
+    use video_editing_executor::{
+        build_video_editing_recovery_child_request, run_video_editing_child,
+        VideoEditingChildStatus, VIDEO_EDITING_RECOVERY_CHECKPOINT_NAME,
+    };
+    use video_editing_workspace::{EditingFailureCode, EditingJobTerminalOutcome};
+    use video_job_workspace::VideoWorkspaceDisposition;
+
+    let Some(editing) = app.try_state::<video_editing_workspace::VideoEditingWorkspace>() else {
+        return;
+    };
+    let Some(settings) =
+        app.try_state::<video_editing_service_settings::ProductionVideoEditingServiceSettings>()
+    else {
+        return;
+    };
+    let Ok(credential) = settings.credential_for_adapter() else {
+        return;
+    };
+    let Some(platform) = app.try_state::<executor_platform::ExecutorPlatformService>() else {
+        return;
+    };
+    let Ok(entrypoint) = platform.verified_entrypoint() else {
+        return;
+    };
+    let Some(workspaces) = app.try_state::<video_job_workspace::VideoJobWorkspaceStore>() else {
+        return;
+    };
+    let Ok(execution_workspace) = workspaces.open(job.editing_job_id) else {
+        return;
+    };
+    let keep = || {
+        let _ = workspaces.finish(&execution_workspace, VideoWorkspaceDisposition::Keep);
+    };
+    let Ok(recovery_checkpoint) =
+        workspaces.load_checkpoint(&execution_workspace, VIDEO_EDITING_RECOVERY_CHECKPOINT_NAME)
+    else {
+        keep();
+        return;
+    };
+    let Ok(staged) =
+        workspaces.reopen_staged_editing_artifacts(&execution_workspace, &job.input_artifact_ids)
+    else {
+        keep();
+        return;
+    };
+    let Ok(input_directory) = workspaces.worker_asset_directory(&execution_workspace) else {
+        keep();
+        return;
+    };
+    let Ok(output_directory) = workspaces.worker_output_directory(&execution_workspace) else {
+        keep();
+        return;
+    };
+    let Ok(state_directory) = workspaces.worker_checkpoint_directory(&execution_workspace) else {
+        keep();
+        return;
+    };
+    let Ok(request) = build_video_editing_recovery_child_request(
+        &credential,
+        job,
+        &recovery_checkpoint,
+        &staged,
+        &input_directory,
+        &output_directory,
+        &state_directory,
+    ) else {
+        keep();
+        return;
+    };
+    let Ok(result) = run_video_editing_child(
+        &entrypoint,
+        request.as_slice(),
+        job.editing_job_id,
+        &output_directory,
+        VIDEO_EDITING_CHILD_DEADLINE,
+    ) else {
+        keep();
+        return;
+    };
+    match result.status() {
+        VideoEditingChildStatus::OutcomeUncertain => keep(),
+        VideoEditingChildStatus::Failed => {
+            let settled = editing.settle_reconciled_editing_job(
+                job.editing_job_id,
+                EditingJobTerminalOutcome::Failed(
+                    result
+                        .failure_code()
+                        .unwrap_or(EditingFailureCode::EditingFailed),
+                ),
+            );
+            if settled.is_ok() {
+                let _ = workspaces.finish(&execution_workspace, VideoWorkspaceDisposition::Delete);
+            } else {
+                keep();
+            }
+        }
+        VideoEditingChildStatus::Succeeded => {
+            let Some(file_name) = result
+                .output_path()
+                .and_then(std::path::Path::file_name)
+                .and_then(std::ffi::OsStr::to_str)
+            else {
+                keep();
+                return;
+            };
+            let imported = workspaces.import_output(
+                &execution_workspace,
+                file_name,
+                "video/mp4",
+                "rendered_video",
+            );
+            let Ok(artifact) = imported else {
+                keep();
+                return;
+            };
+            if Some(artifact.sha256()) != result.output_sha256()
+                || Some(artifact.size_bytes()) != result.output_size_bytes()
+            {
+                let _ = workspaces.delete_artifact(artifact.artifact_id());
+                keep();
+                return;
+            }
+            let settled = editing.settle_reconciled_editing_job(
+                job.editing_job_id,
+                EditingJobTerminalOutcome::Succeeded(vec![artifact.artifact_id()]),
+            );
+            if settled.is_ok() {
+                let _ = workspaces.finish(&execution_workspace, VideoWorkspaceDisposition::Delete);
+            } else {
+                let _ = workspaces.delete_artifact(artifact.artifact_id());
+                keep();
+            }
         }
     }
 }
@@ -4927,6 +5125,7 @@ pub fn run() {
                     &package_root,
                 )?;
             app.manage(executor_platform);
+            start_interrupted_video_editing_reconciliation(app.handle().clone());
             app_logging::record(app_logging::DesktopLogEvent::ExecutorServiceInitialized);
             app.manage(diagnostic_export::DiagnosticExportService::initialize(
                 &app_data_directory,

@@ -5,9 +5,11 @@ from .editing import (
     AliyunImsEditingTransport,
     AliyunOssEditingTransport,
 )
+from .editing_intent_store import FileAliyunEditingIntentStore
 
 __all__ = [
     "AliyunEditingCredential",
     "AliyunImsEditingTransport",
     "AliyunOssEditingTransport",
+    "FileAliyunEditingIntentStore",
 ]

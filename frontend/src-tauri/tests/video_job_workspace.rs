@@ -164,6 +164,62 @@ fn stages_verified_editing_inputs_under_artifact_identity_and_extension() {
 }
 
 #[test]
+fn retained_editing_inputs_reopen_for_reconciliation_without_copying_again() {
+    let root = TemporaryRoot::new();
+    let job_id = job("123e4567-e89b-42d3-a456-426614174233");
+    let store = VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("workspace store");
+    let source_workspace = store
+        .create(job("123e4567-e89b-42d3-a456-426614174234"))
+        .expect("source workspace");
+    fs::write(
+        store
+            .worker_output_directory(&source_workspace)
+            .expect("source output")
+            .join("source.mp4"),
+        b"retained-editing-input",
+    )
+    .expect("source bytes");
+    let artifact = store
+        .import_output(
+            &source_workspace,
+            "source.mp4",
+            "video/mp4",
+            "rendered_video",
+        )
+        .expect("source artifact");
+    let workspace = store.create(job_id).expect("editing workspace");
+    store
+        .stage_editing_artifacts(&workspace, &[artifact.artifact_id()])
+        .expect("initial staging");
+    store
+        .finish(&workspace, VideoWorkspaceDisposition::Keep)
+        .expect("retain interrupted workspace");
+    drop(store);
+
+    let reopened_store =
+        VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("reopened store");
+    let reopened = reopened_store.open(job_id).expect("reopened workspace");
+    let staged = reopened_store
+        .reopen_staged_editing_artifacts(&reopened, &[artifact.artifact_id()])
+        .expect("verified retained inputs");
+
+    assert_eq!(staged.len(), 1);
+    assert_eq!(staged[0].artifact_id(), artifact.artifact_id());
+    assert_eq!(
+        fs::read(staged[0].path()).unwrap(),
+        b"retained-editing-input"
+    );
+    assert_eq!(
+        reopened_store
+            .worker_checkpoint_directory(&reopened)
+            .expect("checkpoint directory")
+            .file_name()
+            .and_then(|value| value.to_str()),
+        Some("checkpoints"),
+    );
+}
+
+#[test]
 fn checkpoint_survives_reopen_and_workspace_disposition_does_not_delete_artifacts() {
     let root = TemporaryRoot::new();
     let job_id = job("123e4567-e89b-42d3-a456-426614174203");

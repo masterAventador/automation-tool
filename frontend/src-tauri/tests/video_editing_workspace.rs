@@ -200,6 +200,10 @@ fn an_interrupted_editing_dispatch_reopens_as_outcome_uncertain() {
     assert_eq!(jobs.len(), 1);
     assert_eq!(jobs[0].status, EditingJobStatus::OutcomeUncertain);
     assert!(jobs[0].failure_code.is_none());
+    assert_eq!(
+        reopened.list_recoverable_editing_jobs().unwrap(),
+        vec![jobs[0].clone()]
+    );
 
     let duplicate = reopened
         .prepare_editing_job(project.project_id)
@@ -208,4 +212,17 @@ fn an_interrupted_editing_dispatch_reopens_as_outcome_uncertain() {
         duplicate.code(),
         VideoEditingWorkspaceErrorCode::EditingServiceUnavailable
     );
+
+    let recovered = reopened
+        .settle_reconciled_editing_job(
+            jobs[0].editing_job_id,
+            EditingJobTerminalOutcome::Succeeded(vec![Uuid::parse_str(
+                "00000000-0000-4000-8000-000000000104",
+            )
+            .unwrap()]),
+        )
+        .unwrap();
+    assert_eq!(recovered.status, EditingJobStatus::Succeeded);
+    assert!(reopened.list_recoverable_editing_jobs().unwrap().is_empty());
+    assert!(reopened.prepare_editing_job(project.project_id).is_ok());
 }

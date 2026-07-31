@@ -518,6 +518,14 @@ impl VideoJobWorkspaceStore {
         Ok(workspace.directory.join(WORK_DIRECTORY))
     }
 
+    pub fn worker_checkpoint_directory(
+        &self,
+        workspace: &VideoJobWorkspace,
+    ) -> Result<PathBuf, VideoWorkspaceError> {
+        self.revalidate_workspace(workspace)?;
+        Ok(workspace.directory.join(CHECKPOINTS_DIRECTORY))
+    }
+
     pub fn stage_editing_artifacts(
         &self,
         workspace: &VideoJobWorkspace,
@@ -594,6 +602,90 @@ impl VideoJobWorkspaceStore {
             let _ = sync_directory(&input_directory);
         }
         result
+    }
+
+    pub fn reopen_staged_editing_artifacts(
+        &self,
+        workspace: &VideoJobWorkspace,
+        artifact_ids: &[Uuid],
+    ) -> Result<Vec<StagedEditingArtifact>, VideoWorkspaceError> {
+        self.revalidate_workspace(workspace)?;
+        self.revalidate_roots()?;
+        if artifact_ids.is_empty()
+            || artifact_ids.len() > MAX_EDITING_INPUTS
+            || artifact_ids.iter().any(|value| !valid_uuid_v4(*value))
+            || artifact_ids
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                != artifact_ids.len()
+        {
+            return Err(configuration_invalid());
+        }
+        let input_directory = workspace.directory.join(WORK_DIRECTORY);
+        let mut expected_names = std::collections::HashSet::new();
+        let mut staged = Vec::with_capacity(artifact_ids.len());
+        for artifact_id in artifact_ids {
+            let record = self.load_artifact_record(*artifact_id)?;
+            let extension =
+                editing_extension(&record.media_type).ok_or_else(configuration_invalid)?;
+            let file_name = format!("{}{extension}", artifact_id.hyphenated());
+            expected_names.insert(file_name.clone());
+            let path = input_directory.join(&file_name);
+            let before = safe_regular_file_metadata(&path)?.ok_or_else(storage_unavailable)?;
+            if before.len() != record.size_bytes {
+                return Err(storage_unavailable());
+            }
+            let mut file = open_read_no_follow(&path)?;
+            let opened = file.metadata().map_err(|_| storage_unavailable())?;
+            if !same_file(&before, &opened) || opened.len() != record.size_bytes {
+                return Err(storage_unavailable());
+            }
+            let mut hasher = Sha256::new();
+            let mut total = 0_u64;
+            let mut buffer = vec![0_u8; COPY_BUFFER_BYTES];
+            loop {
+                let read = file.read(&mut buffer).map_err(|_| storage_unavailable())?;
+                if read == 0 {
+                    break;
+                }
+                total = total
+                    .checked_add(read as u64)
+                    .ok_or_else(storage_unavailable)?;
+                if total > record.size_bytes {
+                    return Err(storage_unavailable());
+                }
+                hasher.update(&buffer[..read]);
+            }
+            let after = fs::symlink_metadata(&path).map_err(|_| storage_unavailable())?;
+            if total != record.size_bytes
+                || !same_file(&before, &after)
+                || lower_hex(&hasher.finalize()) != record.sha256
+            {
+                return Err(storage_unavailable());
+            }
+            staged.push(StagedEditingArtifact {
+                path,
+                artifact_id: *artifact_id,
+                sha256: record.sha256,
+                size_bytes: record.size_bytes,
+                extension,
+            });
+        }
+        let mut actual_names = std::collections::HashSet::new();
+        for entry in fs::read_dir(&input_directory).map_err(|_| storage_unavailable())? {
+            let entry = entry.map_err(|_| storage_unavailable())?;
+            safe_regular_file_metadata(&entry.path())?.ok_or_else(path_rejected)?;
+            let name = entry
+                .file_name()
+                .into_string()
+                .map_err(|_| path_rejected())?;
+            actual_names.insert(name);
+        }
+        if actual_names != expected_names {
+            return Err(path_rejected());
+        }
+        Ok(staged)
     }
 
     pub fn save_checkpoint(

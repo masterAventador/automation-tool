@@ -23,6 +23,15 @@ const ARGUMENT: &str = "--execute-video-editing";
 const MAX_REQUEST_BYTES: usize = 1024 * 1024;
 const MAX_RESPONSE_BYTES: u64 = 64 * 1024;
 const MAX_OUTPUT_BYTES: u64 = 32 * 1024 * 1024 * 1024;
+const MAX_RECOVERY_CHECKPOINT_BYTES: usize = 256 * 1024;
+pub const VIDEO_EDITING_RECOVERY_CHECKPOINT_NAME: &str = "video-editing-recovery";
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ChildExecutionMode {
+    Submit,
+    Reconcile,
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +56,7 @@ struct ChildAsset<'a> {
 #[serde(rename_all = "camelCase")]
 struct ChildRequest<'a> {
     schema_version: u8,
+    execution_mode: ChildExecutionMode,
     credential: ChildCredential<'a>,
     editing_job_id: Uuid,
     project_id: Uuid,
@@ -54,8 +64,49 @@ struct ChildRequest<'a> {
     assets: Vec<ChildAsset<'a>>,
     input_directory: &'a Path,
     output_directory: &'a Path,
+    state_directory: &'a Path,
     output_width: u16,
     output_height: u16,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoEditingRecoveryCheckpoint {
+    schema_version: u8,
+    editing_job_id: Uuid,
+    project_id: Uuid,
+    timeline: EditingTimelineSnapshot,
+    input_artifact_ids: Vec<Uuid>,
+    output_width: u16,
+    output_height: u16,
+}
+
+pub struct RecoveredVideoEditingRequest {
+    timeline: EditingTimelineSnapshot,
+    output_width: u16,
+    output_height: u16,
+}
+
+impl RecoveredVideoEditingRequest {
+    pub const fn timeline(&self) -> &EditingTimelineSnapshot {
+        &self.timeline
+    }
+
+    pub const fn output_size(&self) -> (u16, u16) {
+        (self.output_width, self.output_height)
+    }
+}
+
+impl fmt::Debug for RecoveredVideoEditingRequest {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RecoveredVideoEditingRequest")
+            .field("timeline_id", &self.timeline.timeline_id)
+            .field("timeline_revision", &self.timeline.revision)
+            .field("output_width", &self.output_width)
+            .field("output_height", &self.output_height)
+            .finish()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -152,6 +203,7 @@ impl VideoEditingChildResult {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_video_editing_child_request(
     credential: &EditingServiceCredential,
     job: &EditingJobSnapshot,
@@ -159,11 +211,68 @@ pub fn build_video_editing_child_request(
     assets: &[StagedEditingArtifact],
     input_directory: &Path,
     output_directory: &Path,
+    state_directory: &Path,
+    output_size: (u16, u16),
+) -> Result<Zeroizing<Vec<u8>>, VideoEditingChildError> {
+    build_child_request(
+        ChildExecutionMode::Submit,
+        credential,
+        job,
+        timeline,
+        assets,
+        input_directory,
+        output_directory,
+        state_directory,
+        output_size,
+    )
+}
+
+pub fn build_video_editing_recovery_child_request(
+    credential: &EditingServiceCredential,
+    job: &EditingJobSnapshot,
+    recovery_checkpoint: &[u8],
+    assets: &[StagedEditingArtifact],
+    input_directory: &Path,
+    output_directory: &Path,
+    state_directory: &Path,
+) -> Result<Zeroizing<Vec<u8>>, VideoEditingChildError> {
+    let recovered = load_video_editing_recovery_checkpoint(job, recovery_checkpoint)?;
+    build_child_request(
+        ChildExecutionMode::Reconcile,
+        credential,
+        job,
+        recovered.timeline(),
+        assets,
+        input_directory,
+        output_directory,
+        state_directory,
+        recovered.output_size(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_child_request(
+    execution_mode: ChildExecutionMode,
+    credential: &EditingServiceCredential,
+    job: &EditingJobSnapshot,
+    timeline: &EditingTimelineSnapshot,
+    assets: &[StagedEditingArtifact],
+    input_directory: &Path,
+    output_directory: &Path,
+    state_directory: &Path,
     output_size: (u16, u16),
 ) -> Result<Zeroizing<Vec<u8>>, VideoEditingChildError> {
     let invalid = || VideoEditingChildError::new(VideoEditingChildErrorKind::NotStarted);
     let (output_width, output_height) = output_size;
-    if job.status != EditingJobStatus::Queued
+    let valid_status = matches!(
+        (execution_mode, job.status),
+        (ChildExecutionMode::Submit, EditingJobStatus::Queued)
+            | (
+                ChildExecutionMode::Reconcile,
+                EditingJobStatus::OutcomeUncertain
+            )
+    );
+    if !valid_status
         || job.project_id != timeline.project_id
         || job.timeline_id != timeline.timeline_id
         || job.timeline_revision != timeline.revision
@@ -172,9 +281,12 @@ pub fn build_video_editing_child_request(
         || !(128..=4096).contains(&output_height)
         || !input_directory.is_absolute()
         || !output_directory.is_absolute()
+        || !state_directory.is_absolute()
         || input_directory == output_directory
-        || input_directory.starts_with(output_directory)
-        || output_directory.starts_with(input_directory)
+        || input_directory == state_directory
+        || output_directory == state_directory
+        || input_directory.parent() != output_directory.parent()
+        || input_directory.parent() != state_directory.parent()
     {
         return Err(invalid());
     }
@@ -193,6 +305,7 @@ pub fn build_video_editing_child_request(
     }
     let request = ChildRequest {
         schema_version: 1,
+        execution_mode,
         credential: ChildCredential {
             access_key_id: credential.access_key_id(),
             access_key_secret: credential.access_key_secret(),
@@ -205,6 +318,7 @@ pub fn build_video_editing_child_request(
         assets: child_assets,
         input_directory,
         output_directory,
+        state_directory,
         output_width,
         output_height,
     };
@@ -213,6 +327,71 @@ pub fn build_video_editing_child_request(
         return Err(invalid());
     }
     Ok(Zeroizing::new(payload))
+}
+
+pub fn build_video_editing_recovery_checkpoint(
+    job: &EditingJobSnapshot,
+    timeline: &EditingTimelineSnapshot,
+    output_size: (u16, u16),
+) -> Result<Vec<u8>, VideoEditingChildError> {
+    let invalid = || VideoEditingChildError::new(VideoEditingChildErrorKind::NotStarted);
+    let (output_width, output_height) = output_size;
+    if job.status != EditingJobStatus::Queued
+        || job.project_id != timeline.project_id
+        || job.timeline_id != timeline.timeline_id
+        || job.timeline_revision != timeline.revision
+        || job.input_artifact_ids.is_empty()
+        || !(128..=4096).contains(&output_width)
+        || !(128..=4096).contains(&output_height)
+    {
+        return Err(invalid());
+    }
+    let checkpoint = VideoEditingRecoveryCheckpoint {
+        schema_version: 1,
+        editing_job_id: job.editing_job_id,
+        project_id: job.project_id,
+        timeline: timeline.clone(),
+        input_artifact_ids: job.input_artifact_ids.clone(),
+        output_width,
+        output_height,
+    };
+    let payload = serde_json::to_vec(&checkpoint).map_err(|_| invalid())?;
+    if payload.is_empty() || payload.len() > MAX_RECOVERY_CHECKPOINT_BYTES {
+        return Err(invalid());
+    }
+    Ok(payload)
+}
+
+pub fn load_video_editing_recovery_checkpoint(
+    job: &EditingJobSnapshot,
+    payload: &[u8],
+) -> Result<RecoveredVideoEditingRequest, VideoEditingChildError> {
+    let invalid = || VideoEditingChildError::new(VideoEditingChildErrorKind::NotStarted);
+    if job.status != EditingJobStatus::OutcomeUncertain
+        || payload.is_empty()
+        || payload.len() > MAX_RECOVERY_CHECKPOINT_BYTES
+    {
+        return Err(invalid());
+    }
+    let checkpoint: VideoEditingRecoveryCheckpoint =
+        serde_json::from_slice(payload).map_err(|_| invalid())?;
+    if checkpoint.schema_version != 1
+        || checkpoint.editing_job_id != job.editing_job_id
+        || checkpoint.project_id != job.project_id
+        || checkpoint.timeline.project_id != job.project_id
+        || checkpoint.timeline.timeline_id != job.timeline_id
+        || checkpoint.timeline.revision != job.timeline_revision
+        || checkpoint.input_artifact_ids != job.input_artifact_ids
+        || !(128..=4096).contains(&checkpoint.output_width)
+        || !(128..=4096).contains(&checkpoint.output_height)
+    {
+        return Err(invalid());
+    }
+    Ok(RecoveredVideoEditingRequest {
+        timeline: checkpoint.timeline,
+        output_width: checkpoint.output_width,
+        output_height: checkpoint.output_height,
+    })
 }
 
 pub fn run_video_editing_child(
@@ -384,4 +563,65 @@ fn valid_digest(value: &str) -> bool {
 
 fn valid_uuid_v4(value: Uuid) -> bool {
     value.get_version_num() == 4 && value.get_variant() == Variant::RFC4122
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    use crate::video_editing_workspace::{
+        EditingTimelineSnapshot, TimelineClip, TimelineTrack, TimelineTrackKind,
+    };
+
+    fn ids(value: &str) -> Uuid {
+        Uuid::parse_str(value).unwrap()
+    }
+
+    fn timeline() -> EditingTimelineSnapshot {
+        EditingTimelineSnapshot {
+            timeline_id: ids("00000000-0000-4000-8000-000000000212"),
+            project_id: ids("00000000-0000-4000-8000-000000000211"),
+            revision: 3,
+            duration_ms: 3_000,
+            tracks: vec![TimelineTrack {
+                track_id: "visual-main".to_owned(),
+                kind: TimelineTrackKind::Visual,
+                clips: vec![TimelineClip {
+                    clip_id: "clip-1".to_owned(),
+                    start_ms: 0,
+                    duration_ms: 3_000,
+                    source_artifact_id: Some(ids("00000000-0000-4000-8000-000000000214")),
+                    text: None,
+                    transition_in: None,
+                }],
+            }],
+            created_at: "2026-07-31T01:02:03Z".to_owned(),
+        }
+    }
+
+    #[test]
+    fn recovery_checkpoint_freezes_the_original_timeline_without_credentials() {
+        let timeline = timeline();
+        let mut job = EditingJobSnapshot {
+            editing_job_id: ids("00000000-0000-4000-8000-000000000213"),
+            project_id: timeline.project_id,
+            timeline_id: timeline.timeline_id,
+            timeline_revision: timeline.revision,
+            status: EditingJobStatus::Queued,
+            input_artifact_ids: vec![ids("00000000-0000-4000-8000-000000000214")],
+            output_artifact_ids: vec![],
+            failure_code: None,
+            created_at: "2026-07-31T01:02:04Z".to_owned(),
+            updated_at: "2026-07-31T01:02:04Z".to_owned(),
+        };
+        let payload =
+            build_video_editing_recovery_checkpoint(&job, &timeline, (1920, 1080)).unwrap();
+        let rendered = String::from_utf8(payload.clone()).unwrap();
+        assert!(!rendered.contains("accessKey"));
+        assert!(!rendered.contains("secret"));
+
+        job.status = EditingJobStatus::OutcomeUncertain;
+        let recovered = load_video_editing_recovery_checkpoint(&job, &payload).unwrap();
+        assert_eq!(recovered.timeline(), &timeline);
+        assert_eq!(recovered.output_size(), (1920, 1080));
+    }
 }

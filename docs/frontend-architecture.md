@@ -423,7 +423,7 @@ T4 把正式 `videoEditingGateway` 从 WebView `sessionStorage` 替身替换为
 
 设备侧 `VideoEditingWorkspace` 固定落在 App 私有数据目录，状态写入先生成私有临时文件、
 fsync，再原子替换并同步目录。作业必须在任何云副作用前持久化为 `queued`，随后才能进入
-`running`；重启遗留的活跃态收敛为 `outcome_uncertain`，不得凭空说“没提交”或自动重提。
+`running`；重启遗留的活跃态先收敛为 `outcome_uncertain`，不得凭空说“没提交”或自动重提。
 
 执行时，`VideoJobWorkspaceStore` 从统一 Artifact 库重新校验并复制
 `<artifactId>.<ext>` 私有输入。Rust 从私有设置读取地域、同地域 OSS Bucket 与 AccessKey，
@@ -433,8 +433,11 @@ argv、环境、日志、React 或 Control Plane。Executor 的生产 Transport 
 摘要和大小，只有成功导入统一 Artifact 库后才落 `succeeded`；预览页按稳定 Artifact ID
 读取 MP4，不获得本机路径。
 
-当前 App 中断会安全停在 `outcome_uncertain`，尚未按 vendor JobId 自动续对账；这项恢复
-增强以及正式包双平台真实云验收仍在 T4/CQ-04 遗留项中。
+App 启动后会在后台扫描 `outcome_uncertain` 作业，重新打开原私有 Workspace，复验冻结
+Timeline checkpoint 与保留素材，再启动 reconcile 模式 Executor。持久意图已有 vendor
+JobId 时只续 Query，不重复上传或 Submit；prepared 模糊窗口继续保持待确认。恢复成功或明确
+失败后才原子落最终作业状态并删除 Workspace，React 对已打开任务做有界轮询以自动显示收敛
+结果。正式包双平台真实云验收仍在 T4/CQ-04 遗留项中。
 
 B5-01 已冻结原外部浏览器会话的历史迁移边界。当前 Profile 只能从 Tauri `app_data_dir/browser-profiles/douyin/<canonical UUIDv4 profile_id>` 派生，不能由 React、服务端、平台账号文本或任意路径输入决定；B5-05 负责私有权限、symlink/reparse point 与稳定 identity，B5-06/B5-07 负责跨进程单实例锁和真实 headed 浏览器资源所有权。登录健康只由真实页面检测产生 `missing/healthy/expired/risk/unknown`，只有 `healthy` 关闭熔断；等待扫码/确认和人工接管是本地平台工作流，不是 automation-tool 产品登录。
 

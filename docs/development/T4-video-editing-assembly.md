@@ -36,13 +36,18 @@
 - 项目、Timeline 与作业状态是 16 MiB 有界、严格字段、UUIDv4、私有权限、原子替换的 JSON；
 - App 重启时遗留的 `queued/running/paused/cancelling` 不会永远假运行，而是收敛为
   `outcome_uncertain`；
-- `outcome_uncertain` 保留本机执行 Workspace 和云端临时对象，不自动重提；
+- `outcome_uncertain` 保留本机执行 Workspace、冻结时间轴和云端临时对象；App 重启后会
+  在后台重新打开原 Workspace，并用已持久化的 vendor JobId 继续查询；
+- Executor 在私有 Workspace 内原子保存 `prepared / dispatched / uncertain` 意图。
+  已确认 `dispatched` 的恢复只查询原 JobId，不重复 OSS 上传或 IMS Submit；提交意图已写但
+  POST 是否到达无法判定时继续保持 `outcome_uncertain`，绝不重放；
+- 若中断发生在提交意图写入前，持久化状态可证明 IMS Submit 尚未发生，恢复可以安全完成
+  初次上传与提交；跨进程文件租约避免旧 Executor 与恢复 Executor 并发操作同一任务；
 - 明确失败清理暂存对象；成功导入后清理暂存与输出对象；
 - 输出只有重新进入统一 Artifact 库后才允许标 `succeeded`。
 
-当前尚未实现 App 重启后凭 vendor JobId 自动继续对账；重启中断会诚实停在
-`outcome_uncertain`，不会重复提交。这是后续恢复增强，不影响正常一次性路径，但仍是 T4
-保持待验收而不是标完成的原因之一。
+恢复 checkpoint 不含凭据或绝对路径，任务列表在后台续查完成后会自动刷新。T4 仍保持
+待验收，是因为当前真实凭据已失效，且新源码尚未进入 macOS/Windows 正式包正常用户路径。
 
 ## RED
 
@@ -69,17 +74,17 @@ CQ-04 vertical readiness
 ## GREEN
 
 ```text
-Backend production Transport / Executor / frozen-contract tests   21 passed
+Backend production Transport / Executor / frozen-contract tests   26 passed
 Frontend Gateway / settings / workbench / preview                 22 passed
-Rust settings / workspace / child / main-thread focused suite     33 passed
-CQ-04 vertical readiness                                           5 passed
+Rust settings / workspace / child / main-thread focused suite     36 passed
+CQ-04 vertical readiness                                           6 passed
 Backend ruff + mypy                                                0 issue
 Frontend TypeScript                                                0 error
 ```
 
 另有确定性失败矩阵覆盖：非法供应商字段、路径/摘要篡改、无效密钥形状、IMS 明确拒绝、
 子进程拒绝/超时/畸形输出/后代进程清理、旧设置无 OSS Bucket 的无阻塞迁移、App 中断恢复、
-Artifact 篡改与配额失败。
+vendor JobId 无重复提交续查、提交前安全恢复、模糊提交窗口拒绝重放、Artifact 篡改与配额失败。
 
 ## 真实网关结果
 
@@ -102,8 +107,7 @@ IMS 只读连接测试 → AuthenticationRejected
 
 1. 用有效阿里云凭据跑出真实成片；
 2. 重建签名公证 macOS 正式包并从设置页、工作台正常点击完成一次；
-3. 在 Windows x86_64 正式安装树复跑同一路径；
-4. 验证 App 中断后按 vendor JobId 自动续对账，而不只停在 `outcome_uncertain`。
+3. 在 Windows x86_64 正式安装树复跑同一路径。
 
 ## 遗留项
 
@@ -113,4 +117,3 @@ IMS 只读连接测试 → AuthenticationRejected
 | 真实云最小成片 | 待有效凭据，复跑 opt-in T4 测试 |
 | macOS 签名公证正式包正常用户路径 | 待重新构建 |
 | Windows x86_64 正式包同路径 | 待 Windows 环境 |
-| 中断后自动续对账 | 当前安全收敛为 `outcome_uncertain`，尚无自动恢复 |

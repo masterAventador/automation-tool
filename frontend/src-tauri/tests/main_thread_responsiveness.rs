@@ -252,6 +252,29 @@ fn every_guarded_wait_still_exists_where_it_is_claimed_to_be() {
 }
 
 #[test]
+fn interrupted_editing_reconciliation_starts_off_thread_after_its_dependencies() {
+    let source = read_source("lib.rs");
+    let recovery = source
+        .find("fn start_interrupted_video_editing_reconciliation")
+        .expect("startup editing recovery coordinator");
+    let off_thread = source[recovery..]
+        .find("spawn_blocking")
+        .expect("editing recovery must leave the UI thread");
+    assert!(off_thread > 0);
+
+    let executor = source
+        .find("app.manage(executor_platform)")
+        .expect("verified Executor service");
+    let startup = source
+        .find("start_interrupted_video_editing_reconciliation(app.handle().clone())")
+        .expect("startup recovery invocation");
+    assert!(
+        startup > executor,
+        "recovery started before the signed Executor and private workspaces existed"
+    );
+}
+
+#[test]
 fn commands_that_wait_on_the_world_never_run_on_the_ui_thread() {
     let functions: BTreeMap<String, String> = functions_in("lib.rs")
         .into_iter()

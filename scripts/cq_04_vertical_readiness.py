@@ -27,6 +27,9 @@ _PRODUCTION_DISPATCH_FACTS = (
     "run_video_editing_child",
     "import_output",
     "settle_editing_job",
+    "start_interrupted_video_editing_reconciliation",
+    "build_video_editing_recovery_child_request",
+    "settle_reconciled_editing_job",
 )
 
 

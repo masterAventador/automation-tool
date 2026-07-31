@@ -370,6 +370,25 @@ impl VideoEditingWorkspace {
         Ok(guard.jobs.get(&project_id).cloned().unwrap_or_default())
     }
 
+    pub fn list_recoverable_editing_jobs(
+        &self,
+    ) -> Result<Vec<EditingJobSnapshot>, VideoEditingWorkspaceError> {
+        let guard = self.lock_state()?;
+        let mut jobs = guard
+            .jobs
+            .values()
+            .flat_map(|jobs| jobs.iter())
+            .filter(|job| job.status == EditingJobStatus::OutcomeUncertain)
+            .cloned()
+            .collect::<Vec<_>>();
+        jobs.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.editing_job_id.cmp(&right.editing_job_id))
+        });
+        Ok(jobs)
+    }
+
     pub fn prepare_editing_job(
         &self,
         project_id: Uuid,
@@ -475,33 +494,22 @@ impl VideoEditingWorkspace {
             ) {
                 return Err(storage_unavailable());
             }
-            match outcome {
-                EditingJobTerminalOutcome::Succeeded(output_artifact_ids) => {
-                    validate_artifact_ids(&output_artifact_ids, MAX_JOB_ARTIFACT_REFERENCES)
-                        .map_err(|_| storage_unavailable())?;
-                    if output_artifact_ids.is_empty()
-                        || output_artifact_ids
-                            .iter()
-                            .any(|output| job.input_artifact_ids.contains(output))
-                    {
-                        return Err(storage_unavailable());
-                    }
-                    job.status = EditingJobStatus::Succeeded;
-                    job.output_artifact_ids = output_artifact_ids;
-                    job.failure_code = None;
-                }
-                EditingJobTerminalOutcome::Failed(code) => {
-                    job.status = EditingJobStatus::Failed;
-                    job.output_artifact_ids.clear();
-                    job.failure_code = Some(code);
-                }
-                EditingJobTerminalOutcome::OutcomeUncertain => {
-                    job.status = EditingJobStatus::OutcomeUncertain;
-                    job.output_artifact_ids.clear();
-                    job.failure_code = None;
-                }
+            apply_terminal_outcome(job, outcome)
+        })
+    }
+
+    pub fn settle_reconciled_editing_job(
+        &self,
+        editing_job_id: Uuid,
+        outcome: EditingJobTerminalOutcome,
+    ) -> Result<EditingJobSnapshot, VideoEditingWorkspaceError> {
+        self.update_editing_job(editing_job_id, move |job| {
+            if job.status != EditingJobStatus::OutcomeUncertain
+                || matches!(&outcome, EditingJobTerminalOutcome::OutcomeUncertain)
+            {
+                return Err(storage_unavailable());
             }
-            Ok(())
+            apply_terminal_outcome(job, outcome)
         })
     }
 
@@ -546,6 +554,39 @@ impl VideoEditingWorkspace {
         }
         atomic_write(&self.directory, &self.state_path, &payload)
     }
+}
+
+fn apply_terminal_outcome(
+    job: &mut EditingJobSnapshot,
+    outcome: EditingJobTerminalOutcome,
+) -> Result<(), VideoEditingWorkspaceError> {
+    match outcome {
+        EditingJobTerminalOutcome::Succeeded(output_artifact_ids) => {
+            validate_artifact_ids(&output_artifact_ids, MAX_JOB_ARTIFACT_REFERENCES)
+                .map_err(|_| storage_unavailable())?;
+            if output_artifact_ids.is_empty()
+                || output_artifact_ids
+                    .iter()
+                    .any(|output| job.input_artifact_ids.contains(output))
+            {
+                return Err(storage_unavailable());
+            }
+            job.status = EditingJobStatus::Succeeded;
+            job.output_artifact_ids = output_artifact_ids;
+            job.failure_code = None;
+        }
+        EditingJobTerminalOutcome::Failed(code) => {
+            job.status = EditingJobStatus::Failed;
+            job.output_artifact_ids.clear();
+            job.failure_code = Some(code);
+        }
+        EditingJobTerminalOutcome::OutcomeUncertain => {
+            job.status = EditingJobStatus::OutcomeUncertain;
+            job.output_artifact_ids.clear();
+            job.failure_code = None;
+        }
+    }
+    Ok(())
 }
 
 fn recover_interrupted_jobs(state: &mut StoredState) -> bool {

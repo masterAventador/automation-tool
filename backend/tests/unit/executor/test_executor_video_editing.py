@@ -8,7 +8,6 @@ from pathlib import Path
 
 import httpx2
 import pytest
-
 from automation_tool.executor.video_editing import (
     EditingExecutionRequest,
     execute_video_editing,
@@ -28,8 +27,12 @@ def _request(tmp_path: Path) -> dict[str, object]:
     source.write_bytes(b"verified-video-source")
     output = tmp_path / "output"
     output.mkdir(exist_ok=True)
+    state = tmp_path / "state"
+    state.mkdir(exist_ok=True)
+    state.chmod(0o700)
     return {
         "schemaVersion": 1,
+        "executionMode": "submit",
         "credential": {
             "accessKeyId": "LTAI5tVe04TestAccessKey",
             "accessKeySecret": "ve04PrivateSecret1234567890",
@@ -72,9 +75,16 @@ def _request(tmp_path: Path) -> dict[str, object]:
         ],
         "inputDirectory": str(input_directory),
         "outputDirectory": str(output),
+        "stateDirectory": str(state),
         "outputWidth": 128,
         "outputHeight": 128,
     }
+
+
+def _request_with_mode(tmp_path: Path, mode: str) -> dict[str, object]:
+    payload = _request(tmp_path)
+    payload["executionMode"] = mode
+    return payload
 
 
 @pytest.mark.asyncio
@@ -131,6 +141,181 @@ async def test_real_provider_composition_stages_submits_reconciles_imports_and_c
     assert any("editing-output/v1/" in url for _, url in requests)
     assert [method for method, _ in requests].count("DELETE") == 2
     assert [method for method, _ in requests].count("HEAD") == 2
+
+
+@pytest.mark.asyncio
+async def test_interrupted_execution_resumes_by_vendor_job_without_a_second_submit(
+    tmp_path: Path,
+) -> None:
+    first_requests: list[tuple[str, str | None]] = []
+
+    def interrupted_handler(request: httpx2.Request) -> httpx2.Response:
+        action = request.headers.get("x-acs-action")
+        first_requests.append((request.method, action))
+        if action == "SubmitMediaProducingJob":
+            return httpx2.Response(
+                200,
+                json={"JobId": "vendor-job-recovery", "RequestId": "request-recovery1"},
+            )
+        if action == "GetMediaProducingJob":
+            raise KeyboardInterrupt
+        return httpx2.Response(200)
+
+    submit_payload = _request_with_mode(tmp_path, "submit")
+    submit = EditingExecutionRequest.model_validate(submit_payload)
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(interrupted_handler)) as client:
+        with pytest.raises(KeyboardInterrupt):
+            await execute_video_editing(
+                submit,
+                client=client,
+                poll_interval_seconds=0,
+            )
+
+    assert sum(action == "SubmitMediaProducingJob" for _, action in first_requests) == 1
+
+    resumed_requests: list[tuple[str, str | None]] = []
+    output = b"recovered-cloud-output"
+
+    def resumed_handler(request: httpx2.Request) -> httpx2.Response:
+        action = request.headers.get("x-acs-action")
+        resumed_requests.append((request.method, action))
+        if action == "SubmitMediaProducingJob":
+            raise AssertionError("recovery must not submit a second cloud job")
+        if action == "GetMediaProducingJob":
+            return httpx2.Response(
+                200,
+                json={
+                    "MediaProducingJob": {
+                        "JobId": "vendor-job-recovery",
+                        "Status": "Success",
+                    }
+                },
+            )
+        if request.method == "GET":
+            return httpx2.Response(200, content=output)
+        if request.method == "HEAD":
+            return httpx2.Response(404)
+        return httpx2.Response(200)
+
+    reconcile_payload = _request_with_mode(tmp_path, "reconcile")
+    reconcile = EditingExecutionRequest.model_validate(reconcile_payload)
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(resumed_handler)) as client:
+        recovered = await execute_video_editing(
+            reconcile,
+            client=client,
+            poll_interval_seconds=0,
+        )
+
+    assert recovered.status == "succeeded"
+    assert recovered.output_path is not None
+    assert Path(recovered.output_path).read_bytes() == output
+    assert sum(action == "SubmitMediaProducingJob" for _, action in resumed_requests) == 0
+    assert sum(action == "GetMediaProducingJob" for _, action in resumed_requests) == 1
+    assert not any(method == "PUT" for method, _ in resumed_requests)
+
+
+@pytest.mark.asyncio
+async def test_recovery_restarts_safely_when_interrupted_before_submission(
+    tmp_path: Path,
+) -> None:
+    first_requests: list[tuple[str, str | None]] = []
+
+    def interrupted_handler(request: httpx2.Request) -> httpx2.Response:
+        action = request.headers.get("x-acs-action")
+        first_requests.append((request.method, action))
+        if request.method == "PUT":
+            raise KeyboardInterrupt
+        raise AssertionError("the cloud job must not be submitted after staging is interrupted")
+
+    submit = EditingExecutionRequest.model_validate(_request_with_mode(tmp_path, "submit"))
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(interrupted_handler)) as client:
+        with pytest.raises(KeyboardInterrupt):
+            await execute_video_editing(
+                submit,
+                client=client,
+                poll_interval_seconds=0,
+            )
+
+    assert first_requests == [("PUT", None)]
+
+    recovered_requests: list[tuple[str, str | None]] = []
+    output = b"recovered-after-staging-interruption"
+
+    def recovered_handler(request: httpx2.Request) -> httpx2.Response:
+        action = request.headers.get("x-acs-action")
+        recovered_requests.append((request.method, action))
+        if action == "SubmitMediaProducingJob":
+            return httpx2.Response(
+                200,
+                json={"JobId": "vendor-job-safe-retry", "RequestId": "request-safe-retry"},
+            )
+        if action == "GetMediaProducingJob":
+            return httpx2.Response(
+                200,
+                json={
+                    "MediaProducingJob": {
+                        "JobId": "vendor-job-safe-retry",
+                        "Status": "Success",
+                    }
+                },
+            )
+        if request.method == "GET":
+            return httpx2.Response(200, content=output)
+        if request.method == "HEAD":
+            return httpx2.Response(404)
+        return httpx2.Response(200)
+
+    reconcile = EditingExecutionRequest.model_validate(_request_with_mode(tmp_path, "reconcile"))
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(recovered_handler)) as client:
+        recovered = await execute_video_editing(
+            reconcile,
+            client=client,
+            poll_interval_seconds=0,
+        )
+
+    assert recovered.status == "succeeded"
+    assert recovered.output_path is not None
+    assert Path(recovered.output_path).read_bytes() == output
+    assert sum(action == "SubmitMediaProducingJob" for _, action in recovered_requests) == 1
+    assert sum(action == "GetMediaProducingJob" for _, action in recovered_requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_recovery_never_replays_an_ambiguous_prepared_submission(
+    tmp_path: Path,
+) -> None:
+    first_requests: list[tuple[str, str | None]] = []
+
+    def interrupted_handler(request: httpx2.Request) -> httpx2.Response:
+        action = request.headers.get("x-acs-action")
+        first_requests.append((request.method, action))
+        if action == "SubmitMediaProducingJob":
+            raise KeyboardInterrupt
+        return httpx2.Response(200)
+
+    submit = EditingExecutionRequest.model_validate(_request_with_mode(tmp_path, "submit"))
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(interrupted_handler)) as client:
+        with pytest.raises(KeyboardInterrupt):
+            await execute_video_editing(
+                submit,
+                client=client,
+                poll_interval_seconds=0,
+            )
+
+    assert sum(action == "SubmitMediaProducingJob" for _, action in first_requests) == 1
+
+    def forbidden_handler(request: httpx2.Request) -> httpx2.Response:
+        raise AssertionError(f"ambiguous recovery must not call {request.method}")
+
+    reconcile = EditingExecutionRequest.model_validate(_request_with_mode(tmp_path, "reconcile"))
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(forbidden_handler)) as client:
+        recovered = await execute_video_editing(
+            reconcile,
+            client=client,
+            poll_interval_seconds=0,
+        )
+
+    assert recovered.status == "outcome_uncertain"
 
 
 @pytest.mark.asyncio

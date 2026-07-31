@@ -93,6 +93,41 @@ class VideoEditingProductionWiringTests(unittest.TestCase):
                 (), video_editing_production_wiring_gaps(main, test)
             )
 
+    def test_interrupted_job_recovery_is_a_required_production_dispatch_fact(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cq04-recovery-") as raw:
+            base = Path(raw)
+            main = base / "main.tsx"
+            test = base / "production-wiring.test.ts"
+            execution = base / "lib.rs"
+            main.write_text(
+                "const videoEditingGateway = new TauriVideoEditingGateway();\n",
+                encoding="utf-8",
+            )
+            test.write_text(
+                'it("videoEditingGateway is handed a real Tauri gateway", () => {});\n',
+                encoding="utf-8",
+            )
+            execution.write_text(
+                "\n".join(
+                    (
+                        "spawn_blocking",
+                        "credential_for_adapter",
+                        "verified_entrypoint",
+                        "stage_editing_artifacts",
+                        "build_video_editing_child_request",
+                        "run_video_editing_child",
+                        "import_output",
+                        "settle_editing_job",
+                    )
+                ),
+                encoding="utf-8",
+            )
+
+            gaps = video_editing_production_wiring_gaps(main, test, execution)
+
+        self.assertEqual(1, len(gaps))
+        self.assertIn("start_interrupted_video_editing_reconciliation", gaps[0])
+
     def test_missing_production_source_is_refused(self) -> None:
         with tempfile.TemporaryDirectory(prefix="cq04-wiring-") as raw:
             base = Path(raw)

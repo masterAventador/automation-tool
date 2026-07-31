@@ -20,7 +20,6 @@ from uuid import uuid4
 
 import httpx2
 import pytest
-
 from automation_tool.executor.video_editing import (
     EditingExecutionRequest,
     execute_video_editing,
@@ -72,8 +71,10 @@ async def test_real_one_shot_composition_imports_a_film_and_cleans_cloud_objects
     }
     input_directory = tmp_path / "input"
     output_directory = tmp_path / "output"
+    state_directory = tmp_path / "state"
     input_directory.mkdir()
     output_directory.mkdir()
+    state_directory.mkdir(mode=0o700)
     artifact_id = str(uuid4())
     project_id = str(uuid4())
     timeline_id = str(uuid4())
@@ -83,6 +84,7 @@ async def test_real_one_shot_composition_imports_a_film_and_cleans_cloud_objects
     request = EditingExecutionRequest.model_validate(
         {
             "schemaVersion": 1,
+            "executionMode": "submit",
             "credential": child_credential,
             "editingJobId": editing_job_id,
             "projectId": project_id,
@@ -120,6 +122,7 @@ async def test_real_one_shot_composition_imports_a_film_and_cleans_cloud_objects
             ],
             "inputDirectory": os.fspath(input_directory),
             "outputDirectory": os.fspath(output_directory),
+            "stateDirectory": os.fspath(state_directory),
             "outputWidth": 128,
             "outputHeight": 128,
         }

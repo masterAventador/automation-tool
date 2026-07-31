@@ -939,7 +939,10 @@ T4 在设备 Executor 的 infrastructure 边界补齐生产实现：Rust 只从 
 stdin 交给已签名 Executor；Python Adapter 用固定 OSS 对象键完成上传，再通过 ACS3 签名
 调用 IMS Submit/Query、按有界策略对账、流式导回 MP4，并在确定终态清理临时对象。长期密钥、
 绝对路径和供应商响应不进入领域对象、Control Plane、WebView、argv、环境变量或错误文本；
-响应丢失收敛为 `outcome_uncertain`，不得自动重发。
+响应丢失收敛为 `outcome_uncertain`，不得自动重发。Executor 另在 App 私有任务目录原子保存
+`prepared / dispatched / uncertain` 意图：重启恢复持有 vendor JobId 时只继续 Query，不重复
+OSS 上传或 IMS Submit；无意图可证明 Submit 尚未开始，可以安全完成初次提交；prepared
+模糊窗口不重放。跨进程文件租约保证遗留子进程与恢复子进程不会并发写同一意图。
 
 ### 17.1 两种视频制作执行链
 
