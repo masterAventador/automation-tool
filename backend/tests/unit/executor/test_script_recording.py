@@ -553,20 +553,51 @@ def test_partition_backtracking_limits_total_incremental_dp_allocation(
     assert allocated_edit_distance_cells <= 40_000_000
 
 
+def test_distance_budget_exhaustion_cannot_make_an_ambiguous_slice_unique(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        script_recording,
+        "_MAX_ALIGNMENT_DISTANCE_DP_CELLS",
+        530,
+    )
+
+    assert not script_recording._sentences_align(
+        ("abcdefghij", "abcdxfghij"),
+        "abcdyfghijabcdxfghij",
+    )
+
+
+def test_distance_budget_exhaustion_during_full_text_check_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        script_recording,
+        "_MAX_ALIGNMENT_DISTANCE_DP_CELLS",
+        100,
+    )
+
+    assert not script_recording._sentences_align(
+        ("abcdefghij",),
+        "abcdxfghij",
+    )
+
+
 def test_adjacent_boundary_proof_fails_closed_when_its_work_budget_is_exhausted() -> None:
     previous = "a" * 19 + "X"
     middle = "XY"
     following = "Y" + "b" * 19
 
-    assert not script_recording._slice_preserves_adjacent_boundaries(
-        (previous, middle, following),
-        sentence_index=1,
-        previous_actual=previous,
-        actual=middle,
-        following_actual=following[1:],
-        consume_distance_dp_cells=lambda required: True,
-        consume_dp_cells=lambda required: False,
-    )
+    with pytest.raises(script_recording._AlignmentBudgetExhausted):
+        script_recording._slice_preserves_adjacent_boundaries(
+            (previous, middle, following),
+            sentence_index=1,
+            previous_actual=previous,
+            actual=middle,
+            following_actual=following[1:],
+            consume_distance_dp_cells=lambda required: True,
+            consume_dp_cells=lambda required: False,
+        )
 
 
 def test_adjacent_boundary_proof_keeps_a_middle_with_no_better_reallocation() -> None:

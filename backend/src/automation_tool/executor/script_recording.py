@@ -38,6 +38,10 @@ _MAX_ALIGNMENT_DISTANCE_DP_CELLS: Final = 40_000_000
 _MAX_ALIGNMENT_ADJACENT_DP_CELLS: Final = 4_000_000
 
 
+class _AlignmentBudgetExhausted(RuntimeError):
+    pass
+
+
 class ScriptRecordingRejected(RuntimeError):
     """The user-recording alignment boundary rejected one complete request."""
 
@@ -186,7 +190,7 @@ def _alignment_distance(
         return None
     required_dp_cells = maximum * (min(len(script_text), len(transcript)) + 1)
     if consume_dp_cells is not None and not consume_dp_cells(required_dp_cells):
-        return None
+        raise _AlignmentBudgetExhausted
     distance = _levenshtein_distance(
         script_text,
         transcript,
@@ -360,7 +364,7 @@ def _slice_preserves_adjacent_boundaries(
         len(following_actual) + len(actual)
     ) * (len(following) + 1)
     if not consume_dp_cells(required_dp_cells):
-        return False
+        raise _AlignmentBudgetExhausted
     alternative_previous_distances = _bounded_extension_distances(
         previous,
         previous_actual,
@@ -435,11 +439,15 @@ def _sentences_align(
         return True
 
     expected_transcript = "".join(normalized_sentences)
-    if not _texts_align(
-        expected_transcript,
-        transcript,
-        consume_dp_cells=consume_distance_dp_cells,
-    ):
+    try:
+        texts_align = _texts_align(
+            expected_transcript,
+            transcript,
+            consume_dp_cells=consume_distance_dp_cells,
+        )
+    except _AlignmentBudgetExhausted:
+        return False
+    if not texts_align:
         return False
     length_bounds = tuple(
         _aligned_slice_length_bounds(sentence) for sentence in normalized_sentences
@@ -531,7 +539,10 @@ def _sentences_align(
         failed_states.add(state)
         return False
 
-    return partition_from(0, 0, ())
+    try:
+        return partition_from(0, 0, ())
+    except _AlignmentBudgetExhausted:
+        return False
 
 
 def _clips_from_segments(
