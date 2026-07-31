@@ -611,7 +611,7 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 | BU-04 | 页面动作所有权租约 | 建立 `BrowserSurfaceLease`；抖音发布时 Browser Use 经 CDP 独占运营浏览器动作权，暂停原 Playwright 执行器，超时/崩溃必定断开 CDP 并归还 | BU-02,EB-07 | ✅ 已完成 |
 | BU-05 | 安全策略与确认门禁 | 页面内容不可信、敏感数据发送前确认、外部副作用临界点确认、ActionGate/ledger/Verifier 复用；模型历史、DOM 和截图脱敏且不持有 Cookie/token | BU-03,BU-04 | ✅ 已完成 |
 | BU-06 | 百炼模型与受限能力接入 | `ChatOpenAI` 指向百炼兼容地址；锁最新稳定模型及能力快照，视觉默认 qwen3.7-max 最新多模态版本，DeepSeek/GLM 仅在 DOM-only 验收后可选；无通用 Browser Use 菜单 | BU-05,VF-05 | 🔍 待验收 |
-| BU-07 | 双平台正式包与攻击矩阵 | macOS/Windows 正式包使用唯一 Chromium 完成独立 Agent 与租约接管；覆盖 prompt injection、DOM/截图差异、模型不兼容、断网、超时、并发租约、CDP 暴露、进程清理和零真实副作用 | BU-06,EB-16 | 🔍 待验收 |
+| BU-07 | 双平台正式包与攻击矩阵 | macOS/Windows 正式包使用唯一 Chromium 完成独立 Agent 与租约接管；覆盖 prompt injection、DOM/截图差异、模型不兼容、断网、超时、并发租约、CDP 暴露、进程清理和零真实副作用。**2026-07-31 macOS 签名公证发布候选包内同一矩阵连续三轮通过：22 项确定性攻击矩阵先通过一次，真实恶意页面的独立/接管两种会话再使用随机 CDP 端口 60211、60469、60551 连跑三轮，均无泄漏、工具面漂移或残留进程；runner 已按 Manifest 锁定 target/版本/包根并限制 1～10 轮。Windows 正式安装树内同矩阵与连跑、macOS x86_64 仍待补。** | BU-06,EB-16 | 🔍 待验收 |
 
 ### 9.4 视频基础（7 项）
 

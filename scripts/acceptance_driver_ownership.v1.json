@@ -66,14 +66,14 @@
       ]
     },
     "manual_embedded_browser_native": {
-      "reason": "These drivers stage the real digest-locked embedded Chromium for the current supported macOS or Windows target; they require an explicit native artifact run instead of an automatic source-shape test.",
+      "reason": "These drivers stage the real digest-locked embedded Chromium or consume it from a verified release package for the current supported macOS or Windows target; they require an explicit native artifact run instead of an automatic source-shape test.",
       "conditions": [
         "the host matches one of the driver-supported native macOS or Windows target IDs",
-        "the locked archive is already present at the repository archive_path() location",
+        "the selected locked archive or already-built verified release package is present",
         "the operator explicitly selects the driver and its cleanup scope"
       ],
       "resources": [
-        "the existing digest-locked Chrome for Testing archive",
+        "the existing digest-locked Chrome for Testing archive or verified release package",
         "the matching native Node, Rust, and application build toolchains",
         "isolated temporary browser Profiles and package roots"
       ],
