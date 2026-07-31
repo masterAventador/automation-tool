@@ -14,7 +14,6 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = ROOT / "contracts/video/ffmpeg-toolchain.v1.json"
 SHA256_LENGTH = 64
@@ -177,7 +176,26 @@ def validate_contract(document: dict[str, Any]) -> None:
         "decoders": {"h264", "aac", "png"},
         "demuxers": {"concat", "image2", "image2pipe", "mov"},
         "muxers": {"mp4", "mov", "image2"},
-        "filters": {"amix", "aresample", "concat", "overlay", "scale"},
+        "filters": {
+            "ametadata",
+            "amix",
+            "aresample",
+            "concat",
+            "crop",
+            "ebur128",
+            "format",
+            "fps",
+            "overlay",
+            "scale",
+            "scdet",
+            "select",
+            "setpts",
+            "setsar",
+            "settb",
+            "silencedetect",
+            "trim",
+            "xfade",
+        },
         "protocols": {"file", "pipe"},
     }
     for group, expected in required.items():
@@ -529,6 +547,10 @@ def self_test(document: dict[str, Any]) -> None:
         (
             "missing codec",
             lambda data: data["required_capabilities"]["encoders"].remove("libx264"),
+        ),
+        (
+            "missing local-editing filter",
+            lambda data: data["required_capabilities"]["filters"].remove("xfade"),
         ),
         ("unknown target", lambda data: data["targets"][0].update(arch="x86_64")),
         ("partial digest", lambda data: data["x264"].update(source_sha256="abc")),

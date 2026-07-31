@@ -21,6 +21,7 @@ notice next time.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import unittest
@@ -35,7 +36,29 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from check_video_media_toolchain import (  # noqa: E402
     create_test_directory_link,
     remove_test_directory_link,
+    validate_contract,
 )
+
+EXPECTED_PRODUCTION_FILTERS = {
+    "ametadata",
+    "amix",
+    "aresample",
+    "concat",
+    "crop",
+    "ebur128",
+    "format",
+    "fps",
+    "overlay",
+    "scale",
+    "scdet",
+    "select",
+    "setpts",
+    "setsar",
+    "settb",
+    "silencedetect",
+    "trim",
+    "xfade",
+}
 
 
 class SelfTestRunsOnThisPlatform(unittest.TestCase):
@@ -54,6 +77,19 @@ class SelfTestRunsOnThisPlatform(unittest.TestCase):
             f"only Windows:\n{completed.stdout}{completed.stderr}",
         )
         self.assertIn("video media toolchain contract is valid", completed.stdout)
+
+    def test_contract_and_validator_pin_every_production_filter(self) -> None:
+        document = json.loads(
+            (ROOT / "contracts/video/ffmpeg-toolchain.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        self.assertEqual(
+            EXPECTED_PRODUCTION_FILTERS,
+            set(document["required_capabilities"]["filters"]),
+        )
+        validate_contract(document)
 
 
 class DirectoryLinkFixture(unittest.TestCase):
