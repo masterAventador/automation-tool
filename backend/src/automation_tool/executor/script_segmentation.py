@@ -26,8 +26,8 @@ _SCRIPT_MODEL_IDS: Final = frozenset(
 )
 _API_KEY_PATTERN: Final = re.compile(r"^sk-[A-Za-z0-9._-]{17,253}$")
 _MAX_CATALOG_BYTES: Final = 262_144
-_MAX_RESPONSE_BYTES: Final = 65_536
-_MAX_STRUCTURED_RESULT_BYTES: Final = 32_768
+_MAX_RESPONSE_BYTES: Final = 262_144
+_MAX_STRUCTURED_RESULT_BYTES: Final = 65_536
 _MAX_REQUEST_ID_CHARACTERS: Final = 512
 _SCRIPT_PROMPT: Final = (
     "Return one JSON object with exactly one field named sentences. "
@@ -124,7 +124,7 @@ class ScriptSegmentationOptions:
     """Request-level choices shared by every future model provider."""
 
     enable_thinking: bool = False
-    max_output_tokens: int = 2_048
+    max_output_tokens: int = 16_384
 
     def __post_init__(self) -> None:
         if (
@@ -285,19 +285,30 @@ def load_bailian_script_segmentation_config(
 ) -> BailianScriptSegmentationConfig:
     """Select one allowed text model from the packaged video-model catalog."""
 
+    if type(timeout_seconds) not in {int, float} or not 0 < timeout_seconds <= 300:
+        _reject()
+    validated_timeout_seconds = float(timeout_seconds)
     try:
         if catalog_path.is_symlink() or not catalog_path.is_file():
             _reject()
+        if catalog_path.stat().st_size > _MAX_CATALOG_BYTES:
+            _reject()
+        with catalog_path.open("rb") as catalog_file:
+            raw_catalog = catalog_file.read(_MAX_CATALOG_BYTES + 1)
+        if len(raw_catalog) > _MAX_CATALOG_BYTES:
+            _reject()
         document = decode_bounded_json_object(
-            catalog_path.read_bytes(),
+            raw_catalog,
             maximum_bytes=_MAX_CATALOG_BYTES,
         )
     except (OSError, RecursionError, TypeError, UnicodeError, ValueError):
         document = {}
     purposes = document.get("purposes")
     models = document.get("models")
+    schema_version = document.get("schema_version")
     if (
-        document.get("schema_version") != 1
+        type(schema_version) is not int
+        or schema_version != 1
         or document.get("provider") != "bailian"
         or document.get("api_mode") != "openai_compatible"
         or document.get("base_url") != _BAILIAN_BASE_URL
@@ -314,7 +325,9 @@ def load_bailian_script_segmentation_config(
     allowed_model_ids = purpose.get("allowed_model_ids")
     default_model_id = purpose.get("default_model_id")
     if (
-        default_model_id != _DEFAULT_SCRIPT_MODEL_ID
+        "api_mode" in purpose
+        or "base_url" in purpose
+        or default_model_id != _DEFAULT_SCRIPT_MODEL_ID
         or not isinstance(allowed_model_ids, list)
         or not all(type(item) is str for item in allowed_model_ids)
         or set(allowed_model_ids) != _SCRIPT_MODEL_IDS
@@ -334,7 +347,7 @@ def load_bailian_script_segmentation_config(
         base_url=_BAILIAN_BASE_URL,
         model_id=selected_model_id,
         api_key=api_key,
-        timeout_seconds=float(timeout_seconds),
+        timeout_seconds=validated_timeout_seconds,
     )
 
 

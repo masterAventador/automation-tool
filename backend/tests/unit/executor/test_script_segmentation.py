@@ -123,6 +123,12 @@ def test_public_config_constructor_rejects_malformed_types_with_the_fixed_error(
     assert raised.value.__context__ is None
 
 
+def test_default_token_budget_covers_the_maximum_legal_script() -> None:
+    options = ScriptSegmentationOptions()
+
+    assert options.max_output_tokens == 16_384
+
+
 @pytest.mark.parametrize("enable_thinking", [False, True])
 def test_request_body_follows_thinking_and_contains_only_the_script_text(
     enable_thinking: bool,
@@ -423,6 +429,147 @@ def test_transport_failure_has_no_secret_path_or_exception_chain(
     assert private_path not in rendered
     assert API_KEY not in repr(raised.value)
     assert private_path not in repr(raised.value)
+
+
+def test_oversized_catalog_is_rejected_before_any_unbounded_read(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    oversized = tmp_path / "oversized-catalog.json"
+    oversized.write_bytes(b"{" + b"x" * script_segmentation_module._MAX_CATALOG_BYTES)
+
+    def fail_unbounded_read(_path: Path) -> bytes:
+        raise AssertionError("catalog loader attempted an unbounded read")
+
+    monkeypatch.setattr(Path, "read_bytes", fail_unbounded_read)
+
+    with pytest.raises(
+        ScriptSegmentationRejected,
+        match=r"^script segmentation request rejected$",
+    ) as raised:
+        load_bailian_script_segmentation_config(
+            catalog_path=oversized,
+            api_key=API_KEY,
+            model_id=None,
+            timeout_seconds=10,
+        )
+
+    assert raised.value.__context__ is None
+
+
+@pytest.mark.parametrize("schema_version", [True, 1.0])
+def test_catalog_schema_version_requires_an_exact_integer(
+    schema_version: object,
+    tmp_path: Path,
+) -> None:
+    catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    catalog["schema_version"] = schema_version
+    drifted = tmp_path / "catalog.json"
+    drifted.write_text(json.dumps(catalog), encoding="utf-8")
+
+    with pytest.raises(
+        ScriptSegmentationRejected,
+        match=r"^script segmentation request rejected$",
+    ) as raised:
+        load_bailian_script_segmentation_config(
+            catalog_path=drifted,
+            api_key=API_KEY,
+            model_id=None,
+            timeout_seconds=10,
+        )
+
+    assert raised.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("api_mode", "dashscope_native"),
+        ("base_url", "https://attacker.invalid/v1"),
+    ],
+)
+def test_script_purpose_cannot_override_the_locked_endpoint(
+    field: str,
+    value: str,
+    tmp_path: Path,
+) -> None:
+    catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    purpose = next(item for item in catalog["purposes"] if item["id"] == "script")
+    purpose[field] = value
+    drifted = tmp_path / "catalog.json"
+    drifted.write_text(json.dumps(catalog), encoding="utf-8")
+
+    with pytest.raises(
+        ScriptSegmentationRejected,
+        match=r"^script segmentation request rejected$",
+    ) as raised:
+        load_bailian_script_segmentation_config(
+            catalog_path=drifted,
+            api_key=API_KEY,
+            model_id=None,
+            timeout_seconds=10,
+        )
+
+    assert raised.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    "timeout_seconds",
+    [
+        True,
+        "/Users/operator/Private Videos/source clip.mp4",
+        10**400,
+    ],
+)
+def test_dynamic_timeout_is_validated_before_float_conversion(
+    timeout_seconds: object,
+) -> None:
+    private_path = "/Users/operator/Private Videos/source clip.mp4"
+
+    with pytest.raises(
+        ScriptSegmentationRejected,
+        match=r"^script segmentation request rejected$",
+    ) as raised:
+        load_bailian_script_segmentation_config(
+            catalog_path=CATALOG_PATH,
+            api_key=API_KEY,
+            model_id=None,
+            timeout_seconds=cast(float, timeout_seconds),
+        )
+
+    rendered = "".join(
+        traceback.format_exception(
+            type(raised.value),
+            raised.value,
+            raised.value.__traceback__,
+        )
+    )
+    assert raised.value.__context__ is None
+    assert private_path not in rendered
+
+
+def test_equivalent_escaped_json_can_carry_the_maximum_legal_script(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = json.dumps(
+        {"sentences": ["😀" * MAX_NARRATION_CHARS] * 4},
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    _install_transport(monkeypatch, response=_response(content=content))
+
+    reply = _adapter().segment(
+        "请生成旁白。",
+        options=ScriptSegmentationOptions(),
+    )
+    result = segment_script(
+        _StaticAdapter(reply.content),
+        "请生成旁白。",
+        options=ScriptSegmentationOptions(),
+    )
+
+    assert len(result.sentences) == 4
+    assert sum(len(sentence.text) for sentence in result.sentences) == 4_000
 
 
 def test_catalog_path_is_explicit_and_not_discovered_from_the_environment(
