@@ -135,10 +135,11 @@ RELEASE_PACKAGE_BASELINE_BYTES: Final = {
 }
 
 # A symmetric drift band lets normal metadata/runtime movement through while
-# staying below the 113,124,957 byte motion Worker, the smallest complete
-# runtime tree that could be added or removed. Thus weight alone rejects both a
-# duplicate and a stripped required runtime on either target.
-_RELEASE_PACKAGE_DRIFT_BYTES: Final = 64 * _MEBIBYTE
+# keeping the entire 96 MiB window below the 113,124,957 byte motion Worker,
+# the smallest complete runtime tree that could be added or removed. Thus
+# weight alone rejects both a duplicate and a stripped required runtime from
+# every allowed point in the envelope.
+_RELEASE_PACKAGE_DRIFT_BYTES: Final = 48 * _MEBIBYTE
 
 
 def release_size_bounds(platform: str) -> PackageSizeBounds:

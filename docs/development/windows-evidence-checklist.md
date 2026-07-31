@@ -526,7 +526,8 @@ Windows 侧待补（需真实 Windows 环境）：
    端口、测试凭据、`*_for_acceptance` 测试命令，且窗口配置不是隐藏测试窗口；
 4. 记录 Windows 实测体积（安装包与安装目录），并校准
    `release_size_bounds(platform)`：浏览器树仍为 320–420 MiB，整包按 macOS/Windows
-   各自基线 ±64 MiB；不得再把两平台各项最大值相加，否则余量会藏下第二份完整运行时；
+   各自基线 ±48 MiB；总窗口必须小于最小完整运行时，不得再把两平台各项最大值相加，
+   否则余量会藏下第二份完整运行时；
 5. Authenticode 签名（含时间戳）与 SmartScreen 表现——本机无 Windows 代码签名证书，
    属 🔍 待凭据；
 6. 首次安装（`currentUser` NSIS）、启动正式包 App、退出后无 `chrome.exe` /

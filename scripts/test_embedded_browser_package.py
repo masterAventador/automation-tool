@@ -112,6 +112,10 @@ class ReleaseSizeBoundsTests(unittest.TestCase):
             self.assertGreaterEqual(bounds.max_package_bytes, baseline)
             self.assertGreater(bounds.min_package_bytes, baseline - motion_worker)
             self.assertLess(bounds.max_package_bytes, baseline + motion_worker)
+            self.assertGreater(
+                bounds.min_package_bytes + motion_worker,
+                bounds.max_package_bytes,
+            )
 
     def test_windows_bound_rejects_one_more_complete_motion_worker(self) -> None:
         measured_package = 1_289_130_572

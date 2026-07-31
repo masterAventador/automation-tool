@@ -214,6 +214,37 @@ test("P9-05 rejects a valid PEM private key whose header has trailing whitespace
   }
 });
 
+test("P9-05 rejects OpenSSL PEM whitespace after a carriage return", async () => {
+  const fixture = await createBundle("windows");
+  try {
+    const { privateKey } = generateKeyPairSync("ed25519", {
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+      publicKeyEncoding: { type: "spki", format: "pem" },
+    });
+    const spaced = privateKey.replace(
+      "-----BEGIN PRIVATE KEY-----\n",
+      "-----BEGIN PRIVATE KEY-----\r\t\n",
+    );
+    assert.doesNotThrow(() => createPrivateKey(spaced));
+    const header = Buffer.from("-----BEGIN PRIVATE KEY-----");
+    const padding = Buffer.alloc(1024 * 1024 - header.length - 1, 0x61);
+    await writeFile(
+      join(fixture.bundle, "valid-private.pem"),
+      Buffer.concat([padding, Buffer.from(spaced)]),
+    );
+    await assert.rejects(
+      auditReleaseBundle({
+        bundleRoot: fixture.bundle,
+        executorPackagePath: fixture.executor,
+        platform: "windows",
+      }),
+      /forbidden content marker/u,
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("P9-05 checks every private-key header before carrying a chunk-boundary candidate", async () => {
   const fixture = await createBundle("windows");
   try {

@@ -95,11 +95,11 @@ const privateKeyHeaders = [
   "-----BEGIN EC PRIVATE KEY-----",
   "-----BEGIN OPENSSH PRIVATE KEY-----",
 ].map((header) => Buffer.from(header));
-const privateKeyLineWhitespace = new Set([0x09, 0x0b, 0x0c, 0x20]);
+const privateKeyLineWhitespace = new Set([0x09, 0x0b, 0x0c, 0x0d, 0x20]);
 // FFmpeg and other crypto-capable binaries legitimately embed the names of
 // supported PEM formats as null-terminated strings. A private key header is a
-// line, so require optional OpenSSL-accepted horizontal whitespace plus a line
-// ending instead of rejecting a compiled capability string with no key data.
+// line, so require optional OpenSSL-accepted whitespace (including CR before
+// LF) plus the final LF instead of rejecting a compiled capability string.
 forbiddenContentMarkers.push(Buffer.from(developmentVerifyingKey, "base64url"));
 const maximumMarkerLength = Math.max(
   ...forbiddenContentMarkers.map((marker) => marker.length),
@@ -235,34 +235,21 @@ function assertSafePath(rendered, state) {
 async function assertSafeContent(path, rendered) {
   let tail = Buffer.alloc(0);
   let pendingPrivateKeyWhitespace = false;
-  let pendingPrivateKeyCarriageReturn = false;
   for await (const chunk of createReadStream(path, { highWaterMark: scanChunkSize })) {
     let offset = 0;
-    while (
-      (pendingPrivateKeyWhitespace || pendingPrivateKeyCarriageReturn) &&
-      offset < chunk.length
-    ) {
+    while (pendingPrivateKeyWhitespace && offset < chunk.length) {
       const byte = chunk[offset];
-      if (
-        (pendingPrivateKeyWhitespace && byte === 0x0a) ||
-        (pendingPrivateKeyCarriageReturn && byte === 0x0a)
-      ) {
+      if (byte === 0x0a) {
         throw rejected("forbidden content marker", rendered);
       }
-      const nextWhitespace =
-        pendingPrivateKeyWhitespace && privateKeyLineWhitespace.has(byte);
-      const nextCarriageReturn = pendingPrivateKeyWhitespace && byte === 0x0d;
+      const nextWhitespace = privateKeyLineWhitespace.has(byte);
       pendingPrivateKeyWhitespace = nextWhitespace;
-      pendingPrivateKeyCarriageReturn = nextCarriageReturn;
-      if (!nextWhitespace && !nextCarriageReturn) {
+      if (!nextWhitespace) {
         break;
       }
       offset += 1;
     }
-    if (
-      (pendingPrivateKeyWhitespace || pendingPrivateKeyCarriageReturn) &&
-      offset === chunk.length
-    ) {
+    if (pendingPrivateKeyWhitespace && offset === chunk.length) {
       tail = Buffer.alloc(0);
       continue;
     }
@@ -271,7 +258,6 @@ async function assertSafeContent(path, rendered) {
       throw rejected("forbidden content marker", rendered);
     }
     let nextPendingWhitespace = false;
-    let nextPendingCarriageReturn = false;
     for (const header of privateKeyHeaders) {
       let index = combined.indexOf(header);
       while (index !== -1) {
@@ -289,21 +275,11 @@ async function assertSafeContent(path, rendered) {
         if (combined[cursor] === 0x0a) {
           throw rejected("forbidden content marker", rendered);
         }
-        if (combined[cursor] === 0x0d) {
-          if (cursor + 1 === combined.length) {
-            nextPendingCarriageReturn = true;
-            break;
-          }
-          if (combined[cursor + 1] === 0x0a) {
-            throw rejected("forbidden content marker", rendered);
-          }
-        }
         index = combined.indexOf(header, index + 1);
       }
     }
     pendingPrivateKeyWhitespace = nextPendingWhitespace;
-    pendingPrivateKeyCarriageReturn = nextPendingCarriageReturn;
-    if (pendingPrivateKeyWhitespace || pendingPrivateKeyCarriageReturn) {
+    if (pendingPrivateKeyWhitespace) {
       tail = Buffer.alloc(0);
       continue;
     }
