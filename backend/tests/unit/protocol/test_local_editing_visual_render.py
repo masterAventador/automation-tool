@@ -292,6 +292,46 @@ def test_plan_rejects_a_valid_clip_tuple_whose_last_end_misses_duration() -> Non
         )
 
 
+def test_plan_accepts_exact_clip_limit_and_rejects_one_more() -> None:
+    clips = tuple(
+        LocalEditingVisualRenderClip(
+            sequence=index,
+            material_id=uuid4(),
+            kind=SegmentSelectionMaterialKind.IMAGE,
+            start_ms=index - 1,
+            duration_ms=1,
+            source_in_ms=None,
+            source_out_ms=None,
+            transition_kind=None,
+            transition_duration_ms=None,
+        )
+        for index in range(1, 513)
+    )
+    accepted = LocalEditingVisualRenderPlan(
+        project_id=uuid4(),
+        timeline_id=uuid4(),
+        timeline_revision=1,
+        output_width=720,
+        output_height=1280,
+        output_fps=30,
+        duration_ms=512,
+        clips=clips,
+    )
+
+    assert len(accepted.clips) == 512
+    with pytest.raises(LocalEditingVisualRenderRejected):
+        LocalEditingVisualRenderPlan(
+            project_id=uuid4(),
+            timeline_id=uuid4(),
+            timeline_revision=1,
+            output_width=720,
+            output_height=1280,
+            output_fps=30,
+            duration_ms=513,
+            clips=(*clips, clips[-1]),
+        )
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

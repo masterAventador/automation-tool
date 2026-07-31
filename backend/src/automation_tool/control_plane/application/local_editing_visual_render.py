@@ -87,7 +87,13 @@ def create_local_editing_visual_render_plan(
         or project.project_id != timeline.project_id
         or not isinstance(project.output, OutputSpec)
         or not isinstance(timeline.tracks, tuple)
-        or not all(isinstance(track, TimelineTrack) for track in timeline.tracks)
+        or not all(
+            isinstance(track, TimelineTrack)
+            and isinstance(track.kind, TimelineTrackKind)
+            and isinstance(track.clips, tuple)
+            and all(isinstance(clip, TimelineClip) for clip in track.clips)
+            for track in timeline.tracks
+        )
     ):
         _reject()
     try:

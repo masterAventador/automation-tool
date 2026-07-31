@@ -13,13 +13,21 @@ from automation_tool.control_plane.application.local_editing_visual_render impor
     create_local_editing_visual_render_plan,
 )
 from automation_tool.control_plane.domain.editing_project import (
+    MAX_OUTPUT_DIMENSION,
+    MAX_OUTPUT_FPS,
+    MIN_OUTPUT_DIMENSION,
+    MIN_OUTPUT_FPS,
     CaptionStyle,
     EditingProject,
     EditingProjectId,
     OutputSpec,
 )
-from automation_tool.control_plane.domain.material import MaterialId
+from automation_tool.control_plane.domain.material import MAX_MATERIAL_DURATION_MS, MaterialId
 from automation_tool.control_plane.domain.timeline import (
+    MAX_CLIPS_PER_TRACK,
+    MAX_TIMELINE_DURATION_MS,
+    MAX_TRANSITION_DURATION_MS,
+    MIN_TIMELINE_DURATION_MS,
     Timeline,
     TimelineClip,
     TimelineId,
@@ -29,7 +37,18 @@ from automation_tool.control_plane.domain.timeline import (
     TransitionKind,
 )
 from automation_tool.protocol.local_editing import SegmentSelectionMaterialKind
-from automation_tool.protocol.local_rendering import LocalEditingVisualTransitionKind
+from automation_tool.protocol.local_rendering import (
+    MAX_LOCAL_EDITING_OUTPUT_DIMENSION,
+    MAX_LOCAL_EDITING_OUTPUT_FPS,
+    MAX_LOCAL_EDITING_RENDER_CLIPS,
+    MAX_LOCAL_EDITING_RENDER_DURATION_MS,
+    MAX_LOCAL_EDITING_SOURCE_DURATION_MS,
+    MAX_LOCAL_EDITING_TRANSITION_DURATION_MS,
+    MIN_LOCAL_EDITING_OUTPUT_DIMENSION,
+    MIN_LOCAL_EDITING_OUTPUT_FPS,
+    MIN_LOCAL_EDITING_RENDER_DURATION_MS,
+    LocalEditingVisualTransitionKind,
+)
 
 NOW = datetime(2026, 8, 1, 0, 0, tzinfo=UTC)
 
@@ -238,6 +257,40 @@ def test_projection_rejects_wrong_elements_in_the_track_tuple_before_filtering()
 
     assert "private" not in str(error.value)
     assert error.value.__cause__ is None
+
+
+def test_projection_rejects_mutated_nonvisual_track_shapes_before_filtering() -> None:
+    project_id = EditingProjectId.new()
+    project = _project(project_id)
+    for field, value in (("kind", "caption"), ("clips", [])):
+        timeline = _timeline(project_id)
+        nonvisual = timeline.tracks[-1]
+        object.__setattr__(nonvisual, field, value)
+
+        with pytest.raises(LocalEditingVisualPlanRejected):
+            create_local_editing_visual_render_plan(project, timeline)
+
+
+def test_render_wire_limits_are_guarded_against_domain_drift() -> None:
+    assert (
+        MIN_LOCAL_EDITING_OUTPUT_DIMENSION,
+        MAX_LOCAL_EDITING_OUTPUT_DIMENSION,
+        MIN_LOCAL_EDITING_OUTPUT_FPS,
+        MAX_LOCAL_EDITING_OUTPUT_FPS,
+    ) == (MIN_OUTPUT_DIMENSION, MAX_OUTPUT_DIMENSION, MIN_OUTPUT_FPS, MAX_OUTPUT_FPS)
+    assert (
+        MIN_LOCAL_EDITING_RENDER_DURATION_MS,
+        MAX_LOCAL_EDITING_RENDER_DURATION_MS,
+        MAX_LOCAL_EDITING_RENDER_CLIPS,
+        MAX_LOCAL_EDITING_TRANSITION_DURATION_MS,
+        MAX_LOCAL_EDITING_SOURCE_DURATION_MS,
+    ) == (
+        MIN_TIMELINE_DURATION_MS,
+        MAX_TIMELINE_DURATION_MS,
+        MAX_CLIPS_PER_TRACK,
+        MAX_TRANSITION_DURATION_MS,
+        MAX_MATERIAL_DURATION_MS,
+    )
 
 
 def test_projection_fails_closed_when_visual_track_is_removed_after_construction() -> None:
