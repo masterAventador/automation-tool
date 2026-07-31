@@ -517,7 +517,12 @@ def test_stop_process_escalates_from_term_to_kill_on_posix(
     process = _StoppingProcess(wait_times_out=True)
     signals: list[tuple[int, signal.Signals]] = []
     monkeypatch.setattr(os, "name", "posix")
-    monkeypatch.setattr(os, "killpg", lambda pid, sig: signals.append((pid, sig)))
+    monkeypatch.setattr(
+        os,
+        "killpg",
+        lambda pid, sig: signals.append((pid, sig)),
+        raising=False,
+    )
 
     execution._stop_process(process)  # type: ignore[arg-type]
 
