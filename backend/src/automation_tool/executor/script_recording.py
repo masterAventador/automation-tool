@@ -195,25 +195,6 @@ def _texts_align(script_text: str, transcript: str) -> bool:
     return _alignment_distance(script_text, transcript) is not None
 
 
-def _text_is_within_distance(
-    expected: str,
-    actual: str,
-    *,
-    maximum_distance: int,
-) -> bool:
-    return (
-        bool(expected)
-        and bool(actual)
-        and abs(len(expected) - len(actual)) <= maximum_distance
-        and _levenshtein_distance(
-            expected,
-            actual,
-            maximum_distance=maximum_distance,
-        )
-        <= maximum_distance
-    )
-
-
 def _aligned_slice_length_bounds(expected: str) -> tuple[int, int]:
     expected_length = len(expected)
     minimum = max(
@@ -267,6 +248,7 @@ def _slice_preserves_adjacent_boundaries(
     previous_actual: str,
     actual: str,
     following_actual: str,
+    consume_work: Callable[[], bool],
 ) -> bool:
     previous = normalized_sentences[sentence_index - 1]
     following = normalized_sentences[sentence_index + 1]
@@ -274,26 +256,41 @@ def _slice_preserves_adjacent_boundaries(
     following_distance = _alignment_distance(following, following_actual)
     if previous_distance is None or following_distance is None:
         return False
+    current_adjacent_distance = previous_distance + following_distance
     for boundary in range(1, len(actual)):
         previous_part = actual[:boundary]
         following_part = actual[boundary:]
-        if (
-            previous.endswith(previous_part)
-            and following.startswith(following_part)
-            and _text_is_within_distance(
-                previous[: -len(previous_part)],
-                previous_actual,
-                maximum_distance=previous_distance,
-            )
-            and _text_is_within_distance(
-                following[len(following_part) :],
-                following_actual,
-                maximum_distance=following_distance,
-            )
-        ):
+        if not (previous.endswith(previous_part) and following.startswith(following_part)):
+            continue
+        alternative_previous_actual = previous_actual + previous_part
+        alternative_following_actual = following_part + following_actual
+        minimum_alternative_distance = abs(len(previous) - len(alternative_previous_actual)) + abs(
+            len(following) - len(alternative_following_actual)
+        )
+        if minimum_alternative_distance > current_adjacent_distance:
+            continue
+        if not consume_work():
+            return False
+        alternative_previous_distance = _alignment_distance(
+            previous,
+            alternative_previous_actual,
+            maximum_distance=current_adjacent_distance,
+        )
+        if alternative_previous_distance is None:
+            continue
+        if not consume_work():
+            return False
+        alternative_following_distance = _alignment_distance(
+            following,
+            alternative_following_actual,
+            maximum_distance=current_adjacent_distance - alternative_previous_distance,
+        )
+        if alternative_following_distance is not None:
             # A composition-shaped middle slice is only its own occurrence
-            # when removing both borrowed pieces does not explain the adjacent
-            # slices at least as well. Otherwise it cannot prove presence.
+            # when reallocating both borrowed pieces back to their adjacent
+            # slices does not explain those slices at least as well. This also
+            # catches an ASR boundary insertion that duplicates a borrowed
+            # piece. Otherwise the middle slice cannot prove presence.
             return False
     return True
 
@@ -336,6 +333,13 @@ def _sentences_align(
     failed_states: set[tuple[int, ...]] = set()
     candidate_checks = 0
 
+    def consume_work() -> bool:
+        nonlocal candidate_checks
+        if candidate_checks >= _MAX_ALIGNMENT_CANDIDATE_CHECKS:
+            return False
+        candidate_checks += 1
+        return True
+
     def partition_from(
         sentence_index: int,
         transcript_start: int,
@@ -361,9 +365,8 @@ def _sentences_align(
             last=last_end,
             preferred=transcript_start + len(normalized_sentences[sentence_index]),
         ):
-            if candidate_checks >= _MAX_ALIGNMENT_CANDIDATE_CHECKS:
+            if not consume_work():
                 return False
-            candidate_checks += 1
             actual = transcript[transcript_start:transcript_end]
             if not _slice_proves_sentence(
                 normalized_sentences,
@@ -380,6 +383,7 @@ def _sentences_align(
                     previous_actual=transcript[previous_start:middle_start],
                     actual=transcript[middle_start:transcript_start],
                     following_actual=actual,
+                    consume_work=consume_work,
                 ):
                     continue
             if partition_from(

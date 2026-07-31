@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import ClassVar
 
@@ -429,6 +429,111 @@ def test_partition_search_stops_at_a_hard_candidate_budget(
     assert candidate_checks == maximum_candidate_checks
 
 
+def test_long_overlapping_boundaries_do_not_repeat_edit_distance_per_character(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_edit_distance = script_recording._levenshtein_distance
+    edit_distance_checks = 0
+
+    def count_edit_distance(
+        left: str,
+        right: str,
+        *,
+        maximum_distance: int,
+    ) -> int:
+        nonlocal edit_distance_checks
+        edit_distance_checks += 1
+        return original_edit_distance(
+            left,
+            right,
+            maximum_distance=maximum_distance,
+        )
+
+    monkeypatch.setattr(
+        script_recording,
+        "_levenshtein_distance",
+        count_edit_distance,
+    )
+    sentence_length = 1_000
+    previous = "a" * (sentence_length - 1)
+    middle = "a" * sentence_length
+    following = "a" * (sentence_length - 2) + "b"
+    previous_actual = "c" * 149 + previous[149:]
+    following_actual = "d" * 149 + following[149:]
+
+    assert script_recording._sentences_align(
+        (previous, middle, following),
+        previous_actual + middle + following_actual,
+    )
+    assert edit_distance_checks <= 32
+
+
+def test_adjacent_boundary_proof_fails_closed_when_its_work_budget_is_exhausted() -> None:
+    previous = "a" * 19 + "X"
+    middle = "XY"
+    following = "Y" + "b" * 19
+
+    assert not script_recording._slice_preserves_adjacent_boundaries(
+        (previous, middle, following),
+        sentence_index=1,
+        previous_actual=previous,
+        actual=middle,
+        following_actual=following[1:],
+        consume_work=lambda: False,
+    )
+    work_results = iter((True, False))
+    assert not script_recording._slice_preserves_adjacent_boundaries(
+        (previous, middle, following),
+        sentence_index=1,
+        previous_actual=previous,
+        actual=middle,
+        following_actual=following[1:],
+        consume_work=lambda: next(work_results),
+    )
+
+
+def test_adjacent_boundary_proof_closes_uncertain_alternative_distances(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    previous = "a" * 19 + "X"
+    middle = "XY"
+    following = "Y" + "b" * 19
+    distances: Iterator[int | None] = iter((0, 1, None))
+    monkeypatch.setattr(
+        script_recording,
+        "_alignment_distance",
+        lambda *args, **kwargs: next(distances),
+    )
+    assert script_recording._slice_preserves_adjacent_boundaries(
+        (previous, middle, following),
+        sentence_index=1,
+        previous_actual=previous,
+        actual=middle,
+        following_actual=following[1:],
+        consume_work=lambda: True,
+    )
+
+    previous = "b" * 18 + "aa"
+    middle = "aaa"
+    following = "aa" + "c" * 18
+    distances = iter((0, 3, 1, None))
+    monkeypatch.setattr(
+        script_recording,
+        "_alignment_distance",
+        lambda *args, **kwargs: next(distances),
+    )
+    work_results = iter((True, True, False))
+
+    assert not script_recording._slice_preserves_adjacent_boundaries(
+        (previous, middle, following),
+        sentence_index=1,
+        previous_actual=previous,
+        actual=middle,
+        following_actual=following[2:],
+        consume_work=lambda: next(work_results),
+    )
+
+
 @pytest.mark.parametrize(
     ("sentences", "transcript"),
     [
@@ -486,6 +591,10 @@ def test_text_alignment_rejects_short_errors_large_differences_reordering_and_em
         (
             ("x" * 10 + "abab", "abcd", "cdcd" + "y" * 10),
             ("x" * 10 + "abab") + ("cdcd" + "y" * 10),
+        ),
+        (
+            ("a" * 19 + "X", "XY", "Y" + "b" * 19),
+            ("a" * 19 + "X") + "X" + ("Y" + "b" * 19),
         ),
         (tuple("abcdefghij"), "abcdefghi"),
     ],
