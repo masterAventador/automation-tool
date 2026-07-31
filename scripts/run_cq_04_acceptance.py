@@ -7,12 +7,13 @@ CQ-04 要的是"从全新安装的真实 App 一句话创建两类视频、送�
 | 条件 | 本机 | 影响 |
 | --- | --- | --- |
 | 百炼模型密钥 | 有 | 一句话生成脚本可跑 |
-| 阿里云剪辑密钥 | 有 | 独立剪辑可跑 |
+| 阿里云剪辑密钥 | 有 | 只证明供应商凭据可达 |
+| 独立剪辑生产装配 | 缺失 | 正式 App 仍使用 sessionStorage Gateway |
 | 抖音创作者账号 | **没有**（要扫码） | 真实发布跑不了 |
 
 所以本脚本不假装跑完了整条链路。它做三件事：
 
-1. **探测外部条件**——不解析密钥内容，只确认文件在不在；
+1. **探测外部条件与生产装配**——不解析密钥内容，且不把文件存在当成 wiring 完成；
 2. **跑不依赖缺失条件的那些段**，用的是真实正式包；
 3. **核对台账没有虚标**——每个 `🔍 待验收` 的任务必须说得出自己缺什么。
 
@@ -34,10 +35,18 @@ from cq_04_ledger_honesty import (  # noqa: E402
     LedgerHonestyRejected,
     require_status_matches_evidence,
 )
+from cq_04_vertical_readiness import (  # noqa: E402
+    VerticalReadinessRejected,
+    video_editing_production_wiring_gaps,
+)
 
 ROADMAP = REPOSITORY_ROOT / "docs/embedded-browser-video-studio-roadmap.md"
 EVIDENCE_DIRECTORY = REPOSITORY_ROOT / "docs/development"
 SECRETS = REPOSITORY_ROOT / ".local/secrets"
+PRODUCTION_MAIN = REPOSITORY_ROOT / "frontend/src/main.tsx"
+PRODUCTION_WIRING_TEST = (
+    REPOSITORY_ROOT / "frontend/src/app/production-wiring.test.ts"
+)
 
 _TASK_ROW = re.compile(
     r"^\|\s*([A-Z]{2}-\d{2})\s*\|.*\|\s*([⬜🧪🚧🔍✅⏸][^|]*)\|\s*$", re.M
@@ -91,6 +100,22 @@ def probe_external_conditions() -> dict[str, bool]:
     return available
 
 
+def probe_production_readiness() -> dict[str, bool]:
+    """凭据之外，正式 App 自己也必须真的把能力装进去。"""
+    try:
+        gaps = video_editing_production_wiring_gaps(
+            PRODUCTION_MAIN, PRODUCTION_WIRING_TEST
+        )
+    except VerticalReadinessRejected as error:
+        fail(str(error))
+    ready = not gaps
+    if ready:
+        announce("独立视频剪辑生产装配: 已闭合")
+    else:
+        announce("独立视频剪辑生产装配: 缺失（" + "; ".join(gaps) + "）")
+    return {"独立视频剪辑生产装配": ready}
+
+
 def sweep_the_ledger() -> int:
     """核对每个已激活任务的状态与它自己的证据内容自洽。"""
     roadmap = ROADMAP.read_text(encoding="utf-8")
@@ -140,6 +165,7 @@ def main() -> int:
 
     announce("Probing the external conditions this vertical needs")
     available = probe_external_conditions()
+    available.update(probe_production_readiness())
 
     for label, script in CONTENT_GATES:
         run_segment(label, script)

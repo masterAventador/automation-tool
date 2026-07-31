@@ -194,18 +194,18 @@ PREREQUISITES: Final[tuple[Prerequisite, ...]] = (
         name="eb-16-release-package",
         gate="scripts/run_cq_03_acceptance.py",
         produces=(
-            ".local/eb-16/run/cargo-target/release/bundle/macos/自动化运营工具.app",
+            ".local/release/cargo-target/release/bundle/macos/自动化运营工具.app",
         ),
-        producer=("{python}", "scripts/run_eb_16_acceptance.py"),
+        producer=("{python}", "scripts/build_release_package.py"),
         automatic=False,
         why=(
             "CQ-03 runs three business lines against the one Chromium inside a "
-            "real package; a browser resolved any other way would not be "
-            "testing the thing that ships"
+            "current production package; a browser resolved from the historical "
+            "EB-16 acceptance directory would not be testing the thing that ships"
         ),
         caveat=(
-            "macOS only, tens of minutes, and it signs with the Developer ID "
-            "identity — this is deliberately not run for you"
+            "macOS only, tens of minutes, and it signs and notarises with the "
+            "Developer ID identity — this is deliberately not automatic"
         ),
     ),
     Prerequisite(

@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import run_eb_17_acceptance as acceptance  # noqa: E402
+import run_cq_03_acceptance as concurrent_acceptance  # noqa: E402
 import run_pb_08_acceptance as publish_acceptance  # noqa: E402
 
 
@@ -24,6 +25,7 @@ class CurrentReleaseDefaultsTests(unittest.TestCase):
             / ".local/release/cargo-target/release/bundle/macos/自动化运营工具.app"
         )
         self.assertEqual(expected, acceptance.DEFAULT_PACKAGE)
+        self.assertEqual(expected, concurrent_acceptance.DEFAULT_PACKAGE)
         self.assertEqual(expected, publish_acceptance.DEFAULT_PACKAGE)
 
 
