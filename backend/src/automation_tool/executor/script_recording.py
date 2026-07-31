@@ -195,6 +195,25 @@ def _texts_align(script_text: str, transcript: str) -> bool:
     return _alignment_distance(script_text, transcript) is not None
 
 
+def _text_is_within_distance(
+    expected: str,
+    actual: str,
+    *,
+    maximum_distance: int,
+) -> bool:
+    return (
+        bool(expected)
+        and bool(actual)
+        and abs(len(expected) - len(actual)) <= maximum_distance
+        and _levenshtein_distance(
+            expected,
+            actual,
+            maximum_distance=maximum_distance,
+        )
+        <= maximum_distance
+    )
+
+
 def _aligned_slice_length_bounds(expected: str) -> tuple[int, int]:
     expected_length = len(expected)
     minimum = max(
@@ -238,15 +257,43 @@ def _slice_proves_sentence(
             # presence, even when it also falls within this sentence's ASR
             # tolerance.
             return False
-    if 0 < sentence_index < len(normalized_sentences) - 1:
-        previous = normalized_sentences[sentence_index - 1]
-        following = normalized_sentences[sentence_index + 1]
-        if any(
-            previous.endswith(actual[:boundary]) and following.startswith(actual[boundary:])
-            for boundary in range(1, len(actual))
+    return True
+
+
+def _slice_preserves_adjacent_boundaries(
+    normalized_sentences: tuple[str, ...],
+    *,
+    sentence_index: int,
+    previous_actual: str,
+    actual: str,
+    following_actual: str,
+) -> bool:
+    previous = normalized_sentences[sentence_index - 1]
+    following = normalized_sentences[sentence_index + 1]
+    previous_distance = _alignment_distance(previous, previous_actual)
+    following_distance = _alignment_distance(following, following_actual)
+    if previous_distance is None or following_distance is None:
+        return False
+    for boundary in range(1, len(actual)):
+        previous_part = actual[:boundary]
+        following_part = actual[boundary:]
+        if (
+            previous.endswith(previous_part)
+            and following.startswith(following_part)
+            and _text_is_within_distance(
+                previous[: -len(previous_part)],
+                previous_actual,
+                maximum_distance=previous_distance,
+            )
+            and _text_is_within_distance(
+                following[len(following_part) :],
+                following_actual,
+                maximum_distance=following_distance,
+            )
         ):
-            # A missing middle sentence can otherwise be synthesized from the
-            # previous sentence's suffix and the following sentence's prefix.
+            # A composition-shaped middle slice is only its own occurrence
+            # when removing both borrowed pieces does not explain the adjacent
+            # slices at least as well. Otherwise it cannot prove presence.
             return False
     return True
 
@@ -273,8 +320,6 @@ def _sentences_align(
     transcript: str,
 ) -> bool:
     expected_transcript = "".join(normalized_sentences)
-    if expected_transcript == transcript:
-        return True
     if not _texts_align(expected_transcript, transcript):
         return False
     length_bounds = tuple(
@@ -288,14 +333,18 @@ def _sentences_align(
         maximum_suffix[index] = maximum + maximum_suffix[index + 1]
     if not minimum_suffix[0] <= len(transcript) <= maximum_suffix[0]:
         return False
-    failed_states: set[tuple[int, int]] = set()
+    failed_states: set[tuple[int, ...]] = set()
     candidate_checks = 0
 
-    def partition_from(sentence_index: int, transcript_start: int) -> bool:
+    def partition_from(
+        sentence_index: int,
+        transcript_start: int,
+        transcript_ends: tuple[int, ...],
+    ) -> bool:
         nonlocal candidate_checks
         if sentence_index == len(normalized_sentences):
             return transcript_start == len(transcript)
-        state = (sentence_index, transcript_start)
+        state = (sentence_index, *transcript_ends[-3:])
         if state in failed_states:
             return False
         minimum, maximum = length_bounds[sentence_index]
@@ -315,16 +364,34 @@ def _sentences_align(
             if candidate_checks >= _MAX_ALIGNMENT_CANDIDATE_CHECKS:
                 return False
             candidate_checks += 1
-            if _slice_proves_sentence(
+            actual = transcript[transcript_start:transcript_end]
+            if not _slice_proves_sentence(
                 normalized_sentences,
                 sentence_index=sentence_index,
-                actual=transcript[transcript_start:transcript_end],
-            ) and partition_from(sentence_index + 1, transcript_end):
+                actual=actual,
+            ):
+                continue
+            if sentence_index >= 2:
+                previous_start = 0 if sentence_index == 2 else transcript_ends[-3]
+                middle_start = transcript_ends[-2]
+                if not _slice_preserves_adjacent_boundaries(
+                    normalized_sentences,
+                    sentence_index=sentence_index - 1,
+                    previous_actual=transcript[previous_start:middle_start],
+                    actual=transcript[middle_start:transcript_start],
+                    following_actual=actual,
+                ):
+                    continue
+            if partition_from(
+                sentence_index + 1,
+                transcript_end,
+                (*transcript_ends, transcript_end),
+            ):
                 return True
         failed_states.add(state)
         return False
 
-    return partition_from(0, 0)
+    return partition_from(0, 0, ())
 
 
 def _clips_from_segments(

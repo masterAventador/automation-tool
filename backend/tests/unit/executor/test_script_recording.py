@@ -303,6 +303,53 @@ def test_exact_overlapping_short_sentences_are_not_mistaken_for_a_missing_senten
     )
 
 
+def test_overlapping_short_sentence_survives_an_allowed_error_in_another_sentence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, approved, tools, asr = _arrange_boundary(tmp_path, monkeypatch)
+    sentences = ("abcdefghijX", "XY", "Yklmnopqrst")
+    exact_transcript = "".join(sentences)
+    InjectedRecordedSpeechAnalyzer.next_result = RecordedSpeechAnalysis(
+        duration_ms=5_000,
+        speech_segments_ms=((100, 1_000), (1_500, 2_500), (3_000, 4_000)),
+        transcript=exact_transcript[:-1] + "Z",
+    )
+
+    result = align_script_recording(
+        _script(*sentences),
+        source=source,
+        approved=approved,
+        tools=tools,
+        vad_factory=object,
+        asr_adapter=asr,
+    )
+
+    assert tuple(clip.sentence.text for clip in result.clips) == sentences
+
+
+def test_exact_concatenation_that_cannot_prove_sentence_order_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, approved, tools, asr = _arrange_boundary(tmp_path, monkeypatch)
+    InjectedRecordedSpeechAnalyzer.next_result = RecordedSpeechAnalysis(
+        duration_ms=5_000,
+        speech_segments_ms=((100, 2_000), (2_500, 4_000)),
+        transcript="你好你好你好",
+    )
+
+    with pytest.raises(ScriptRecordingRejected):
+        align_script_recording(
+            _script("你好", "你好你好"),
+            source=source,
+            approved=approved,
+            tools=tools,
+            vad_factory=object,
+            asr_adapter=asr,
+        )
+
+
 def test_maximum_exact_script_avoids_edit_distance_work(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -435,6 +482,10 @@ def test_text_alignment_rejects_short_errors_large_differences_reordering_and_em
         (
             ("a" * 19 + "X", "XY", "Y" + "b" * 19),
             ("a" * 19 + "X") + ("Y" + "b" * 19),
+        ),
+        (
+            ("x" * 10 + "abab", "abcd", "cdcd" + "y" * 10),
+            ("x" * 10 + "abab") + ("cdcd" + "y" * 10),
         ),
         (tuple("abcdefghij"), "abcdefghi"),
     ],
