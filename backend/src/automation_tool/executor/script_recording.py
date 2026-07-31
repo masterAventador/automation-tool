@@ -110,8 +110,8 @@ class ScriptRecordingResult:
         normalized_sentences = tuple(
             _normalized_speech_text(clip.sentence.text) for clip in self.clips
         )
-        if not all(normalized_sentences) or not _texts_align(
-            "".join(normalized_sentences),
+        if not all(normalized_sentences) or not _sentences_align(
+            normalized_sentences,
             _normalized_speech_text(self.transcript),
         ):
             _reject()
@@ -162,6 +162,62 @@ def _texts_align(script_text: str, transcript: str) -> bool:
     if abs(len(script_text) - len(transcript)) > allowed_errors:
         return False
     return _levenshtein_distance(script_text, transcript) <= allowed_errors
+
+
+def _transcript_slices(
+    normalized_sentences: tuple[str, ...],
+    transcript: str,
+) -> tuple[str, ...] | None:
+    if len(transcript) < len(normalized_sentences):
+        return None
+    total_script_characters = sum(len(sentence) for sentence in normalized_sentences)
+    transcript_start = 0
+    cumulative_script_characters = 0
+    slices: list[str] = []
+    for index, sentence in enumerate(normalized_sentences):
+        cumulative_script_characters += len(sentence)
+        remaining_sentences = len(normalized_sentences) - index - 1
+        if remaining_sentences:
+            numerator = len(transcript) * cumulative_script_characters
+            target = (numerator + total_script_characters // 2) // total_script_characters
+            transcript_end = max(
+                transcript_start + 1,
+                min(target, len(transcript) - remaining_sentences),
+            )
+        else:
+            transcript_end = len(transcript)
+        slices.append(transcript[transcript_start:transcript_end])
+        transcript_start = transcript_end
+    return tuple(slices)
+
+
+def _sentences_align(
+    normalized_sentences: tuple[str, ...],
+    transcript: str,
+) -> bool:
+    if not _texts_align("".join(normalized_sentences), transcript):
+        return False
+    transcript_slices = _transcript_slices(normalized_sentences, transcript)
+    if transcript_slices is None:
+        return False
+    for index, (expected, actual) in enumerate(
+        zip(normalized_sentences, transcript_slices, strict=True)
+    ):
+        if not _texts_align(expected, actual):
+            return False
+        expected_distance = _levenshtein_distance(expected, actual)
+        for other_index, other in enumerate(normalized_sentences):
+            if other_index == index or other == expected:
+                continue
+            if (
+                _texts_align(other, actual)
+                and _levenshtein_distance(other, actual) <= expected_distance
+            ):
+                # A slice that is at least as close to another distinct script
+                # sentence cannot prove the declared order. Fail closed rather
+                # than binding a near-duplicate sentence to the wrong audio.
+                return False
+    return True
 
 
 def _clips_from_segments(
@@ -261,9 +317,8 @@ def _align_script_recording(
         or len(analysis.speech_segments_ms) < len(script.sentences)
     ):
         _reject()
-    normalized_script = "".join(normalized_sentences)
     normalized_transcript = _normalized_speech_text(analysis.transcript)
-    if not _texts_align(normalized_script, normalized_transcript):
+    if not _sentences_align(normalized_sentences, normalized_transcript):
         _reject()
     return ScriptRecordingResult(
         script_request_id=script.request_id,

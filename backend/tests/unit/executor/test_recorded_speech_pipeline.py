@@ -151,6 +151,41 @@ def test_too_few_real_speech_segments_is_rejected_before_asr(
     assert captured.value.__context__ is None
 
 
+def test_source_changed_while_asr_is_in_flight_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "automation_tool.executor.material_speech_pipeline.subprocess.Popen",
+        FinishedExtraction,
+    )
+    source = tmp_path / "private recording.m4a"
+    source.write_bytes(b"private container bytes")
+    source, approved = approve_source(source)
+
+    class ChangingSourceAsr(RecordingAsr):
+        def transcribe(self, audio: SpeechAudioBatch) -> str:
+            result = super().transcribe(audio)
+            with source.open("ab") as destination:
+                destination.write(b"changed during ASR")
+            return result
+
+    asr = ChangingSourceAsr()
+    analyzer = LocalRecordedSpeechAnalyzer(
+        tools=_tools(tmp_path),
+        source=source,
+        approved=approved,
+        vad_factory=lambda: SequencedVad([0.9] * 10 + [0.0] * 54),
+        asr_adapter=asr,
+    )
+
+    with pytest.raises(MaterialSpeechRejected) as captured:
+        analyzer.analyze(2_048, minimum_segments=1)
+
+    assert len(asr.calls) == 1
+    assert captured.value.__context__ is None
+
+
 def test_multiple_real_segments_are_preserved_while_asr_stays_path_free(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

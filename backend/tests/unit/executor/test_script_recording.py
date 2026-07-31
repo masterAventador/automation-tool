@@ -291,6 +291,40 @@ def test_text_alignment_rejects_short_errors_large_differences_reordering_and_em
 
 
 @pytest.mark.parametrize(
+    ("sentences", "transcript"),
+    [
+        (("abcdefghij", "Z"), "abcdefghij"),
+        (("aaaaaaaaab", "aaaaaaaaac"), "aaaaaaaaacaaaaaaaaab"),
+        (tuple("abcdefghij"), "abcdefghi"),
+    ],
+)
+def test_each_sentence_must_be_present_in_order_despite_the_global_error_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    sentences: tuple[str, ...],
+    transcript: str,
+) -> None:
+    source, approved, tools, asr = _arrange_boundary(tmp_path, monkeypatch)
+    InjectedRecordedSpeechAnalyzer.next_result = RecordedSpeechAnalysis(
+        duration_ms=5_000,
+        speech_segments_ms=tuple(
+            (100 + index * 400, 300 + index * 400) for index in range(len(sentences))
+        ),
+        transcript=transcript,
+    )
+
+    with pytest.raises(ScriptRecordingRejected):
+        align_script_recording(
+            _script(*sentences),
+            source=source,
+            approved=approved,
+            tools=tools,
+            vad_factory=object,
+            asr_adapter=asr,
+        )
+
+
+@pytest.mark.parametrize(
     "facts",
     [
         MediaStreamFacts(

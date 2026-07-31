@@ -371,6 +371,11 @@ class LocalRecordedSpeechAnalyzer:
                 batches.close()
             if not transcripts:
                 _reject()
+            # The result names ranges in the caller-owned source file, not in
+            # the private PCM snapshot. Re-close that identity window after
+            # every network wait so those ranges cannot be applied to a file
+            # replaced while ASR was in flight.
+            require_source_unchanged(source, checked)
             return RecordedSpeechAnalysis(
                 duration_ms=duration_ms,
                 speech_segments_ms=segments,
