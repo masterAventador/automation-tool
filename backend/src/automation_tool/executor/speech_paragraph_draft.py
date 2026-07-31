@@ -16,6 +16,9 @@ from automation_tool.protocol.local_editing import (
     MAX_LOCAL_EDITING_SCRIPT_SENTENCES,
     MAX_LOCAL_EDITING_SEMANTIC_MATERIALS,
     MAX_LOCAL_EDITING_TRANSCRIPT_CHARACTERS,
+    LocalEditingTimelineDraft,
+    LocalEditingTimelineParagraph,
+    LocalEditingTimelineParagraphKind,
     SegmentSelectionMaterialKind,
     SpeechParagraphMaterial,
     is_canonical_local_editing_material_id,
@@ -243,6 +246,40 @@ class ParagraphDraftFailure:
     def __post_init__(self) -> None:
         if not isinstance(self.code, ParagraphDraftFailureCode):
             _reject()
+
+
+@dataclass(frozen=True, slots=True)
+class NarrationMaterialBinding:
+    """Local TTS path bound to its separately registered AUDIO material."""
+
+    sequence: int
+    narration_relative_path: str
+    material_id: UUID
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.sequence) is not int
+            or not 1 <= self.sequence <= MAX_LOCAL_EDITING_SCRIPT_SENTENCES
+            or not _valid_narration_path(
+                self.narration_relative_path,
+                sequence=self.sequence,
+            )
+            or not is_canonical_local_editing_material_id(self.material_id)
+        ):
+            _reject()
+
+
+def _validated_narration_binding(
+    binding: NarrationMaterialBinding,
+) -> NarrationMaterialBinding:
+    try:
+        return NarrationMaterialBinding(
+            sequence=binding.sequence,
+            narration_relative_path=binding.narration_relative_path,
+            material_id=binding.material_id,
+        )
+    except Exception:
+        _reject()
 
 
 @dataclass(frozen=True, slots=True)
@@ -556,8 +593,76 @@ def resolve_speech_aware_paragraph_draft(
     )
 
 
+def project_local_editing_timeline_draft(
+    resolved: ResolvedSpeechAwareParagraphDraft,
+    *,
+    narration_materials: tuple[NarrationMaterialBinding, ...],
+) -> LocalEditingTimelineDraft:
+    """Drop local TTS paths after binding them to registered material IDs."""
+
+    if (
+        not isinstance(resolved, ResolvedSpeechAwareParagraphDraft)
+        or not isinstance(narration_materials, tuple)
+        or not all(isinstance(binding, NarrationMaterialBinding) for binding in narration_materials)
+    ):
+        _reject()
+    try:
+        originals = tuple(
+            _validated_original_paragraph(paragraph)
+            for paragraph in resolved.original_speech_paragraphs
+        )
+        narrated = tuple(
+            _validated_selected_paragraph(paragraph) for paragraph in resolved.narrated_paragraphs
+        )
+        ResolvedSpeechAwareParagraphDraft(
+            original_speech_paragraphs=originals,
+            narrated_paragraphs=narrated,
+        )
+        bindings = tuple(_validated_narration_binding(binding) for binding in narration_materials)
+        if tuple(binding.sequence for binding in bindings) != tuple(
+            range(1, len(narrated) + 1)
+        ) or any(
+            binding.narration_relative_path != paragraph.narration_relative_path
+            for binding, paragraph in zip(bindings, narrated, strict=True)
+        ):
+            _reject()
+        paragraphs = [
+            LocalEditingTimelineParagraph(
+                sequence=index,
+                kind=LocalEditingTimelineParagraphKind.ORIGINAL_SPEECH,
+                visual_material_id=paragraph.material_id,
+                audio_material_id=paragraph.material_id,
+                duration_ms=paragraph.visual_duration_ms,
+                visual_source_in_ms=paragraph.source_in_ms,
+                visual_source_out_ms=paragraph.source_out_ms,
+                caption_text=paragraph.caption_text,
+            )
+            for index, paragraph in enumerate(originals, start=1)
+        ]
+        paragraphs.extend(
+            LocalEditingTimelineParagraph(
+                sequence=len(originals) + index,
+                kind=LocalEditingTimelineParagraphKind.NARRATED,
+                visual_material_id=paragraph.segment.material_id,
+                audio_material_id=binding.material_id,
+                duration_ms=paragraph.duration_ms,
+                visual_source_in_ms=paragraph.segment.source_in_ms,
+                visual_source_out_ms=paragraph.segment.source_out_ms,
+                caption_text=paragraph.caption_text,
+            )
+            for index, (paragraph, binding) in enumerate(
+                zip(narrated, bindings, strict=True),
+                start=1,
+            )
+        )
+        return LocalEditingTimelineDraft(paragraphs=tuple(paragraphs))
+    except Exception:
+        _reject()
+
+
 __all__ = [
     "NarratedParagraphDraft",
+    "NarrationMaterialBinding",
     "OriginalSpeechParagraphDraft",
     "ParagraphDraftFailure",
     "ParagraphDraftFailureCode",
@@ -567,5 +672,6 @@ __all__ = [
     "SpeechAwareParagraphDraft",
     "SpeechParagraphDraftRejected",
     "build_speech_aware_paragraph_draft",
+    "project_local_editing_timeline_draft",
     "resolve_speech_aware_paragraph_draft",
 ]

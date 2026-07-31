@@ -11,11 +11,14 @@ from uuid import RFC_4122, UUID
 
 LOCAL_EDITING_SEGMENT_SELECTION_VERSION: Final = "local-editing.segment-selection.v1"
 LOCAL_EDITING_SPEECH_PARAGRAPH_VERSION: Final = "local-editing.speech-paragraph.v1"
+LOCAL_EDITING_TIMELINE_DRAFT_VERSION: Final = "local-editing.timeline-draft.v1"
 MAX_LOCAL_EDITING_MATERIAL_DURATION_MS: Final = 4 * 60 * 60 * 1_000
 MAX_LOCAL_EDITING_SHOT_BOUNDARIES: Final = 4_096
 MAX_LOCAL_EDITING_SPEECH_SEGMENTS: Final = 4_096
 MAX_LOCAL_EDITING_TRANSCRIPT_CHARACTERS: Final = 100_000
+MIN_LOCAL_EDITING_TIMELINE_DURATION_MS: Final = 100
 MAX_LOCAL_EDITING_TIMELINE_DURATION_MS: Final = 600_000
+MAX_LOCAL_EDITING_TIMELINE_CAPTION_CHARACTERS: Final = 2_000
 MAX_LOCAL_EDITING_SCRIPT_SENTENCES: Final = 128
 MAX_LOCAL_EDITING_SEMANTIC_MATERIALS: Final = 32
 LOCAL_EDITING_SEMANTIC_SCORE_THRESHOLD: Final = 60
@@ -51,6 +54,11 @@ class SegmentSelectionMaterialKind(StrEnum):
     AUDIO = "audio"
 
 
+class LocalEditingTimelineParagraphKind(StrEnum):
+    ORIGINAL_SPEECH = "original_speech"
+    NARRATED = "narrated"
+
+
 def _valid_local_editing_text(value: object, *, maximum: int) -> bool:
     return (
         type(value) is str
@@ -62,6 +70,121 @@ def _valid_local_editing_text(value: object, *, maximum: int) -> bool:
             for character in value
         )
     )
+
+
+@dataclass(frozen=True, slots=True)
+class LocalEditingTimelineParagraph:
+    """One final, path-free paragraph ready for Timeline domain construction."""
+
+    sequence: int
+    kind: LocalEditingTimelineParagraphKind
+    visual_material_id: UUID
+    audio_material_id: UUID
+    duration_ms: int
+    visual_source_in_ms: int | None
+    visual_source_out_ms: int | None
+    caption_text: str
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.sequence) is not int
+            or not 1 <= self.sequence <= MAX_LOCAL_EDITING_SEMANTIC_MATERIALS
+            or not isinstance(self.kind, LocalEditingTimelineParagraphKind)
+            or not is_canonical_local_editing_material_id(self.visual_material_id)
+            or not is_canonical_local_editing_material_id(self.audio_material_id)
+            or type(self.duration_ms) is not int
+            or not 1 <= self.duration_ms <= MAX_LOCAL_EDITING_TIMELINE_DURATION_MS
+            or (self.visual_source_in_ms is None) != (self.visual_source_out_ms is None)
+            or not _valid_local_editing_text(
+                self.caption_text,
+                maximum=MAX_LOCAL_EDITING_TIMELINE_CAPTION_CHARACTERS,
+            )
+            or (
+                self.kind is LocalEditingTimelineParagraphKind.ORIGINAL_SPEECH
+                and (
+                    self.audio_material_id != self.visual_material_id
+                    or self.visual_source_in_ms is None
+                )
+            )
+            or (
+                self.kind is LocalEditingTimelineParagraphKind.NARRATED
+                and self.audio_material_id == self.visual_material_id
+            )
+        ):
+            _reject()
+        if self.visual_source_in_ms is None:
+            return
+        if (
+            type(self.visual_source_in_ms) is not int
+            or type(self.visual_source_out_ms) is not int
+            or self.visual_source_in_ms < 0
+            or self.visual_source_out_ms > MAX_LOCAL_EDITING_MATERIAL_DURATION_MS
+            or self.visual_source_out_ms - self.visual_source_in_ms != self.duration_ms
+        ):
+            _reject()
+
+
+def _validated_timeline_paragraph(
+    paragraph: LocalEditingTimelineParagraph,
+) -> LocalEditingTimelineParagraph:
+    try:
+        return LocalEditingTimelineParagraph(
+            sequence=paragraph.sequence,
+            kind=paragraph.kind,
+            visual_material_id=paragraph.visual_material_id,
+            audio_material_id=paragraph.audio_material_id,
+            duration_ms=paragraph.duration_ms,
+            visual_source_in_ms=paragraph.visual_source_in_ms,
+            visual_source_out_ms=paragraph.visual_source_out_ms,
+            caption_text=paragraph.caption_text,
+        )
+    except Exception:
+        _reject()
+
+
+@dataclass(frozen=True, slots=True)
+class LocalEditingTimelineDraft:
+    """A complete all-or-nothing plan crossing into the Control Plane."""
+
+    paragraphs: tuple[LocalEditingTimelineParagraph, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.paragraphs, tuple)
+            or not 1 <= len(self.paragraphs) <= MAX_LOCAL_EDITING_SEMANTIC_MATERIALS
+            or not all(
+                isinstance(paragraph, LocalEditingTimelineParagraph)
+                for paragraph in self.paragraphs
+            )
+        ):
+            _reject()
+        validated = tuple(_validated_timeline_paragraph(paragraph) for paragraph in self.paragraphs)
+        visual_ids = {paragraph.visual_material_id for paragraph in validated}
+        narration_audio_ids = tuple(
+            paragraph.audio_material_id
+            for paragraph in validated
+            if paragraph.kind is LocalEditingTimelineParagraphKind.NARRATED
+        )
+        duration_ms = sum(paragraph.duration_ms for paragraph in validated)
+        if (
+            tuple(paragraph.sequence for paragraph in validated)
+            != tuple(range(1, len(validated) + 1))
+            or len(visual_ids) != len(validated)
+            or len(set(narration_audio_ids)) != len(narration_audio_ids)
+            or any(material_id in visual_ids for material_id in narration_audio_ids)
+            or not MIN_LOCAL_EDITING_TIMELINE_DURATION_MS
+            <= duration_ms
+            <= MAX_LOCAL_EDITING_TIMELINE_DURATION_MS
+        ):
+            _reject()
+
+    @property
+    def duration_ms(self) -> int:
+        return sum(paragraph.duration_ms for paragraph in self.paragraphs)
+
+    @property
+    def version(self) -> str:
+        return LOCAL_EDITING_TIMELINE_DRAFT_VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,14 +350,20 @@ __all__ = [
     "LOCAL_EDITING_SEGMENT_SELECTION_VERSION",
     "LOCAL_EDITING_SEMANTIC_SCORE_THRESHOLD",
     "LOCAL_EDITING_SPEECH_PARAGRAPH_VERSION",
+    "LOCAL_EDITING_TIMELINE_DRAFT_VERSION",
     "MAX_LOCAL_EDITING_MATERIAL_DURATION_MS",
     "MAX_LOCAL_EDITING_SCRIPT_SENTENCES",
     "MAX_LOCAL_EDITING_SEMANTIC_MATERIALS",
     "MAX_LOCAL_EDITING_SHOT_BOUNDARIES",
     "MAX_LOCAL_EDITING_SPEECH_SEGMENTS",
+    "MAX_LOCAL_EDITING_TIMELINE_CAPTION_CHARACTERS",
     "MAX_LOCAL_EDITING_TIMELINE_DURATION_MS",
     "MAX_LOCAL_EDITING_TRANSCRIPT_CHARACTERS",
+    "MIN_LOCAL_EDITING_TIMELINE_DURATION_MS",
     "LocalEditingProtocolRejected",
+    "LocalEditingTimelineDraft",
+    "LocalEditingTimelineParagraph",
+    "LocalEditingTimelineParagraphKind",
     "SegmentSelectionCandidateScore",
     "SegmentSelectionMaterial",
     "SegmentSelectionMaterialKind",
