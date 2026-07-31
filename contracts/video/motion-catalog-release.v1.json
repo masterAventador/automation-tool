@@ -91,6 +91,27 @@
   "contentRewrites": {
     "items": [
       {
+        "name": "caption-texture",
+        "document": "items/caption-texture/caption-texture.html",
+        "replacements": [
+          {
+            "literal": "var TEXTURE_URL = \"compositions/components/\" + TEXTURE + \".png\";",
+            "replacement": "var TEXTURE_URL = TEXTURE + \".png\";",
+            "occurrences": 1
+          },
+          {
+            "literal": "        color: #ffd0a0;",
+            "replacement": "        color: transparent !important;\n        background-size: 200% 200%;\n        background-position: var(--mask-position, 0% 50%);\n        -webkit-background-clip: text;\n        background-clip: text;",
+            "occurrences": 1
+          },
+          {
+            "literal": "          wordEl.style.webkitMaskImage = \"url('\" + TEXTURE_URL + \"')\";\n          wordEl.style.maskImage = \"url('\" + TEXTURE_URL + \"')\";",
+            "replacement": "          wordEl.style.backgroundImage = \"url('\" + TEXTURE_URL + \"')\";",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
         "name": "code-snippet-dark-2026",
         "document": "items/code-snippet-dark-2026/code-snippet-dark-2026.html",
         "replacements": [
@@ -478,6 +499,6 @@
   },
   "generated": {
     "fileCount": 337,
-    "aggregateSha256": "fc0330a7f3bc1a81fdc2b4704a52588f2931221053629bed3c1fe637f70d962c"
+    "aggregateSha256": "07201129da250f63d0511bb05b1904f532b82b8e7eebcaad2851544492f40e85"
   }
 }

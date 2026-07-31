@@ -81,8 +81,18 @@ def main() -> int:
         "runtime data must be inlined into the composed release; the render "
         "sandbox may not widen file-origin access"
     )
+    # `load` is not the composition-ready boundary. A document may parse an
+    # inlined GLB first and only then register its seekable GSAP timeline. The
+    # Worker must keep probing through warm-up and derive the capture mode from
+    # the final probe; otherwise it takes several identical opening frames and
+    # falsely rejects a healthy composition as static (BM-16, first seen on
+    # `vfx-iphone-device`).
+    assert "const readTimelineMetadata = async () =>" in source
+    assert source.count("await readTimelineMetadata()") >= 2
+    assert "timelineExpected" in source
+    assert "timelineMetadata.timelineCount === 0" in source
     print("BM-02 Node Worker rejection tests passed")
-    print("executed checks: 5")
+    print("executed checks: 6")
     return 0
 
 
