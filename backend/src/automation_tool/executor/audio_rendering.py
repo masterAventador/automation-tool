@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
+from enum import StrEnum
+from pathlib import Path
 from typing import Never, cast
-from uuid import UUID
+from uuid import RFC_4122, UUID
 
+from automation_tool.executor.material_probe import MAX_PATH_CHARACTERS
 from automation_tool.protocol.local_rendering import (
     LocalEditingAudioRenderPlan,
     LocalEditingAudioTrackKind,
     LocalEditingOriginalAudioMode,
 )
+from automation_tool.protocol.safe_text import contains_control_or_bidi
 
 AUDIO_SAMPLE_RATE = 48_000
 AUDIO_DUCK_THRESHOLD = "0.05"
@@ -30,6 +35,70 @@ def _reject() -> Never:
     raise AudioRenderCompilationRejected from None
 
 
+class AudioRenderBindingRejection(StrEnum):
+    INVALID_PLAN = "invalid_plan"
+    INVALID_BINDINGS = "invalid_bindings"
+    SOURCE_HAS_NO_AUDIO = "source_has_no_audio"
+
+
+class AudioRenderBindingRejected(ValueError):
+    """Local material facts cannot safely satisfy one audio plan."""
+
+    def __init__(
+        self,
+        code: AudioRenderBindingRejection,
+        *,
+        material_id: UUID | None = None,
+    ) -> None:
+        self.code = code
+        self.material_id = material_id
+        super().__init__("audio render binding rejected")
+
+
+def _reject_binding(
+    code: AudioRenderBindingRejection,
+    *,
+    material_id: UUID | None = None,
+) -> Never:
+    raise AudioRenderBindingRejected(code, material_id=material_id) from None
+
+
+def _is_uuid4(value: object) -> bool:
+    return (
+        isinstance(value, UUID)
+        and value.variant == RFC_4122
+        and value.version == 4
+        and value.int != 0
+    )
+
+
+def _valid_local_path(value: object) -> bool:
+    if not isinstance(value, Path) or not value.is_absolute():
+        return False
+    text = os.fspath(value)
+    return 1 <= len(text) <= MAX_PATH_CHARACTERS and not contains_control_or_bidi(text)
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class AudioRenderSourceBinding:
+    """One Executor-local material path and its already-probed audio fact."""
+
+    material_id: UUID
+    source_path: Path = field(repr=False)
+    has_audio: bool
+
+    def __post_init__(self) -> None:
+        if (
+            not _is_uuid4(self.material_id)
+            or not _valid_local_path(self.source_path)
+            or type(self.has_audio) is not bool
+        ):
+            _reject_binding(AudioRenderBindingRejection.INVALID_BINDINGS)
+
+    def __repr__(self) -> str:
+        return "AudioRenderSourceBinding(<redacted>)"
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class CompiledAudioFilterGraph:
     input_material_ids: tuple[UUID, ...]
@@ -38,6 +107,19 @@ class CompiledAudioFilterGraph:
 
     def __repr__(self) -> str:
         return "CompiledAudioFilterGraph(<redacted>)"
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class BoundAudioRenderInputs:
+    """Local input argv paired with the still path-free compiled filter graph."""
+
+    input_argv: tuple[str, ...] = field(repr=False)
+    input_material_ids: tuple[UUID, ...]
+    filter_graph: str
+    output_label: str | None
+
+    def __repr__(self) -> str:
+        return "BoundAudioRenderInputs(<redacted>)"
 
 
 def _seconds(milliseconds: int) -> str:
@@ -71,20 +153,12 @@ def _validated_plan(plan: LocalEditingAudioRenderPlan) -> LocalEditingAudioRende
         _reject()
 
 
-def compile_audio_filter_graph(
-    plan: LocalEditingAudioRenderPlan,
+def _compile_validated_audio_filter_graph(
+    validated: LocalEditingAudioRenderPlan,
     *,
     first_input_index: int,
+    excluded_sequences: frozenset[int],
 ) -> CompiledAudioFilterGraph:
-    """Assign inputs and compile ducked/fixed branches without local paths."""
-
-    if (
-        not isinstance(plan, LocalEditingAudioRenderPlan)
-        or type(first_input_index) is not int
-        or first_input_index < 0
-    ):
-        _reject()
-    validated = _validated_plan(plan)
     parts: list[str] = []
     material_ids: list[UUID] = []
     narration_labels: list[str] = []
@@ -93,7 +167,10 @@ def compile_audio_filter_graph(
     total_seconds = _seconds(validated.duration_ms)
 
     for clip in validated.clips:
-        if clip.original_audio_mode is LocalEditingOriginalAudioMode.MUTED:
+        if (
+            clip.sequence in excluded_sequences
+            or clip.original_audio_mode is LocalEditingOriginalAudioMode.MUTED
+        ):
             continue
         input_index = first_input_index + len(material_ids)
         material_ids.append(clip.material_id)
@@ -149,13 +226,114 @@ def compile_audio_filter_graph(
     return CompiledAudioFilterGraph(tuple(material_ids), ";".join(parts), "audio_out")
 
 
+def compile_audio_filter_graph(
+    plan: LocalEditingAudioRenderPlan,
+    *,
+    first_input_index: int,
+) -> CompiledAudioFilterGraph:
+    """Assign inputs and compile ducked/fixed branches without local paths."""
+
+    if (
+        not isinstance(plan, LocalEditingAudioRenderPlan)
+        or type(first_input_index) is not int
+        or first_input_index < 0
+    ):
+        _reject()
+    return _compile_validated_audio_filter_graph(
+        _validated_plan(plan),
+        first_input_index=first_input_index,
+        excluded_sequences=frozenset(),
+    )
+
+
+def _validated_bindings(
+    sources: tuple[AudioRenderSourceBinding, ...],
+) -> tuple[AudioRenderSourceBinding, ...]:
+    if not isinstance(sources, tuple) or not all(
+        isinstance(source, AudioRenderSourceBinding) for source in sources
+    ):
+        _reject_binding(AudioRenderBindingRejection.INVALID_BINDINGS)
+    try:
+        rebuilt = tuple(
+            AudioRenderSourceBinding(
+                material_id=source.material_id,
+                source_path=source.source_path,
+                has_audio=source.has_audio,
+            )
+            for source in sources
+        )
+    except Exception:
+        _reject_binding(AudioRenderBindingRejection.INVALID_BINDINGS)
+    if len({source.material_id for source in rebuilt}) != len(rebuilt):
+        _reject_binding(AudioRenderBindingRejection.INVALID_BINDINGS)
+    return rebuilt
+
+
+def bind_audio_render_inputs(
+    plan: LocalEditingAudioRenderPlan,
+    sources: tuple[AudioRenderSourceBinding, ...],
+    *,
+    first_input_index: int,
+) -> BoundAudioRenderInputs:
+    """Apply local audio facts and bind exact source paths in compiler input order."""
+
+    if (
+        not isinstance(plan, LocalEditingAudioRenderPlan)
+        or type(first_input_index) is not int
+        or first_input_index < 0
+    ):
+        _reject_binding(AudioRenderBindingRejection.INVALID_PLAN)
+    try:
+        validated_plan = _validated_plan(plan)
+    except AudioRenderCompilationRejected:
+        _reject_binding(AudioRenderBindingRejection.INVALID_PLAN)
+    validated_sources = _validated_bindings(sources)
+    source_by_id = {source.material_id: source for source in validated_sources}
+    expected_ids = {clip.material_id for clip in validated_plan.clips}
+    if set(source_by_id) != expected_ids:
+        _reject_binding(AudioRenderBindingRejection.INVALID_BINDINGS)
+
+    excluded_sequences: set[int] = set()
+    for clip in validated_plan.clips:
+        source = source_by_id[clip.material_id]
+        if source.has_audio or clip.original_audio_mode is LocalEditingOriginalAudioMode.MUTED:
+            continue
+        if clip.track_kind is LocalEditingAudioTrackKind.AMBIENT:
+            excluded_sequences.add(clip.sequence)
+            continue
+        _reject_binding(
+            AudioRenderBindingRejection.SOURCE_HAS_NO_AUDIO,
+            material_id=clip.material_id,
+        )
+
+    compiled = _compile_validated_audio_filter_graph(
+        validated_plan,
+        first_input_index=first_input_index,
+        excluded_sequences=frozenset(excluded_sequences),
+    )
+    input_argv: list[str] = []
+    for material_id in compiled.input_material_ids:
+        input_argv.extend(("-i", os.fspath(source_by_id[material_id].source_path)))
+    return BoundAudioRenderInputs(
+        input_argv=tuple(input_argv),
+        input_material_ids=compiled.input_material_ids,
+        filter_graph=compiled.filter_graph,
+        output_label=compiled.output_label,
+    )
+
+
 __all__ = [
     "AUDIO_DUCK_ATTACK_MS",
     "AUDIO_DUCK_RATIO",
     "AUDIO_DUCK_RELEASE_MS",
     "AUDIO_DUCK_THRESHOLD",
     "AUDIO_SAMPLE_RATE",
+    "AudioRenderBindingRejected",
+    "AudioRenderBindingRejection",
     "AudioRenderCompilationRejected",
+    "AudioRenderSourceBinding",
+    "BoundAudioRenderInputs",
     "CompiledAudioFilterGraph",
+    "bind_audio_render_inputs",
     "compile_audio_filter_graph",
 ]
