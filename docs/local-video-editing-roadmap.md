@@ -106,7 +106,7 @@
 
 ## 5. 当前下一步
 
-**LE-10 T1、T2 已完成；T3 首轮 Review 的隐私 finding 已修，待第二轮复审。**
+**LE-10 T1～T3 已完成；T4 xfade 实现检查点待提交级 Review。**
 30fps 下四段各 50ms 由绝对边界量化为 `2/1/2/1`、总计 6 帧，没有逐段量化成 8 帧的
 累计误差；100ms dissolve 得到 3 帧 overlap，1000ms 时间线精确 30 帧。0 帧 clip、0 帧
 转场和转场吞没 clip 均固定拒绝。T2 专项 9 条、77 语句/12 分支 100%，T1/T2 合跑 50 条。
@@ -116,8 +116,11 @@ concat；任何转场固定拒绝，留给 T4 xfade。T2/T3 覆盖合跑 31 条�
 100%，T1～T3 合跑 72 条。随包 FFmpeg 真实输出 H.264、720×1280、30fps、9 帧、0.3s、
 2374 bytes，无音频且 filter graph 无路径。首轮 Review 发现 FFmpeg 默认 metadata/chapter
 复制风险，现显式加入两组 `-1` 禁用映射；带 `PRIVATE_TITLE` 与 `/Users/private/source`
-标签的真实素材复验确认两者均未进入输出。下一步提交修复并完成第二轮复审；完整
-integration 仍留到 T7 收口时决定。
+标签的真实素材以及 stream 级私有标签复验均确认不进入输出，第二轮 Review 无 finding。
+T4 现在按 `transition_frames/fps` 与 incoming 绝对 `start_frame/fps` 生成 xfade，覆盖三种
+映射、连续转场和硬切/转场混合链。T2～T4 专项 35 条、模块 186 语句/40 分支 100%，
+T1～T4 受影响回归 76 条；随包 FFmpeg 真实连续转场输出 39 帧、1.3s，重叠帧像素统计证明
+不是硬切冒充。完整 integration 仍留到 T7 收口时决定。
 
 ## 7. 用户可见文案门禁现已恢复绿色
 

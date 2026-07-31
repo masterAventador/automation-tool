@@ -1,4 +1,4 @@
-"""LE-10 T3: compile hard-cut VIDEO/IMAGE plans into one FFmpeg graph."""
+"""LE-10 T3/T4: compile VIDEO/IMAGE plans into one FFmpeg graph."""
 
 from __future__ import annotations
 
@@ -48,6 +48,7 @@ def _clip(
     start_ms: int,
     duration_ms: int,
     transition_ms: int | None = None,
+    transition_kind: LocalEditingVisualTransitionKind = LocalEditingVisualTransitionKind.FADE,
 ) -> LocalEditingVisualRenderClip:
     return LocalEditingVisualRenderClip(
         sequence=sequence,
@@ -57,7 +58,7 @@ def _clip(
         duration_ms=duration_ms,
         source_in_ms=700 if kind is SegmentSelectionMaterialKind.VIDEO else None,
         source_out_ms=(700 + duration_ms if kind is SegmentSelectionMaterialKind.VIDEO else None),
-        transition_kind=(None if transition_ms is None else LocalEditingVisualTransitionKind.FADE),
+        transition_kind=None if transition_ms is None else transition_kind,
         transition_duration_ms=transition_ms,
     )
 
@@ -282,7 +283,19 @@ def test_material_bindings_must_be_unique_exact_and_kind_matched(
     assert error.value.__cause__ is None
 
 
-def test_transition_is_not_silently_compiled_as_a_hard_cut(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("transition_kind", "ffmpeg_transition"),
+    [
+        (LocalEditingVisualTransitionKind.FADE, "fade"),
+        (LocalEditingVisualTransitionKind.DISSOLVE, "dissolve"),
+        (LocalEditingVisualTransitionKind.WIPE, "wipeleft"),
+    ],
+)
+def test_transition_compiles_frame_derived_duration_and_absolute_offset(
+    tmp_path: Path,
+    transition_kind: LocalEditingVisualTransitionKind,
+    ffmpeg_transition: str,
+) -> None:
     tools = _tools(tmp_path)
     first_id = uuid4()
     second_id = uuid4()
@@ -298,16 +311,112 @@ def test_transition_is_not_silently_compiled_as_a_hard_cut(tmp_path: Path) -> No
                 start_ms=80,
                 duration_ms=100,
                 transition_ms=20,
+                transition_kind=transition_kind,
             ),
         ),
         duration_ms=180,
         fps=50,
     )
 
-    with pytest.raises(VisualFilterGraphRejected) as error:
-        compile_visual_ffmpeg_command(tools, plan, (first, second), tmp_path / "result.mp4")
+    result = compile_visual_ffmpeg_command(
+        tools,
+        plan,
+        (first, second),
+        tmp_path / "result.mp4",
+    )
 
-    assert error.value.code is VisualFilterGraphRejection.TRANSITIONS_NOT_SUPPORTED
+    assert (
+        f"[v1][v2]xfade=transition={ffmpeg_transition}:duration=0.020000000:"
+        "offset=0.080000000[out2]"
+    ) in result.filter_complex
+    assert "concat=" not in result.filter_complex
+    assert result.argv[result.argv.index("-map") + 1] == "[out2]"
+
+
+def test_consecutive_transitions_keep_absolute_offsets_and_unique_chain_labels(
+    tmp_path: Path,
+) -> None:
+    tools = _tools(tmp_path)
+    material_ids = (uuid4(), uuid4(), uuid4())
+    sources = tuple(
+        _source(tmp_path, material_id, SegmentSelectionMaterialKind.IMAGE, f"{index}.png")
+        for index, material_id in enumerate(material_ids, start=1)
+    )
+    plan = _plan(
+        (
+            _clip(1, material_ids[0], sources[0].kind, start_ms=0, duration_ms=500),
+            _clip(
+                2,
+                material_ids[1],
+                sources[1].kind,
+                start_ms=400,
+                duration_ms=500,
+                transition_ms=100,
+                transition_kind=LocalEditingVisualTransitionKind.DISSOLVE,
+            ),
+            _clip(
+                3,
+                material_ids[2],
+                sources[2].kind,
+                start_ms=800,
+                duration_ms=500,
+                transition_ms=100,
+                transition_kind=LocalEditingVisualTransitionKind.WIPE,
+            ),
+        ),
+        duration_ms=1300,
+    )
+
+    result = compile_visual_ffmpeg_command(tools, plan, sources, tmp_path / "result.mp4")
+
+    assert (
+        "[v1][v2]xfade=transition=dissolve:duration=0.100000000:"
+        "offset=0.400000000[out2]"
+    ) in result.filter_complex
+    assert (
+        "[out2][v3]xfade=transition=wipeleft:duration=0.100000000:"
+        "offset=0.800000000[out3]"
+    ) in result.filter_complex
+    assert result.filter_complex.count("[out2]") == 2
+    assert result.argv[result.argv.index("-map") + 1] == "[out3]"
+    assert result.target_frames == 39
+
+
+def test_hard_cuts_and_transition_form_one_pairwise_chain(tmp_path: Path) -> None:
+    tools = _tools(tmp_path)
+    material_ids = tuple(uuid4() for _ in range(4))
+    sources = tuple(
+        _source(tmp_path, material_id, SegmentSelectionMaterialKind.IMAGE, f"{index}.png")
+        for index, material_id in enumerate(material_ids, start=1)
+    )
+    plan = _plan(
+        (
+            _clip(1, material_ids[0], sources[0].kind, start_ms=0, duration_ms=200),
+            _clip(2, material_ids[1], sources[1].kind, start_ms=200, duration_ms=200),
+            _clip(
+                3,
+                material_ids[2],
+                sources[2].kind,
+                start_ms=350,
+                duration_ms=250,
+                transition_ms=50,
+            ),
+            _clip(4, material_ids[3], sources[3].kind, start_ms=600, duration_ms=200),
+        ),
+        duration_ms=800,
+        fps=20,
+    )
+
+    result = compile_visual_ffmpeg_command(tools, plan, sources, tmp_path / "result.mp4")
+
+    assert "[v1][v2]concat=n=2:v=1:a=0[out2]" in result.filter_complex
+    assert (
+        "[out2][v3]xfade=transition=fade:duration=0.050000000:"
+        "offset=0.350000000[out3]"
+    ) in result.filter_complex
+    assert "[out3][v4]concat=n=2:v=1:a=0[out4]" in result.filter_complex
+    assert result.argv[result.argv.index("-map") + 1] == "[out4]"
+    assert result.target_frames == 16
 
 
 @pytest.mark.parametrize("output", [Path("relative.mp4"), Path("/private/tmp/result.mov")])

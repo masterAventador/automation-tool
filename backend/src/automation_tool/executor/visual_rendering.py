@@ -46,12 +46,11 @@ class VisualFilterGraphRejection(StrEnum):
     INVALID_PLAN = "invalid_plan"
     INVALID_BINDINGS = "invalid_bindings"
     INVALID_OUTPUT = "invalid_output"
-    TRANSITIONS_NOT_SUPPORTED = "transitions_not_supported"
     TOOL_UNAVAILABLE = "tool_unavailable"
 
 
 class VisualFilterGraphRejected(ValueError):
-    """A hard-cut FFmpeg command cannot be compiled from local inputs."""
+    """A visual FFmpeg command cannot be compiled from local inputs."""
 
     def __init__(self, code: VisualFilterGraphRejection) -> None:
         self.code = code
@@ -268,6 +267,19 @@ def _seconds(milliseconds: int) -> str:
     return f"{milliseconds // 1000}.{milliseconds % 1000:03d}"
 
 
+def _frame_seconds(frames: int, fps: int) -> str:
+    nanoseconds = (frames * 1_000_000_000 + fps // 2) // fps
+    whole, fraction = divmod(nanoseconds, 1_000_000_000)
+    return f"{whole}.{fraction:09d}"
+
+
+_XFADE_TRANSITIONS = {
+    LocalEditingVisualTransitionKind.FADE: "fade",
+    LocalEditingVisualTransitionKind.DISSOLVE: "dissolve",
+    LocalEditingVisualTransitionKind.WIPE: "wipeleft",
+}
+
+
 def _clip_filter(
     clip: VisualFrameGridClip,
     *,
@@ -303,7 +315,7 @@ def compile_visual_ffmpeg_command(
     sources: tuple[VisualRenderSourceBinding, ...],
     output_path: Path,
 ) -> VisualFfmpegCommand:
-    """Compile one hard-cut visual plan without invoking a shell or FFmpeg."""
+    """Compile one visual plan without invoking a shell or FFmpeg."""
 
     if not isinstance(tools, PackagedMediaTools):
         _reject_filter_graph(VisualFilterGraphRejection.TOOL_UNAVAILABLE)
@@ -317,9 +329,6 @@ def compile_visual_ffmpeg_command(
         frame_plan = quantize_visual_render_plan(plan)
     except VisualFrameGridRejected:
         _reject_filter_graph(VisualFilterGraphRejection.INVALID_PLAN)
-    if any(clip.transition_kind is not None for clip in frame_plan.clips):
-        _reject_filter_graph(VisualFilterGraphRejection.TRANSITIONS_NOT_SUPPORTED)
-
     validated_sources = _validated_sources(sources)
     source_by_id = {source.material_id: source for source in validated_sources}
     expected_ids = {clip.material_id for clip in frame_plan.clips}
@@ -346,10 +355,27 @@ def compile_visual_ffmpeg_command(
         )
 
     output_label = f"v{frame_plan.clips[0].sequence}"
-    if len(frame_plan.clips) > 1:
+    has_transitions = any(clip.transition_kind is not None for clip in frame_plan.clips)
+    if len(frame_plan.clips) > 1 and not has_transitions:
         labels = "".join(f"[v{clip.sequence}]" for clip in frame_plan.clips)
         filter_parts.append(f"{labels}concat=n={len(frame_plan.clips)}:v=1:a=0[outv]")
         output_label = "outv"
+    elif has_transitions:
+        for clip in frame_plan.clips[1:]:
+            next_label = f"out{clip.sequence}"
+            if clip.transition_kind is None:
+                filter_parts.append(
+                    f"[{output_label}][v{clip.sequence}]concat=n=2:v=1:a=0[{next_label}]"
+                )
+            else:
+                filter_parts.append(
+                    f"[{output_label}][v{clip.sequence}]xfade="
+                    f"transition={_XFADE_TRANSITIONS[clip.transition_kind]}:"
+                    f"duration={_frame_seconds(clip.transition_frames, frame_plan.output_fps)}:"
+                    f"offset={_frame_seconds(clip.start_frame, frame_plan.output_fps)}"
+                    f"[{next_label}]"
+                )
+            output_label = next_label
     filter_complex = ";".join(filter_parts)
     argv = (
         os.fspath(tools.ffmpeg_path),
