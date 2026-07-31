@@ -20,6 +20,17 @@ from fractions import Fraction
 from pathlib import Path
 from typing import BinaryIO, Final, Never
 
+from automation_tool.executor.audio_rendering import (
+    AudioRenderBindingRejected,
+    AudioRenderSourceBinding,
+    bind_audio_render_inputs,
+)
+from automation_tool.executor.audiovisual_rendering import (
+    AudiovisualFfmpegCommand,
+    AudiovisualRenderRejected,
+    AudiovisualRenderRejection,
+    compile_audiovisual_ffmpeg_command,
+)
 from automation_tool.executor.caption_overlay import (
     CaptionOverlayRejected,
     VisualCaptionOverlaySet,
@@ -32,6 +43,7 @@ from automation_tool.executor.material_probe import (
     require_source_unchanged,
 )
 from automation_tool.executor.visual_rendering import (
+    VisualFfmpegCommand,
     VisualFilterGraphRejected,
     VisualFilterGraphRejection,
     VisualRenderSourceBinding,
@@ -43,6 +55,7 @@ from automation_tool.protocol.local_rendering import (
     MAX_LOCAL_EDITING_RENDER_DURATION_MS,
     MIN_LOCAL_EDITING_OUTPUT_DIMENSION,
     MIN_LOCAL_EDITING_OUTPUT_FPS,
+    LocalEditingAudioRenderPlan,
     LocalEditingCaptionRenderPlan,
     LocalEditingVisualRenderPlan,
 )
@@ -97,6 +110,9 @@ class VisualRenderReceipt:
     duration_ms: int
     bytes_written: int
     sha256: str
+    audio_codec: str | None = None
+    audio_sample_rate: int | None = None
+    audio_channels: int | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -120,6 +136,12 @@ class VisualRenderReceipt:
             or not 1 <= self.bytes_written <= VISUAL_RENDER_MAX_OUTPUT_BYTES
             or type(self.sha256) is not str
             or _SHA256_PATTERN.fullmatch(self.sha256) is None
+            or (
+                (self.audio_codec, self.audio_sample_rate, self.audio_channels)
+                != (None, None, None)
+                and (self.audio_codec, self.audio_sample_rate, self.audio_channels)
+                != ("aac", 48_000, 2)
+            )
         ):
             _reject(VisualRenderExecutionRejection.OUTPUT_INVALID)
 
@@ -275,6 +297,60 @@ def _checked_sources(
     return tuple(checked_sources), tuple(checked_stats)
 
 
+def _checked_audio_sources(
+    plan: LocalEditingAudioRenderPlan,
+    sources: tuple[AudioRenderSourceBinding, ...],
+    approvals: tuple[os.stat_result | None, ...],
+) -> tuple[
+    tuple[AudioRenderSourceBinding, ...],
+    tuple[os.stat_result | None, ...],
+]:
+    if (
+        not isinstance(sources, tuple)
+        or not isinstance(approvals, tuple)
+        or len(sources) != len(approvals)
+    ):
+        _reject(VisualRenderExecutionRejection.INVALID_REQUEST)
+    try:
+        bound = bind_audio_render_inputs(plan, sources, first_input_index=0)
+    except AudioRenderBindingRejected:
+        _reject(VisualRenderExecutionRejection.INVALID_REQUEST)
+    active_ids = set(bound.input_material_ids)
+    checked_sources: list[AudioRenderSourceBinding] = []
+    checked_stats: list[os.stat_result | None] = []
+    source_changed = False
+    try:
+        for source, approved in zip(sources, approvals, strict=True):
+            if source.material_id not in active_ids:
+                checked_sources.append(
+                    AudioRenderSourceBinding(
+                        material_id=source.material_id,
+                        source_path=source.source_path,
+                        has_audio=source.has_audio,
+                    )
+                )
+                checked_stats.append(None)
+                continue
+            if not isinstance(approved, os.stat_result):
+                _reject(VisualRenderExecutionRejection.INVALID_REQUEST)
+            path, checked = require_source_unchanged(source.source_path, approved)
+            checked_sources.append(
+                AudioRenderSourceBinding(
+                    material_id=source.material_id,
+                    source_path=path,
+                    has_audio=source.has_audio,
+                )
+            )
+            checked_stats.append(checked)
+    except MaterialProbeRejected:
+        source_changed = True
+    except AudioRenderBindingRejected:
+        _reject(VisualRenderExecutionRejection.INVALID_REQUEST)
+    if source_changed:
+        _reject(VisualRenderExecutionRejection.SOURCE_CHANGED)
+    return tuple(checked_sources), tuple(checked_stats)
+
+
 def _stat_file(path: Path) -> os.stat_result:
     metadata: os.stat_result | None = None
     with suppress(OSError):
@@ -318,7 +394,8 @@ def _ffprobe_argv(tools: PackagedMediaTools, output: Path) -> tuple[str, ...]:
         "-count_frames",
         "-show_entries",
         (
-            "stream=codec_type,codec_name,width,height,avg_frame_rate,nb_read_frames:"
+            "stream=codec_type,codec_name,width,height,avg_frame_rate,nb_read_frames,"
+            "sample_rate,channels,duration:"
             "format=duration,size"
         ),
         "-of",
@@ -343,20 +420,30 @@ def _verified_receipt(
     target_frames: int,
     output_stat: os.stat_result,
     digest: str,
+    expect_audio: bool = False,
 ) -> VisualRenderReceipt:
     frame_count = 0
     container_size = 0
     duration = Decimal(0)
+    audio_duration = Decimal(0)
     payload_invalid = False
     try:
         document = json.loads(payload)
         streams = document["streams"]
         container = document["format"]
-        if not isinstance(streams, list) or len(streams) != 1 or not isinstance(container, dict):
+        expected_stream_count = 2 if expect_audio else 1
+        if (
+            not isinstance(streams, list)
+            or len(streams) != expected_stream_count
+            or not isinstance(container, dict)
+            or not all(isinstance(stream, dict) for stream in streams)
+        ):
             _reject(VisualRenderExecutionRejection.OUTPUT_INVALID)
-        stream = streams[0]
-        if not isinstance(stream, dict):
+        video_streams = [stream for stream in streams if stream.get("codec_type") == "video"]
+        audio_streams = [stream for stream in streams if stream.get("codec_type") == "audio"]
+        if len(video_streams) != 1 or len(audio_streams) != int(expect_audio):
             _reject(VisualRenderExecutionRejection.OUTPUT_INVALID)
+        stream = video_streams[0]
         if (
             stream.get("codec_type") != "video"
             or stream.get("codec_name") != "h264"
@@ -375,6 +462,19 @@ def _verified_receipt(
         duration = Decimal(container["duration"])
         if not duration.is_finite() or duration <= 0:
             _reject(VisualRenderExecutionRejection.OUTPUT_INVALID)
+        if expect_audio:
+            audio_stream = audio_streams[0]
+            audio_duration_value = audio_stream.get("duration")
+            if (
+                audio_stream.get("codec_name") != "aac"
+                or audio_stream.get("sample_rate") != "48000"
+                or audio_stream.get("channels") != 2
+                or not isinstance(audio_duration_value, str)
+            ):
+                _reject(VisualRenderExecutionRejection.OUTPUT_INVALID)
+            audio_duration = Decimal(audio_duration_value)
+            if not audio_duration.is_finite() or audio_duration <= 0:
+                _reject(VisualRenderExecutionRejection.OUTPUT_INVALID)
     except VisualRenderExecutionRejected:
         raise
     except (
@@ -393,6 +493,7 @@ def _verified_receipt(
         frame_count != target_frames
         or container_size != output_stat.st_size
         or abs(duration - expected_duration) > Decimal("0.001")
+        or (expect_audio and abs(audio_duration - expected_duration) > Decimal("0.001"))
     ):
         _reject(VisualRenderExecutionRejection.OUTPUT_INVALID)
     duration_ms = (target_frames * 1000 + plan.output_fps // 2) // plan.output_fps
@@ -404,6 +505,9 @@ def _verified_receipt(
         duration_ms=duration_ms,
         bytes_written=container_size,
         sha256=digest,
+        audio_codec="aac" if expect_audio else None,
+        audio_sample_rate=48_000 if expect_audio else None,
+        audio_channels=2 if expect_audio else None,
     )
 
 
@@ -427,13 +531,16 @@ def _remove(path: Path | None) -> None:
             path.unlink(missing_ok=True)
 
 
-def execute_visual_render(
+def _execute_render(
     tools: PackagedMediaTools,
     plan: LocalEditingVisualRenderPlan,
     sources: tuple[VisualRenderSourceBinding, ...],
     approved_sources: tuple[os.stat_result, ...],
     task_directory: Path,
     *,
+    audio_plan: LocalEditingAudioRenderPlan | None = None,
+    audio_sources: tuple[AudioRenderSourceBinding, ...] = (),
+    approved_audio_sources: tuple[os.stat_result | None, ...] = (),
     caption_plan: LocalEditingCaptionRenderPlan | None = None,
     cancel_requested: Callable[[], bool] | None = None,
 ) -> VisualRenderReceipt:
@@ -442,6 +549,20 @@ def execute_visual_render(
     if (
         not isinstance(tools, PackagedMediaTools)
         or not isinstance(plan, LocalEditingVisualRenderPlan)
+        or (
+            audio_plan is None
+            and (audio_sources != () or approved_audio_sources != ())
+        )
+        or (
+            audio_plan is not None
+            and (
+                not isinstance(audio_plan, LocalEditingAudioRenderPlan)
+                or audio_plan.project_id != plan.project_id
+                or audio_plan.timeline_id != plan.timeline_id
+                or audio_plan.timeline_revision != plan.timeline_revision
+                or audio_plan.duration_ms != plan.duration_ms
+            )
+        )
         or (
             caption_plan is not None and not isinstance(caption_plan, LocalEditingCaptionRenderPlan)
         )
@@ -467,15 +588,29 @@ def execute_visual_render(
     working_output: Path | None = None
     overlays: VisualCaptionOverlaySet | None = None
     caption_stats: tuple[os.stat_result, ...] = ()
+    checked_audio_sources: tuple[AudioRenderSourceBinding, ...] = ()
+    checked_audio_stats: tuple[os.stat_result | None, ...] = ()
     deferred_rejection: VisualRenderExecutionRejection | None = None
     try:
         checked_sources, checked_stats = _checked_sources(sources, approved_sources)
+        if audio_plan is not None:
+            checked_audio_sources, checked_audio_stats = _checked_audio_sources(
+                audio_plan,
+                audio_sources,
+                approved_audio_sources,
+            )
         if cancel_requested is not None and cancel_requested():
             _reject(VisualRenderExecutionRejection.CANCELLED)
         if caption_plan is not None:
             overlays = render_caption_overlay_set(caption_plan, task_directory)
             caption_stats = tuple(_stat_file(item.source_path) for item in overlays.captions)
         checked_sources, checked_stats = _checked_sources(checked_sources, checked_stats)
+        if audio_plan is not None:
+            checked_audio_sources, checked_audio_stats = _checked_audio_sources(
+                audio_plan,
+                checked_audio_sources,
+                checked_audio_stats,
+            )
         descriptor: int | None = None
         working_name: str | None = None
         allocation_failed = False
@@ -497,13 +632,25 @@ def execute_visual_render(
                 _remove(Path(working_name))
             _reject(VisualRenderExecutionRejection.WORKSPACE_UNUSABLE)
 
-        command = compile_visual_ffmpeg_command(
-            tools,
-            plan,
-            checked_sources,
-            working_output,
-            caption_overlays=overlays,
-        )
+        command: AudiovisualFfmpegCommand | VisualFfmpegCommand
+        if audio_plan is None:
+            command = compile_visual_ffmpeg_command(
+                tools,
+                plan,
+                checked_sources,
+                working_output,
+                caption_overlays=overlays,
+            )
+        else:
+            command = compile_audiovisual_ffmpeg_command(
+                tools,
+                plan,
+                checked_sources,
+                audio_plan,
+                checked_audio_sources,
+                working_output,
+                caption_overlays=overlays,
+            )
         rendered = _run_bounded_process(
             command.argv,
             timeout_seconds=_FFMPEG_TIMEOUT_SECONDS,
@@ -512,6 +659,12 @@ def execute_visual_render(
             output_limit_bytes=VISUAL_RENDER_MAX_OUTPUT_BYTES,
         )
         _checked_sources(checked_sources, checked_stats)
+        if audio_plan is not None:
+            _checked_audio_sources(
+                audio_plan,
+                checked_audio_sources,
+                checked_audio_stats,
+            )
         if overlays is not None and any(
             not _caption_unchanged(item.source_path, before)
             for item, before in zip(overlays.captions, caption_stats, strict=True)
@@ -553,6 +706,9 @@ def execute_visual_render(
             target_frames=command.target_frames,
             output_stat=after_digest,
             digest=digest,
+            expect_audio=(
+                isinstance(command, AudiovisualFfmpegCommand) and command.has_audio
+            ),
         )
         publication_rejection: VisualRenderExecutionRejection | None = None
         try:
@@ -576,6 +732,11 @@ def execute_visual_render(
         deferred_rejection = VisualRenderExecutionRejection.SOURCE_CHANGED
     except CaptionOverlayRejected:
         deferred_rejection = VisualRenderExecutionRejection.CAPTION_FAILED
+    except AudiovisualRenderRejected as rejected:
+        if rejected.code is AudiovisualRenderRejection.TOOL_UNAVAILABLE:
+            deferred_rejection = VisualRenderExecutionRejection.TOOL_UNAVAILABLE
+        else:
+            deferred_rejection = VisualRenderExecutionRejection.INVALID_REQUEST
     except VisualFilterGraphRejected as rejected:
         if rejected.code is VisualFilterGraphRejection.TOOL_UNAVAILABLE:
             deferred_rejection = VisualRenderExecutionRejection.TOOL_UNAVAILABLE
@@ -604,11 +765,64 @@ def execute_visual_render(
     _reject(deferred_rejection)
 
 
+def execute_visual_render(
+    tools: PackagedMediaTools,
+    plan: LocalEditingVisualRenderPlan,
+    sources: tuple[VisualRenderSourceBinding, ...],
+    approved_sources: tuple[os.stat_result, ...],
+    task_directory: Path,
+    *,
+    caption_plan: LocalEditingCaptionRenderPlan | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
+) -> VisualRenderReceipt:
+    """Render and publish the existing explicit video-only contract."""
+
+    return _execute_render(
+        tools,
+        plan,
+        sources,
+        approved_sources,
+        task_directory,
+        caption_plan=caption_plan,
+        cancel_requested=cancel_requested,
+    )
+
+
+def execute_audiovisual_render(
+    tools: PackagedMediaTools,
+    visual_plan: LocalEditingVisualRenderPlan,
+    visual_sources: tuple[VisualRenderSourceBinding, ...],
+    approved_visual_sources: tuple[os.stat_result, ...],
+    audio_plan: LocalEditingAudioRenderPlan,
+    audio_sources: tuple[AudioRenderSourceBinding, ...],
+    approved_audio_sources: tuple[os.stat_result | None, ...],
+    task_directory: Path,
+    *,
+    caption_plan: LocalEditingCaptionRenderPlan | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
+) -> VisualRenderReceipt:
+    """Render one visual plan with zero or one verified local AAC stream."""
+
+    return _execute_render(
+        tools,
+        visual_plan,
+        visual_sources,
+        approved_visual_sources,
+        task_directory,
+        audio_plan=audio_plan,
+        audio_sources=audio_sources,
+        approved_audio_sources=approved_audio_sources,
+        caption_plan=caption_plan,
+        cancel_requested=cancel_requested,
+    )
+
+
 __all__ = [
     "VISUAL_RENDER_MAX_OUTPUT_BYTES",
     "VISUAL_RENDER_OUTPUT_FILENAME",
     "VisualRenderExecutionRejected",
     "VisualRenderExecutionRejection",
     "VisualRenderReceipt",
+    "execute_audiovisual_render",
     "execute_visual_render",
 ]
