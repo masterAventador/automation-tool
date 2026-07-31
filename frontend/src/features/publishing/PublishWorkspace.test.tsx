@@ -76,7 +76,7 @@ describe("publish workspace", () => {
     expect(await screen.findByText("B站")).toBeInTheDocument();
     expect(screen.getByText("抖音")).toBeInTheDocument();
     expect(screen.getByText("待配置")).toBeInTheDocument();
-    expect(screen.getByText(/还在接入中/, { exact: false })).toBeInTheDocument();
+    expect(screen.getByText(/到设置中配置/, { exact: false })).toBeInTheDocument();
   });
 
   it("does not promise the operator something no part of this App can do", async () => {

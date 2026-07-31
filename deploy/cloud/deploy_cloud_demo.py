@@ -491,7 +491,7 @@ def build_arguments(*, image: str, app_version: str, vcs_ref: str) -> list[str]:
         f"APP_VERSION={app_version}",
         "--build-arg",
         f"VCS_REF={vcs_ref}",
-        str(BACKEND_ROOT),
+        str(REPOSITORY_ROOT),
     ]
 
 

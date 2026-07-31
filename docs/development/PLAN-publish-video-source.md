@@ -9,6 +9,9 @@
 >
 > 起因：`docs/development/completed-task-wiring-audit-20260726.md` 第 3.2 节两个断点，
 > 以及该报告第 8 节第 7 条明说"没有结论"的问题——`selectedVideo` 应该由谁提供。
+>
+> **历史方案提示（2026-07-31）**：本文件中的 B站缺口判断与分阶段建议已执行完毕，
+> 不再代表当前实现状态。现状与验证证据以 `docs/development/PB-07.md` 末节为准。
 
 ---
 

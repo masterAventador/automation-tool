@@ -52,6 +52,8 @@ def test_factory_returns_isolated_apps_with_explicit_lifespan() -> None:
     assert second.state.task_event_convergence_service is None
     assert first.state.task_event_stream_service is None
     assert second.state.task_event_stream_service is None
+    assert first.state.bilibili_publishing_runtime is None
+    assert second.state.bilibili_publishing_runtime is None
     assert first.state.lifecycle_state == "created"
     assert second.state.lifecycle_state == "created"
 
@@ -60,6 +62,14 @@ def test_factory_returns_isolated_apps_with_explicit_lifespan() -> None:
         assert second.state.lifecycle_state == "created"
 
     assert first.state.lifecycle_state == "stopped"
+
+
+def test_bilibili_publishing_routes_are_part_of_the_production_api_surface() -> None:
+    schema = create_app(database=None).openapi()
+
+    assert "/api/v1/publishing/bilibili/jobs/{publish_job_id}" in schema["paths"]
+    assert "/api/v1/publishing/bilibili/jobs/{publish_job_id}/video" in schema["paths"]
+    assert "/api/v1/publishing/bilibili/jobs/{publish_job_id}/submission" in schema["paths"]
 
 
 def test_lifespan_tolerates_an_unavailable_registry_during_shutdown() -> None:

@@ -469,16 +469,13 @@ fn the_platform_a_publish_names_decides_the_route_it_takes() {
         PublishPlatform::Douyin.route(),
         PublishRoute::OperationsBrowser,
     );
-    assert_eq!(
-        PublishPlatform::Bilibili.route(),
-        PublishRoute::NotIntegrated,
-    );
+    assert_eq!(PublishPlatform::Bilibili.route(), PublishRoute::OfficialApi,);
 }
 
 #[test]
-fn a_publishable_official_platform_still_refuses_to_borrow_the_other_route() {
-    // Configured credentials make B站 *publishable*; they do not make it
-    // reachable. Beginning it must reserve the workspace and stop there.
+fn a_publishable_official_platform_uses_its_own_route() {
+    // Configured credentials make B站 publishable through the official
+    // interface; they must never make it borrow the operations browser.
     let mut workspace = PublishWorkspace::new(true);
 
     let platform = workspace
@@ -489,7 +486,7 @@ fn a_publishable_official_platform_still_refuses_to_borrow_the_other_route() {
         .expect("a configured platform may be started");
 
     assert_eq!(platform, PublishPlatform::Bilibili);
-    assert_eq!(platform.route(), PublishRoute::NotIntegrated);
+    assert_eq!(platform.route(), PublishRoute::OfficialApi);
 }
 
 #[test]
@@ -526,8 +523,8 @@ fn the_bridge_routes_by_platform_before_it_reaches_for_any_browser() {
         .find("PublishRoute::OperationsBrowser")
         .expect("begin_publish must match on the route the platform takes");
     assert!(
-        body.contains("PublishRoute::NotIntegrated"),
-        "begin_publish must answer for the platform it cannot reach",
+        body.contains("PublishRoute::OfficialApi"),
+        "begin_publish must route the official platform without a browser",
     );
     for reached in ["current_douyin_profile", "resolve_embedded_browser"] {
         let at = body

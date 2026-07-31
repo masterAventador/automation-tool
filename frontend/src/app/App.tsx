@@ -24,6 +24,8 @@ import type { ModelServiceGateway } from "../features/settings/model-service-gat
 import { ModelServiceSettings } from "../features/settings/ModelServiceSettings";
 import type { VideoEditingServiceGateway } from "../features/settings/video-editing-service-gateway";
 import { VideoEditingServiceSettings } from "../features/settings/VideoEditingServiceSettings";
+import type { BilibiliServiceGateway } from "../features/settings/bilibili-service-gateway";
+import { BilibiliServiceSettings } from "../features/settings/BilibiliServiceSettings";
 import type { MaterialVideoStudioGateway } from "../features/video-studio/material-video-studio-gateway";
 import type { VideoEditingGateway } from "../features/video-editing/video-editing-gateway";
 import type { SelectedVideo } from "../features/publishing/PublishWorkspace";
@@ -45,6 +47,7 @@ interface AppProps {
   accountSessionGateway?: AccountSessionGateway;
   modelServiceGateway?: ModelServiceGateway;
   videoEditingServiceGateway?: VideoEditingServiceGateway;
+  bilibiliServiceGateway?: BilibiliServiceGateway;
   materialVideoStudioGateway?: MaterialVideoStudioGateway;
   videoEditingGateway?: VideoEditingGateway;
   publishWorkspaceGateway?: PublishWorkspaceGateway | undefined;
@@ -67,6 +70,7 @@ export function App({
   accountSessionGateway,
   modelServiceGateway,
   videoEditingServiceGateway,
+  bilibiliServiceGateway,
   materialVideoStudioGateway,
   videoEditingGateway,
   publishWorkspaceGateway,
@@ -86,6 +90,7 @@ export function App({
       appUpdateGateway={appUpdateGateway}
       modelServiceGateway={modelServiceGateway}
       videoEditingServiceGateway={videoEditingServiceGateway}
+      bilibiliServiceGateway={bilibiliServiceGateway}
       materialVideoStudioGateway={materialVideoStudioGateway}
       videoEditingGateway={videoEditingGateway}
       publishWorkspaceGateway={publishWorkspaceGateway}
@@ -106,6 +111,9 @@ export function App({
             )}
             {videoEditingServiceGateway === undefined ? null : (
               <VideoEditingServiceSettings gateway={videoEditingServiceGateway} />
+            )}
+            {bilibiliServiceGateway === undefined ? null : (
+              <BilibiliServiceSettings gateway={bilibiliServiceGateway} />
             )}
             {platformAdapter === undefined ? null : (
               <Diagnostics platform={platformAdapter} />

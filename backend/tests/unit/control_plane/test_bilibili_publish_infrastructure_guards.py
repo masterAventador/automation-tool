@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from typing import Any
 
@@ -22,6 +23,7 @@ from automation_tool.control_plane.domain.video_publishing import (
 from automation_tool.control_plane.infrastructure.bilibili import (
     BilibiliApiCredentials,
     BilibiliGatewayEndpoints,
+    HttpxBilibiliAccessTokenProvider,
     HttpxBilibiliOpenApiGateway,
 )
 from automation_tool.control_plane.infrastructure.database import Database
@@ -79,6 +81,32 @@ async def test_gateway_constructor_rejects_invalid_configuration() -> None:
         contract=CONTRACT, credentials=CREDENTIALS, endpoints=loopback_endpoints()
     )
     await gateway.aclose()
+
+
+@pytest.mark.asyncio
+async def test_access_token_is_refreshed_before_an_irreversible_call_can_see_near_expiry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = HttpxBilibiliAccessTokenProvider(
+        contract=CONTRACT,
+        credentials=CREDENTIALS,
+        access_token="near-expiry-access",
+        refresh_token="near-expiry-refresh",
+        expires_at_epoch_seconds=int(time.time()) + 60,
+    )
+    calls = 0
+
+    async def refresh() -> str:
+        nonlocal calls
+        calls += 1
+        return "rotated-before-dispatch"
+
+    monkeypatch.setattr(provider, "refresh_access_token", refresh)
+    try:
+        assert await provider.current_access_token() == "rotated-before-dispatch"
+        assert calls == 1
+    finally:
+        await provider.aclose()
 
 
 class BrokenDatabase(Database):

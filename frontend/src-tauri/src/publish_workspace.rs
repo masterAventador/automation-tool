@@ -58,7 +58,7 @@ impl PublishPlatform {
     /// compiler asks.
     pub const fn route(self) -> PublishRoute {
         match self {
-            Self::Bilibili => PublishRoute::NotIntegrated,
+            Self::Bilibili => PublishRoute::OfficialApi,
             Self::Douyin => PublishRoute::OperationsBrowser,
         }
     }
@@ -73,12 +73,8 @@ impl PublishPlatform {
 pub enum PublishRoute {
     /// The visible operations browser, driven by the local executor.
     OperationsBrowser,
-    /// Reachable in principle, not connected to the App in this build.
-    ///
-    /// B站's official publishing exists on the server side and has no route out
-    /// of the App yet. Saying so is the honest answer; borrowing another
-    /// platform's route is not.
-    NotIntegrated,
+    /// The official server-side publishing API, reached through Control Plane.
+    OfficialApi,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -113,6 +109,8 @@ pub enum PublishStage {
 pub enum PublishOutcome {
     #[serde(rename = "published")]
     Published,
+    #[serde(rename = "submitted")]
+    Submitted,
     #[serde(rename = "outcome_uncertain")]
     OutcomeUncertain,
     #[serde(rename = "not_published")]
@@ -242,6 +240,10 @@ impl PublishWorkspace {
 
     pub fn observe_douyin_signed_in(&mut self, signed_in: bool) {
         self.operations_browser_signed_in = signed_in;
+    }
+
+    pub fn observe_bilibili_configured(&mut self, configured: bool) {
+        self.official_credentials_configured = configured;
     }
 
     /// The identity of the publish currently in flight, if there is one.

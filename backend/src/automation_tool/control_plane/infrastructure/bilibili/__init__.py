@@ -14,13 +14,19 @@ from automation_tool.control_plane.infrastructure.bilibili.signing import (
     BilibiliApiCredentials,
     build_signed_headers,
 )
+from automation_tool.control_plane.infrastructure.bilibili.token_provider import (
+    BilibiliTokenSnapshot,
+    HttpxBilibiliAccessTokenProvider,
+)
 
 __all__ = [
     "BilibiliApiCredentials",
     "BilibiliGatewayEndpoints",
     "BilibiliQueryGatewayEndpoints",
+    "BilibiliTokenSnapshot",
     "FilesystemBilibiliCoverSource",
     "FilesystemBilibiliPublishMaterial",
+    "HttpxBilibiliAccessTokenProvider",
     "HttpxBilibiliArchiveQueryGateway",
     "HttpxBilibiliOpenApiGateway",
     "build_signed_headers",

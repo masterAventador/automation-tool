@@ -8,6 +8,10 @@
 >
 > 方案：`docs/development/PLAN-publish-video-source.md`。方案中有一条推荐解法被实测推翻，
 > 见下面第 1 节。
+>
+> **后续更正（2026-07-31）**：本文记录的 B站断点已经补齐生产装配。受保护凭据入口、
+> Rust 正式 API 分派、Control Plane prepare/upload/submission 与正式容器资源均已接通；
+> 当前边界只剩 PB-08 的真实平台凭据验收。最新证据见 `docs/development/PB-07.md` 末节。
 
 ## 起因
 

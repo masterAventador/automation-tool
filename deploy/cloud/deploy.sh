@@ -11,7 +11,14 @@ set -euo pipefail
 TARGET="${1:-root@49.233.213.109}"
 REVISION="${2:-HEAD}"
 REMOTE_ROOT="/opt/automation-tool-demo/src"
-DEPLOYABLE_PATHS=(backend deploy/cloud deploy/postgresql deploy/secrets)
+DEPLOYABLE_PATHS=(
+  .dockerignore
+  backend
+  contracts/publishing/bilibili-open-api.v1.json
+  deploy/cloud
+  deploy/postgresql
+  deploy/secrets
+)
 REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 cd "${REPOSITORY_ROOT}"

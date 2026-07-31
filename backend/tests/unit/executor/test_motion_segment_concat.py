@@ -126,17 +126,21 @@ def test_the_join_is_measured_afterwards_not_trusted(tmp_path) -> None:
     segments = [tmp_path / "a.mp4", tmp_path / "b.mp4"]
     for segment in segments:
         segment.write_bytes(b"segment")
-    ffmpeg = _stub(tmp_path / "ffmpeg", 'touch "$#"; exit 0')
+    ffmpeg = _stub(
+        tmp_path / "ffmpeg",
+        'for value do output="$value"; done; touch "$output"; exit 0',
+    )
     ffprobe = _stub(
         tmp_path / "ffprobe",
         'echo \'{"streams":[{"width":1920,"height":1080,"avg_frame_rate":"30/1",'
         '"pix_fmt":"yuv420p","nb_read_frames":"1"}]}\'',
     )
+    output = tmp_path / "film.mp4"
 
     with pytest.raises(SegmentMismatch) as failure:
         join_segments(
             segments,
-            tmp_path / "film.mp4",
+            output,
             canvas=CANVAS,
             ffmpeg=ffmpeg,
             ffprobe=ffprobe,
@@ -144,6 +148,7 @@ def test_the_join_is_measured_afterwards_not_trusted(tmp_path) -> None:
         )
 
     assert "324" in str(failure.value)
+    assert output.is_file(), "the fake ffmpeg must write the requested output"
 
 
 def test_a_concat_list_quotes_every_path_the_demuxer_reads(tmp_path) -> None:

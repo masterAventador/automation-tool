@@ -181,6 +181,227 @@
         "title": "ActionResultEvidence",
         "type": "string"
       },
+      "BilibiliArchiveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 250,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "noReprint": {
+            "enum": [
+              0,
+              1
+            ],
+            "title": "Noreprint",
+            "type": "integer"
+          },
+          "tag": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Tag",
+            "type": "string"
+          },
+          "tid": {
+            "exclusiveMinimum": 0.0,
+            "title": "Tid",
+            "type": "integer"
+          },
+          "title": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "tid",
+          "tag",
+          "description",
+          "noReprint"
+        ],
+        "title": "BilibiliArchiveRequest",
+        "type": "object"
+      },
+      "BilibiliCredentialRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "accessToken": {
+            "format": "password",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Accesstoken",
+            "type": "string",
+            "writeOnly": true
+          },
+          "appSecret": {
+            "format": "password",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Appsecret",
+            "type": "string",
+            "writeOnly": true
+          },
+          "clientId": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Clientid",
+            "type": "string"
+          },
+          "expiresAtEpochSeconds": {
+            "exclusiveMinimum": 0.0,
+            "title": "Expiresatepochseconds",
+            "type": "integer"
+          },
+          "refreshToken": {
+            "format": "password",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Refreshtoken",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "clientId",
+          "appSecret",
+          "accessToken",
+          "refreshToken",
+          "expiresAtEpochSeconds"
+        ],
+        "title": "BilibiliCredentialRequest",
+        "type": "object"
+      },
+      "BilibiliCredentialRotationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "accessToken": {
+            "title": "Accesstoken",
+            "type": "string"
+          },
+          "expiresAtEpochSeconds": {
+            "title": "Expiresatepochseconds",
+            "type": "integer"
+          },
+          "refreshToken": {
+            "title": "Refreshtoken",
+            "type": "string"
+          }
+        },
+        "required": [
+          "accessToken",
+          "refreshToken",
+          "expiresAtEpochSeconds"
+        ],
+        "title": "BilibiliCredentialRotationResponse",
+        "type": "object"
+      },
+      "BilibiliMaterialRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "durationSeconds": {
+            "exclusiveMinimum": 0.0,
+            "title": "Durationseconds",
+            "type": "integer"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "sizeBytes": {
+            "exclusiveMinimum": 0.0,
+            "title": "Sizebytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sizeBytes",
+          "durationSeconds",
+          "sha256"
+        ],
+        "title": "BilibiliMaterialRequest",
+        "type": "object"
+      },
+      "BilibiliPublishPhase": {
+        "description": "Closed durable phases of one Bilibili publish attempt.",
+        "enum": [
+          "prepared",
+          "video_uploaded",
+          "dispatched",
+          "submitted",
+          "failed",
+          "outcome_uncertain"
+        ],
+        "title": "BilibiliPublishPhase",
+        "type": "string"
+      },
+      "BilibiliPublishResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "credentialRotation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BilibiliCredentialRotationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "phase": {
+            "$ref": "#/components/schemas/BilibiliPublishPhase"
+          },
+          "publishJobId": {
+            "title": "Publishjobid",
+            "type": "string"
+          },
+          "replayed": {
+            "title": "Replayed",
+            "type": "boolean"
+          },
+          "requestDigest": {
+            "title": "Requestdigest",
+            "type": "string"
+          },
+          "resourceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resourceid"
+          },
+          "sessionToken": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sessiontoken"
+          }
+        },
+        "required": [
+          "publishJobId",
+          "phase",
+          "requestDigest",
+          "resourceId",
+          "replayed",
+          "sessionToken",
+          "credentialRotation"
+        ],
+        "title": "BilibiliPublishResponse",
+        "type": "object"
+      },
       "BindingChallengeRequest": {
         "additionalProperties": false,
         "properties": {
@@ -645,6 +866,27 @@
         ],
         "title": "PlatformSessionState",
         "type": "string"
+      },
+      "PrepareBilibiliPublishRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "archive": {
+            "$ref": "#/components/schemas/BilibiliArchiveRequest"
+          },
+          "credential": {
+            "$ref": "#/components/schemas/BilibiliCredentialRequest"
+          },
+          "material": {
+            "$ref": "#/components/schemas/BilibiliMaterialRequest"
+          }
+        },
+        "required": [
+          "credential",
+          "material",
+          "archive"
+        ],
+        "title": "PrepareBilibiliPublishRequest",
+        "type": "object"
       },
       "RegistrationChallengeRequest": {
         "additionalProperties": false,
@@ -2292,6 +2534,240 @@
         "summary": "Prepare Douyin Platform Session Logout",
         "tags": [
           "platform-sessions"
+        ]
+      }
+    },
+    "/api/v1/publishing/bilibili/jobs/{publish_job_id}": {
+      "post": {
+        "operationId": "prepareBilibiliPublish",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "publish_job_id",
+            "required": true,
+            "schema": {
+              "title": "Publish Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrepareBilibiliPublishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BilibiliPublishResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Prepare Bilibili Publish",
+        "tags": [
+          "publishing"
+        ]
+      }
+    },
+    "/api/v1/publishing/bilibili/jobs/{publish_job_id}/session": {
+      "delete": {
+        "operationId": "cancelBilibiliPublishSession",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "publish_job_id",
+            "required": true,
+            "schema": {
+              "title": "Publish Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-bilibili-publish-session",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 32,
+              "title": "X-Bilibili-Publish-Session",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Cancel Bilibili Publish Session",
+        "tags": [
+          "publishing"
+        ]
+      }
+    },
+    "/api/v1/publishing/bilibili/jobs/{publish_job_id}/submission": {
+      "post": {
+        "operationId": "submitBilibiliPublish",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "publish_job_id",
+            "required": true,
+            "schema": {
+              "title": "Publish Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-bilibili-publish-session",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 32,
+              "title": "X-Bilibili-Publish-Session",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BilibiliPublishResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Submit Bilibili Publish",
+        "tags": [
+          "publishing"
+        ]
+      }
+    },
+    "/api/v1/publishing/bilibili/jobs/{publish_job_id}/video": {
+      "put": {
+        "operationId": "uploadBilibiliPublishVideo",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "publish_job_id",
+            "required": true,
+            "schema": {
+              "title": "Publish Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-bilibili-publish-session",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 32,
+              "title": "X-Bilibili-Publish-Session",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "content-length",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Content-Length",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BilibiliPublishResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Upload Bilibili Publish Video",
+        "tags": [
+          "publishing"
         ]
       }
     },

@@ -310,6 +310,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/publishing/bilibili/jobs/{publish_job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prepare Bilibili Publish */
+        post: operations["prepareBilibiliPublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/publishing/bilibili/jobs/{publish_job_id}/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Cancel Bilibili Publish Session */
+        delete: operations["cancelBilibiliPublishSession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/publishing/bilibili/jobs/{publish_job_id}/submission": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit Bilibili Publish */
+        post: operations["submitBilibiliPublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/publishing/bilibili/jobs/{publish_job_id}/video": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Upload Bilibili Publish Video */
+        put: operations["uploadBilibiliPublishVideo"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tasks": {
         parameters: {
             query?: never;
@@ -641,6 +709,83 @@ export interface components {
          * @enum {string}
          */
         ActionResultEvidence: "awaiting_execution" | "action_pending" | "action_in_progress" | "profile_visible" | "comment_confirmed" | "message_confirmed" | "executor_reported_success" | "user_excluded" | "duplicate_in_task" | "duplicate_in_history" | "blacklisted" | "action_cancelled" | "admission_rejected" | "local_safety_limit" | "login_required" | "dialog_blocked" | "messaging_not_allowed" | "follow_required" | "timed_out" | "page_version_unknown" | "conflicting_anchors" | "page_unavailable" | "verification_unavailable" | "executor_reported_failure" | "dispatch_timed_out" | "dispatch_unavailable" | "final_state_unconfirmed" | "recovery_unconfirmed";
+        /** BilibiliArchiveRequest */
+        BilibiliArchiveRequest: {
+            /** Description */
+            description: string;
+            /**
+             * Noreprint
+             * @enum {integer}
+             */
+            noReprint: 0 | 1;
+            /** Tag */
+            tag: string;
+            /** Tid */
+            tid: number;
+            /** Title */
+            title: string;
+        };
+        /** BilibiliCredentialRequest */
+        BilibiliCredentialRequest: {
+            /**
+             * Accesstoken
+             * Format: password
+             */
+            accessToken: string;
+            /**
+             * Appsecret
+             * Format: password
+             */
+            appSecret: string;
+            /** Clientid */
+            clientId: string;
+            /** Expiresatepochseconds */
+            expiresAtEpochSeconds: number;
+            /**
+             * Refreshtoken
+             * Format: password
+             */
+            refreshToken: string;
+        };
+        /** BilibiliCredentialRotationResponse */
+        BilibiliCredentialRotationResponse: {
+            /** Accesstoken */
+            accessToken: string;
+            /** Expiresatepochseconds */
+            expiresAtEpochSeconds: number;
+            /** Refreshtoken */
+            refreshToken: string;
+        };
+        /** BilibiliMaterialRequest */
+        BilibiliMaterialRequest: {
+            /** Durationseconds */
+            durationSeconds: number;
+            /** Sha256 */
+            sha256: string;
+            /** Sizebytes */
+            sizeBytes: number;
+        };
+        /**
+         * BilibiliPublishPhase
+         * @description Closed durable phases of one Bilibili publish attempt.
+         * @enum {string}
+         */
+        BilibiliPublishPhase: "prepared" | "video_uploaded" | "dispatched" | "submitted" | "failed" | "outcome_uncertain";
+        /** BilibiliPublishResponse */
+        BilibiliPublishResponse: {
+            credentialRotation: components["schemas"]["BilibiliCredentialRotationResponse"] | null;
+            phase: components["schemas"]["BilibiliPublishPhase"];
+            /** Publishjobid */
+            publishJobId: string;
+            /** Replayed */
+            replayed: boolean;
+            /** Requestdigest */
+            requestDigest: string;
+            /** Resourceid */
+            resourceId: string | null;
+            /** Sessiontoken */
+            sessionToken: string | null;
+        };
         /** BindingChallengeRequest */
         BindingChallengeRequest: {
             /** Devicepublickey */
@@ -856,6 +1001,12 @@ export interface components {
          * @enum {string}
          */
         PlatformSessionState: "healthy" | "expired" | "missing" | "risk" | "unknown";
+        /** PrepareBilibiliPublishRequest */
+        PrepareBilibiliPublishRequest: {
+            archive: components["schemas"]["BilibiliArchiveRequest"];
+            credential: components["schemas"]["BilibiliCredentialRequest"];
+            material: components["schemas"]["BilibiliMaterialRequest"];
+        };
         /** RegistrationChallengeRequest */
         RegistrationChallengeRequest: {
             /** Devicepublickey */
@@ -1680,6 +1831,139 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlatformSessionLogoutPrepareResponse"];
+                };
+            };
+        };
+    };
+    prepareBilibiliPublish: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                publish_job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrepareBilibiliPublishRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BilibiliPublishResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancelBilibiliPublishSession: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-bilibili-publish-session": string;
+            };
+            path: {
+                publish_job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submitBilibiliPublish: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-bilibili-publish-session": string;
+            };
+            path: {
+                publish_job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BilibiliPublishResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    uploadBilibiliPublishVideo: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-bilibili-publish-session": string;
+                "content-length": number;
+            };
+            path: {
+                publish_job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BilibiliPublishResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

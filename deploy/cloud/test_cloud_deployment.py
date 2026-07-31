@@ -112,6 +112,7 @@ class ImageIdentityContract(unittest.TestCase):
         self.assertIn("APP_VERSION=0.1.0", arguments)
         self.assertIn(f"VCS_REF={'0' * 40}", arguments)
         self.assertIn(str(REPOSITORY_ROOT / "backend" / "Dockerfile"), arguments)
+        self.assertEqual(arguments[-1], str(REPOSITORY_ROOT))
 
     def test_the_lock_file_pins_artifact_digests(self) -> None:
         # Every artifact is pinned by sha256, which is what makes rewriting the

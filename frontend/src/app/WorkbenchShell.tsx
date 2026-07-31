@@ -53,6 +53,8 @@ import { ModelServiceSettings } from "../features/settings/ModelServiceSettings"
 import type { ModelServiceGateway } from "../features/settings/model-service-gateway";
 import { VideoEditingServiceSettings } from "../features/settings/VideoEditingServiceSettings";
 import type { VideoEditingServiceGateway } from "../features/settings/video-editing-service-gateway";
+import { BilibiliServiceSettings } from "../features/settings/BilibiliServiceSettings";
+import type { BilibiliServiceGateway } from "../features/settings/bilibili-service-gateway";
 import {
   motionRunAttention,
   useMotionRun,
@@ -426,6 +428,26 @@ const shellVideoEditingServiceGateway: VideoEditingServiceGateway = {
   },
 };
 
+const shellBilibiliServiceGateway: BilibiliServiceGateway = {
+  async getSettings() {
+    return {
+      provider: "bilibili",
+      providerLabel: "B站开放平台",
+      configured: false,
+      targetAccount: null,
+      tid: null,
+      tag: null,
+      noReprint: null,
+    };
+  },
+  async configure() {
+    throw new Error("Bilibili service configuration is unavailable");
+  },
+  async clear() {
+    throw new Error("Bilibili service configuration is unavailable");
+  },
+};
+
 const shellMaterialVideoStudioGateway: MaterialVideoStudioGateway = {
   async open() {
     throw new Error("Material video studio is unavailable");
@@ -479,6 +501,7 @@ interface WorkbenchShellProps {
   readonly appUpdateGateway?: AppUpdateGateway | undefined;
   readonly modelServiceGateway?: ModelServiceGateway | undefined;
   readonly videoEditingServiceGateway?: VideoEditingServiceGateway | undefined;
+  readonly bilibiliServiceGateway?: BilibiliServiceGateway | undefined;
   readonly materialVideoStudioGateway?: MaterialVideoStudioGateway | undefined;
   readonly videoEditingGateway?: VideoEditingGateway | undefined;
   readonly publishWorkspaceGateway?: PublishWorkspaceGateway | undefined;
@@ -505,6 +528,7 @@ export function WorkbenchShell({
   appUpdateGateway = shellAppUpdateGateway,
   modelServiceGateway = shellModelServiceGateway,
   videoEditingServiceGateway = shellVideoEditingServiceGateway,
+  bilibiliServiceGateway = shellBilibiliServiceGateway,
   materialVideoStudioGateway = shellMaterialVideoStudioGateway,
   videoEditingGateway = shellVideoEditingGateway,
   publishWorkspaceGateway = shellPublishWorkspaceGateway,
@@ -767,6 +791,7 @@ export function WorkbenchShell({
                   <AppUpdateCenter gateway={appUpdateGateway} showSettings />
                   <ModelServiceSettings gateway={modelServiceGateway} />
                   <VideoEditingServiceSettings gateway={videoEditingServiceGateway} />
+                  <BilibiliServiceSettings gateway={bilibiliServiceGateway} />
                   <Diagnostics platform={platformAdapter} />
                   <div className="settings-legal-entry">
                     <Button

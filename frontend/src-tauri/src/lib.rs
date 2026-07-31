@@ -5,6 +5,7 @@ pub mod app_update_coordinator;
 pub mod app_update_installation;
 pub mod app_update_policy;
 pub mod app_updates;
+pub mod bilibili_service_settings;
 pub mod browser_discovery;
 pub mod browser_profiles;
 pub mod browser_settings;
@@ -330,6 +331,37 @@ async fn test_video_editing_service_connection(
     video_editing_service_settings::VideoEditingServiceCommandError,
 > {
     settings.test_connection().await.map_err(Into::into)
+}
+
+#[tauri::command]
+fn get_bilibili_service_settings(
+    settings: tauri::State<'_, bilibili_service_settings::ProductionBilibiliServiceSettings>,
+) -> Result<
+    bilibili_service_settings::BilibiliServiceSnapshot,
+    bilibili_service_settings::BilibiliServiceCommandError,
+> {
+    settings.snapshot().map_err(Into::into)
+}
+
+#[tauri::command]
+fn configure_bilibili_service(
+    request: bilibili_service_settings::ConfigureBilibiliServiceRequest,
+    settings: tauri::State<'_, bilibili_service_settings::ProductionBilibiliServiceSettings>,
+) -> Result<
+    bilibili_service_settings::BilibiliServiceSnapshot,
+    bilibili_service_settings::BilibiliServiceCommandError,
+> {
+    settings.configure(&request).map_err(Into::into)
+}
+
+#[tauri::command]
+fn clear_bilibili_service(
+    settings: tauri::State<'_, bilibili_service_settings::ProductionBilibiliServiceSettings>,
+) -> Result<
+    bilibili_service_settings::BilibiliServiceSnapshot,
+    bilibili_service_settings::BilibiliServiceCommandError,
+> {
+    settings.clear().map_err(Into::into)
 }
 
 #[tauri::command]
@@ -2318,10 +2350,92 @@ async fn logout_douyin_session(
 pub struct PublishWorkspaceState(pub std::sync::Mutex<publish_workspace::PublishWorkspace>);
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+struct BilibiliPendingPublish {
+    job_id: String,
+    session_token: zeroize::Zeroizing<String>,
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+pub struct BilibiliPublishSessionState(std::sync::Mutex<Option<BilibiliPendingPublish>>);
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+impl BilibiliPublishSessionState {
+    fn new() -> Self {
+        Self(std::sync::Mutex::new(None))
+    }
+
+    fn replace(
+        &self,
+        job_id: String,
+        session_token: zeroize::Zeroizing<String>,
+    ) -> Result<(), ExecutorPlatformCommandError> {
+        let mut held = self.0.lock().map_err(|_| publish_workspace_unavailable())?;
+        *held = Some(BilibiliPendingPublish {
+            job_id,
+            session_token,
+        });
+        Ok(())
+    }
+
+    fn take(
+        &self,
+        expected_job_id: &str,
+    ) -> Result<BilibiliPendingPublish, ExecutorPlatformCommandError> {
+        let mut held = self.0.lock().map_err(|_| publish_workspace_unavailable())?;
+        if held
+            .as_ref()
+            .is_none_or(|pending| pending.job_id != expected_job_id)
+        {
+            return Err(ExecutorPlatformCommandError {
+                code: "publish_nothing_to_confirm",
+                retryable: false,
+            });
+        }
+        held.take().ok_or(ExecutorPlatformCommandError {
+            code: "publish_nothing_to_confirm",
+            retryable: false,
+        })
+    }
+
+    fn clear(&self) -> Result<(), ExecutorPlatformCommandError> {
+        let mut held = self.0.lock().map_err(|_| publish_workspace_unavailable())?;
+        held.take();
+        Ok(())
+    }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 fn publish_workspace_unavailable() -> ExecutorPlatformCommandError {
     ExecutorPlatformCommandError {
         code: "storage_unavailable",
         retryable: false,
+    }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+fn map_publish_control_plane_error(
+    error: control_plane::ControlPlaneError,
+) -> ExecutorPlatformCommandError {
+    let mapped = map_control_plane_error(error);
+    ExecutorPlatformCommandError {
+        code: mapped.code,
+        retryable: mapped.retryable,
+    }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+fn map_bilibili_service_error(
+    error: bilibili_service_settings::BilibiliServiceError,
+) -> ExecutorPlatformCommandError {
+    use bilibili_service_settings::BilibiliServiceErrorCode;
+    let code = match error.code() {
+        BilibiliServiceErrorCode::ConfigurationRequired => "publish_not_available",
+        BilibiliServiceErrorCode::ConfigurationInvalid => "configuration_invalid",
+        BilibiliServiceErrorCode::StorageUnavailable => "storage_unavailable",
+    };
+    ExecutorPlatformCommandError {
+        code,
+        retryable: error.retryable(),
     }
 }
 
@@ -2376,6 +2490,7 @@ fn map_video_workspace_error(
 async fn get_publish_workspace(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+    settings: tauri::State<'_, bilibili_service_settings::ProductionBilibiliServiceSettings>,
     workspace: tauri::State<'_, PublishWorkspaceState>,
 ) -> Result<publish_workspace::PublishWorkspaceSnapshot, ExecutorPlatformCommandError> {
     // A session this App cannot read is not a session it may publish through.
@@ -2384,11 +2499,16 @@ async fn get_publish_workspace(
         .await
         .map(|session| session.state() == "healthy")
         .unwrap_or(false);
+    let bilibili_configured = settings
+        .snapshot()
+        .map(|snapshot| snapshot.configured())
+        .unwrap_or(false);
     let mut held = workspace
         .0
         .lock()
         .map_err(|_| publish_workspace_unavailable())?;
     held.observe_douyin_signed_in(signed_in);
+    held.observe_bilibili_configured(bilibili_configured);
     Ok(held.snapshot())
 }
 
@@ -2397,6 +2517,7 @@ async fn get_publish_workspace(
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 async fn begin_publish(
+    app: tauri::AppHandle,
     platform: String,
     artifact_id: uuid::Uuid,
     video_summary: String,
@@ -2408,6 +2529,8 @@ async fn begin_publish(
     authority: tauri::State<'_, embedded_browser_authority::EmbeddedBrowserAuthority>,
     profiles: tauri::State<'_, browser_profiles::BrowserProfileStore>,
     workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+    settings: tauri::State<'_, bilibili_service_settings::ProductionBilibiliServiceSettings>,
+    bilibili_session: tauri::State<'_, BilibiliPublishSessionState>,
     workspace: tauri::State<'_, PublishWorkspaceState>,
 ) -> Result<publish_workspace::PublishWorkspaceSnapshot, ExecutorPlatformCommandError> {
     // One publish, one identity, minted here. The page never supplies it, so it
@@ -2429,19 +2552,7 @@ async fn begin_publish(
     // how a B站 publish would have been typed into 抖音's browser.
     match target.route() {
         publish_workspace::PublishRoute::OperationsBrowser => {}
-        publish_workspace::PublishRoute::NotIntegrated => {
-            let mut held = workspace
-                .0
-                .lock()
-                .map_err(|_| publish_workspace_unavailable())?;
-            // Nothing was opened and nothing was sent, so this is a clean
-            // "did not publish" rather than an unknown outcome.
-            held.settle(publish_workspace::PublishOutcome::NotPublished);
-            return Err(ExecutorPlatformCommandError {
-                code: "publish_platform_not_integrated",
-                retryable: false,
-            });
-        }
+        publish_workspace::PublishRoute::OfficialApi => {}
     }
     // The publishable set is "a finished video this App produced", resolved by
     // the store from an identity. The page never holds a local path, and the
@@ -2457,6 +2568,23 @@ async fn begin_publish(
             return Err(map_video_workspace_error(error));
         }
     };
+    if target.route() == publish_workspace::PublishRoute::OfficialApi {
+        return begin_bilibili_publish(
+            &app,
+            publish_job_id,
+            video_summary,
+            title,
+            description,
+            &client,
+            &vault,
+            &settings,
+            &bilibili_session,
+            &workspaces,
+            &workspace,
+            staged,
+        )
+        .await;
+    }
     let prepared = async {
         ensure_executor_running(&client, &vault, &executor).await?;
         let executable_path = resolve_embedded_browser(&authority)?;
@@ -2562,6 +2690,127 @@ async fn begin_publish(
     Ok(held.snapshot())
 }
 
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[allow(clippy::too_many_arguments)]
+async fn begin_bilibili_publish(
+    app: &tauri::AppHandle,
+    publish_job_id: String,
+    video_summary: String,
+    title: String,
+    description: String,
+    client: &control_plane::ControlPlaneClient,
+    vault: &ProductionDeviceCredentialVault,
+    settings: &bilibili_service_settings::ProductionBilibiliServiceSettings,
+    bilibili_session: &BilibiliPublishSessionState,
+    workspaces: &video_job_workspace::VideoJobWorkspaceStore,
+    workspace: &PublishWorkspaceState,
+    staged: video_job_workspace::StagedPublishArtifact,
+) -> Result<publish_workspace::PublishWorkspaceSnapshot, ExecutorPlatformCommandError> {
+    let prepared = async {
+        bilibili_session.clear()?;
+        let credential = settings
+            .credential_for_publish()
+            .map_err(map_bilibili_service_error)?;
+        let target_account = credential.target_account().to_owned();
+        let resource_directory =
+            app.path()
+                .resource_dir()
+                .map_err(|_| ExecutorPlatformCommandError {
+                    code: "publish_video_not_publishable",
+                    retryable: false,
+                })?;
+        let video_path = staged.path().to_path_buf();
+        let duration_seconds = tauri::async_runtime::spawn_blocking(move || {
+            video_media_toolchain::VideoMediaToolchain::load(&resource_directory)
+                .and_then(|toolchain| toolchain.probe_duration_seconds(&video_path))
+        })
+        .await
+        .map_err(|_| ExecutorPlatformCommandError {
+            code: "process_unavailable",
+            retryable: true,
+        })?
+        .map_err(|_| ExecutorPlatformCommandError {
+            code: "publish_video_not_publishable",
+            retryable: false,
+        })?;
+        let prepared = client
+            .prepare_bilibili_publish(
+                vault,
+                &publish_job_id,
+                staged.size_bytes(),
+                duration_seconds,
+                staged.sha256(),
+                &title,
+                &description,
+                &credential,
+            )
+            .await
+            .map_err(map_publish_control_plane_error)?;
+        if let Some(rotation) = prepared.credential_rotation() {
+            settings
+                .apply_rotation(rotation)
+                .map_err(map_bilibili_service_error)?;
+        }
+        let publish_session =
+            prepared
+                .into_session_token()
+                .ok_or(ExecutorPlatformCommandError {
+                    code: "operation_unavailable",
+                    retryable: false,
+                })?;
+        let uploaded = client
+            .upload_bilibili_publish_video(
+                vault,
+                &publish_job_id,
+                publish_session.as_str(),
+                staged.path(),
+                staged.size_bytes(),
+            )
+            .await
+            .map_err(map_publish_control_plane_error)?;
+        if let Some(rotation) = uploaded.credential_rotation() {
+            settings
+                .apply_rotation(rotation)
+                .map_err(map_bilibili_service_error)?;
+        }
+        let confirmation_id = video_job_workspace::generate_uuid_v4()
+            .map_err(map_video_workspace_error)?
+            .hyphenated()
+            .to_string();
+        let approval = publish_workspace::PublishApproval::new(
+            &target_account,
+            &video_summary,
+            &title,
+            &description,
+            &confirmation_id,
+        )
+        .map_err(map_publish_workspace_error)?;
+        bilibili_session.replace(publish_job_id, publish_session)?;
+        Ok::<_, ExecutorPlatformCommandError>(approval)
+    }
+    .await;
+
+    let approval = match prepared {
+        Ok(approval) => approval,
+        Err(error) => {
+            let _ = bilibili_session.clear();
+            let _ = workspaces.discard_staged_publish_artifacts();
+            let mut held = workspace
+                .0
+                .lock()
+                .map_err(|_| publish_workspace_unavailable())?;
+            held.settle(publish_workspace::PublishOutcome::NotPublished);
+            return Err(error);
+        }
+    };
+    let mut held = workspace
+        .0
+        .lock()
+        .map_err(|_| publish_workspace_unavailable())?;
+    held.await_approval(approval);
+    Ok(held.snapshot())
+}
+
 /// Spend the operator's approval on the one click it authorizes.
 ///
 /// The confirmation the App sends back must be the one the executor issued.
@@ -2570,13 +2819,18 @@ async fn begin_publish(
 /// nobody saw is the failure this whole chain exists to prevent.
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn approve_publish(
     confirmation_id: String,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
     executor: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+    settings: tauri::State<'_, bilibili_service_settings::ProductionBilibiliServiceSettings>,
+    bilibili_session: tauri::State<'_, BilibiliPublishSessionState>,
     workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
     workspace: tauri::State<'_, PublishWorkspaceState>,
 ) -> Result<publish_workspace::PublishWorkspaceSnapshot, ExecutorPlatformCommandError> {
-    let publish_job_id = {
+    let (publish_job_id, target, pending_bilibili) = {
         let mut held = workspace
             .0
             .lock()
@@ -2599,9 +2853,66 @@ async fn approve_publish(
             .ok_or(publish_workspace::PublishWorkspaceError::NoApprovalPending)
             .map_err(map_publish_workspace_error)?
             .to_owned();
+        let target = pending
+            .target
+            .ok_or(publish_workspace::PublishWorkspaceError::NoApprovalPending)
+            .map_err(map_publish_workspace_error)?;
+        let pending_bilibili = if target == publish_workspace::PublishPlatform::Bilibili {
+            Some(bilibili_session.take(&publish_job_id)?)
+        } else {
+            None
+        };
         held.approve().map_err(map_publish_workspace_error)?;
-        publish_job_id
+        (publish_job_id, target, pending_bilibili)
     };
+    if target == publish_workspace::PublishPlatform::Bilibili {
+        let pending = pending_bilibili.ok_or(ExecutorPlatformCommandError {
+            code: "publish_nothing_to_confirm",
+            retryable: false,
+        })?;
+        let outcome = client
+            .submit_bilibili_publish(&vault, &publish_job_id, pending.session_token.as_str())
+            .await;
+        let _ = workspaces.discard_staged_publish_artifacts();
+        let mut held = workspace
+            .0
+            .lock()
+            .map_err(|_| publish_workspace_unavailable())?;
+        held.begin_verification();
+        return match outcome {
+            Err(error) => {
+                held.settle(publish_workspace::PublishOutcome::OutcomeUncertain);
+                drop(held);
+                Err(map_publish_control_plane_error(error))
+            }
+            Ok(result) => {
+                if let Some(rotation) = result.credential_rotation() {
+                    if let Err(error) = settings.apply_rotation(rotation) {
+                        held.settle(publish_workspace::PublishOutcome::OutcomeUncertain);
+                        return Err(map_bilibili_service_error(error));
+                    }
+                }
+                let publish_outcome = match result.phase() {
+                    control_plane::BilibiliPublishPhase::Submitted => {
+                        publish_workspace::PublishOutcome::Submitted
+                    }
+                    control_plane::BilibiliPublishPhase::Failed => {
+                        publish_workspace::PublishOutcome::NotPublished
+                    }
+                    control_plane::BilibiliPublishPhase::Dispatched
+                    | control_plane::BilibiliPublishPhase::OutcomeUncertain => {
+                        publish_workspace::PublishOutcome::OutcomeUncertain
+                    }
+                    control_plane::BilibiliPublishPhase::Prepared
+                    | control_plane::BilibiliPublishPhase::VideoUploaded => {
+                        publish_workspace::PublishOutcome::OutcomeUncertain
+                    }
+                };
+                held.settle(publish_outcome);
+                Ok(held.snapshot())
+            }
+        };
+    }
     let service = executor.inner().clone();
     let job = publish_job_id.clone();
     let outcome = tauri::async_runtime::spawn_blocking(move || {
@@ -2640,21 +2951,55 @@ async fn approve_publish(
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 #[tauri::command]
 async fn cancel_publish(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
     executor: tauri::State<'_, executor_platform::ExecutorPlatformService>,
+    bilibili_session: tauri::State<'_, BilibiliPublishSessionState>,
     workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
     workspace: tauri::State<'_, PublishWorkspaceState>,
 ) -> Result<publish_workspace::PublishWorkspaceSnapshot, ExecutorPlatformCommandError> {
-    {
+    let (target, pending_bilibili) = {
         // Refuse before touching the browser: a dispatched publish has nothing
         // local left to cancel, and saying otherwise would be a lie.
         let mut held = workspace
             .0
             .lock()
             .map_err(|_| publish_workspace_unavailable())?;
+        let target = held
+            .snapshot()
+            .target
+            .ok_or(publish_workspace::PublishWorkspaceError::NothingInFlight)
+            .map_err(map_publish_workspace_error)?;
+        let pending_bilibili = if target == publish_workspace::PublishPlatform::Bilibili {
+            let job_id = held
+                .job_id()
+                .ok_or(publish_workspace::PublishWorkspaceError::NothingInFlight)
+                .map_err(map_publish_workspace_error)?;
+            Some(bilibili_session.take(job_id)?)
+        } else {
+            None
+        };
         held.cancel().map_err(map_publish_workspace_error)?;
-    }
+        (target, pending_bilibili)
+    };
     // The cancel was accepted, so nothing will be published from this copy.
     let _ = workspaces.discard_staged_publish_artifacts();
+    if target == publish_workspace::PublishPlatform::Bilibili {
+        if let Some(pending) = pending_bilibili {
+            let _ = client
+                .cancel_bilibili_publish_session(
+                    &vault,
+                    &pending.job_id,
+                    pending.session_token.as_str(),
+                )
+                .await;
+        }
+        let held = workspace
+            .0
+            .lock()
+            .map_err(|_| publish_workspace_unavailable())?;
+        return Ok(held.snapshot());
+    }
     let service = executor.inner().clone();
     tauri::async_runtime::spawn_blocking(move || service.release_publish_surface())
         .await
@@ -5092,12 +5437,19 @@ pub fn run() {
                     &app_data_directory,
                 )?,
             );
+            app.manage(
+                bilibili_service_settings::initialize_production_bilibili_service_settings(
+                    &app_data_directory,
+                )?,
+            );
             app.manage(video_editing_workspace::VideoEditingWorkspace::initialize(
                 &app_data_directory,
             )?);
             app.manage(PublishWorkspaceState(std::sync::Mutex::new(
                 publish_workspace::PublishWorkspace::new(false),
             )));
+            #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+            app.manage(BilibiliPublishSessionState::new());
             app.manage(startup_environment::StartupEnvironmentService::initialize(
                 &app_data_directory,
             )?);
@@ -5196,6 +5548,9 @@ pub fn run() {
         configure_video_editing_service,
         clear_video_editing_service,
         test_video_editing_service_connection,
+        get_bilibili_service_settings,
+        configure_bilibili_service,
+        clear_bilibili_service,
         list_video_editing_projects,
         create_video_editing_project,
         get_video_editing_timeline,
@@ -5272,6 +5627,9 @@ pub fn run() {
         configure_video_editing_service,
         clear_video_editing_service,
         test_video_editing_service_connection,
+        get_bilibili_service_settings,
+        configure_bilibili_service,
+        clear_bilibili_service,
         list_video_editing_projects,
         create_video_editing_project,
         get_video_editing_timeline,
@@ -5379,6 +5737,9 @@ pub fn run() {
         configure_video_editing_service,
         clear_video_editing_service,
         test_video_editing_service_connection,
+        get_bilibili_service_settings,
+        configure_bilibili_service,
+        clear_bilibili_service,
         list_video_editing_projects,
         create_video_editing_project,
         get_video_editing_timeline,

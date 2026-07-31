@@ -122,6 +122,8 @@ class BilibiliOpenApiContract:
     authorize_h5_url: str
     token_url: str
     refresh_token_url: str
+    grant_type_authorization_code: str
+    grant_type_refresh_token: str
     required_scope: str
     known_scopes: frozenset[str]
     signature_version: str
@@ -419,6 +421,8 @@ def load_bilibili_open_api_contract(path: Path) -> BilibiliOpenApiContract:
         authorize_h5_url=_contract_https_url(oauth, "authorize_h5_url"),
         token_url=_contract_https_url(oauth, "token_url"),
         refresh_token_url=_contract_https_url(oauth, "refresh_token_url"),
+        grant_type_authorization_code=_contract_str(oauth, "grant_type_authorization_code"),
+        grant_type_refresh_token=_contract_str(oauth, "grant_type_refresh_token"),
         required_scope=required_scope,
         known_scopes=known_scopes,
         signature_version=_contract_str(signature, "signature_version"),

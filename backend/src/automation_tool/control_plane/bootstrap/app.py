@@ -12,6 +12,9 @@ from automation_tool.control_plane.api.account_installation_bindings import (
     router as account_installation_binding_router,
 )
 from automation_tool.control_plane.api.account_sessions import router as account_session_router
+from automation_tool.control_plane.api.bilibili_publishing import (
+    router as bilibili_publishing_router,
+)
 from automation_tool.control_plane.api.desktop_updates import router as desktop_update_router
 from automation_tool.control_plane.api.device_credentials import (
     router as device_credential_router,
@@ -52,6 +55,9 @@ from automation_tool.control_plane.application.account_installation_bindings imp
 from automation_tool.control_plane.application.account_sessions import AccountSessionService
 from automation_tool.control_plane.application.action_execution_orchestration import (
     ActionExecutionOrchestrationService,
+)
+from automation_tool.control_plane.application.bilibili_publishing_runtime import (
+    BilibiliPublishingRuntime,
 )
 from automation_tool.control_plane.application.desktop_updates import DesktopUpdateCatalog
 from automation_tool.control_plane.application.device_credentials import DeviceCredentialService
@@ -99,6 +105,9 @@ from automation_tool.control_plane.bootstrap.account_sessions import (
 from automation_tool.control_plane.bootstrap.action_execution import (
     action_execution_runtime_from_environment,
 )
+from automation_tool.control_plane.bootstrap.bilibili_publishing import (
+    bilibili_publishing_runtime as build_bilibili_publishing_runtime,
+)
 from automation_tool.control_plane.bootstrap.database import database_from_environment
 from automation_tool.control_plane.bootstrap.desktop_updates import (
     desktop_update_catalog_from_environment,
@@ -109,11 +118,11 @@ from automation_tool.control_plane.bootstrap.device_credentials import (
 from automation_tool.control_plane.bootstrap.device_sessions import (
     device_session_service as build_device_session_service,
 )
-from automation_tool.control_plane.bootstrap.platform_sessions import (
-    platform_session_health_service as build_platform_session_health_service,
-)
 from automation_tool.control_plane.bootstrap.local_provisioning import (
     LocalRegistrationBootstrap,
+)
+from automation_tool.control_plane.bootstrap.platform_sessions import (
+    platform_session_health_service as build_platform_session_health_service,
 )
 from automation_tool.control_plane.bootstrap.registration import (
     registration_service_from_environment,
@@ -188,6 +197,9 @@ async def control_plane_lifespan(app: FastAPI) -> AsyncIterator[None]:
         if isinstance(registry, ExecutorConnectionRegistry):
             await registry.shutdown()
         database: DatabaseLifecycle | None = app.state.database
+        bilibili_runtime = app.state.bilibili_publishing_runtime
+        if isinstance(bilibili_runtime, BilibiliPublishingRuntime):
+            await bilibili_runtime.aclose()
         if database is not None:
             await database.close()
         app.state.lifecycle_state = "stopped"
@@ -219,6 +231,7 @@ def create_app(
     task_event_stream_service: TaskEventStreamService | None = None,
     workbench_metrics_service: WorkbenchMetricsService | None = None,
     desktop_update_catalog: DesktopUpdateCatalog | None = None,
+    bilibili_publishing_runtime: BilibiliPublishingRuntime | None = None,
     executor_connection_hello_timeout_seconds: float = 5.0,
     executor_connection_recheck_interval_seconds: float = 1.0,
     task_event_stream_poll_interval_seconds: float = 0.25,
@@ -255,6 +268,7 @@ def create_app(
     resolved_task_event_stream_service = task_event_stream_service
     resolved_workbench_metrics_service = workbench_metrics_service
     resolved_desktop_update_catalog = desktop_update_catalog
+    resolved_bilibili_publishing_runtime = bilibili_publishing_runtime
     if (
         resolved_account_session_service is None
         and isinstance(database, _FromEnvironment)
@@ -356,6 +370,8 @@ def create_app(
         resolved_task_event_stream_service = build_task_event_stream_service(resolved_database)
     if resolved_workbench_metrics_service is None and isinstance(resolved_database, Database):
         resolved_workbench_metrics_service = build_workbench_metrics_service(resolved_database)
+    if resolved_bilibili_publishing_runtime is None and isinstance(resolved_database, Database):
+        resolved_bilibili_publishing_runtime = build_bilibili_publishing_runtime(resolved_database)
     hello_timeout_seconds = _positive_finite_seconds(executor_connection_hello_timeout_seconds)
     recheck_interval_seconds = _positive_finite_seconds(
         executor_connection_recheck_interval_seconds
@@ -401,6 +417,7 @@ def create_app(
     app.state.task_event_stream_service = resolved_task_event_stream_service
     app.state.workbench_metrics_service = resolved_workbench_metrics_service
     app.state.desktop_update_catalog = resolved_desktop_update_catalog
+    app.state.bilibili_publishing_runtime = resolved_bilibili_publishing_runtime
     app.state.executor_connection_hello_timeout_seconds = hello_timeout_seconds
     app.state.executor_connection_recheck_interval_seconds = recheck_interval_seconds
     app.state.task_event_stream_poll_interval_seconds = stream_poll_interval_seconds
@@ -409,6 +426,7 @@ def create_app(
     install_request_context(app)
     register_error_handlers(app)
     app.include_router(account_session_router)
+    app.include_router(bilibili_publishing_router)
     app.include_router(account_installation_binding_router)
     app.include_router(account_device_router)
     app.include_router(desktop_update_router)

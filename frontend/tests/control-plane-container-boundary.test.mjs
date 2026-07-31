@@ -11,7 +11,7 @@ async function read(path) {
 test("C10-02 builds a locked production-only Control Plane image", async () => {
   const [dockerfile, dockerignore, pyproject] = await Promise.all([
     read("backend/Dockerfile"),
-    read("backend/.dockerignore"),
+    read(".dockerignore"),
     read("backend/pyproject.toml"),
   ]);
 
@@ -39,6 +39,10 @@ test("C10-02 builds a locked production-only Control Plane image", async () => {
   assert.match(
     pyproject,
     /automation-tool-control-plane-container = "automation_tool\.control_plane\.bootstrap\.container_cli:main"/u,
+  );
+  assert.match(
+    dockerfile,
+    /COPY contracts\/publishing\/bilibili-open-api\.v1\.json/u,
   );
   for (const excluded of ["tests", ".venv", "__pycache__", ".pytest_cache", ".coverage"]) {
     assert.ok(dockerignore.split("\n").includes(excluded), `${excluded} must be excluded`);

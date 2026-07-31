@@ -173,7 +173,14 @@ describe("publish workspace copy", () => {
         ["idle", "preparing", "awaiting_approval", "publishing", "verifying", "settled"] as const
       ).map(publishStageLabel),
       ...(
-        ["published", "outcome_uncertain", "not_published", "handed_off", "cancelled"] as const
+        [
+          "published",
+          "submitted",
+          "outcome_uncertain",
+          "not_published",
+          "handed_off",
+          "cancelled",
+        ] as const
       ).map(publishOutcomeLabel),
     ].join(" ");
 

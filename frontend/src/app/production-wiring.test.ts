@@ -81,6 +81,7 @@ const REQUIRED_TAURI_PROPS = [
   "appUpdateGateway",
   "modelServiceGateway",
   "videoEditingServiceGateway",
+  "bilibiliServiceGateway",
   "videoEditingGateway",
   "materialVideoStudioGateway",
   "publishWorkspaceGateway",
