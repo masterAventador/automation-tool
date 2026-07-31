@@ -60,7 +60,7 @@
 | LE-09 | 字幕渲染与 fallback 机制 | PIL 渲染字幕 PNG；`fontTools` 读 cmap 实现缺字 fallback **机制**；换行、描边、行距可控。**验收判据不是「PNG 非空」——LE-09 调研实测证明那条零捕捉力**：中文字体渲染不在 cmap 的 `😀` 会画出 1226 个非零像素的实心方框（与 `.notdef` 逐字节相同），而拉丁字体渲染 `中` 画的是空白；豆腐块有墨、缺字无墨，非空断言两头都抓不住。**正确判据是与 `.notdef` 位图差分**（`font.getmask(chr(0x10FFFF))`）。**只用生产在册的 Noto Sans CJK SC 加一个在册拉丁字体验证 fallback 链路本身**，字体扩充与装配属于 LE-20，两者不得互相阻塞。**缺字且整条链都没有时 fail closed**（抛异常、带码位不带原文、不留半成品文件），不画替代符号——画了会让所有下游断言照常通过，正是 T108 事故的形状。**T1～T5 全部完成**（机制、注册表、cmap fallback、样式与字体加载、排版出图、真实面验收），证据见 `docs/development/LE-09.md`；**顶格 `🔍 待验收`**——补验收依赖 LE-10（PNG 进 ffmpeg overlay 出成片）、LE-20（字体进执行器包并有出厂门禁）、LE-17（工作台接上形成用户可操作路径），三条都不满足之前不得标完成。**原登记的两项待定已在实现中定型**：换行宽度首期为固定边距断行（回填 `CaptionStyle` 登记在 `docs/development/LE-09.md` 遗留项 4，归 Control Plane 侧），字幕位置/边距归 LE-10 的 overlay | LE-01 | 🔍 待验收 |
 | LE-10 | 视频渲染管线 | trim(in/out) → scale/crop → fps 归一 → concat → `xfade` 转场 → 字幕 overlay；补齐 `ffmpeg-toolchain.v1.json` 的 `required_capabilities.filters` 声明（xfade/select/scdet 等，**无需重建 ffmpeg**）；产出 mp4 并以 ffprobe 断言编码/分辨率/帧数/时长。**输出画幅与帧率已由 `EditingProject.output`（`OutputSpec`）承载，ffprobe 断言的目标值取自它**；**并决定两项 LE-04 未覆盖的渲染必需信息**：① 16:9 素材放进 9:16 画幅时是 scale 加黑边还是 crop 裁切（两个完全不同的成片，加黑边还需填充色），`OutputSpec` 只有 width/height/fps、没有字段表达这个选择；② **毫秒时间轴与 fps 帧栅格的对账**——LE-04 终审实测 1ms 的视觉 clip 与 1ms 的 xfade 转场当前都被接受，而任何合法 fps（12–60）下一帧至少 16.7ms，这段渲不出任何一帧；且 `TimelineTrack` 要求 `start_ms == previous_end - overlap` 精确成立、`Timeline` 要求 `picture.end_ms == duration_ms` 精确相等，而渲染器必须把它们量化到帧栅格，量化误差累积后成片时长会偏离 `duration_ms`——**而本任务的完成定义恰恰是 ffprobe 断言帧数与时长**。谁对账、允许多大偏差，需在此定死；**LE-07 交接**：要不要转码只能在持有文件的本机判断——`video_codec`/`audio_codec` 只存在于执行器侧的 `MaterialFacts`，**`Material` 里没有编码字段**，Control Plane 拿不到；若确认必须跨层传，要在 domain 加字段并同步缩小 `test_material_probe_media.py` 的 `FACTS_WITH_NO_FIELD_IN_THE_DOMAIN`（那里有结构测试守着，不会静默）。依据见 `docs/development/LE-07.md`「拿探测产物真造 `Material`」。2026-08-01 已按 `docs/development/LE-10.md` 定死居中 crop、绝对边界半向上帧量化与 7 个 Task；T1～T7、逐任务 Review、macOS/Windows 既有随包候选和完整集成门禁均已完成，证据见 `docs/development/LE-10.md`；正式 App 用户路径与正式安装包验收依赖 LE-17/LE-19/LE-22/LE-23，故顶格不标完成 | LE-03,LE-09 | 🔍 待验收 |
 | LE-11 | 音频管线 | 旁白/原声/BGM 三轨；`sidechaincompress` 以旁白为 sidechain 自动闪避；`has_audio` 为假时不排 ambient 轨；采样率归一；断言输出音轨时长与成片一致；**必须实现设计 §5.3 的「原声处理方式」三态开关**（自动闪避 / 固定音量 / 静音，默认自动闪避）。LE-03 终审指出模型只有 `gain_db`（对应三态里的基准音量那一维），三态本身表达不出来：静音可靠不排 ambient clip 表达，但「固定音量」需要一条**既不被旁白压、也不作为 sidechain 源**的音频通路，而五种轨道里没有这样一条——NARRATION 是 sidechain 源，AMBIENT 与 MUSIC 按 §5 都要过 `sidechaincompress`。2026-08-01 已在 `docs/development/LE-11.md` 定为 clip 级强类型三态字段，不新增第六轨、不收窄承诺；T1～T5 已全部完成，交付模型/API/JSONB、无路径协议、三态 compiler、本地 `has_audio` 门禁、共享受控 H.264 + AAC 执行、来源快照、原子发布和 1ms ffprobe 核验；AUTO/FIXED/MUTED 双平台真实 PCM 电平分别证明显著闪避/固定/静音，LE 结束全受影响 `502 passed`、完整 integration `460 passed, 17 skipped`，逐任务 Review finding 全部闭环，证据见 `docs/development/LE-11.md`；正式 App/安装包用户路径依赖 LE-17/19/22/23，故顶格不标完成 | LE-10 | 🔍 待验收 |
-| LE-12 | Worker 生命周期与任务控制 | Tauri 调度渲染 Worker：随机 loopback、高熵会话令牌、健康检查、进度上报、取消与紧停、崩溃恢复、App 退出后任务恢复；`cargo test` 覆盖。**LE-07 交接三条**：① Rust 侧把已校验的 ffmpeg/ffprobe 路径下发给 Worker 的装配归本任务，Python 侧接收端（`PackagedMediaTools`，不发现、不查 PATH、不读环境变量）已交付；② 同一批编码事实（`video_codec`/`audio_codec`）只在执行器侧，见 LE-10 行；③ 探测与测量都需要可写暂存空间，卷满时产出 `WORKSPACE_UNUSABLE`（不是「文件坏了」也不是「重试」），Worker 的失败上报要能表达这一类。T1 已交付只进认证 stdin 的随包工具对配置与 Python 精确 parser；双平台各 `26 passed`，Rust 旧 Worker 兼容和 Windows 专属目标均已复验，证据见 `docs/development/LE-12.md` | LE-11 | 🚧 实现中 |
+| LE-12 | Worker 生命周期与任务控制 | Tauri 调度渲染 Worker：随机 loopback、高熵会话令牌、健康检查、进度上报、取消与紧停、崩溃恢复、App 退出后任务恢复；`cargo test` 覆盖。**LE-07 交接三条**：① Rust 侧把已校验的 ffmpeg/ffprobe 路径下发给 Worker 的装配归本任务，Python 侧接收端（`PackagedMediaTools`，不发现、不查 PATH、不读环境变量）已交付；② 同一批编码事实（`video_codec`/`audio_codec`）只在执行器侧，见 LE-10 行；③ 探测与测量都需要可写暂存空间，卷满时产出 `WORKSPACE_UNUSABLE`（不是「文件坏了」也不是「重试」），Worker 的失败上报要能表达这一类。T1～T2 已交付认证 stdin 工具对、Python 精确 parser、path-free 作业命令、单调进度、协作取消竞态和进程树紧停；Python 双平台各 `55 passed`，macOS Rust Worker `25 passed, 3 ignored`，Windows 原生目标编译与专项全绿，证据见 `docs/development/LE-12.md` | LE-11 | 🚧 实现中 |
 
 ### 3.5 AI 编排（4 项）
 
@@ -106,7 +106,7 @@
 
 ## 5. 当前下一步
 
-**LE-12 T1 已完成；下一步进入 T2 本地剪辑作业协议、进度、取消与紧停。** LE-10 已交付从真实领域投影、绝对
+**LE-12 T1～T2 已完成；下一步进入 T3 持久作业账本、检查点与失败分类。** LE-10 已交付从真实领域投影、绝对
 帧栅格、VIDEO/IMAGE 居中 crop、硬切/连续 xfade、LE-09 字幕 overlay 到受控 FFmpeg、
 ffprobe 核验、摘要和原子发布的完整分层实现。macOS/Windows 既有随包 FFmpeg 8.1.2 候选
 均通过 18 项精确滤镜能力合约；组合真实链在两端均得到 H.264 `720×1280@20`、20 帧、
@@ -124,8 +124,9 @@ ffprobe fail-closed 核验。T5 又以同源三份真实成片的 PCM 频段电�
 和静音确实可听地区分，并完成全量集成与最终 Review。LE-11 顶格保持 `🔍 待验收`；现在按
 依赖顺序进入 LE-12。T1 已把 Rust 校验过的 ffmpeg/ffprobe 唯一工具对只经认证 stdin 交给
 Python 本地剪辑 Worker，Python 侧精确解析并直接构造 `PackagedMediaTools`；双平台专项通过，
-Windows 专属测试目标的历史构造参数漂移也由真机编译 RED 修复。现在进入 T2 的认证作业命令、
-单调进度、协作取消和进程树紧停。
+Windows 专属测试目标的历史构造参数漂移也由真机编译 RED 修复。T2 又在同一 HMAC 通道交付
+path-free 作业命令、单调进度、协作取消竞态和进程树紧停，并保持 `workspace_unusable` 独立失败
+分类。现在进入 T3 的 App 私有持久作业账本、检查点和 `EditingJob` 状态映射。
 
 ## 7. 用户可见文案门禁现已恢复绿色
 
