@@ -8,6 +8,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use automation_tool_desktop_lib::local_video_orchestrator::{
     LocalVideoOrchestrator, VideoWorkerErrorCode, VideoWorkerKind, VideoWorkerLaunch,
+    VideoWorkerLocalEditingEvent, VideoWorkerLocalEditingFailureCode,
+    VideoWorkerLocalEditingJobRequest, VideoWorkerLocalEditingPhase,
     VideoWorkerMediaToolsConfiguration, VideoWorkerRenderBrowserConfiguration,
     VideoWorkerRenderCanvas, VideoWorkerRenderSandboxRequest, VideoWorkerRestartPolicy,
     VideoWorkerSourceWindow, VideoWorkerState,
@@ -237,6 +239,425 @@ fn media_pair_rejects_aliases_and_duplicate_attachment() {
         .err()
         .expect("native media tools belong only to the Python editing Worker");
     assert_eq!(node_only.code(), VideoWorkerErrorCode::ConfigurationInvalid);
+}
+
+fn editing_worker(outcome: &str) -> String {
+    let prefix = HEALTHY_WORKER
+        .split_once("for line in sys.stdin:")
+        .expect("healthy Worker command loop")
+        .0;
+    format!(
+        r#"{prefix}def command_proof(command, job_id, detail=None):
+    parts = [command, kind, protocol, job_id]
+    if detail is not None:
+        parts.append(detail)
+    digest = hmac.digest(
+        key,
+        b"automation-tool.video-worker-command.v1\0" + b"\0".join(
+            value.encode() for value in parts
+        ),
+        hashlib.sha256,
+    )
+    return "atvwc1." + base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+def editing_event(event, job_id, detail, **facts):
+    body = {{
+        "authenticationProof": proof(event, detail),
+        "event": event,
+        "jobId": job_id,
+        "protocolVersion": protocol,
+        "workerKind": kind,
+        "workerVersion": version,
+    }}
+    if outcome == "forged":
+        body["authenticationProof"] = "atvwp1.forged"
+    body.update(facts)
+    print(json.dumps(body, separators=(",", ":")), flush=True)
+
+outcome = {outcome:?}
+active_job = None
+for line in sys.stdin:
+    command = json.loads(line)
+    job_id = command.get("jobId", "")
+    if command.get("command") == "worker.editing.start":
+        editing = command.get("editing")
+        canonical = json.dumps(editing, separators=(",", ":"), sort_keys=True)
+        if not hmac.compare_digest(
+            command.get("authenticationProof", ""),
+            command_proof("worker.editing.start", job_id, canonical),
+        ):
+            continue
+        active_job = job_id
+        editing_event(
+            "worker.editing.progress", job_id, job_id + "\0" + "preparing" + "\0" + "0",
+            phase="preparing", progressPermille=0,
+        )
+        if outcome == "success":
+            editing_event(
+                "worker.editing.progress", job_id, job_id + "\0" + "rendering" + "\0" + "600",
+                phase="rendering", progressPermille=600,
+            )
+            editing_event(
+                "worker.editing.progress", job_id, job_id + "\0" + "publishing" + "\0" + "1000",
+                phase="publishing", progressPermille=1000,
+            )
+            artifact = "423e4567-e89b-42d3-a456-426614174103"
+            editing_event(
+                "worker.editing.succeeded", job_id, job_id + "\0" + artifact,
+                outputArtifactId=artifact,
+            )
+        elif outcome == "workspace":
+            editing_event(
+                "worker.editing.failed", job_id, job_id + "\0workspace_unusable",
+                failureCode="workspace_unusable",
+            )
+        elif outcome == "regression":
+            editing_event(
+                "worker.editing.progress", job_id, job_id + "\0" + "rendering" + "\0" + "600",
+                phase="rendering", progressPermille=600,
+            )
+            editing_event(
+                "worker.editing.progress", job_id, job_id + "\0" + "rendering" + "\0" + "599",
+                phase="rendering", progressPermille=599,
+            )
+        continue
+    if command.get("command") == "worker.cancel" and active_job == job_id:
+        if not hmac.compare_digest(
+            command.get("authenticationProof", ""),
+            command_proof("worker.cancel", job_id),
+        ):
+            continue
+        if outcome == "race-success":
+            editing_event(
+                "worker.editing.progress", job_id, job_id + "\0" + "rendering" + "\0" + "600",
+                phase="rendering", progressPermille=600,
+            )
+            editing_event(
+                "worker.editing.progress", job_id, job_id + "\0" + "publishing" + "\0" + "1000",
+                phase="publishing", progressPermille=1000,
+            )
+            artifact = "423e4567-e89b-42d3-a456-426614174103"
+            editing_event(
+                "worker.editing.succeeded", job_id, job_id + "\0" + artifact,
+                outputArtifactId=artifact,
+            )
+        else:
+            editing_event("worker.editing.cancelled", job_id, job_id)
+
+stopping = True
+server.close()
+"#
+    )
+}
+
+fn editing_launch(fixture: &TemporaryWorker) -> VideoWorkerLaunch {
+    let ffmpeg = executable_fixture(&fixture.root, "ffmpeg");
+    let ffprobe = executable_fixture(&fixture.root, "ffprobe");
+    fixture
+        .launch(VideoWorkerKind::Python)
+        .with_media_tools(
+            VideoWorkerMediaToolsConfiguration::new(ffmpeg, ffprobe).expect("verified media tools"),
+        )
+        .expect("editing Worker launch")
+}
+
+fn editing_request() -> VideoWorkerLocalEditingJobRequest {
+    VideoWorkerLocalEditingJobRequest::new(
+        Uuid::parse_str("223e4567-e89b-42d3-a456-426614174101").expect("project ID"),
+        Uuid::parse_str("323e4567-e89b-42d3-a456-426614174102").expect("timeline ID"),
+        7,
+    )
+    .expect("editing request")
+}
+
+fn editing_job_id() -> Uuid {
+    Uuid::parse_str("123e4567-e89b-42d3-a456-426614174100").expect("editing job ID")
+}
+
+fn next_editing_event(orchestrator: &LocalVideoOrchestrator) -> VideoWorkerLocalEditingEvent {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if let Some(event) = orchestrator
+            .try_local_editing_event(editing_job_id())
+            .expect("authenticated editing event")
+        {
+            return event;
+        }
+        assert!(Instant::now() < deadline, "editing event timed out");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn local_editing_progress_and_success_are_authenticated_and_monotonic() {
+    let fixture = TemporaryWorker::new(&editing_worker("success"));
+    let orchestrator = orchestrator();
+    orchestrator
+        .start(editing_launch(&fixture))
+        .expect("start editing Worker");
+    orchestrator
+        .start_local_editing_job(editing_job_id(), &editing_request())
+        .expect("dispatch editing job");
+
+    assert_eq!(
+        next_editing_event(&orchestrator),
+        VideoWorkerLocalEditingEvent::Progress {
+            phase: VideoWorkerLocalEditingPhase::Preparing,
+            progress_per_mille: 0,
+        }
+    );
+    assert_eq!(
+        next_editing_event(&orchestrator),
+        VideoWorkerLocalEditingEvent::Progress {
+            phase: VideoWorkerLocalEditingPhase::Rendering,
+            progress_per_mille: 600,
+        }
+    );
+    assert_eq!(
+        next_editing_event(&orchestrator),
+        VideoWorkerLocalEditingEvent::Progress {
+            phase: VideoWorkerLocalEditingPhase::Publishing,
+            progress_per_mille: 1000,
+        }
+    );
+    assert_eq!(
+        next_editing_event(&orchestrator),
+        VideoWorkerLocalEditingEvent::Succeeded {
+            output_artifact_id: Uuid::parse_str("423e4567-e89b-42d3-a456-426614174103")
+                .expect("artifact ID"),
+        }
+    );
+    orchestrator
+        .finish_local_editing_job(editing_job_id())
+        .expect("ack terminal event");
+    assert_eq!(
+        orchestrator
+            .try_local_editing_event(editing_job_id())
+            .expect_err("finished job is no longer active")
+            .code(),
+        VideoWorkerErrorCode::ConfigurationInvalid,
+    );
+}
+
+#[test]
+fn local_editing_request_and_single_job_ownership_fail_closed() {
+    let project = Uuid::parse_str("223e4567-e89b-42d3-a456-426614174101").unwrap();
+    let timeline = Uuid::parse_str("323e4567-e89b-42d3-a456-426614174102").unwrap();
+    for candidate in [
+        VideoWorkerLocalEditingJobRequest::new(project, project, 1),
+        VideoWorkerLocalEditingJobRequest::new(project, timeline, 0),
+        VideoWorkerLocalEditingJobRequest::new(project, timeline, i32::MAX as u32 + 1),
+        VideoWorkerLocalEditingJobRequest::new(
+            Uuid::parse_str("00000000-0000-1000-8000-000000000000").unwrap(),
+            timeline,
+            1,
+        ),
+    ] {
+        assert_eq!(
+            candidate
+                .expect_err("invalid editing identity must fail")
+                .code(),
+            VideoWorkerErrorCode::ConfigurationInvalid,
+        );
+    }
+
+    let fixture = TemporaryWorker::new(&editing_worker("hold"));
+    let orchestrator = orchestrator();
+    orchestrator
+        .start(fixture.launch(VideoWorkerKind::Python))
+        .expect("start Python Worker without native tools");
+    assert_eq!(
+        orchestrator
+            .start_local_editing_job(editing_job_id(), &editing_request())
+            .expect_err("editing Worker requires the verified tool pair")
+            .code(),
+        VideoWorkerErrorCode::ConfigurationInvalid,
+    );
+    orchestrator
+        .stop(VideoWorkerKind::Python)
+        .expect("stop unconfigured Worker");
+
+    orchestrator
+        .start(editing_launch(&fixture))
+        .expect("start configured editing Worker");
+    orchestrator
+        .start_local_editing_job(editing_job_id(), &editing_request())
+        .expect("dispatch first editing job");
+    assert_eq!(
+        orchestrator
+            .start_local_editing_job(
+                Uuid::parse_str("623e4567-e89b-42d3-a456-426614174105").unwrap(),
+                &editing_request(),
+            )
+            .expect_err("one Worker cannot own two editing jobs")
+            .code(),
+        VideoWorkerErrorCode::ConfigurationInvalid,
+    );
+    assert_eq!(
+        orchestrator
+            .cancel(VideoWorkerKind::Python, editing_job_id())
+            .expect_err("generic synchronous cancel cannot steal editing events")
+            .code(),
+        VideoWorkerErrorCode::ConfigurationInvalid,
+    );
+    orchestrator
+        .request_local_editing_cancel(editing_job_id())
+        .expect("first cooperative cancel");
+    assert_eq!(
+        orchestrator
+            .request_local_editing_cancel(editing_job_id())
+            .expect_err("duplicate cancel is rejected")
+            .code(),
+        VideoWorkerErrorCode::ConfigurationInvalid,
+    );
+}
+
+#[test]
+fn local_editing_workspace_failure_and_regressing_progress_fail_closed() {
+    let workspace = TemporaryWorker::new(&editing_worker("workspace"));
+    let orchestrator = orchestrator();
+    orchestrator
+        .start(editing_launch(&workspace))
+        .expect("start workspace-failing Worker");
+    orchestrator
+        .start_local_editing_job(editing_job_id(), &editing_request())
+        .expect("dispatch editing job");
+    assert!(matches!(
+        next_editing_event(&orchestrator),
+        VideoWorkerLocalEditingEvent::Progress { .. }
+    ));
+    assert_eq!(
+        next_editing_event(&orchestrator),
+        VideoWorkerLocalEditingEvent::Failed {
+            failure_code: VideoWorkerLocalEditingFailureCode::WorkspaceUnusable,
+        }
+    );
+    orchestrator
+        .stop(VideoWorkerKind::Python)
+        .expect("stop workspace Worker");
+
+    let regressing = TemporaryWorker::new(&editing_worker("regression"));
+    orchestrator
+        .start(editing_launch(&regressing))
+        .expect("start regressing Worker");
+    orchestrator
+        .start_local_editing_job(editing_job_id(), &editing_request())
+        .expect("dispatch regressing job");
+    assert!(matches!(
+        next_editing_event(&orchestrator),
+        VideoWorkerLocalEditingEvent::Progress { .. }
+    ));
+    assert!(matches!(
+        next_editing_event(&orchestrator),
+        VideoWorkerLocalEditingEvent::Progress { .. }
+    ));
+    assert_eq!(
+        orchestrator
+            .try_local_editing_event(editing_job_id())
+            .expect_err("progress regression must fail closed")
+            .code(),
+        VideoWorkerErrorCode::AuthenticationRejected,
+    );
+}
+
+#[test]
+fn local_editing_cancel_race_and_emergency_stop_have_deterministic_ownership() {
+    let cancelling = TemporaryWorker::new(&editing_worker("hold"));
+    let orchestrator = orchestrator();
+    let status = orchestrator
+        .start(editing_launch(&cancelling))
+        .expect("start cancellable Worker");
+    orchestrator
+        .start_local_editing_job(editing_job_id(), &editing_request())
+        .expect("dispatch cancellable job");
+    assert!(matches!(
+        next_editing_event(&orchestrator),
+        VideoWorkerLocalEditingEvent::Progress { .. }
+    ));
+    orchestrator
+        .request_local_editing_cancel(editing_job_id())
+        .expect("request cooperative cancel");
+    assert_eq!(
+        next_editing_event(&orchestrator),
+        VideoWorkerLocalEditingEvent::Cancelled,
+    );
+    orchestrator
+        .finish_local_editing_job(editing_job_id())
+        .expect("ack cancelled terminal");
+
+    orchestrator
+        .start_local_editing_job(editing_job_id(), &editing_request())
+        .expect("dispatch emergency-stop job");
+    assert!(matches!(
+        next_editing_event(&orchestrator),
+        VideoWorkerLocalEditingEvent::Progress { .. }
+    ));
+    orchestrator
+        .emergency_stop_local_editing_job(editing_job_id())
+        .expect("kill editing Worker tree");
+    wait_until_stopped(status.process_id().expect("process ID"));
+    assert_eq!(
+        orchestrator
+            .status(VideoWorkerKind::Python)
+            .expect("stopped status")
+            .state(),
+        VideoWorkerState::Stopped,
+    );
+}
+
+#[test]
+fn local_editing_completion_can_win_cancel_and_forged_events_never_advance_state() {
+    let racing = TemporaryWorker::new(&editing_worker("race-success"));
+    let orchestrator = orchestrator();
+    orchestrator
+        .start(editing_launch(&racing))
+        .expect("start racing Worker");
+    orchestrator
+        .start_local_editing_job(editing_job_id(), &editing_request())
+        .expect("dispatch racing job");
+    assert!(matches!(
+        next_editing_event(&orchestrator),
+        VideoWorkerLocalEditingEvent::Progress { .. }
+    ));
+    orchestrator
+        .request_local_editing_cancel(editing_job_id())
+        .expect("request cancel before completion");
+    assert!(matches!(
+        next_editing_event(&orchestrator),
+        VideoWorkerLocalEditingEvent::Progress { .. }
+    ));
+    assert!(matches!(
+        next_editing_event(&orchestrator),
+        VideoWorkerLocalEditingEvent::Progress { .. }
+    ));
+    assert!(matches!(
+        next_editing_event(&orchestrator),
+        VideoWorkerLocalEditingEvent::Succeeded { .. }
+    ));
+    orchestrator
+        .stop(VideoWorkerKind::Python)
+        .expect("stop racing Worker");
+
+    let forged = TemporaryWorker::new(&editing_worker("forged"));
+    orchestrator
+        .start(editing_launch(&forged))
+        .expect("start forged-event Worker");
+    orchestrator
+        .start_local_editing_job(editing_job_id(), &editing_request())
+        .expect("dispatch forged-event job");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        match orchestrator.try_local_editing_event(editing_job_id()) {
+            Err(error) => {
+                assert_eq!(error.code(), VideoWorkerErrorCode::AuthenticationRejected);
+                break;
+            }
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            other => panic!("forged progress was not rejected: {other:?}"),
+        }
+    }
 }
 
 fn wait_until_stopped(process_id: u32) {

@@ -14,11 +14,11 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::Duration;
-use uuid::Uuid;
+use uuid::{Uuid, Variant};
 use zeroize::{Zeroize, Zeroizing};
 
 const BOOTSTRAP_VERSION: &str = "1";
@@ -214,6 +214,115 @@ impl VideoWorkerMediaToolsConfiguration {
             ffprobe_path,
         })
     }
+}
+
+/// The path-free identity of one local-editing render request.
+#[derive(Clone)]
+pub struct VideoWorkerLocalEditingJobRequest {
+    project_id: Uuid,
+    timeline_id: Uuid,
+    timeline_revision: u32,
+}
+
+impl fmt::Debug for VideoWorkerLocalEditingJobRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("VideoWorkerLocalEditingJobRequest(<redacted>)")
+    }
+}
+
+impl VideoWorkerLocalEditingJobRequest {
+    pub fn new(
+        project_id: Uuid,
+        timeline_id: Uuid,
+        timeline_revision: u32,
+    ) -> Result<Self, VideoWorkerError> {
+        if !valid_uuid_v4(project_id)
+            || !valid_uuid_v4(timeline_id)
+            || project_id == timeline_id
+            || timeline_revision == 0
+            || timeline_revision > i32::MAX as u32
+        {
+            return Err(configuration_invalid());
+        }
+        Ok(Self {
+            project_id,
+            timeline_id,
+            timeline_revision,
+        })
+    }
+
+    fn document(&self) -> serde_json::Value {
+        serde_json::json!({
+            "projectId": self.project_id.hyphenated().to_string(),
+            "timelineId": self.timeline_id.hyphenated().to_string(),
+            "timelineRevision": self.timeline_revision,
+        })
+    }
+
+    fn canonical_json(&self) -> Result<String, VideoWorkerError> {
+        serde_json::to_string(&self.document()).map_err(|_| process_unavailable())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum VideoWorkerLocalEditingPhase {
+    Preparing,
+    Rendering,
+    Publishing,
+}
+
+impl VideoWorkerLocalEditingPhase {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "preparing" => Some(Self::Preparing),
+            "rendering" => Some(Self::Rendering),
+            "publishing" => Some(Self::Publishing),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VideoWorkerLocalEditingFailureCode {
+    InvalidTimeline,
+    MaterialUnavailable,
+    MaterialUnsupported,
+    FontUnavailable,
+    RenderFailed,
+    ResourceExhausted,
+    PermissionDenied,
+    WorkspaceUnusable,
+}
+
+impl VideoWorkerLocalEditingFailureCode {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "invalid_timeline" => Some(Self::InvalidTimeline),
+            "material_unavailable" => Some(Self::MaterialUnavailable),
+            "material_unsupported" => Some(Self::MaterialUnsupported),
+            "font_unavailable" => Some(Self::FontUnavailable),
+            "render_failed" => Some(Self::RenderFailed),
+            "resource_exhausted" => Some(Self::ResourceExhausted),
+            "permission_denied" => Some(Self::PermissionDenied),
+            "workspace_unusable" => Some(Self::WorkspaceUnusable),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum VideoWorkerLocalEditingEvent {
+    Progress {
+        phase: VideoWorkerLocalEditingPhase,
+        progress_per_mille: u16,
+    },
+    Succeeded {
+        output_artifact_id: Uuid,
+    },
+    Failed {
+        failure_code: VideoWorkerLocalEditingFailureCode,
+    },
+    Cancelled,
 }
 
 /// The single, already-verified embedded Chromium the render Worker may
@@ -853,6 +962,9 @@ impl LocalVideoOrchestrator {
     pub fn cancel(&self, kind: VideoWorkerKind, job_id: Uuid) -> Result<(), VideoWorkerError> {
         let mut workers = self.lock_workers()?;
         let running = workers.get_mut(&kind).ok_or_else(not_running)?;
+        if running.editing_job.is_some() {
+            return Err(configuration_invalid());
+        }
         let job_id = job_id.hyphenated().to_string();
         let authentication_proof = running
             .token
@@ -890,6 +1002,173 @@ impl LocalVideoOrchestrator {
         {
             return Err(authentication_rejected());
         }
+        Ok(())
+    }
+
+    /// Dispatch one path-free local-editing job to the authenticated Python
+    /// Worker. Progress and terminal events are consumed with
+    /// [`Self::try_local_editing_event`], keeping cancellation non-blocking.
+    pub fn start_local_editing_job(
+        &self,
+        job_id: Uuid,
+        request: &VideoWorkerLocalEditingJobRequest,
+    ) -> Result<(), VideoWorkerError> {
+        if !valid_uuid_v4(job_id) {
+            return Err(configuration_invalid());
+        }
+        let mut workers = self.lock_workers()?;
+        let running = workers
+            .get_mut(&VideoWorkerKind::Python)
+            .ok_or_else(not_running)?;
+        if running.launch.media_tools.is_none() || running.editing_job.is_some() {
+            return Err(configuration_invalid());
+        }
+        if running
+            .child
+            .try_wait()
+            .map_err(|_| process_unavailable())?
+            .is_some()
+        {
+            return Err(process_unavailable());
+        }
+        let job_id = job_id.hyphenated().to_string();
+        let canonical_editing = request.canonical_json()?;
+        let authentication_proof = running.token.command_proof_with_detail(
+            VideoWorkerKind::Python,
+            "worker.editing.start",
+            &job_id,
+            Some(&canonical_editing),
+        )?;
+        let command = VideoWorkerLocalEditingStartCommandDocument {
+            authentication_proof: &authentication_proof,
+            command: "worker.editing.start",
+            editing: request.document(),
+            job_id: &job_id,
+            protocol_version: WORKER_PROTOCOL_VERSION,
+            worker_kind: VideoWorkerKind::Python.as_str(),
+        };
+        write_command(&mut running.stdin, &command)?;
+        running.editing_job = Some(RunningLocalEditingJob {
+            job_id,
+            phase: None,
+            progress_per_mille: 0,
+            cancelling: false,
+            terminal: false,
+        });
+        Ok(())
+    }
+
+    /// Consume at most one already-emitted editing event without holding the
+    /// process lock while waiting. Empty means the caller should poll again.
+    pub fn try_local_editing_event(
+        &self,
+        job_id: Uuid,
+    ) -> Result<Option<VideoWorkerLocalEditingEvent>, VideoWorkerError> {
+        if !valid_uuid_v4(job_id) {
+            return Err(configuration_invalid());
+        }
+        let mut workers = self.lock_workers()?;
+        let running = workers
+            .get_mut(&VideoWorkerKind::Python)
+            .ok_or_else(not_running)?;
+        let expected_job_id = job_id.hyphenated().to_string();
+        let state = running
+            .editing_job
+            .as_mut()
+            .filter(|state| state.job_id == expected_job_id)
+            .ok_or_else(configuration_invalid)?;
+        let line = match running.events.try_recv() {
+            Ok(Ok(line)) => line,
+            Ok(Err(())) => return Err(authentication_rejected()),
+            Err(TryRecvError::Empty) => return Ok(None),
+            Err(TryRecvError::Disconnected) => return Err(process_unavailable()),
+        };
+        if state.terminal {
+            return Err(authentication_rejected());
+        }
+        let event = parse_local_editing_event(&running.token, &running.launch, state, &line)?;
+        Ok(Some(event))
+    }
+
+    /// Request cooperative cancellation. The authoritative result remains an
+    /// authenticated terminal event because completion can win the race.
+    pub fn request_local_editing_cancel(&self, job_id: Uuid) -> Result<(), VideoWorkerError> {
+        if !valid_uuid_v4(job_id) {
+            return Err(configuration_invalid());
+        }
+        let mut workers = self.lock_workers()?;
+        let running = workers
+            .get_mut(&VideoWorkerKind::Python)
+            .ok_or_else(not_running)?;
+        let job_id = job_id.hyphenated().to_string();
+        let state = running
+            .editing_job
+            .as_mut()
+            .filter(|state| state.job_id == job_id && !state.terminal)
+            .ok_or_else(configuration_invalid)?;
+        if state.cancelling {
+            return Err(configuration_invalid());
+        }
+        let authentication_proof =
+            running
+                .token
+                .command_proof(VideoWorkerKind::Python, "worker.cancel", &job_id)?;
+        let command = VideoWorkerCommandDocument {
+            command: "worker.cancel",
+            job_id: &job_id,
+            protocol_version: WORKER_PROTOCOL_VERSION,
+            worker_kind: VideoWorkerKind::Python.as_str(),
+            authentication_proof: &authentication_proof,
+        };
+        write_command(&mut running.stdin, &command)?;
+        state.cancelling = true;
+        Ok(())
+    }
+
+    /// Kill the Python Worker process tree immediately. Unlike cooperative
+    /// cancel this deliberately has no Worker-authored terminal event.
+    pub fn emergency_stop_local_editing_job(&self, job_id: Uuid) -> Result<(), VideoWorkerError> {
+        if !valid_uuid_v4(job_id) {
+            return Err(configuration_invalid());
+        }
+        let mut workers = self.lock_workers()?;
+        let expected = job_id.hyphenated().to_string();
+        let running = workers
+            .get(&VideoWorkerKind::Python)
+            .ok_or_else(not_running)?;
+        if !running
+            .editing_job
+            .as_ref()
+            .is_some_and(|state| state.job_id == expected && !state.terminal)
+        {
+            return Err(configuration_invalid());
+        }
+        let mut running = workers
+            .remove(&VideoWorkerKind::Python)
+            .expect("checked Python Worker exists");
+        force_stop(&mut running);
+        Ok(())
+    }
+
+    /// Acknowledge that the scheduler durably consumed a terminal event before
+    /// the Worker may accept another local-editing job.
+    pub fn finish_local_editing_job(&self, job_id: Uuid) -> Result<(), VideoWorkerError> {
+        if !valid_uuid_v4(job_id) {
+            return Err(configuration_invalid());
+        }
+        let mut workers = self.lock_workers()?;
+        let running = workers
+            .get_mut(&VideoWorkerKind::Python)
+            .ok_or_else(not_running)?;
+        let expected = job_id.hyphenated().to_string();
+        if !running
+            .editing_job
+            .as_ref()
+            .is_some_and(|state| state.job_id == expected && state.terminal)
+        {
+            return Err(configuration_invalid());
+        }
+        running.editing_job = None;
         Ok(())
     }
 
@@ -1161,6 +1440,15 @@ struct RunningVideoWorker {
     launch: VideoWorkerLaunch,
     status: VideoWorkerStatus,
     web_ui: Option<VideoWorkerWebUiEndpoint>,
+    editing_job: Option<RunningLocalEditingJob>,
+}
+
+struct RunningLocalEditingJob {
+    job_id: String,
+    phase: Option<VideoWorkerLocalEditingPhase>,
+    progress_per_mille: u16,
+    cancelling: bool,
+    terminal: bool,
 }
 
 struct VideoWorkerSessionToken {
@@ -1221,13 +1509,29 @@ impl VideoWorkerSessionToken {
         command: &'static str,
         job_id: &str,
     ) -> Result<Zeroizing<String>, VideoWorkerError> {
+        self.command_proof_with_detail(kind, command, job_id, None)
+    }
+
+    fn command_proof_with_detail(
+        &self,
+        kind: VideoWorkerKind,
+        command: &'static str,
+        job_id: &str,
+        detail: Option<&str>,
+    ) -> Result<Zeroizing<String>, VideoWorkerError> {
         let mut authenticator =
             HmacSha256::new_from_slice(&self.bytes).map_err(|_| process_unavailable())?;
-        update_authenticator(
-            &mut authenticator,
-            COMMAND_AUTHENTICATION_DOMAIN,
-            &[command, kind.as_str(), WORKER_PROTOCOL_VERSION, job_id],
-        );
+        let common = [command, kind.as_str(), WORKER_PROTOCOL_VERSION, job_id];
+        match detail {
+            Some(detail) => update_authenticator(
+                &mut authenticator,
+                COMMAND_AUTHENTICATION_DOMAIN,
+                &[common[0], common[1], common[2], common[3], detail],
+            ),
+            None => {
+                update_authenticator(&mut authenticator, COMMAND_AUTHENTICATION_DOMAIN, &common)
+            }
+        }
         Ok(Zeroizing::new(format!(
             "{COMMAND_PROOF_PREFIX}{}",
             URL_SAFE_NO_PAD.encode(authenticator.finalize().into_bytes())
@@ -1314,6 +1618,17 @@ struct VideoWorkerCommandDocument<'a> {
     protocol_version: &'static str,
     worker_kind: &'static str,
     authentication_proof: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VideoWorkerLocalEditingStartCommandDocument<'a> {
+    authentication_proof: &'a str,
+    command: &'static str,
+    editing: serde_json::Value,
+    job_id: &'a str,
+    protocol_version: &'static str,
+    worker_kind: &'static str,
 }
 
 #[derive(Serialize)]
@@ -1407,6 +1722,229 @@ struct VideoWorkerCancelledEvent {
     worker_version: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoWorkerLocalEditingProgressEvent {
+    authentication_proof: String,
+    event: String,
+    job_id: String,
+    phase: String,
+    #[serde(rename = "progressPermille")]
+    progress_per_mille: u16,
+    protocol_version: String,
+    worker_kind: String,
+    worker_version: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoWorkerLocalEditingSucceededEvent {
+    authentication_proof: String,
+    event: String,
+    job_id: String,
+    output_artifact_id: String,
+    protocol_version: String,
+    worker_kind: String,
+    worker_version: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoWorkerLocalEditingFailedEvent {
+    authentication_proof: String,
+    event: String,
+    failure_code: String,
+    job_id: String,
+    protocol_version: String,
+    worker_kind: String,
+    worker_version: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoWorkerLocalEditingCancelledEvent {
+    authentication_proof: String,
+    event: String,
+    job_id: String,
+    protocol_version: String,
+    worker_kind: String,
+    worker_version: String,
+}
+
+fn write_command(stdin: &mut ChildStdin, command: &impl Serialize) -> Result<(), VideoWorkerError> {
+    let mut bytes = Zeroizing::new(serde_json::to_vec(command).map_err(|_| process_unavailable())?);
+    bytes.push(b'\n');
+    if bytes.len() > MAX_LINE_BYTES {
+        return Err(configuration_invalid());
+    }
+    stdin
+        .write_all(&bytes)
+        .and_then(|()| stdin.flush())
+        .map_err(|_| process_unavailable())
+}
+
+struct LocalEditingEventAuthentication<'a> {
+    event: &'a str,
+    job_id: &'a str,
+    worker_kind: &'a str,
+    protocol_version: &'a str,
+    worker_version: &'a str,
+    detail: &'a str,
+    proof: &'a str,
+}
+
+fn valid_local_editing_event_common(
+    token: &VideoWorkerSessionToken,
+    launch: &VideoWorkerLaunch,
+    authentication: &LocalEditingEventAuthentication<'_>,
+) -> bool {
+    authentication.event.starts_with("worker.editing.")
+        && authentication.job_id.len() == 36
+        && authentication.worker_kind == VideoWorkerKind::Python.as_str()
+        && authentication.protocol_version == WORKER_PROTOCOL_VERSION
+        && authentication.worker_version == launch.expected_version
+        && token.verify_event_proof(
+            authentication.event,
+            VideoWorkerKind::Python,
+            authentication.worker_version,
+            authentication.detail,
+            authentication.proof,
+        )
+}
+
+fn parse_local_editing_event(
+    token: &VideoWorkerSessionToken,
+    launch: &VideoWorkerLaunch,
+    state: &mut RunningLocalEditingJob,
+    line: &str,
+) -> Result<VideoWorkerLocalEditingEvent, VideoWorkerError> {
+    if let Ok(event) = serde_json::from_str::<VideoWorkerLocalEditingProgressEvent>(line) {
+        let phase = VideoWorkerLocalEditingPhase::parse(&event.phase)
+            .ok_or_else(authentication_rejected)?;
+        let detail = format!(
+            "{}\0{}\0{}",
+            event.job_id, event.phase, event.progress_per_mille
+        );
+        if event.event != "worker.editing.progress"
+            || event.job_id != state.job_id
+            || event.progress_per_mille > 1000
+            || !valid_local_editing_event_common(
+                token,
+                launch,
+                &LocalEditingEventAuthentication {
+                    event: &event.event,
+                    job_id: &event.job_id,
+                    worker_kind: &event.worker_kind,
+                    protocol_version: &event.protocol_version,
+                    worker_version: &event.worker_version,
+                    detail: &detail,
+                    proof: &event.authentication_proof,
+                },
+            )
+        {
+            return Err(authentication_rejected());
+        }
+        match state.phase {
+            None if phase != VideoWorkerLocalEditingPhase::Preparing
+                || event.progress_per_mille != 0 =>
+            {
+                return Err(authentication_rejected());
+            }
+            Some(previous)
+                if phase < previous || event.progress_per_mille < state.progress_per_mille =>
+            {
+                return Err(authentication_rejected());
+            }
+            _ => {}
+        }
+        state.phase = Some(phase);
+        state.progress_per_mille = event.progress_per_mille;
+        return Ok(VideoWorkerLocalEditingEvent::Progress {
+            phase,
+            progress_per_mille: event.progress_per_mille,
+        });
+    }
+    if let Ok(event) = serde_json::from_str::<VideoWorkerLocalEditingSucceededEvent>(line) {
+        let Ok(output_artifact_id) = Uuid::parse_str(&event.output_artifact_id) else {
+            return Err(authentication_rejected());
+        };
+        let detail = format!("{}\0{}", event.job_id, event.output_artifact_id);
+        if event.event != "worker.editing.succeeded"
+            || event.job_id != state.job_id
+            || !valid_uuid_v4(output_artifact_id)
+            || output_artifact_id.hyphenated().to_string() != event.output_artifact_id
+            || state.phase != Some(VideoWorkerLocalEditingPhase::Publishing)
+            || state.progress_per_mille != 1000
+            || !valid_local_editing_event_common(
+                token,
+                launch,
+                &LocalEditingEventAuthentication {
+                    event: &event.event,
+                    job_id: &event.job_id,
+                    worker_kind: &event.worker_kind,
+                    protocol_version: &event.protocol_version,
+                    worker_version: &event.worker_version,
+                    detail: &detail,
+                    proof: &event.authentication_proof,
+                },
+            )
+        {
+            return Err(authentication_rejected());
+        }
+        state.terminal = true;
+        return Ok(VideoWorkerLocalEditingEvent::Succeeded { output_artifact_id });
+    }
+    if let Ok(event) = serde_json::from_str::<VideoWorkerLocalEditingFailedEvent>(line) {
+        let failure_code = VideoWorkerLocalEditingFailureCode::parse(&event.failure_code)
+            .ok_or_else(authentication_rejected)?;
+        let detail = format!("{}\0{}", event.job_id, event.failure_code);
+        if event.event != "worker.editing.failed"
+            || event.job_id != state.job_id
+            || !valid_local_editing_event_common(
+                token,
+                launch,
+                &LocalEditingEventAuthentication {
+                    event: &event.event,
+                    job_id: &event.job_id,
+                    worker_kind: &event.worker_kind,
+                    protocol_version: &event.protocol_version,
+                    worker_version: &event.worker_version,
+                    detail: &detail,
+                    proof: &event.authentication_proof,
+                },
+            )
+        {
+            return Err(authentication_rejected());
+        }
+        state.terminal = true;
+        return Ok(VideoWorkerLocalEditingEvent::Failed { failure_code });
+    }
+    if let Ok(event) = serde_json::from_str::<VideoWorkerLocalEditingCancelledEvent>(line) {
+        if event.event != "worker.editing.cancelled"
+            || event.job_id != state.job_id
+            || !state.cancelling
+            || !valid_local_editing_event_common(
+                token,
+                launch,
+                &LocalEditingEventAuthentication {
+                    event: &event.event,
+                    job_id: &event.job_id,
+                    worker_kind: &event.worker_kind,
+                    protocol_version: &event.protocol_version,
+                    worker_version: &event.worker_version,
+                    detail: &event.job_id,
+                    proof: &event.authentication_proof,
+                },
+            )
+        {
+            return Err(authentication_rejected());
+        }
+        state.terminal = true;
+        return Ok(VideoWorkerLocalEditingEvent::Cancelled);
+    }
+    Err(authentication_rejected())
+}
+
 fn spawn_worker(
     launch: VideoWorkerLaunch,
     start_timeout: Duration,
@@ -1496,6 +2034,7 @@ fn spawn_worker(
         launch,
         status,
         web_ui,
+        editing_job: None,
     };
     if let Err(error) = verify_health(&running, start_timeout) {
         force_stop(&mut running);
@@ -1923,6 +2462,10 @@ fn valid_model_api_key(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
+fn valid_uuid_v4(value: Uuid) -> bool {
+    value.get_version_num() == 4 && value.get_variant() == Variant::RFC4122
 }
 
 fn valid_sandbox_relative_path(value: &str) -> bool {
