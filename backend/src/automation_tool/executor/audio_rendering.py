@@ -7,7 +7,6 @@ from typing import Never, cast
 from uuid import UUID
 
 from automation_tool.protocol.local_rendering import (
-    LocalEditingAudioRenderClip,
     LocalEditingAudioRenderPlan,
     LocalEditingAudioTrackKind,
     LocalEditingOriginalAudioMode,
@@ -66,20 +65,7 @@ def _validated_plan(plan: LocalEditingAudioRenderPlan) -> LocalEditingAudioRende
             timeline_id=plan.timeline_id,
             timeline_revision=plan.timeline_revision,
             duration_ms=plan.duration_ms,
-            clips=tuple(
-                LocalEditingAudioRenderClip(
-                    sequence=clip.sequence,
-                    track_kind=clip.track_kind,
-                    material_id=clip.material_id,
-                    start_ms=clip.start_ms,
-                    duration_ms=clip.duration_ms,
-                    source_in_ms=clip.source_in_ms,
-                    source_out_ms=clip.source_out_ms,
-                    gain_db=clip.gain_db,
-                    original_audio_mode=clip.original_audio_mode,
-                )
-                for clip in plan.clips
-            ),
+            clips=plan.clips,
         )
     except Exception:
         _reject()

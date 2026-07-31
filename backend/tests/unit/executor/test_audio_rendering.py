@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -181,6 +182,28 @@ def test_compiler_revalidates_a_mutated_nested_plan() -> None:
     assert str(error.value) == "audio render compilation rejected"
     assert "private" not in str(error.value)
     assert error.value.__cause__ is None
+
+
+def test_compiler_does_not_launder_a_mutated_outer_clip_list() -> None:
+    plan = _plan(
+        (
+            _clip(
+                1,
+                LocalEditingAudioTrackKind.NARRATION,
+                start_ms=0,
+                duration_ms=1000,
+                gain_db=0.0,
+            ),
+        )
+    )
+    object.__setattr__(
+        plan,
+        "clips",
+        cast(tuple[LocalEditingAudioRenderClip, ...], list(plan.clips)),
+    )
+
+    with pytest.raises(AudioRenderCompilationRejected):
+        compile_audio_filter_graph(plan, first_input_index=0)
 
 
 def test_empty_or_all_muted_plan_has_no_inputs_and_no_output_label() -> None:
