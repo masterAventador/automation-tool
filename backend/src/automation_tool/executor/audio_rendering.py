@@ -18,7 +18,7 @@ from automation_tool.protocol.local_rendering import (
 from automation_tool.protocol.safe_text import contains_control_or_bidi
 
 AUDIO_SAMPLE_RATE = 48_000
-AUDIO_DUCK_THRESHOLD = "0.05"
+AUDIO_DUCK_THRESHOLD = "0.02"
 AUDIO_DUCK_RATIO = 8
 AUDIO_DUCK_ATTACK_MS = 20
 AUDIO_DUCK_RELEASE_MS = 350
