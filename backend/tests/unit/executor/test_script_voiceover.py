@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -12,7 +13,7 @@ import pytest
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, os.fspath(REPOSITORY_ROOT / "scripts"))
 
-from video_runtime_cache import cache_root  # type: ignore[import-not-found]  # noqa: E402
+from video_runtime_cache import cache_root  # noqa: E402
 
 from automation_tool.executor import script_voiceover as script_voiceover_module  # noqa: E402
 from automation_tool.executor.material_probe import (  # noqa: E402
@@ -23,6 +24,7 @@ from automation_tool.executor.material_probe import (  # noqa: E402
     PackagedMediaTools,
     ProbedMaterialKind,
 )
+from automation_tool.executor.motion_authoring import voiceover as voiceover_module  # noqa: E402
 from automation_tool.executor.motion_authoring.agent import AuthoringWorkspace  # noqa: E402
 from automation_tool.executor.motion_authoring.voiceover import (  # noqa: E402
     MAX_VOICEOVER_BYTES,
@@ -210,6 +212,147 @@ def test_a_second_sentence_tts_failure_is_not_retried_and_rolls_back_the_batch(
     assert raised.value.__cause__ is None
     assert raised.value.__context__ is None
     assert [narration for narration, _ in synthesizer.calls] == ["第一句。", "第二句。"]
+    assert list(workspace.root.rglob("*.wav")) == []
+
+
+def test_a_tts_timeout_is_not_retried_and_leaves_a_fixed_empty_batch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = _workspace(tmp_path / "workspace")
+    calls: list[str] = []
+
+    def time_out(
+        _config: VoiceoverConfig,
+        narration: str,
+        *,
+        workspace: AuthoringWorkspace,
+        relative_path: str,
+    ) -> SynthesizedVoiceover:
+        del workspace, relative_path
+        calls.append(narration)
+        raise TimeoutError("/Users/operator/private-tts-request")
+
+    monkeypatch.setattr(script_voiceover_module, "synthesize_voiceover", time_out)
+
+    with pytest.raises(
+        ScriptVoiceoverRejected,
+        match=r"^script voiceover request rejected$",
+    ) as raised:
+        synthesize_script_voiceovers(
+            _script("超时的第一句。", "不能重试的第二句。"),
+            config=_config(),
+            workspace=workspace,
+            tools=_stub_tools(tmp_path),
+        )
+
+    assert calls == ["超时的第一句。"]
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    assert list(workspace.root.rglob("*.wav")) == []
+
+
+def test_an_empty_tts_download_never_reaches_ffprobe_or_leaves_a_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = _workspace(tmp_path / "workspace")
+    network_calls: list[str] = []
+
+    def return_empty_audio(
+        config: VoiceoverConfig,
+        narration: str,
+        *,
+        workspace: AuthoringWorkspace,
+        relative_path: str,
+    ) -> SynthesizedVoiceover:
+        def post(
+            _url: str,
+            _body: bytes,
+            _headers: dict[str, str],
+            _timeout: int,
+        ) -> bytes:
+            network_calls.append("post")
+            return json.dumps(
+                {"output": {"audio": {"url": "http://x.oss-cn-beijing.aliyuncs.com/a.wav"}}}
+            ).encode("utf-8")
+
+        def fetch(_url: str, _timeout: int) -> bytes:
+            network_calls.append("fetch")
+            return b""
+
+        return voiceover_module.synthesize_voiceover(
+            config,
+            narration,
+            workspace=workspace,
+            relative_path=relative_path,
+            post=post,
+            fetch=fetch,
+        )
+
+    def probe_must_not_run(
+        _tools: PackagedMediaTools,
+        _source: Path,
+    ) -> MediaStreamFacts:
+        pytest.fail("ffprobe must not run for an empty TTS download")
+
+    monkeypatch.setattr(
+        script_voiceover_module,
+        "synthesize_voiceover",
+        return_empty_audio,
+    )
+    monkeypatch.setattr(
+        script_voiceover_module,
+        "read_stream_facts",
+        probe_must_not_run,
+    )
+
+    with pytest.raises(
+        ScriptVoiceoverRejected,
+        match=r"^script voiceover request rejected$",
+    ) as raised:
+        synthesize_script_voiceovers(
+            _script("空音频必须失败。"),
+            config=_config(),
+            workspace=workspace,
+            tools=_stub_tools(tmp_path),
+        )
+
+    assert network_calls == ["post", "fetch"]
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    assert list(workspace.root.rglob("*.wav")) == []
+
+
+@pytest.mark.parametrize("duration_ms", [None, 0])
+def test_a_missing_or_zero_real_duration_rolls_back_the_single_tts_call(
+    duration_ms: int | None,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = _workspace(tmp_path / "workspace")
+    synthesizer = _Synthesizer()
+    monkeypatch.setattr(
+        script_voiceover_module,
+        "synthesize_voiceover",
+        synthesizer,
+    )
+    _install_probe(monkeypatch, [_facts(duration_ms)])
+
+    with pytest.raises(
+        ScriptVoiceoverRejected,
+        match=r"^script voiceover request rejected$",
+    ) as raised:
+        synthesize_script_voiceovers(
+            _script("真实时长必须大于零。"),
+            config=_config(),
+            workspace=workspace,
+            tools=_stub_tools(tmp_path),
+        )
+
+    assert synthesizer.calls == [("真实时长必须大于零。", "voiceover/sentence-0001.wav")]
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
     assert list(workspace.root.rglob("*.wav")) == []
 
 

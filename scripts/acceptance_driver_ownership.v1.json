@@ -59,6 +59,7 @@
         "run_bm_05_acceptance.py",
         "run_bu_06_acceptance.py",
         "run_cq_04_acceptance.py",
+        "run_le_15_acceptance.py",
         "run_t36_acceptance.py"
       ]
     },

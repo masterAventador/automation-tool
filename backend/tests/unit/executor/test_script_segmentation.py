@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import traceback
 import urllib.request
+from collections.abc import Callable
 from email.message import Message
 from pathlib import Path
-from typing import cast
+from typing import IO, cast
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -587,3 +590,231 @@ def test_catalog_path_is_explicit_and_not_discovered_from_the_environment(
     )
 
     assert config.model_id == "qwen3.7-max-2026-06-08"
+
+
+def test_redirects_are_closed_and_rejected() -> None:
+    response = MagicMock()
+
+    with pytest.raises(ScriptSegmentationRejected):
+        script_segmentation_module._RejectRedirectHandler().redirect_request(
+            urllib.request.Request("https://dashscope.aliyuncs.com/original"),
+            cast(IO[bytes], response),
+            302,
+            "redirect",
+            cast(http.client.HTTPMessage, Message()),
+            "https://dashscope.aliyuncs.com/redirected",
+        )
+
+    response.close.assert_called_once_with()
+
+
+def test_default_transport_builds_the_redirect_rejecting_opener(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opener = MagicMock()
+    expected = _response()
+    opener.open.return_value = expected
+    build_opener = MagicMock(return_value=opener)
+    monkeypatch.setattr(urllib.request, "build_opener", build_opener)
+    request = urllib.request.Request("https://dashscope.aliyuncs.com/request")
+
+    actual = script_segmentation_module._open_request(request, timeout=3.5)
+
+    assert cast(object, actual) is expected
+    handler = build_opener.call_args.args[0]
+    assert isinstance(handler, script_segmentation_module._RejectRedirectHandler)
+    opener.open.assert_called_once_with(request, timeout=3.5)
+
+
+class _DeclaredLengthResponse:
+    def __init__(self, headers: object) -> None:
+        self.headers = headers
+
+
+class _DeclaredLengthHeaders:
+    def __init__(self, values: object) -> None:
+        self.values = values
+
+    def get_all(self, _name: str) -> object:
+        return self.values
+
+
+@pytest.mark.parametrize(
+    ("response", "expected"),
+    [
+        (object(), None),
+        (_DeclaredLengthResponse(_DeclaredLengthHeaders(None)), None),
+        (_DeclaredLengthResponse(_DeclaredLengthHeaders(["42"])), 42),
+    ],
+)
+def test_declared_response_length_accepts_only_an_optional_single_decimal(
+    response: object,
+    expected: int | None,
+) -> None:
+    assert script_segmentation_module._declared_response_bytes(response) == expected
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        object(),
+        _DeclaredLengthHeaders(("42",)),
+        _DeclaredLengthHeaders(["41", "42"]),
+        _DeclaredLengthHeaders([42]),
+        _DeclaredLengthHeaders(["4,2"]),
+        _DeclaredLengthHeaders([""]),
+        _DeclaredLengthHeaders(["\uff11\uff12"]),
+        _DeclaredLengthHeaders(["4.2"]),
+    ],
+)
+def test_invalid_declared_response_lengths_fail_closed(headers: object) -> None:
+    with pytest.raises(ScriptSegmentationRejected):
+        script_segmentation_module._declared_response_bytes(_DeclaredLengthResponse(headers))
+
+
+@pytest.mark.parametrize(
+    "construct",
+    [
+        lambda: ScriptSegmentationOptions(enable_thinking=cast(bool, 1)),
+        lambda: ScriptSegmentationOptions(max_output_tokens=0),
+        lambda: script_segmentation_module.ScriptSentence(sequence=0, text="句子"),
+    ],
+)
+def test_public_value_objects_reject_invalid_scalar_boundaries(
+    construct: Callable[[], object],
+) -> None:
+    with pytest.raises(ScriptSegmentationRejected):
+        construct()
+
+
+def test_orchestrator_and_adapter_reject_wrong_protocol_objects() -> None:
+    with pytest.raises(ScriptSegmentationRejected):
+        segment_script(
+            cast(ScriptSegmentationAdapter, object()),
+            "旁白",
+            options=ScriptSegmentationOptions(),
+        )
+    with pytest.raises(ScriptSegmentationRejected):
+        BailianScriptSegmentationAdapter(cast(BailianScriptSegmentationConfig, object()))
+    with pytest.raises(ScriptSegmentationRejected):
+        _adapter().segment(
+            "旁白",
+            options=cast(ScriptSegmentationOptions, object()),
+        )
+
+
+def test_missing_or_unreadable_catalogs_are_fixed_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    missing = tmp_path / "missing.json"
+    with pytest.raises(ScriptSegmentationRejected):
+        load_bailian_script_segmentation_config(
+            catalog_path=missing,
+            api_key=API_KEY,
+            model_id=None,
+            timeout_seconds=10,
+        )
+
+    original_stat = Path.stat
+
+    def fail_stat(
+        path: Path,
+        *,
+        follow_symlinks: bool = True,
+    ) -> os.stat_result:
+        if path == CATALOG_PATH:
+            raise OSError("private catalog path")
+        return original_stat(path, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "stat", fail_stat)
+    with pytest.raises(ScriptSegmentationRejected):
+        load_bailian_script_segmentation_config(
+            catalog_path=CATALOG_PATH,
+            api_key=API_KEY,
+            model_id=None,
+            timeout_seconds=10,
+        )
+
+
+def test_catalog_growth_between_stat_and_read_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    catalog = tmp_path / "growing.json"
+    catalog.write_bytes(b"x" * (script_segmentation_module._MAX_CATALOG_BYTES + 1))
+    original_stat = Path.stat
+
+    def stale_stat(
+        path: Path,
+        *,
+        follow_symlinks: bool = True,
+    ) -> os.stat_result:
+        metadata = original_stat(path, follow_symlinks=follow_symlinks)
+        if path != catalog:
+            return metadata
+        values = list(metadata)
+        values[6] = 1
+        return os.stat_result(values)
+
+    monkeypatch.setattr(Path, "stat", stale_stat)
+
+    with pytest.raises(ScriptSegmentationRejected):
+        load_bailian_script_segmentation_config(
+            catalog_path=catalog,
+            api_key=API_KEY,
+            model_id=None,
+            timeout_seconds=10,
+        )
+
+
+def test_catalog_model_records_require_string_ids(
+    tmp_path: Path,
+) -> None:
+    document = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    document["models"][0]["id"] = 1
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ScriptSegmentationRejected):
+        load_bailian_script_segmentation_config(
+            catalog_path=catalog,
+            api_key=API_KEY,
+            model_id=None,
+            timeout_seconds=10,
+        )
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {
+            "id": "request",
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"content": '{"sentences":["旁白"]}'},
+                }
+            ],
+        },
+        {"id": "request", "choices": []},
+        {"id": "request", "choices": ["not-an-object"]},
+        {
+            "id": "request",
+            "choices": [{"finish_reason": "stop", "message": "not-an-object"}],
+        },
+    ],
+)
+def test_adapter_rejects_response_length_and_nested_shape_drift(
+    document: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = _Response(document)
+    if document["choices"]:
+        first = cast(list[object], document["choices"])[0]
+        if isinstance(first, dict) and isinstance(first.get("message"), dict):
+            response.headers.replace_header("Content-Length", "1")
+    _install_transport(monkeypatch, response=response)
+
+    with pytest.raises(ScriptSegmentationRejected):
+        _adapter().segment("旁白", options=ScriptSegmentationOptions())
