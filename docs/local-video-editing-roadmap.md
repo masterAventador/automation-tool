@@ -106,7 +106,7 @@
 
 ## 5. 当前下一步
 
-**LE-10 T1、T2 已完成；T3 实现、专项与真实 FFmpeg 功能验收已绿，待 Review。**
+**LE-10 T1、T2 已完成；T3 首轮 Review 的隐私 finding 已修，待第二轮复审。**
 30fps 下四段各 50ms 由绝对边界量化为 `2/1/2/1`、总计 6 帧，没有逐段量化成 8 帧的
 累计误差；100ms dissolve 得到 3 帧 overlap，1000ms 时间线精确 30 帧。0 帧 clip、0 帧
 转场和转场吞没 clip 均固定拒绝。T2 专项 9 条、77 语句/12 分支 100%，T1/T2 合跑 50 条。
@@ -114,8 +114,10 @@
 现在只实现 VIDEO/IMAGE 的独立 input、scale/显式居中 crop/fps/精确 frame trim 和硬切
 concat；任何转场固定拒绝，留给 T4 xfade。T2/T3 覆盖合跑 31 条且模块 176 语句/36 分支
 100%，T1～T3 合跑 72 条。随包 FFmpeg 真实输出 H.264、720×1280、30fps、9 帧、0.3s、
-2374 bytes，无音频且 filter graph 无路径。下一步提交 T3 检查点并完成 finding 修复/复审；
-完整 integration 仍留到 T7 收口时决定。
+2374 bytes，无音频且 filter graph 无路径。首轮 Review 发现 FFmpeg 默认 metadata/chapter
+复制风险，现显式加入两组 `-1` 禁用映射；带 `PRIVATE_TITLE` 与 `/Users/private/source`
+标签的真实素材复验确认两者均未进入输出。下一步提交修复并完成第二轮复审；完整
+integration 仍留到 T7 收口时决定。
 
 ## 7. 用户可见文案门禁现已恢复绿色
 

@@ -139,6 +139,8 @@ def test_mixed_video_image_hard_cut_compiles_one_path_safe_filter_graph(
     assert "23" in result.argv
     assert "yuv420p" in result.argv
     assert "cfr" in result.argv
+    assert result.argv[result.argv.index("-map_metadata") + 1] == "-1"
+    assert result.argv[result.argv.index("-map_chapters") + 1] == "-1"
     assert repr(result) == "VisualFfmpegCommand(<redacted>)"
     assert os.fspath(video.source_path) not in repr(result)
 
