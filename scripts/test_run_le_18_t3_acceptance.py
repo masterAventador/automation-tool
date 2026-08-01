@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import os
 import queue
 import unittest
 from pathlib import Path
 from unittest import mock
+from uuid import uuid4
 
-import run_le_18_t3_acceptance as acceptance
 from automation_tool.executor.material_probe import (
     MaterialProbeRejected,
     MaterialProbeRejection,
 )
+
+import run_le_18_t3_acceptance as acceptance
 
 
 class _RunningProcess:
@@ -99,6 +102,54 @@ class GeneratedSourceSettlementTest(unittest.TestCase):
 
         self.assertEqual(require.call_count, 2)
         self.assertEqual(sleep.call_count, 2)
+
+
+class FrozenWorkerStatusEventTest(unittest.TestCase):
+    def test_accepts_authenticated_closed_status(self) -> None:
+        material_id = uuid4()
+        token = os.urandom(32)
+        event = {
+            "event": "worker.material.status",
+            "materialId": str(material_id),
+            "workerKind": "python",
+            "protocolVersion": "1.0",
+            "workerVersion": "1.2.3",
+            "status": "available",
+        }
+        event["authenticationProof"] = acceptance._proof(
+            token,
+            acceptance.EVENT_DOMAIN,
+            "atvwp1.",
+            (
+                "worker.material.status",
+                "python",
+                "1.0",
+                "1.2.3",
+                f"{material_id}\0available",
+            ),
+        )
+
+        acceptance._verify_status_event(event, token, material_id, "available")
+
+    def test_rejects_unknown_status_without_echoing_it(self) -> None:
+        material_id = uuid4()
+        event = {
+            "event": "worker.material.status",
+            "workerVersion": "1.2.3",
+            "status": "operator-private-status",
+        }
+
+        with self.assertRaisesRegex(
+            AssertionError, "invalid material status$"
+        ) as rejected:
+            acceptance._verify_status_event(
+                event,
+                os.urandom(32),
+                material_id,
+                "available",
+            )
+
+        self.assertNotIn("operator-private-status", str(rejected.exception))
 
 
 if __name__ == "__main__":

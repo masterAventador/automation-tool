@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT / "backend" / "src"))
 
 from automation_tool.executor.local_editing_worker import (  # noqa: E402
     LocalMaterialWorkerFailureCode,
+    LocalMaterialWorkerStatus,
 )
 from automation_tool.executor.material_probe import (  # noqa: E402
     MaterialPathRegistry,
@@ -36,6 +37,7 @@ from automation_tool.executor.material_probe import (  # noqa: E402
     approve_source,
     require_source_unchanged,
 )
+
 from prepare_video_runtime import prepare  # noqa: E402
 
 COMMAND_DOMAIN = b"automation-tool.video-worker-command.v1\0"
@@ -152,6 +154,32 @@ def _verify_event(event: dict[str, object], token: bytes, detail: str) -> None:
     )
     if event.get("authenticationProof") != expected:
         raise AssertionError(f"{name} authentication proof is invalid")
+
+
+def _verify_status_event(
+    event: dict[str, object],
+    token: bytes,
+    material_id: UUID,
+    expected_status: str,
+) -> None:
+    """Verify a path-free, authenticated status without echoing rejected values."""
+
+    status = event.get("status")
+    if (
+        event.get("event") != "worker.material.status"
+        or event.get("workerKind") != "python"
+        or event.get("protocolVersion") != "1.0"
+        or event.get("materialId") != str(material_id)
+        or not isinstance(status, str)
+    ):
+        raise AssertionError("invalid material status")
+    try:
+        closed_status = LocalMaterialWorkerStatus(status)
+    except ValueError:
+        raise AssertionError("invalid material status") from None
+    if closed_status.value != expected_status:
+        raise AssertionError("unexpected material status")
+    _verify_event(event, token, f"{material_id}\0{closed_status.value}")
 
 
 def _generate_source(ffmpeg: Path, source: Path) -> None:
@@ -369,6 +397,24 @@ def main() -> int:
 
         process.stdin.write(
             json.dumps(
+                _command(token, "worker.material.status", material_id),
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+        process.stdin.flush()
+        available = _next_event(
+            stdout_lines,
+            stderr_lines,
+            process,
+            "worker.material.status",
+            transcript,
+            source,
+        )
+        _verify_status_event(available, token, material_id, "available")
+
+        process.stdin.write(
+            json.dumps(
                 _command(token, "worker.material.forget", material_id),
                 separators=(",", ":"),
             )
@@ -392,6 +438,24 @@ def main() -> int:
         else:
             raise AssertionError("explicit compensation left the mapping registered")
 
+        process.stdin.write(
+            json.dumps(
+                _command(token, "worker.material.status", material_id),
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+        process.stdin.flush()
+        not_registered = _next_event(
+            stdout_lines,
+            stderr_lines,
+            process,
+            "worker.material.status",
+            transcript,
+            source,
+        )
+        _verify_status_event(not_registered, token, material_id, "not_registered")
+
         process.stdin.close()
         return_code = process.wait(timeout=TIMEOUT_SECONDS)
         stdout_thread.join(timeout=5)
@@ -407,6 +471,7 @@ def main() -> int:
         atexit.unregister(_stop_process)
 
     print("LE-18 T3 frozen Worker import/compensation acceptance passed")
+    print("LE-18 T4 frozen Worker material-status acceptance passed")
     return 0
 
 
