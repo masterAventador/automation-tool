@@ -261,7 +261,8 @@ export function PlatformSessions({
     <Card className="platform-session-card" title="抖音">
       <Space orientation="vertical" size="middle" className="platform-session-stack">
         <Typography.Text type="secondary">
-          App 使用独立运营浏览器档案；登录与人工处理在系统浏览器窗口完成，状态由本机执行器检查并回报服务端。
+          App 使用独立运营浏览器档案；登录与人工处理在 App
+          内置运营浏览器窗口完成，状态由本机执行器检查并回报服务端。
         </Typography.Text>
         {failure !== null ? (
           <Alert

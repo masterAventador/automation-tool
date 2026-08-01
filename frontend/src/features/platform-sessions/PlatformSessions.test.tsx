@@ -47,6 +47,15 @@ function gateway(): PlatformSessionGateway {
 }
 
 describe("platform status page", () => {
+  it("identifies the App-owned operations browser instead of a system browser", async () => {
+    render(<PlatformSessions gateway={gateway()} />);
+
+    expect(
+      await screen.findByText(/在 App 内置运营浏览器窗口完成/u),
+    ).toBeVisible();
+    expect(document.body).not.toHaveTextContent("在系统浏览器窗口完成");
+  });
+
   it("uses the existing login action once for an automatic task handoff", async () => {
     const source = gateway();
     const onAutoOpenConsumed = vi.fn();

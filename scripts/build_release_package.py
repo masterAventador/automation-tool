@@ -32,7 +32,10 @@ import argparse
 import json
 import os
 import platform as platform_module
+import plistlib
 import shutil
+import stat
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -100,6 +103,12 @@ from release_configuration import (  # noqa: E402
     effective_configuration,
     write_macos_release_configuration,
 )
+from release_identity import (  # noqa: E402
+    ReleaseIdentityRejected,
+    SourceFacts,
+    materialize_repository_snapshot,
+    repository_source_facts,
+)
 from run_p9_03_acceptance import (  # noqa: E402
     CARGO_MANIFEST,
     EXECUTOR_RESOURCE,
@@ -117,6 +126,15 @@ _EB_03_CACHE = ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm6
 DEFAULT_WORK_DIRECTORY = REPOSITORY_ROOT / ".local/release"
 RELEASE_CONFIGURATION_NAME = "tauri.release.generated.json"
 EFFECTIVE_CONFIGURATION_NAME = "tauri.release.effective.json"
+RELEASE_IDENTITY_KEY = "AutomationToolReleaseIdentity"
+RELEASE_IDENTITY_SCHEMA = "automation-tool.release-identity.v1"
+SOURCE_SNAPSHOT_ENVIRONMENT = "AUTOMATION_TOOL_RELEASE_SOURCE_SNAPSHOT"
+SOURCE_SNAPSHOT_IDENTITY_ENVIRONMENT = "AUTOMATION_TOOL_RELEASE_SOURCE_IDENTITY"
+SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT = (
+    "AUTOMATION_TOOL_RELEASE_SOURCE_CAPABILITY_FD"
+)
+SOURCE_SNAPSHOT_CAPABILITY_MAGIC = b"automation-tool.release-source-snapshot.v1"
+SOURCE_SNAPSHOT_CAPABILITY_MAX_BYTES = 4096
 
 
 class ReleaseFailed(RuntimeError):
@@ -125,6 +143,30 @@ class ReleaseFailed(RuntimeError):
 
 def announce(message: str) -> None:
     print(f"[release] {message}", flush=True)
+
+
+def require_source_stable_work_directory(path: Path) -> Path:
+    """Reject repository outputs that the signed source snapshot would ingest."""
+
+    resolved = path.resolve()
+    try:
+        relative = resolved.relative_to(REPOSITORY_ROOT)
+    except ValueError:
+        return resolved
+    if relative == Path(".") or not relative.parts or relative.parts[0] == ".git":
+        raise ReleaseFailed("release work directory would change the source snapshot")
+    ignored = subprocess.run(
+        ["git", "check-ignore", "-q", "--no-index", "--", relative.as_posix()],
+        cwd=REPOSITORY_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if ignored.returncode == 0:
+        return resolved
+    if ignored.returncode == 1:
+        raise ReleaseFailed("release work directory would change the source snapshot")
+    raise ReleaseFailed("release work directory ignore policy is unavailable")
 
 
 def _first_existing(*candidates: Path) -> Path:
@@ -183,7 +225,10 @@ def refresh_staging_inventory(staging: Path, target_id: str) -> int:
     entries = generate_manifest(staging, root_entry=target.root_entry)
     manifest["entries"] = entries
     manifest["fileCount"] = sum(1 for entry in entries if entry["type"] == "file")
-    manifest["totalBytes"] = sum(int(entry.get("size", 0)) for entry in entries)
+    manifest["totalBytes"] = sum(
+        size if isinstance(size := entry.get("size", 0), int) else 0
+        for entry in entries
+    )
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=1, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -336,6 +381,15 @@ def install_runtime_resources_and_sign(
     )
     announce(f"Catalog installed: {sorted(catalog)}")
     announce("Installing the embedded browser, verifying it, then sealing the bundle")
+
+    def seal_application(bundle: Path) -> None:
+        sign_tree(
+            root=bundle,
+            component="application",
+            identity=identity,
+            exclude=inventoried_payloads(bundle, "macos"),
+        )
+
     install_and_seal(
         application=application,
         staging=staging,
@@ -345,13 +399,59 @@ def install_runtime_resources_and_sign(
         # seal covers a tree that will not change again — and it must leave the
         # inventoried payloads untouched, or the manifests taken over them stop
         # describing what the package actually carries.
-        seal=lambda bundle: sign_tree(
-            root=bundle,
-            component="application",
-            identity=identity,
-            exclude=inventoried_payloads(bundle, "macos"),
-        ),
+        seal=seal_application,
     )
+
+
+def embed_release_identity(
+    *,
+    application: Path,
+    source: SourceFacts,
+    build_id: str,
+    target_id: str,
+    architecture: str,
+    deployment_profile_id: str,
+) -> None:
+    """Place release provenance under the outer Developer ID resource seal."""
+    information_path = application / "Contents" / "Info.plist"
+    if information_path.is_symlink() or not information_path.is_file():
+        raise ReleaseFailed("the release App Info.plist is unavailable")
+    try:
+        with information_path.open("rb") as source_file:
+            information = plistlib.load(source_file)
+    except (OSError, plistlib.InvalidFileException) as error:
+        raise ReleaseFailed("the release App Info.plist is invalid") from error
+    if not isinstance(information, dict) or RELEASE_IDENTITY_KEY in information:
+        raise ReleaseFailed("the release App identity slot is invalid")
+    original_mode = stat.S_IMODE(information_path.stat().st_mode)
+    information[RELEASE_IDENTITY_KEY] = {
+        "architecture": architecture,
+        "buildId": build_id,
+        "deploymentProfileId": deployment_profile_id,
+        "schema": RELEASE_IDENTITY_SCHEMA,
+        "sourceGitCommit": source.git_commit,
+        "sourceTreeSha256": source.tree_sha256,
+        "target": target_id,
+    }
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=information_path.parent,
+            prefix=".Info.plist.",
+            delete=False,
+        ) as target:
+            temporary = Path(target.name)
+            # NamedTemporaryFile created this path in our private staging
+            # directory, so it cannot be a symlink.  Omitting follow_symlinks
+            # keeps this release helper compatible with Windows Python 3.12.
+            os.chmod(temporary, original_mode)
+            plistlib.dump(information, target, sort_keys=True)
+            target.flush()
+            os.fsync(target.fileno())
+        os.replace(temporary, information_path)
+    except BaseException:
+        if "temporary" in locals():
+            temporary.unlink(missing_ok=True)
+        raise
 
 
 def writable_image_command(
@@ -679,6 +779,7 @@ def build_macos_release(
     deployment's action authorization key. Without it the package is the
     ordinary local-profile release. One path, one set of gates, either way.
     """
+    work_directory = require_source_stable_work_directory(work_directory)
     target_id, architecture = require_macos_target()
     # Resolved before anything is built. There is one identity and one reader
     # for it: no environment variable or build mode can make an acceptance run
@@ -686,6 +787,15 @@ def build_macos_release(
     # divergence is precisely what let a package ship with no browser in it.
     identity = load_signing_identity()
     announce(f"Signing this release as {identity.certificate}")
+    announce("Checking the locked read-only third-party source checkouts")
+    run_checked(
+        [
+            sys.executable,
+            os.fspath(REPOSITORY_ROOT / "scripts/check_third_party_sources.py"),
+        ],
+        cwd=REPOSITORY_ROOT,
+    )
+    source_identity = repository_source_facts(REPOSITORY_ROOT)
     resolved_archive = archive or DEFAULT_ARCHIVES[target_id]
     build_directory = work_directory / "build"
     cargo_target = work_directory / "cargo-target"
@@ -740,6 +850,16 @@ def build_macos_release(
     video_runtime = prepare_video_runtime(platform="macos")
     announce("Staging the frozen catalog of animation parts")
     motion_catalog = stage_motion_catalog(staging=build_directory / "catalog").parent
+    if repository_source_facts(REPOSITORY_ROOT) != source_identity:
+        raise ReleaseFailed("release sources changed while the App was being built")
+    embed_release_identity(
+        application=application,
+        source=source_identity,
+        build_id=build_id,
+        target_id=target_id,
+        architecture=architecture,
+        deployment_profile_id="local" if deployment is None else deployment.profile_id,
+    )
     install_runtime_resources_and_sign(
         application, browser, target_id, video_runtime, motion_catalog, identity
     )
@@ -888,6 +1008,260 @@ def resolve_deployment(arguments: argparse.Namespace) -> CustomerDemoMaterial | 
     )
 
 
+def _link_snapshot_build_dependency(snapshot: Path, relative: Path) -> None:
+    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+        raise ReleaseFailed("release source snapshot dependency path is unsafe")
+    source = REPOSITORY_ROOT / relative
+    if not source.exists() or source.is_symlink():
+        return
+    target = snapshot / relative
+    if target.exists() or target.is_symlink():
+        raise ReleaseFailed("release source snapshot dependency path is occupied")
+    # These fixed build-only paths are directories in the operator checkout, so
+    # their trailing-slash .gitignore rules work there.  Inside the detached
+    # snapshot they become symlinks, and Git deliberately does not match a
+    # directory-only rule against a symlink.  Exclude the exact anchored path in
+    # this disposable clone's private metadata before identity is recomputed;
+    # otherwise a real build sees the dependency as unreviewed source.
+    git_directory = snapshot / ".git"
+    exclude_path = git_directory / "info" / "exclude"
+    try:
+        git_metadata = git_directory.lstat()
+        exclude_metadata = exclude_path.lstat()
+        if (
+            stat.S_ISLNK(git_metadata.st_mode)
+            or not stat.S_ISDIR(git_metadata.st_mode)
+            or stat.S_ISLNK(exclude_metadata.st_mode)
+            or not stat.S_ISREG(exclude_metadata.st_mode)
+        ):
+            raise ReleaseFailed("release source snapshot Git metadata is invalid")
+        with exclude_path.open("a", encoding="utf-8") as exclude_file:
+            exclude_file.write(f"\n/{relative.as_posix()}\n")
+    except OSError as error:
+        raise ReleaseFailed("release source snapshot Git metadata is unavailable") from error
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.symlink_to(source, target_is_directory=True)
+
+
+def _read_source_snapshot_capability() -> tuple[Path, str]:
+    rendered_descriptor = os.environ.pop(
+        SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT,
+        None,
+    )
+    if (
+        rendered_descriptor is None
+        or not rendered_descriptor.isascii()
+        or not rendered_descriptor.isdigit()
+        or str(int(rendered_descriptor)) != rendered_descriptor
+    ):
+        raise ReleaseFailed("release source snapshot capability is unavailable")
+    descriptor = int(rendered_descriptor)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISFIFO(metadata.st_mode):
+            raise ReleaseFailed("release source snapshot capability is invalid")
+        os.set_blocking(descriptor, False)
+        try:
+            payload = os.read(descriptor, SOURCE_SNAPSHOT_CAPABILITY_MAX_BYTES + 1)
+            trailing = os.read(descriptor, 1)
+        except BlockingIOError as error:
+            raise ReleaseFailed("release source snapshot capability is incomplete") from error
+    except OSError as error:
+        raise ReleaseFailed("release source snapshot capability is unavailable") from error
+    finally:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+    if (
+        not payload
+        or len(payload) > SOURCE_SNAPSHOT_CAPABILITY_MAX_BYTES
+        or trailing
+    ):
+        raise ReleaseFailed("release source snapshot capability is invalid")
+    fields = payload.split(b"\0")
+    if len(fields) != 4 or fields[0] != SOURCE_SNAPSHOT_CAPABILITY_MAGIC:
+        raise ReleaseFailed("release source snapshot capability is invalid")
+    try:
+        parent_process_id = int(fields[1].decode("ascii"))
+        declared = Path(os.fsdecode(fields[2]))
+        expected_identity = fields[3].removesuffix(b"\n").decode("ascii")
+    except (UnicodeDecodeError, ValueError) as error:
+        raise ReleaseFailed("release source snapshot capability is invalid") from error
+    if (
+        fields[3] != expected_identity.encode("ascii") + b"\n"
+        or parent_process_id != os.getppid()
+        or len(expected_identity) != 64
+        or any(character not in "0123456789abcdef" for character in expected_identity)
+    ):
+        raise ReleaseFailed("release source snapshot capability is invalid")
+    return declared, expected_identity
+
+
+def require_snapshot_repository_layout(snapshot: Path, work_directory: Path) -> None:
+    """Require the private detached clone shape created by this release entrypoint.
+
+    A pipe proves only that the writer is our direct parent; a caller can also
+    be a direct parent.  The child therefore accepts the capability only when
+    its own source root is the dedicated detached repository beneath the exact
+    requested release work directory, never an ordinary mutable checkout.
+    """
+
+    work = require_source_stable_work_directory(work_directory)
+    container = snapshot.parent
+    suffix = container.name.removeprefix("source-snapshot-")
+    if (
+        snapshot.name != "repository"
+        or container.parent != work
+        or not container.name.startswith("source-snapshot-")
+        or len(suffix) < 6
+        or any(character not in "abcdefghijklmnopqrstuvwxyz0123456789_" for character in suffix)
+    ):
+        raise ReleaseFailed("release source snapshot layout is invalid")
+    git_directory = snapshot / ".git"
+    try:
+        container_metadata = container.lstat()
+        snapshot_metadata = snapshot.lstat()
+        git_metadata = git_directory.lstat()
+    except OSError as error:
+        raise ReleaseFailed("release source snapshot layout is unavailable") from error
+    if (
+        stat.S_ISLNK(container_metadata.st_mode)
+        or not stat.S_ISDIR(container_metadata.st_mode)
+        or container_metadata.st_uid != os.geteuid()
+        or stat.S_IMODE(container_metadata.st_mode) != 0o700
+        or stat.S_ISLNK(snapshot_metadata.st_mode)
+        or not stat.S_ISDIR(snapshot_metadata.st_mode)
+        or snapshot_metadata.st_uid != os.geteuid()
+        or stat.S_ISLNK(git_metadata.st_mode)
+        or not stat.S_ISDIR(git_metadata.st_mode)
+        or git_metadata.st_uid != os.geteuid()
+    ):
+        raise ReleaseFailed("release source snapshot layout is invalid")
+    try:
+        git_root = subprocess.run(
+            ["git", "-C", os.fspath(snapshot), "rev-parse", "--show-toplevel"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout.strip()
+        absolute_git = subprocess.run(
+            ["git", "-C", os.fspath(snapshot), "rev-parse", "--absolute-git-dir"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout.strip()
+        symbolic_head = subprocess.run(
+            ["git", "-C", os.fspath(snapshot), "symbolic-ref", "-q", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ReleaseFailed("release source snapshot layout is unavailable") from error
+    if (
+        Path(git_root).resolve(strict=True) != snapshot
+        or Path(absolute_git).resolve(strict=True) != git_directory
+        or symbolic_head.returncode != 1
+        or symbolic_head.stdout
+    ):
+        raise ReleaseFailed("release source snapshot layout is invalid")
+
+
+def require_materialized_source_snapshot(work_directory: Path) -> None:
+    if (
+        SOURCE_SNAPSHOT_ENVIRONMENT in os.environ
+        or SOURCE_SNAPSHOT_IDENTITY_ENVIRONMENT in os.environ
+    ):
+        raise ReleaseFailed("release source snapshot capability cannot come from public state")
+    declared, expected_identity = _read_source_snapshot_capability()
+    try:
+        snapshot = declared.resolve(strict=True)
+        if snapshot != REPOSITORY_ROOT or Path(__file__).resolve().parent.parent != snapshot:
+            raise ReleaseFailed("release build did not enter its source snapshot")
+        require_snapshot_repository_layout(snapshot, work_directory)
+        observed = repository_source_facts(snapshot)
+    except (OSError, ReleaseIdentityRejected) as error:
+        raise ReleaseFailed("release source snapshot is unavailable") from error
+    if observed.tree_sha256 != expected_identity:
+        raise ReleaseFailed("release source snapshot identity changed")
+
+
+def run_from_materialized_source_snapshot(arguments: argparse.Namespace) -> int:
+    """Restart this command in a detached copy of the exact reviewed inputs."""
+
+    invocation_directory = Path.cwd().resolve(strict=True)
+    work_directory = require_source_stable_work_directory(arguments.work_dir)
+    work_directory.mkdir(parents=True, exist_ok=True)
+    container = Path(
+        tempfile.mkdtemp(prefix="source-snapshot-", dir=work_directory)
+    ).resolve(strict=True)
+    snapshot = container / "repository"
+    try:
+        source = repository_source_facts(REPOSITORY_ROOT)
+        materialize_repository_snapshot(
+            REPOSITORY_ROOT,
+            snapshot,
+            expected=source,
+        )
+        for dependency in (
+            Path(".local"),
+            Path("frontend/node_modules"),
+            Path("backend/.venv"),
+        ):
+            _link_snapshot_build_dependency(snapshot, dependency)
+        if repository_source_facts(snapshot) != source:
+            raise ReleaseFailed("release source snapshot changed while dependencies were linked")
+        environment = os.environ.copy()
+        for name in (
+            SOURCE_SNAPSHOT_ENVIRONMENT,
+            SOURCE_SNAPSHOT_IDENTITY_ENVIRONMENT,
+            SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT,
+        ):
+            environment.pop(name, None)
+        read_descriptor, write_descriptor = os.pipe()
+        try:
+            capability = b"\0".join(
+                (
+                    SOURCE_SNAPSHOT_CAPABILITY_MAGIC,
+                    str(os.getpid()).encode("ascii"),
+                    os.fsencode(snapshot),
+                    source.tree_sha256.encode("ascii") + b"\n",
+                )
+            )
+            written = os.write(write_descriptor, capability)
+            if written != len(capability):
+                raise ReleaseFailed("release source snapshot capability could not be created")
+        finally:
+            os.close(write_descriptor)
+        try:
+            environment[SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT] = str(read_descriptor)
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    os.fspath(snapshot / "scripts/build_release_package.py"),
+                    *sys.argv[1:],
+                ],
+                # Preserve the operator's relative-path base. The child parses the
+                # original argv again from the detached script, and changing cwd
+                # here would silently retarget --work-dir, --archive and key paths.
+                cwd=invocation_directory,
+                env=environment,
+                pass_fds=(read_descriptor,),
+                check=False,
+            )
+        finally:
+            os.close(read_descriptor)
+        return completed.returncode
+    except ReleaseIdentityRejected as error:
+        raise ReleaseFailed("release source snapshot could not be materialized") from error
+    finally:
+        shutil.rmtree(container)
+
+
 def main() -> int:
     arguments = parse_arguments()
     if arguments.platform == "windows":
@@ -899,6 +1273,14 @@ def main() -> int:
             "scripts/run_eb_16_windows_acceptance.py; this command builds macOS "
             "packages only"
         )
+    if SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT not in os.environ:
+        if (
+            SOURCE_SNAPSHOT_ENVIRONMENT in os.environ
+            or SOURCE_SNAPSHOT_IDENTITY_ENVIRONMENT in os.environ
+        ):
+            raise ReleaseFailed("release source snapshot capability is unavailable")
+        return run_from_materialized_source_snapshot(arguments)
+    require_materialized_source_snapshot(arguments.work_dir)
     # Resolved before anything is built: a deployment the App would reject is
     # refused now rather than twenty minutes from now.
     deployment = resolve_deployment(arguments)
