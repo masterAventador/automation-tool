@@ -46,9 +46,21 @@ onnxruntime_binaries = collect_dynamic_libs("onnxruntime")
 onnxruntime_hiddenimports = ["onnxruntime"]
 onnxruntime_metadata = copy_metadata("onnxruntime")
 executor_hiddenimports = [
+    "automation_tool.executor.authentication",
+    "automation_tool.executor.bootstrap",
+    "automation_tool.executor.command_processor",
+    "automation_tool.executor.runtime",
     "automation_tool.executor.silero_vad",
     "automation_tool.executor.material_speech_pipeline",
     "automation_tool.executor.material_speech_transcription",
+]
+protocol_hiddenimports = [
+    "automation_tool.protocol.action_authorization",
+    "automation_tool.protocol.action_message_template",
+    "automation_tool.protocol.action_result",
+    "automation_tool.protocol.douyin_search",
+    "automation_tool.protocol.executor_envelope",
+    "automation_tool.protocol.version",
 ]
 
 # LE-14's local speech gate may never download a model at runtime. Fetch and
@@ -126,6 +138,7 @@ analysis = Analysis(
         *playwright_hiddenimports,
         *onnxruntime_hiddenimports,
         *executor_hiddenimports,
+        *protocol_hiddenimports,
     ],
     hookspath=[],
     hooksconfig={},
