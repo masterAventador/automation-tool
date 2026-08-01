@@ -35,6 +35,11 @@ test("LE-17 owns one real App editing journey with an isolated production runtim
   assert.doesNotMatch(spec, /mock|stub|setItem\(/iu);
 
   assert.match(wdio, /specs:\s*\["\.\/e2e-tauri\/video-editing\.spec\.ts"\]/u);
+  assert.match(
+    wdio,
+    /const driverProvider =\s*process\.platform === "win32" \? "external" : "embedded"/u,
+  );
+  assert.match(wdio, /driverProvider,/u);
   assert.doesNotMatch(wdio, /video-studio\.spec\.ts|motion-video-native\.spec\.ts/u);
   assert.equal(configuration.identifier, "com.aventador.automationtool.le17acceptance");
   assert.equal(configuration.app.windows.length, 1);
