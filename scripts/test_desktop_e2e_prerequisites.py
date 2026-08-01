@@ -88,6 +88,22 @@ def check_the_startup_gate_environment_does_not_mutate_the_caller() -> None:
     assert prepared["AUTOMATION_TOOL_TEST_DB_NAME"] == "automation_tool_t306"
 
 
+def check_video_studio_keeps_only_the_owned_windows_postgres_root() -> None:
+    postgres_root = "AUTOMATION_TOOL_ACCEPTANCE_WINDOWS_POSTGRES_ROOT"
+    prepared = prerequisites._video_studio_environment(
+        {
+            "AUTOMATION_TOOL_PRODUCT_SECRET": "must-not-cross",
+            postgres_root: "C:/trusted/postgres-root",
+            "PATH": "/trusted/tools",
+        },
+        database_port=19003,
+        development_database_port=19004,
+    )
+
+    assert prepared[postgres_root] == "C:/trusted/postgres-root"
+    assert "AUTOMATION_TOOL_PRODUCT_SECRET" not in prepared
+
+
 def check_reserved_control_plane_ports_stay_inside_the_project_range() -> None:
     """The port must be project-owned, verified free and stable per process.
 
@@ -556,6 +572,7 @@ def check_every_declared_check_is_registered() -> None:
 CHECKS = (
     check_the_startup_gate_environment_supplies_every_compile_time_input,
     check_the_startup_gate_environment_does_not_mutate_the_caller,
+    check_video_studio_keeps_only_the_owned_windows_postgres_root,
     check_reserved_control_plane_ports_stay_inside_the_project_range,
     check_every_control_plane_driver_goes_through_the_shared_preparation,
     check_no_control_plane_driver_hardcodes_the_shared_port,

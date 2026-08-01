@@ -70,6 +70,7 @@ PACKAGE_JSON: Final = FRONTEND_ROOT / "package.json"
 if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
+from acceptance_postgres import WINDOWS_POSTGRES_ROOT_ENVIRONMENT  # noqa: E402
 from embedded_browser_archives import (  # noqa: E402
     MACOS_ARM64_ARCHIVE,
     MACOS_X86_64_ARCHIVE,
@@ -127,6 +128,7 @@ LOCAL_ACTION_TASK_LIMIT: Final = "20"
 PRODUCT_CONTROL_PLANE_PORT: Final = 8765
 VIDEO_STUDIO_DRIVER_ENVIRONMENT_NAMES: Final = frozenset(
     {
+        WINDOWS_POSTGRES_ROOT_ENVIRONMENT,
         "AUTOMATION_TOOL_BM08_EVIDENCE_VIDEO",
         "AUTOMATION_TOOL_IM05_WORKER",
     }
