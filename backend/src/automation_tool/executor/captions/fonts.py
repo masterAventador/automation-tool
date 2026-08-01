@@ -57,6 +57,14 @@ REGISTERED_CAPTION_FONTS: Final[Mapping[str, RegisteredCaptionFont]] = MappingPr
             packaged_name="NotoSansCJKsc-Regular.ttf",
             bundle=MATERIAL_VIDEO_WORKER_BUNDLE,
         ),
+        "plangothic-p1-regular": RegisteredCaptionFont(
+            packaged_name="PlangothicP1-Regular.ttf",
+            bundle=MATERIAL_VIDEO_WORKER_BUNDLE,
+        ),
+        "plangothic-p2-regular": RegisteredCaptionFont(
+            packaged_name="PlangothicP2-Regular.ttf",
+            bundle=MATERIAL_VIDEO_WORKER_BUNDLE,
+        ),
         "big-shoulders-display": RegisteredCaptionFont(
             packaged_name="big-shoulders-display-latin.woff2",
             bundle=MOTION_CATALOG_OVERLAY_BUNDLE,

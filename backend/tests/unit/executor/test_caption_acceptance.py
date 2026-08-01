@@ -9,7 +9,7 @@ TrueType glyf face, so neither of the two formats the product actually ships
 real-face readings recorded in `docs/development/LE-09.md` has anything
 holding it in place.
 
-This file is the other half. It uses the three faces the product ships and
+This file is the other half. It uses the five faces the product ships and
 pins the readings those earlier rounds measured, so that a face swap, a
 Pillow upgrade or a FreeType change shows up as a red test rather than as a
 line in a document nobody re-runs.
@@ -34,6 +34,8 @@ from automation_tool.executor.captions import fonts, render
 
 _CJK_BOLD: Final = "noto-sans-cjk-sc-bold"
 _CJK_REGULAR: Final = "noto-sans-cjk-sc-regular"
+_RARE_CJK_P1: Final = "plangothic-p1-regular"
+_RARE_CJK_P2: Final = "plangothic-p2-regular"
 _LATIN: Final = "big-shoulders-display"
 
 # What each packaged file is, as bytes rather than as a file name. The two
@@ -43,6 +45,8 @@ _LATIN: Final = "big-shoulders-display"
 _SFNT_MAGIC: Final[Mapping[str, bytes]] = {
     _CJK_BOLD: b"OTTO",
     _CJK_REGULAR: b"OTTO",
+    _RARE_CJK_P1: b"\x00\x01\x00\x00",
+    _RARE_CJK_P2: b"\x00\x01\x00\x00",
     _LATIN: b"wOF2",
 }
 
@@ -70,16 +74,26 @@ _SFNT_MAGIC: Final[Mapping[str, bytes]] = {
 # they are not refused as control characters; these assert the other half.
 # Written as escapes rather than as the characters themselves: four of these
 # are invisible, and two of those are invisible in different ways.
+def _reading(noto: bool, p1: bool, p2: bool, latin: bool) -> Mapping[str, bool]:
+    return {
+        _CJK_BOLD: noto,
+        _CJK_REGULAR: noto,
+        _RARE_CJK_P1: p1,
+        _RARE_CJK_P2: p2,
+        _LATIN: latin,
+    }
+
+
 _COVERAGE_READINGS: Final[tuple[tuple[str, Mapping[str, bool]], ...]] = (
-    ("\u0020", {_CJK_BOLD: True, _CJK_REGULAR: True, _LATIN: True}),  # SPACE
-    ("\u00a0", {_CJK_BOLD: True, _CJK_REGULAR: True, _LATIN: True}),  # NO-BREAK SPACE
-    ("\u00ad", {_CJK_BOLD: True, _CJK_REGULAR: True, _LATIN: True}),  # SOFT HYPHEN
-    ("\u200b", {_CJK_BOLD: False, _CJK_REGULAR: False, _LATIN: True}),  # ZERO WIDTH SPACE
-    ("\u3000", {_CJK_BOLD: True, _CJK_REGULAR: True, _LATIN: False}),  # IDEOGRAPHIC SPACE
-    ("\u2764", {_CJK_BOLD: False, _CJK_REGULAR: False, _LATIN: False}),  # HEAVY BLACK HEART
-    ("\ufe0f", {_CJK_BOLD: False, _CJK_REGULAR: False, _LATIN: False}),  # VARIATION SELECTOR-16
-    ("\u4e2d", {_CJK_BOLD: True, _CJK_REGULAR: True, _LATIN: False}),  # CJK IDEOGRAPH "zhong"
-    ("\u0041", {_CJK_BOLD: True, _CJK_REGULAR: True, _LATIN: True}),  # LATIN CAPITAL LETTER A
+    ("\u0020", _reading(True, True, True, True)),  # SPACE
+    ("\u00a0", _reading(True, True, True, True)),  # NO-BREAK SPACE
+    ("\u00ad", _reading(True, True, True, True)),  # SOFT HYPHEN
+    ("\u200b", _reading(False, False, False, True)),  # ZERO WIDTH SPACE
+    ("\u3000", _reading(True, False, False, False)),  # IDEOGRAPHIC SPACE
+    ("\u2764", _reading(False, False, False, False)),  # HEAVY BLACK HEART
+    ("\ufe0f", _reading(False, False, True, False)),  # VARIATION SELECTOR-16
+    ("\u4e2d", _reading(True, False, True, False)),  # CJK IDEOGRAPH "zhong"
+    ("\u0041", _reading(True, True, True, True)),  # LATIN CAPITAL LETTER A
 )
 
 # Codepoints above the basic plane in the CJK face's character map. Reached
@@ -195,7 +209,8 @@ def _require_the_packaged_faces() -> None:
         raise AssertionError(
             "the packaged caption faces are not on this machine, so the "
             "real-face acceptance cases cannot run. Fetch them with "
-            "`scripts/subtitle_font_assets.py` (the two Noto faces) and check "
+            "`scripts/subtitle_font_assets.py` (the two Noto and two Plangothic "
+            "faces) and check "
             "the checkout is complete (the Big Shoulders face is committed). " + "; ".join(missing)
         )
 
@@ -400,7 +415,7 @@ class TestRealFaceCoverage:
         rather than merely asserted to exist.
         """
         assert ord(_LATIN_ONLY_CHARACTER) in fonts.glyph_coverage(_LATIN)
-        for font_key in (_CJK_BOLD, _CJK_REGULAR):
+        for font_key in (_CJK_BOLD, _CJK_REGULAR, _RARE_CJK_P1, _RARE_CJK_P2):
             assert ord(_LATIN_ONLY_CHARACTER) not in fonts.glyph_coverage(font_key)
 
         style = render.CaptionRenderStyle(
@@ -505,7 +520,9 @@ class TestRealFaceLoading:
         assert face.path == fonts.resolve_font_file(font_key)
         assert face.size == _INK_SAMPLE_PX
 
-    @pytest.mark.parametrize("font_key", [_CJK_BOLD, _CJK_REGULAR])
+    @pytest.mark.parametrize(
+        "font_key", [_CJK_BOLD, _CJK_REGULAR, _RARE_CJK_P1, _RARE_CJK_P2]
+    )
     def test_a_packaged_static_face_has_no_axes_to_pin(self, font_key: str) -> None:
         """The static branch of the weight pinning, on the real static faces.
 

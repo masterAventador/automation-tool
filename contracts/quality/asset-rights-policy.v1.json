@@ -286,6 +286,9 @@
       "googleFontsCommit": "00e726a90e0b9698971c37b88c35ef958965448b",
       "licenseTextUrl": "https://github.com/google/fonts/blob/00e726a90e0b9698971c37b88c35ef958965448b/ofl/bigshouldersdisplay/OFL.txt",
       "licenseTextSha256": "338f9c050f19daeda1d597243faf79f3a3d437c338af58cb7047617d0ce08771",
+      "licenseTextBytes": 4396,
+      "packagedLicenseName": "BigShouldersDisplay-OFL.txt",
+      "licensePath": "assets/motion-catalog-overlay/fonts/BigShouldersDisplay-OFL.txt",
       "redistributionConditions": [
         "Do not sell the font by itself.",
         "Every redistributed copy must retain the Big Shoulders copyright notice and the SIL Open Font License.",

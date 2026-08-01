@@ -284,6 +284,43 @@ def verify_license_payload(notice: PackagedLicenseNotice, payload: bytes) -> Non
         )
 
 
+def committed_font_license_source(entry: dict, root: Path = REPOSITORY_ROOT) -> Path:
+    """Resolve and verify a reviewed licence text committed inside the checkout."""
+    identifier = entry.get("id")
+    if not isinstance(identifier, str) or not identifier:
+        _reject("a committed font licence entry has no id")
+    raw_path = entry.get("licensePath")
+    if not isinstance(raw_path, str) or not raw_path or "\\" in raw_path:
+        _reject(f"{identifier}: licensePath must be repository-relative")
+    relative = PurePosixPath(raw_path)
+    if relative.is_absolute() or ".." in relative.parts or relative.as_posix() != raw_path:
+        _reject(f"{identifier}: licensePath must be repository-relative")
+    source = root / Path(*relative.parts)
+    try:
+        resolved_root = root.resolve(strict=True)
+        resolved = source.resolve(strict=True)
+    except OSError as error:
+        _reject(f"{identifier}: licensePath is not a readable file: {error}")
+    if (
+        resolved_root not in resolved.parents
+        or not source.is_file()
+        or source.is_symlink()
+    ):
+        _reject(f"{identifier}: licensePath is not a regular repository file")
+    payload = source.read_bytes()
+    expected_length = _positive_length(
+        entry.get("licenseTextBytes"), f"{identifier}: licenseTextBytes"
+    )
+    expected_digest = _digest(
+        entry.get("licenseTextSha256"), f"{identifier}: licenseTextSha256"
+    )
+    if len(payload) != expected_length or hashlib.sha256(payload).hexdigest() != expected_digest:
+        _reject(f"{identifier}: committed font licence bytes drifted")
+    if OPEN_FONT_LICENSE_MARKER not in payload.decode("utf-8", errors="replace"):
+        _reject(f"{identifier}: committed font licence is not OFL-1.1")
+    return source
+
+
 def _required_fields(rights: dict) -> tuple[str, ...]:
     shared = rights.get("distributionRequiredFields")
     categories = rights.get("requiredCategories")
@@ -602,6 +639,7 @@ __all__ = [
     "SubtitleFontUnavailable",
     "bundled_font_families",
     "bundled_subtitle_fonts",
+    "committed_font_license_source",
     "default_subtitle_font_name",
     "ensure_subtitle_fonts",
     "font_copyright_notice",

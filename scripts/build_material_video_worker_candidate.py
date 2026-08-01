@@ -14,11 +14,14 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import NoReturn
+
+from fontTools.ttLib import TTFont
+from PIL import ImageFont
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -27,6 +30,10 @@ import subtitle_font_assets
 from frozen_artifact_environment import frozen_artifact_environment
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "backend/src"))
+
+from automation_tool.executor.captions import fonts as caption_fonts
+
 UPSTREAM = ROOT / "vendor/moneyprinterturbo"
 WORKER = ROOT / "workers/material_montage"
 CONTRACT_PATH = ROOT / "contracts/quality/material-video-worker-package.v1.json"
@@ -218,6 +225,7 @@ def assert_bundled_subtitle_fonts_present(
     *,
     fonts: tuple[subtitle_font_assets.BundledSubtitleFont, ...] | None = None,
     notice: subtitle_font_assets.PackagedLicenseNotice | None = None,
+    notices: tuple[subtitle_font_assets.PackagedLicenseNotice, ...] | None = None,
     default_font_name: str | None = None,
 ) -> None:
     """Fail closed unless every cleared subtitle face really landed in the package.
@@ -234,8 +242,17 @@ def assert_bundled_subtitle_fonts_present(
     try:
         if fonts is None:
             fonts = subtitle_font_assets.bundled_subtitle_fonts()
-        if notice is None:
-            notice = subtitle_font_assets.packaged_license_notice()
+        if notice is not None and notices is not None:
+            reject("字幕字体许可证审计参数冲突")
+        resolved_notices = (
+            tuple(notices)
+            if notices is not None
+            else (
+                (notice,)
+                if notice is not None
+                else subtitle_font_assets.packaged_license_notices()
+            )
+        )
         if default_font_name is None:
             default_font_name = subtitle_font_assets.default_subtitle_font_name(
                 contract
@@ -258,9 +275,17 @@ def assert_bundled_subtitle_fonts_present(
             subtitle_font_assets.verify_font_payload(font, payload)
         except subtitle_font_assets.SubtitleFontUnavailable:
             misattributed.append(font.packaged_name)
-    packaged_notice = font_root / notice.packaged_name
-    if not packaged_notice.is_file() or packaged_notice.is_symlink():
-        missing.append(notice.packaged_name)
+    for resolved_notice in resolved_notices:
+        packaged_notice = font_root / resolved_notice.packaged_name
+        if not packaged_notice.is_file() or packaged_notice.is_symlink():
+            missing.append(resolved_notice.packaged_name)
+            continue
+        try:
+            subtitle_font_assets.verify_license_payload(
+                resolved_notice, packaged_notice.read_bytes()
+            )
+        except subtitle_font_assets.SubtitleFontUnavailable:
+            drifted.append(resolved_notice.packaged_name)
     if missing:
         reject(f"候选缺少已登记的开源字幕字体或其许可证：{','.join(sorted(missing))}")
     if drifted:
@@ -271,6 +296,137 @@ def assert_bundled_subtitle_fonts_present(
         )
     if not (font_root / default_font_name).is_file():
         reject(f"候选缺少默认字幕字体：{default_font_name}")
+
+
+def assert_registered_caption_fonts_present(
+    candidate: Path,
+    *,
+    registered: Mapping[str, caption_fonts.RegisteredCaptionFont] | None = None,
+    relative_path: Callable[[str], PurePosixPath] | None = None,
+    rights: dict | None = None,
+) -> None:
+    """Verify every runtime face and its licence at the exact frozen lookup path."""
+    registry = caption_fonts.REGISTERED_CAPTION_FONTS if registered is None else registered
+    path_for = caption_fonts.packaged_relative_path if relative_path is None else relative_path
+    document = subtitle_font_assets.load_asset_rights() if rights is None else rights
+    entries = document.get("entries")
+    if not isinstance(entries, list):
+        reject("字幕字体权利登记缺少条目")
+    cleared: dict[tuple[str, str], dict] = {}
+    for entry in entries:
+        if not isinstance(entry, dict) or entry.get("category") != "font":
+            continue
+        if not all(
+            entry.get(permission) is True
+            for permission in (
+                "redistributionAllowed",
+                "commercialUseAllowed",
+                "embeddingAllowed",
+            )
+        ):
+            continue
+        bundle = entry.get("bundledIn")
+        name = entry.get("packagedName")
+        if isinstance(bundle, str) and isinstance(name, str):
+            identity = (bundle, name)
+            if identity in cleared:
+                reject("字幕字体权利登记存在重复装配身份")
+            cleared[identity] = entry
+
+    missing: list[str] = []
+    drifted: list[str] = []
+    unreadable: list[str] = []
+    licenses: dict[PurePosixPath, tuple[str, int]] = {}
+    for font_key, face in registry.items():
+        expected = PurePosixPath("fonts") / face.bundle / face.packaged_name
+        try:
+            relative = path_for(font_key)
+        except caption_fonts.CaptionFontRejected as error:
+            reject(f"字幕字体运行时路径无法派生：{font_key}（{type(error).__name__}）")
+        if relative != expected or relative.is_absolute() or ".." in relative.parts:
+            reject(f"字幕字体运行时路径漂移：{font_key}")
+        entry = cleared.get((face.bundle, face.packaged_name))
+        if entry is None:
+            reject(f"字幕字体没有分发权利登记：{font_key}")
+        digest = entry.get("sha256")
+        length = entry.get("bytes")
+        attribution = entry.get("attribution")
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or not isinstance(length, int)
+            or isinstance(length, bool)
+            or length <= 0
+            or not isinstance(attribution, str)
+            or not attribution
+        ):
+            reject(f"字幕字体权利登记的字节事实无效：{font_key}")
+        packaged = candidate / "_internal" / Path(*relative.parts)
+        if not packaged.is_file() or packaged.is_symlink():
+            missing.append(font_key)
+        else:
+            payload = packaged.read_bytes()
+            if len(payload) != length or hashlib.sha256(payload).hexdigest() != digest:
+                drifted.append(font_key)
+            else:
+                try:
+                    with TTFont(packaged, lazy=False) as parsed:
+                        cmap = parsed.getBestCmap()
+                        copyright_record = parsed["name"].getName(0, 3, 1, 0x409)
+                        if copyright_record is None:
+                            copyright_record = next(
+                                record
+                                for record in parsed["name"].names
+                                if record.nameID == 0
+                            )
+                        actual_attribution = copyright_record.toUnicode().strip()
+                    ImageFont.truetype(str(packaged), 16)
+                    if not cmap or actual_attribution != attribution:
+                        raise ValueError("font metadata does not match rights")
+                except Exception:  # noqa: BLE001
+                    unreadable.append(font_key)
+
+        license_name = entry.get("packagedLicenseName")
+        license_digest = entry.get("licenseTextSha256")
+        license_length = entry.get("licenseTextBytes")
+        if (
+            not isinstance(license_name, str)
+            or PurePosixPath(license_name).name != license_name
+            or not isinstance(license_digest, str)
+            or len(license_digest) != 64
+            or not isinstance(license_length, int)
+            or isinstance(license_length, bool)
+            or license_length <= 0
+        ):
+            reject(f"字幕字体许可证登记无效：{font_key}")
+        license_relative = PurePosixPath("fonts") / face.bundle / license_name
+        previous = licenses.setdefault(
+            license_relative, (license_digest, license_length)
+        )
+        if previous != (license_digest, license_length):
+            reject(f"字幕字体许可证登记相互冲突：{license_name}")
+
+    for relative, (digest, length) in licenses.items():
+        packaged = candidate / "_internal" / Path(*relative.parts)
+        if not packaged.is_file() or packaged.is_symlink():
+            missing.append(relative.name)
+            continue
+        payload = packaged.read_bytes()
+        if (
+            len(payload) != length
+            or hashlib.sha256(payload).hexdigest() != digest
+            or subtitle_font_assets.OPEN_FONT_LICENSE_MARKER.encode() not in payload
+        ):
+            drifted.append(relative.name)
+    if missing:
+        reject(f"候选缺少运行时字幕字体或许可证：{','.join(sorted(missing))}")
+    if drifted:
+        reject(f"候选运行时字幕字体或许可证字节漂移：{','.join(sorted(drifted))}")
+    if unreadable:
+        reject(
+            "候选运行时字幕字体不可由渲染器读取或元数据漂移："
+            f"{','.join(sorted(unreadable))}"
+        )
 
 
 @contextmanager
@@ -565,6 +721,7 @@ def audit_candidate(
     assert_excluded_upstream_resources_absent(candidate, contract)
     assert_excluded_upstream_resource_files_absent(candidate, contract)
     assert_bundled_subtitle_fonts_present(candidate, contract)
+    assert_registered_caption_fonts_present(candidate)
     inventory_path = (
         candidate / "_internal/licenses/material-video-worker-dependencies.json"
     )
