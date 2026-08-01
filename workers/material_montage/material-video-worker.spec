@@ -75,6 +75,7 @@ runtime_distributions = [
 hiddenimports = [
     "automation_tool.executor.local_editing_worker",
     "automation_tool.executor.local_editing_worker_process",
+    "automation_tool.executor.local_material_preview",
     "app",
     "moviepy",
     "streamlit",

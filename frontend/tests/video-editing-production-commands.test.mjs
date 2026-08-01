@@ -29,10 +29,17 @@ test("local material import gets its private path only from the native picker", 
   for (const command of [
     "import_editing_material",
     "get_local_editing_material_status",
+    "get_local_editing_material_preview_url",
     "delete_editing_material",
   ]) {
     assert.match(rust, new RegExp(`async fn ${command}\\(`));
   }
+  const previewSignature = rust.match(
+    /async fn get_local_editing_material_preview_url\(([\s\S]*?)\) ->/,
+  )?.[1];
+  assert.ok(previewSignature, "native material preview command must exist");
+  assert.match(previewSignature, /material_id/u);
+  assert.doesNotMatch(previewSignature, /source|path|file_name/iu);
 });
 
 test("plain desktop E2E cannot replace the production editing boundary", () => {
@@ -49,6 +56,7 @@ test("plain desktop E2E cannot replace the production editing boundary", () => {
     "submit_editing_job",
     "import_editing_material",
     "get_local_editing_material_status",
+    "get_local_editing_material_preview_url",
     "delete_editing_material",
   ]) {
     assert.doesNotMatch(plainDesktopHandler, new RegExp(`\\b${command}\\b`));

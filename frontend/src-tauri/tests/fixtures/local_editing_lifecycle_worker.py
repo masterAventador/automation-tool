@@ -65,6 +65,7 @@ server = socket.socket()
 server.bind(("127.0.0.1", 0))
 server.listen()
 port = server.getsockname()[1]
+preview_path = "material-preview-v1-" + "A" * 43
 stopping = False
 
 
@@ -75,7 +76,9 @@ def _serve() -> None:
         except OSError:
             return
         request = connection.recv(8192).decode(errors="replace")
-        authorized = f"Authorization: Bearer {bootstrap['localSessionToken']}" in request
+        authorized = (
+            f"Authorization: Bearer {bootstrap['localSessionToken']}" in request
+        )
         if authorized and request.startswith("GET /health HTTP/1.1"):
             body = json.dumps(
                 {
@@ -97,7 +100,10 @@ def _serve() -> None:
                 + body
             )
         else:
-            response = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            response = (
+                "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n"
+                "Connection: close\r\n\r\n"
+            )
         connection.sendall(response.encode())
         connection.close()
 
@@ -110,6 +116,14 @@ print(
                 token, "worker.ready", kind, protocol, str(port)
             ),
             "event": "worker.ready",
+            "materialPreviewAuthenticationProof": _proof(
+                token,
+                "worker.material_preview_ready",
+                kind,
+                protocol,
+                f"{port}:{preview_path}",
+            ),
+            "materialPreviewPath": preview_path,
             "protocolVersion": protocol,
             "workerKind": kind,
             "workerVersion": WORKER_VERSION,

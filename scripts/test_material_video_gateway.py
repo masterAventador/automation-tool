@@ -24,12 +24,44 @@ from gateway import (  # noqa: E402
     GatewayBootstrap,
     GatewayRejected,
     create_gateway,
+    material_preview_capability_path,
     parse_bootstrap,
     parse_cancel_command,
 )
 
 TOKEN = "11" * 32
 ORIGIN = "tauri://localhost"
+MATERIAL_ID = "123e4567-e89b-42d3-a456-426614174321"
+
+
+class _PreviewLease:
+    content_type = "video/mp4"
+
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+        self.size_bytes = len(body)
+        self.closed = False
+
+    def read(self, start: int, length: int) -> bytes:
+        if self.closed:
+            raise AssertionError("closed preview lease was read")
+        return self._body[start : start + length]
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _PreviewSource:
+    def __init__(self, body: bytes = b"0123456789") -> None:
+        self.body = body
+        self.opened: list[str] = []
+        self.leases: list[_PreviewLease] = []
+
+    def open(self, material_id: object) -> _PreviewLease:
+        self.opened.append(str(material_id))
+        lease = _PreviewLease(self.body)
+        self.leases.append(lease)
+        return lease
 
 
 def bootstrap_line(asset_root: Path, **changes: object) -> bytes:
@@ -48,13 +80,22 @@ def bootstrap_line(asset_root: Path, **changes: object) -> bytes:
 
 
 @contextmanager
-def running_gateway(asset_root: Path) -> Iterator[int]:
-    bootstrap = GatewayBootstrap(TOKEN, bytes.fromhex(TOKEN), asset_root.resolve())
-    server = create_gateway(bootstrap)
+def running_gateway(
+    asset_root: Path,
+    *,
+    preview_source: _PreviewSource | None = None,
+) -> Iterator[tuple[int, GatewayBootstrap]]:
+    bootstrap = GatewayBootstrap(
+        TOKEN,
+        bytes.fromhex(TOKEN),
+        asset_root.resolve(),
+        local_editing=preview_source is not None,
+    )
+    server = create_gateway(bootstrap, material_preview=preview_source)
     thread = threading.Thread(target=server.serve_forever)
     thread.start()
     try:
-        yield int(server.server_address[1])
+        yield int(server.server_address[1]), bootstrap
     finally:
         server.shutdown()
         server.server_close()
@@ -82,6 +123,27 @@ def request(
     return result
 
 
+def request_with_repeated_headers(
+    port: int,
+    path: str,
+    headers: list[tuple[str, str]],
+) -> tuple[int, dict[str, str], bytes]:
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+    connection.putrequest("GET", path, skip_host=True)
+    for name, value in headers:
+        connection.putheader(name, value)
+    connection.endheaders()
+    response = connection.getresponse()
+    payload = response.read()
+    result = (
+        response.status,
+        {key.lower(): value for key, value in response.getheaders()},
+        payload,
+    )
+    connection.close()
+    return result
+
+
 def authorized_headers(**extra: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {TOKEN}", **extra}
 
@@ -92,6 +154,9 @@ class MaterialVideoGatewayTest(unittest.TestCase):
             root = Path(directory).resolve()
             parsed = parse_bootstrap(bootstrap_line(root))
             self.assertEqual(parsed.asset_root, root)
+            self.assertEqual(repr(parsed), "GatewayBootstrap(<redacted>)")
+            self.assertNotIn(TOKEN, repr(parsed))
+            self.assertNotIn(str(root), repr(parsed))
             for changes in (
                 {"localSessionToken": "short"},
                 {"workerKind": "node"},
@@ -146,8 +211,9 @@ class MaterialVideoGatewayTest(unittest.TestCase):
     def test_health_authentication_route_and_cors_are_fail_closed(self) -> None:
         with (
             tempfile.TemporaryDirectory(prefix="im03-http-") as directory,
-            running_gateway(Path(directory)) as port,
+            running_gateway(Path(directory)) as running,
         ):
+            port, _ = running
             status, headers, body = request(port, "GET", "/health")
             self.assertEqual(status, 401)
             self.assertEqual(json.loads(body), {"code": "authentication_required"})
@@ -203,7 +269,8 @@ class MaterialVideoGatewayTest(unittest.TestCase):
             outside = root.parent / f"{root.name}-outside.txt"
             outside.write_bytes(b"outside")
             try:
-                with running_gateway(root) as port:
+                with running_gateway(root) as running:
+                    port, _ = running
                     status, headers, body = request(
                         port,
                         "OPTIONS",
@@ -211,7 +278,9 @@ class MaterialVideoGatewayTest(unittest.TestCase):
                         headers={
                             "Origin": ORIGIN,
                             "Access-Control-Request-Method": "POST",
-                            "Access-Control-Request-Headers": "authorization, content-type",
+                            "Access-Control-Request-Headers": (
+                                "authorization, content-type"
+                            ),
                         },
                     )
                     self.assertEqual((status, body), (204, b""))
@@ -284,7 +353,8 @@ class MaterialVideoGatewayTest(unittest.TestCase):
             outside.write_text("outside", encoding="utf-8")
             try:
                 (root / "linked.txt").symlink_to(outside)
-                with running_gateway(root) as port:
+                with running_gateway(root) as running:
+                    port, _ = running
                     payload = json.dumps({"relativePath": "linked.txt"}).encode()
                     status, _, _ = request(
                         port,
@@ -298,6 +368,125 @@ class MaterialVideoGatewayTest(unittest.TestCase):
                     self.assertEqual(status, 400)
             finally:
                 outside.unlink(missing_ok=True)
+
+    def test_material_preview_supports_exact_full_head_and_single_ranges(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="le18-preview-http-") as directory:
+            source = _PreviewSource()
+            with running_gateway(Path(directory), preview_source=source) as running:
+                port, bootstrap = running
+                capability = material_preview_capability_path(bootstrap)
+                other_bootstrap = GatewayBootstrap(
+                    "22" * 32,
+                    bytes.fromhex("22" * 32),
+                    Path(directory).resolve(),
+                    local_editing=True,
+                )
+                self.assertNotEqual(
+                    capability,
+                    material_preview_capability_path(other_bootstrap),
+                )
+                self.assertNotIn(TOKEN, capability)
+                path = f"/api/v1/material-previews/{capability}/{MATERIAL_ID}"
+
+                status, headers, body = request(
+                    port, "GET", path, headers={"Origin": ORIGIN}
+                )
+                self.assertEqual((status, body), (200, source.body))
+                self.assertEqual(headers["content-type"], "video/mp4")
+                self.assertEqual(headers["content-length"], "10")
+                self.assertEqual(headers["accept-ranges"], "bytes")
+                self.assertEqual(headers["cache-control"], "no-store")
+                self.assertEqual(headers["referrer-policy"], "no-referrer")
+
+                status, headers, body = request(
+                    port,
+                    "HEAD",
+                    path,
+                    headers={"Origin": ORIGIN},
+                )
+                self.assertEqual((status, body), (200, b""))
+                self.assertEqual(headers["content-length"], "10")
+
+                for range_value, expected_range, expected_body in (
+                    ("bytes=2-5", "bytes 2-5/10", b"2345"),
+                    ("bytes=7-", "bytes 7-9/10", b"789"),
+                    ("bytes=-3", "bytes 7-9/10", b"789"),
+                ):
+                    status, headers, body = request(
+                        port,
+                        "GET",
+                        path,
+                        headers={"Origin": ORIGIN, "Range": range_value},
+                    )
+                    self.assertEqual((status, body), (206, expected_body))
+                    self.assertEqual(headers["content-range"], expected_range)
+                    self.assertEqual(headers["content-length"], str(len(expected_body)))
+
+                self.assertEqual(source.opened, [MATERIAL_ID] * 5)
+                self.assertTrue(all(lease.closed for lease in source.leases))
+
+    def test_material_preview_rejects_invalid_ranges_origins_and_capabilities(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(prefix="le18-preview-reject-") as directory:
+            private = str(Path(directory).resolve())
+            source = _PreviewSource()
+            with running_gateway(Path(directory), preview_source=source) as running:
+                port, bootstrap = running
+                capability = material_preview_capability_path(bootstrap)
+                path = f"/api/v1/material-previews/{capability}/{MATERIAL_ID}"
+                for range_value in (
+                    "items=0-1",
+                    "bytes=",
+                    "bytes=1-2,4-5",
+                    "bytes=10-",
+                    "bytes=5-4",
+                    "bytes=-0",
+                    "bytes=+1-2",
+                    "bytes=" + "9" * 129 + "-",
+                ):
+                    status, headers, body = request(
+                        port, "GET", path, headers={"Range": range_value}
+                    )
+                    self.assertEqual((status, body), (416, b""))
+                    self.assertEqual(headers["content-range"], "bytes */10")
+
+                status, headers, body = request_with_repeated_headers(
+                    port,
+                    path,
+                    [
+                        ("Host", f"127.0.0.1:{port}"),
+                        ("Range", "bytes=0-1"),
+                        ("Range", "bytes=2-3"),
+                    ],
+                )
+                self.assertEqual((status, body), (416, b""))
+                self.assertEqual(headers["content-range"], "bytes */10")
+
+                status, _, body = request_with_repeated_headers(
+                    port,
+                    path,
+                    [("Host", "evil.example")],
+                )
+                self.assertEqual((status, body), (403, b""))
+
+                status, _, body = request(
+                    port,
+                    "GET",
+                    path,
+                    headers={"Origin": "https://evil.example"},
+                )
+                self.assertEqual((status, body), (403, b""))
+
+                for rejected_path in (
+                    f"/api/v1/material-previews/wrong/{MATERIAL_ID}",
+                    f"/api/v1/material-previews/{capability}/not-a-uuid",
+                    f"/api/v1/material-previews/{capability}/{MATERIAL_ID}?path={private}",
+                ):
+                    status, _, body = request(port, "GET", rejected_path)
+                    self.assertEqual((status, body), (404, b""))
+                    self.assertNotIn(private.encode(), body)
+                    self.assertNotIn(TOKEN.encode(), body)
 
 
 if __name__ == "__main__":

@@ -2862,6 +2862,24 @@ async fn get_local_editing_material_status(
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 #[tauri::command]
+async fn get_local_editing_material_preview_url(
+    material_id: String,
+    app: tauri::AppHandle,
+    orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
+    coordinator: tauri::State<'_, local_material_library::LocalMaterialLibraryCoordinator>,
+) -> Result<String, LocalMaterialCommandError> {
+    let material_id = parse_material_id(&material_id)?;
+    let _operation = coordinator.acquire().await;
+    local_editing_runtime::ensure_worker(&app).map_err(|_| LocalMaterialCommandError {
+        code: "worker_unavailable",
+        retryable: true,
+    })?;
+    local_material_library::material_preview_url(&orchestrator, material_id)
+        .map_err(map_local_material_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
 async fn delete_editing_material(
     material_id: String,
     app: tauri::AppHandle,
@@ -5055,6 +5073,7 @@ pub fn run() {
         submit_editing_job,
         import_editing_material,
         get_local_editing_material_status,
+        get_local_editing_material_preview_url,
         delete_editing_material,
         open_douyin_login,
         recheck_douyin_login,
@@ -5128,6 +5147,7 @@ pub fn run() {
         submit_editing_job,
         import_editing_material,
         get_local_editing_material_status,
+        get_local_editing_material_preview_url,
         delete_editing_material,
         open_douyin_login,
         recheck_douyin_login,

@@ -9,12 +9,11 @@ from pathlib import Path
 from unittest import mock
 from uuid import uuid4
 
+import run_le_18_t3_acceptance as acceptance
 from automation_tool.executor.material_probe import (
     MaterialProbeRejected,
     MaterialProbeRejection,
 )
-
-import run_le_18_t3_acceptance as acceptance
 
 
 class _RunningProcess:
@@ -150,6 +149,57 @@ class FrozenWorkerStatusEventTest(unittest.TestCase):
             )
 
         self.assertNotIn("operator-private-status", str(rejected.exception))
+
+
+class FrozenWorkerPreviewEndpointTest(unittest.TestCase):
+    def test_accepts_an_authenticated_preview_only_capability(self) -> None:
+        token = os.urandom(32)
+        port = 43123
+        path = "material-preview-v1-" + "A" * 43
+        event = {
+            "authenticationProof": acceptance._proof(
+                token,
+                acceptance.EVENT_DOMAIN,
+                "atvwp1.",
+                ("worker.ready", "python", "1.0", "1.2.3", str(port)),
+            ),
+            "event": "worker.ready",
+            "materialPreviewAuthenticationProof": acceptance._proof(
+                token,
+                acceptance.EVENT_DOMAIN,
+                "atvwp1.",
+                (
+                    "worker.material_preview_ready",
+                    "python",
+                    "1.0",
+                    "1.2.3",
+                    f"{port}:{path}",
+                ),
+            ),
+            "materialPreviewPath": path,
+            "port": port,
+            "workerVersion": "1.2.3",
+        }
+
+        assert acceptance._verify_preview_ready(event, token) == (port, path)
+
+    def test_forged_preview_capability_is_rejected_without_echoing_it(self) -> None:
+        private = "material-preview-v1-" + "P" * 43
+        event = {
+            "authenticationProof": "atvwp1.forged",
+            "event": "worker.ready",
+            "materialPreviewAuthenticationProof": "atvwp1.forged",
+            "materialPreviewPath": private,
+            "port": 43123,
+            "workerVersion": "1.2.3",
+        }
+
+        with self.assertRaisesRegex(
+            AssertionError, "authentication proof is invalid$"
+        ) as rejected:
+            acceptance._verify_preview_ready(event, os.urandom(32))
+
+        self.assertNotIn(private, str(rejected.exception))
 
 
 if __name__ == "__main__":

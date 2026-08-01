@@ -1014,6 +1014,31 @@ impl VideoWorkerWebUiEndpoint {
     }
 }
 
+#[derive(Clone)]
+struct VideoWorkerMaterialPreviewEndpoint {
+    port: u16,
+    path: String,
+}
+
+impl fmt::Debug for VideoWorkerMaterialPreviewEndpoint {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("VideoWorkerMaterialPreviewEndpoint(<redacted>)")
+    }
+}
+
+impl VideoWorkerMaterialPreviewEndpoint {
+    fn url(&self, material_id: &str) -> Result<String, VideoWorkerLocalMaterialError> {
+        let url = url::Url::parse(&format!(
+            "http://{LOOPBACK_HOST}:{}/api/v1/material-previews/{}/{material_id}",
+            self.port, self.path,
+        ))
+        .map_err(|_| {
+            VideoWorkerLocalMaterialError::Lifecycle(VideoWorkerErrorCode::ProcessUnavailable)
+        })?;
+        Ok(url.into())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VideoWorkerStatus {
@@ -1369,6 +1394,25 @@ impl LocalVideoOrchestrator {
             ));
         }
         Ok(event.status)
+    }
+
+    pub fn local_material_preview_url(
+        &self,
+        material_id: Uuid,
+    ) -> Result<String, VideoWorkerLocalMaterialError> {
+        let material_id = valid_local_material_id(material_id)?;
+        let mut workers = self
+            .lock_workers()
+            .map_err(VideoWorkerLocalMaterialError::from)?;
+        let running = local_material_worker(&mut workers)?;
+        let endpoint =
+            running
+                .material_preview
+                .as_ref()
+                .ok_or(VideoWorkerLocalMaterialError::Lifecycle(
+                    VideoWorkerErrorCode::AuthenticationRejected,
+                ))?;
+        endpoint.url(&material_id)
     }
 
     pub fn cancel(&self, kind: VideoWorkerKind, job_id: Uuid) -> Result<(), VideoWorkerError> {
@@ -1864,6 +1908,7 @@ struct RunningVideoWorker {
     launch: VideoWorkerLaunch,
     status: VideoWorkerStatus,
     web_ui: Option<VideoWorkerWebUiEndpoint>,
+    material_preview: Option<VideoWorkerMaterialPreviewEndpoint>,
     editing_job: Option<RunningLocalEditingJob>,
 }
 
@@ -2092,6 +2137,8 @@ struct VideoWorkerSandboxCommandDocument<'a> {
 struct VideoWorkerReadyEvent {
     authentication_proof: String,
     event: String,
+    material_preview_authentication_proof: Option<String>,
+    material_preview_path: Option<String>,
     protocol_version: String,
     script_model_id: Option<String>,
     web_ui_authentication_proof: Option<String>,
@@ -2625,7 +2672,7 @@ fn spawn_worker(
         let line = receive_line(&events, start_timeout)?;
         let event: VideoWorkerReadyEvent =
             serde_json::from_str(&line).map_err(|_| authentication_rejected())?;
-        let web_ui = validate_ready_event(&token, &launch, &event)?;
+        let (web_ui, material_preview) = validate_ready_event(&token, &launch, &event)?;
         let status = VideoWorkerStatus::running(
             launch.kind,
             event.worker_version,
@@ -2635,17 +2682,26 @@ fn spawn_worker(
             event.script_model_id,
             web_ui.is_some(),
         );
-        Ok((stdin, events, stdout_thread, stderr_thread, status, web_ui))
+        Ok((
+            stdin,
+            events,
+            stdout_thread,
+            stderr_thread,
+            status,
+            web_ui,
+            material_preview,
+        ))
     })();
-    let (stdin, events, stdout_thread, stderr_thread, status, web_ui) = match setup {
-        Ok(value) => value,
-        Err(error) => {
-            let _ = process_tree.terminate();
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(error);
-        }
-    };
+    let (stdin, events, stdout_thread, stderr_thread, status, web_ui, material_preview) =
+        match setup {
+            Ok(value) => value,
+            Err(error) => {
+                let _ = process_tree.terminate();
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        };
     let mut running = RunningVideoWorker {
         child,
         stdin,
@@ -2657,6 +2713,7 @@ fn spawn_worker(
         launch,
         status,
         web_ui,
+        material_preview,
         editing_job: None,
     };
     if let Err(error) = verify_health(&running, start_timeout) {
@@ -2735,7 +2792,13 @@ fn validate_ready_event(
     token: &VideoWorkerSessionToken,
     launch: &VideoWorkerLaunch,
     event: &VideoWorkerReadyEvent,
-) -> Result<Option<VideoWorkerWebUiEndpoint>, VideoWorkerError> {
+) -> Result<
+    (
+        Option<VideoWorkerWebUiEndpoint>,
+        Option<VideoWorkerMaterialPreviewEndpoint>,
+    ),
+    VideoWorkerError,
+> {
     let port = event.port.to_string();
     if event.event != "worker.ready"
         || event.protocol_version != WORKER_PROTOCOL_VERSION
@@ -2758,13 +2821,13 @@ fn validate_ready_event(
     if event.worker_version != launch.expected_version {
         return Err(VideoWorkerError::new(VideoWorkerErrorCode::VersionMismatch));
     }
-    match (
+    let web_ui = match (
         launch.web_ui,
         event.web_ui_port,
         event.web_ui_path.as_deref(),
         event.web_ui_authentication_proof.as_deref(),
     ) {
-        (false, None, None, None) => Ok(None),
+        (false, None, None, None) => None,
         (true, Some(web_ui_port), Some(web_ui_path), Some(proof))
             if valid_web_ui_path(web_ui_path) =>
         {
@@ -2778,13 +2841,38 @@ fn validate_ready_event(
             ) {
                 return Err(authentication_rejected());
             }
-            Ok(Some(VideoWorkerWebUiEndpoint {
+            Some(VideoWorkerWebUiEndpoint {
                 port: web_ui_port,
                 path: web_ui_path.to_owned(),
-            }))
+            })
         }
-        _ => Err(authentication_rejected()),
-    }
+        _ => return Err(authentication_rejected()),
+    };
+    let material_preview = match (
+        launch.media_tools.is_some(),
+        event.material_preview_path.as_deref(),
+        event.material_preview_authentication_proof.as_deref(),
+    ) {
+        (false, None, None) => None,
+        (true, Some(path), Some(proof)) if valid_material_preview_path(path) => {
+            let detail = format!("{}:{path}", event.port);
+            if !token.verify_event_proof(
+                "worker.material_preview_ready",
+                launch.kind,
+                &event.worker_version,
+                &detail,
+                proof,
+            ) {
+                return Err(authentication_rejected());
+            }
+            Some(VideoWorkerMaterialPreviewEndpoint {
+                port: event.port,
+                path: path.to_owned(),
+            })
+        }
+        _ => return Err(authentication_rejected()),
+    };
+    Ok((web_ui, material_preview))
 }
 
 fn verify_health(running: &RunningVideoWorker, timeout: Duration) -> Result<(), VideoWorkerError> {
@@ -3114,6 +3202,16 @@ fn valid_render_reason_code(value: &str) -> bool {
 
 fn valid_web_ui_path(value: &str) -> bool {
     let Some(capability) = value.strip_prefix("studio-") else {
+        return false;
+    };
+    capability.len() == 43
+        && capability
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn valid_material_preview_path(value: &str) -> bool {
+    let Some(capability) = value.strip_prefix("material-preview-v1-") else {
         return false;
     };
     capability.len() == 43

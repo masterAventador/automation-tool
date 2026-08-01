@@ -52,6 +52,11 @@ server = socket.socket()
 server.bind(("127.0.0.1", 0))
 server.listen()
 port = server.getsockname()[1]
+preview_path = (
+    "material-preview-v1-" + "A" * 43
+    if bootstrap.get("mediaTools") is not None
+    else None
+)
 stopping = False
 
 def serve():
@@ -81,6 +86,11 @@ threading.Thread(target=serve, daemon=True).start()
 print(json.dumps({
     "authenticationProof": proof("worker.ready", str(port)),
     "event": "worker.ready",
+    "materialPreviewAuthenticationProof": (
+        proof("worker.material_preview_ready", str(port) + ":" + preview_path)
+        if preview_path is not None else None
+    ),
+    "materialPreviewPath": preview_path,
     "protocolVersion": protocol,
     "workerKind": kind,
     "workerVersion": version,
@@ -494,9 +504,35 @@ fn local_material_import_status_and_forget_are_authenticated_and_path_free() {
             .expect("authenticated status"),
         VideoWorkerLocalMaterialStatus::Available,
     );
+    let preview_url = orchestrator
+        .local_material_preview_url(material_id)
+        .expect("authenticated preview capability URL");
+    assert!(preview_url.starts_with("http://127.0.0.1:"));
+    assert!(preview_url.ends_with(&format!(
+        "/api/v1/material-previews/material-preview-v1-{}/{material_id}",
+        "A".repeat(43),
+    )));
+    assert!(!preview_url.contains(private_source.to_string_lossy().as_ref()));
     orchestrator
         .forget_local_material(material_id)
         .expect("authenticated idempotent forget");
+}
+
+#[test]
+fn local_material_preview_ready_proof_is_strictly_authenticated() {
+    let forged = material_worker("success").replace(
+        "proof(\"worker.material_preview_ready\", str(port) + \":\" + preview_path)",
+        "\"atvwp1.forged\"",
+    );
+    let fixture = TemporaryWorker::new(&forged);
+
+    assert_eq!(
+        orchestrator()
+            .start(editing_launch(&fixture))
+            .expect_err("forged preview capability must reject Worker startup")
+            .code(),
+        VideoWorkerErrorCode::AuthenticationRejected,
+    );
 }
 
 #[test]

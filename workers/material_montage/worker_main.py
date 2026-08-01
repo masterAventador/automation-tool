@@ -20,6 +20,7 @@ from gateway import (
     GatewayRejected,
     create_gateway,
     event_proof,
+    material_preview_capability_path,
     parse_bootstrap,
     parse_cancel_command,
 )
@@ -91,6 +92,7 @@ def dependency_probe(name: str) -> dict[str, object]:
     if name == "local-editing-runtime":
         importlib.import_module("automation_tool.executor.local_editing_worker")
         importlib.import_module("automation_tool.executor.local_editing_worker_process")
+        importlib.import_module("automation_tool.executor.local_material_preview")
         return {"dependency": name, "status": "ready"}
     module = RUNTIME_MODULES.get(name)
     if module is None:
@@ -165,6 +167,9 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
             execute_local_material_import,
             execute_local_material_status,
         )
+        from automation_tool.executor.local_material_preview import (
+            LocalMaterialPreviewSource,
+        )
 
         bootstrap_line = line.encode()
         bootstrap = parse_bootstrap(bootstrap_line)
@@ -189,7 +194,17 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
             if bootstrap.web_ui
             else None
         )
-        server = create_gateway(bootstrap)
+        material_preview = (
+            LocalMaterialPreviewSource(
+                state_directory=(
+                    editing_bootstrap.asset_root / "local-executor" / "state"
+                ),
+                media_tools=editing_bootstrap.media_tools,
+            )
+            if editing_bootstrap is not None
+            else None
+        )
+        server = create_gateway(bootstrap, material_preview=material_preview)
     except Exception:
         if webui is not None:
             webui.stop()
@@ -200,9 +215,24 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
         target=server.serve_forever, name="material-video-gateway"
     )
     thread.start()
+    material_preview_path = (
+        material_preview_capability_path(bootstrap)
+        if material_preview is not None
+        else None
+    )
     ready = {
         "authenticationProof": event_proof(bootstrap, "worker.ready", str(port)),
         "event": "worker.ready",
+        "materialPreviewAuthenticationProof": (
+            event_proof(
+                bootstrap,
+                "worker.material_preview_ready",
+                f"{port}:{material_preview_path}",
+            )
+            if material_preview_path is not None
+            else None
+        ),
+        "materialPreviewPath": material_preview_path,
         "port": port,
         "protocolVersion": PROTOCOL_VERSION,
         "scriptModelId": script_model_id,

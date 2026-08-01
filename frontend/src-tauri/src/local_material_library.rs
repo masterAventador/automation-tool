@@ -115,6 +115,8 @@ trait MaterialWorkerPort {
         &self,
         material_id: Uuid,
     ) -> Result<VideoWorkerLocalMaterialStatus, VideoWorkerLocalMaterialError>;
+
+    fn preview_url(&self, material_id: Uuid) -> Result<String, VideoWorkerLocalMaterialError>;
 }
 
 impl MaterialWorkerPort for LocalVideoOrchestrator {
@@ -135,6 +137,10 @@ impl MaterialWorkerPort for LocalVideoOrchestrator {
         material_id: Uuid,
     ) -> Result<VideoWorkerLocalMaterialStatus, VideoWorkerLocalMaterialError> {
         self.local_material_status(material_id)
+    }
+
+    fn preview_url(&self, material_id: Uuid) -> Result<String, VideoWorkerLocalMaterialError> {
+        self.local_material_preview_url(material_id)
     }
 }
 
@@ -212,6 +218,64 @@ pub(crate) fn material_status(
     material_id: Uuid,
 ) -> Result<VideoWorkerLocalMaterialStatus, LocalMaterialLibraryError> {
     MaterialWorkerPort::status(worker, material_id).map_err(worker_error)
+}
+
+pub(crate) fn material_preview_url(
+    worker: &LocalVideoOrchestrator,
+    material_id: Uuid,
+) -> Result<String, LocalMaterialLibraryError> {
+    material_preview_url_with(worker, material_id)
+}
+
+fn material_preview_url_with<W: MaterialWorkerPort>(
+    worker: &W,
+    material_id: Uuid,
+) -> Result<String, LocalMaterialLibraryError> {
+    let status = worker.status(material_id).map_err(worker_error)?;
+    if let Some(code) = unavailable_status_failure(status) {
+        return Err(library_error(
+            LocalMaterialLibraryErrorCode::WorkerRejected(code),
+            matches!(
+                status,
+                VideoWorkerLocalMaterialStatus::FileMissing
+                    | VideoWorkerLocalMaterialStatus::FileUnreadable
+                    | VideoWorkerLocalMaterialStatus::FileChanged
+            ),
+        ));
+    }
+    worker.preview_url(material_id).map_err(worker_error)
+}
+
+const fn unavailable_status_failure(
+    status: VideoWorkerLocalMaterialStatus,
+) -> Option<VideoWorkerLocalMaterialFailureCode> {
+    Some(match status {
+        VideoWorkerLocalMaterialStatus::Available => return None,
+        VideoWorkerLocalMaterialStatus::UnusableIdentifier => {
+            VideoWorkerLocalMaterialFailureCode::UnusableIdentifier
+        }
+        VideoWorkerLocalMaterialStatus::NotRegistered => {
+            VideoWorkerLocalMaterialFailureCode::NotRegistered
+        }
+        VideoWorkerLocalMaterialStatus::FileMissing => {
+            VideoWorkerLocalMaterialFailureCode::FileMissing
+        }
+        VideoWorkerLocalMaterialStatus::FileUnreadable => {
+            VideoWorkerLocalMaterialFailureCode::FileUnreadable
+        }
+        VideoWorkerLocalMaterialStatus::FileChanged => {
+            VideoWorkerLocalMaterialFailureCode::FileChanged
+        }
+        VideoWorkerLocalMaterialStatus::RegistryUnreadable => {
+            VideoWorkerLocalMaterialFailureCode::RegistryUnreadable
+        }
+        VideoWorkerLocalMaterialStatus::RegistryUnwritable => {
+            VideoWorkerLocalMaterialFailureCode::RegistryUnwritable
+        }
+        VideoWorkerLocalMaterialStatus::RegistryFull => {
+            VideoWorkerLocalMaterialFailureCode::RegistryFull
+        }
+    })
 }
 
 async fn import_material_with<W, C, F>(
@@ -480,6 +544,16 @@ mod tests {
                 .borrow_mut()
                 .push(format!("status:{material_id}"));
             Ok(VideoWorkerLocalMaterialStatus::Available)
+        }
+
+        fn preview_url(&self, material_id: Uuid) -> Result<String, VideoWorkerLocalMaterialError> {
+            self.calls
+                .borrow_mut()
+                .push(format!("preview:{material_id}"));
+            Ok(format!(
+                "http://127.0.0.1:3210/api/v1/material-previews/material-preview-v1-{}/{material_id}",
+                "A".repeat(43),
+            ))
         }
     }
 
@@ -774,6 +848,57 @@ mod tests {
             &*worker.calls.borrow(),
             &[format!("status:{EXISTING_ID}")],
             "a rejected CP delete must not forget the local source mapping"
+        );
+    }
+
+    #[test]
+    fn preview_checks_availability_before_returning_only_the_capability_url() {
+        let material_id = Uuid::parse_str(EXISTING_ID).unwrap();
+        let worker = worker_with(vec![], vec![]);
+
+        let url = material_preview_url_with(&worker, material_id)
+            .expect("available material preview URL");
+
+        assert!(url.starts_with("http://127.0.0.1:3210/"));
+        assert!(url.ends_with(EXISTING_ID));
+        assert_eq!(
+            &*worker.calls.borrow(),
+            &[
+                format!("status:{EXISTING_ID}"),
+                format!("preview:{EXISTING_ID}"),
+            ]
+        );
+    }
+
+    #[test]
+    fn every_unavailable_preview_status_keeps_its_closed_reason() {
+        for (status, expected) in [
+            (
+                VideoWorkerLocalMaterialStatus::NotRegistered,
+                VideoWorkerLocalMaterialFailureCode::NotRegistered,
+            ),
+            (
+                VideoWorkerLocalMaterialStatus::FileMissing,
+                VideoWorkerLocalMaterialFailureCode::FileMissing,
+            ),
+            (
+                VideoWorkerLocalMaterialStatus::FileUnreadable,
+                VideoWorkerLocalMaterialFailureCode::FileUnreadable,
+            ),
+            (
+                VideoWorkerLocalMaterialStatus::FileChanged,
+                VideoWorkerLocalMaterialFailureCode::FileChanged,
+            ),
+            (
+                VideoWorkerLocalMaterialStatus::RegistryUnreadable,
+                VideoWorkerLocalMaterialFailureCode::RegistryUnreadable,
+            ),
+        ] {
+            assert_eq!(unavailable_status_failure(status), Some(expected));
+        }
+        assert_eq!(
+            unavailable_status_failure(VideoWorkerLocalMaterialStatus::Available),
+            None
         );
     }
 

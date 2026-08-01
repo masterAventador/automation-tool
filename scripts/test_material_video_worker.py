@@ -28,20 +28,6 @@ import gateway  # noqa: E402
 import subtitle_font_assets  # noqa: E402
 import webui_runtime  # noqa: E402
 import worker_main  # noqa: E402
-from job_observation_bridge import (  # noqa: E402
-    CANCEL_FILE,
-    OBSERVATION_FILE,
-    JobCancelled,
-    ObservedTaskState,
-)
-from webui_runtime import (  # noqa: E402
-    WebUiRejected,
-    _native_path_for_upstream,
-    _prepare_private_project,
-    _private_config_document,
-    default_subtitle_font_name,
-)
-
 from automation_tool.executor.local_editing_worker import (  # noqa: E402
     LocalEditingWorkerFailureCode,
     LocalMaterialWorkerFailureCode,
@@ -55,6 +41,19 @@ from automation_tool.executor.local_editing_worker_process import (  # noqa: E40
 from automation_tool.executor.material_probe import (  # noqa: E402
     MaterialFacts,
     ProbedMaterialKind,
+)
+from job_observation_bridge import (  # noqa: E402
+    CANCEL_FILE,
+    OBSERVATION_FILE,
+    JobCancelled,
+    ObservedTaskState,
+)
+from webui_runtime import (  # noqa: E402
+    WebUiRejected,
+    _native_path_for_upstream,
+    _prepare_private_project,
+    _private_config_document,
+    default_subtitle_font_name,
 )
 
 UPSTREAM_WEBUI = ROOT / "vendor/moneyprinterturbo/webui"
@@ -446,11 +445,33 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not part of the startup set"):
             worker_main.dependency_probe("litellm")
 
+    def test_local_editing_cold_probe_includes_the_preview_reader(self) -> None:
+        with mock.patch.object(worker_main.importlib, "import_module") as imported:
+            result = worker_main.dependency_probe("local-editing-runtime")
+
+        self.assertEqual(
+            [call.args[0] for call in imported.call_args_list],
+            [
+                "automation_tool.executor.local_editing_worker",
+                "automation_tool.executor.local_editing_worker_process",
+                "automation_tool.executor.local_material_preview",
+            ],
+        )
+        self.assertEqual(
+            result,
+            {"dependency": "local-editing-runtime", "status": "ready"},
+        )
+
     def test_dependency_probe_reports_only_a_closed_failure_type(self) -> None:
         stdout = io.StringIO()
-        with mock.patch.object(
-            worker_main, "dependency_probe", side_effect=RuntimeError("private path")
-        ), contextlib.redirect_stdout(stdout):
+        with (
+            mock.patch.object(
+                worker_main,
+                "dependency_probe",
+                side_effect=RuntimeError("private path"),
+            ),
+            contextlib.redirect_stdout(stdout),
+        ):
             result = worker_main.main(["--probe-dependency", "local-editing-runtime"])
 
         self.assertEqual(result, 70)
