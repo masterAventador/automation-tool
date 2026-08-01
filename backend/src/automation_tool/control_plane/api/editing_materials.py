@@ -248,7 +248,6 @@ class SmartEditMaterialWritebackRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     analyses: list[SmartEditMaterialAnalysisRequest] = Field(
-        min_length=1,
         max_length=32,
     )
     narrations: list[SmartEditNarrationMaterialRequest] = Field(max_length=32)

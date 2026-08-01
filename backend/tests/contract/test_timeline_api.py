@@ -166,7 +166,33 @@ def test_openapi_exposes_latest_get_and_next_revision_put_only() -> None:
     assert conflict_details["additionalProperties"] is False
     assert conflict_details["required"] == ["kind", "currentRevision"]
     assert conflict_details["properties"]["kind"]["const"] == "timeline_revision_conflict.v1"
-    assert conflict_details["properties"]["currentRevision"]["minimum"] == 1
+    assert conflict_details["properties"]["currentRevision"]["minimum"] == 0
+
+
+def test_expected_revision_prevents_a_stale_generation_from_appending_a_timeline() -> None:
+    client, repository = timeline_client()
+    first = client.put(
+        f"/api/v1/editing-projects/{PROJECT_ID}/timeline",
+        json={**VALID_DRAFT, "expectedRevision": 0},
+    )
+    stale = client.put(
+        f"/api/v1/editing-projects/{PROJECT_ID}/timeline",
+        json={**VALID_DRAFT, "expectedRevision": 0},
+    )
+    second = client.put(
+        f"/api/v1/editing-projects/{PROJECT_ID}/timeline",
+        json={**VALID_DRAFT, "expectedRevision": 1},
+    )
+
+    assert first.status_code == 201
+    error = assert_error(stale, status_code=409, code="timeline_revision_conflict")
+    assert error["details"] == {
+        "kind": "timeline_revision_conflict.v1",
+        "currentRevision": 1,
+    }
+    assert second.status_code == 201
+    assert second.json()["revision"] == 2
+    assert len(repository.revisions[PROJECT_ID]) == 2
 
 
 def test_route_reports_when_the_timeline_service_is_not_wired() -> None:
@@ -527,8 +553,8 @@ async def test_service_refuses_a_non_installation_owner_before_repository_access
     assert not repository.revisions
 
 
-@pytest.mark.parametrize("current_revision", [0, True])
-def test_revision_conflict_requires_a_strict_positive_revision(
+@pytest.mark.parametrize("current_revision", [-1, True])
+def test_revision_conflict_requires_a_strict_non_negative_revision(
     current_revision: object,
 ) -> None:
     with pytest.raises(ValueError):

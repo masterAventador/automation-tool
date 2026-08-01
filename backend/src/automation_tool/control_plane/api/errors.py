@@ -25,7 +25,7 @@ class TimelineRevisionConflictDetails(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     kind: Literal["timeline_revision_conflict.v1"]
-    current_revision: StrictInt = Field(alias="currentRevision", ge=1)
+    current_revision: StrictInt = Field(alias="currentRevision", ge=0)
 
 
 type PublicErrorDetails = TimelineRevisionConflictDetails

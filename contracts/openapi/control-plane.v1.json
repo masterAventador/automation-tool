@@ -1260,6 +1260,18 @@
             "title": "Durationms",
             "type": "integer"
           },
+          "expectedRevision": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedrevision"
+          },
           "tracks": {
             "items": {
               "$ref": "#/components/schemas/EditingTimelineTrack"
@@ -1693,7 +1705,7 @@
         "description": "The complete public context for a timeline revision conflict.",
         "properties": {
           "currentRevision": {
-            "minimum": 1.0,
+            "minimum": 0.0,
             "title": "Currentrevision",
             "type": "integer"
           },
@@ -1917,7 +1929,6 @@
               "$ref": "#/components/schemas/SmartEditMaterialAnalysisRequest"
             },
             "maxItems": 32,
-            "minItems": 1,
             "title": "Analyses",
             "type": "array"
           },

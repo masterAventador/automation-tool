@@ -17,8 +17,9 @@ use automation_tool_desktop_lib::local_video_orchestrator::{
     VideoWorkerLocalMaterialFailureCode, VideoWorkerLocalMaterialKind,
     VideoWorkerLocalMaterialStatus, VideoWorkerMediaToolsConfiguration,
     VideoWorkerRenderBrowserConfiguration, VideoWorkerRenderCanvas,
-    VideoWorkerRenderSandboxRequest, VideoWorkerRestartPolicy, VideoWorkerSourceWindow,
-    VideoWorkerState,
+    VideoWorkerRenderSandboxRequest, VideoWorkerRestartPolicy, VideoWorkerScriptModelConfiguration,
+    VideoWorkerSmartEditEvent, VideoWorkerSmartEditRequest, VideoWorkerSmartEditStage,
+    VideoWorkerSourceWindow, VideoWorkerState,
 };
 use automation_tool_desktop_lib::motion_video_studio::{
     cancel_marker_file_name, TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR, TEMPLATE_CANVAS_HEIGHT,
@@ -644,6 +645,322 @@ fn local_material_input_and_editing_ownership_fail_closed() {
             .expect_err("material operations cannot race a render"),
         VideoWorkerLocalMaterialError::Lifecycle(VideoWorkerErrorCode::ConfigurationInvalid),
     );
+}
+
+fn smart_edit_worker() -> String {
+    let worker = HEALTHY_WORKER.replace(
+        "    \"materialPreviewPath\": preview_path,\n    \"protocolVersion\": protocol,",
+        "    \"materialPreviewPath\": preview_path,\n    \"scriptModelId\": bootstrap[\"scriptModel\"][\"modelId\"],\n    \"protocolVersion\": protocol,",
+    );
+    let prefix = worker
+        .split_once("for line in sys.stdin:")
+        .expect("healthy Worker command loop")
+        .0;
+    format!(
+        r#"{prefix}import pathlib, shutil
+
+def command_proof(command, job_id):
+    digest = hmac.digest(
+        key,
+        b"automation-tool.video-worker-command.v1\0" + b"\0".join(
+            value.encode() for value in [command, kind, protocol, job_id]
+        ),
+        hashlib.sha256,
+    )
+    return "atvwc1." + base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+def smart_event(event, job_id, detail, **facts):
+    body = {{
+        "authenticationProof": proof(event, detail),
+        "event": event,
+        "jobId": job_id,
+        "protocolVersion": protocol,
+        "workerKind": kind,
+        "workerVersion": version,
+    }}
+    body.update(facts)
+    print(json.dumps(body, separators=(",", ":")), flush=True)
+
+prepared_digest = None
+for line in sys.stdin:
+    command = json.loads(line)
+    job_id = command.get("jobId", "")
+    name = command.get("command")
+    if not hmac.compare_digest(command.get("authenticationProof", ""), command_proof(name, job_id)):
+        continue
+    if name == "worker.smart_edit.start":
+        root = pathlib.Path(bootstrap["assetRoot"]) / "local-executor" / "smart-edit" / "jobs" / job_id
+        request = json.loads((root / "request.json").read_text(encoding="utf-8"))
+        assert request["schemaVersion"] == "smart-edit-generation-request.v1"
+        assert request["jobId"] == job_id
+        assert request["prompt"] == "把发布会开场剪成一条节奏明快的短片"
+        material_id = request["materials"][0]["materialId"]
+        result = {{
+            "analysisUpdates": [],
+            "draft": {{
+                "durationMs": 1000,
+                "paragraphs": [{{
+                    "audioMaterialId": material_id,
+                    "captionText": "发布会开场",
+                    "durationMs": 1000,
+                    "kind": "original_speech",
+                    "sequence": 1,
+                    "visualMaterialId": material_id,
+                    "visualSourceInMs": 0,
+                    "visualSourceOutMs": 1000,
+                }}],
+            }},
+            "jobId": job_id,
+            "narrationRegistrations": [],
+            "schemaVersion": "smart-edit-generation-result.v1",
+        }}
+        payload = json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode()
+        (root / "result.json").write_bytes(payload)
+        prepared_digest = hashlib.sha256(payload).hexdigest()
+        smart_event("worker.smart_edit.progress", job_id, job_id + "\0preparing\0" + "0", stage="preparing", progressPermille=0)
+        smart_event("worker.smart_edit.progress", job_id, job_id + "\0completed\0" + "1000", stage="completed", progressPermille=1000)
+        smart_event("worker.smart_edit.prepared", job_id, job_id + "\0" + prepared_digest, resultDigest=prepared_digest)
+    elif name == "worker.smart_edit.commit" and prepared_digest is not None:
+        shutil.rmtree(root)
+        smart_event("worker.smart_edit.succeeded", job_id, job_id + "\0" + prepared_digest, resultDigest=prepared_digest)
+    elif name == "worker.smart_edit.abort" and prepared_digest is not None:
+        shutil.rmtree(root)
+        smart_event("worker.smart_edit.aborted", job_id, job_id)
+
+stopping = True
+server.close()
+"#
+    )
+}
+
+fn smart_edit_material() -> serde_json::Value {
+    serde_json::json!({
+        "aiDescription": "发布会开场镜头",
+        "aiTags": ["发布会"],
+        "audioLoudnessLufs": -18.25,
+        "contentDigest": "cd".repeat(32),
+        "describedAt": "2026-08-01T00:00:00Z",
+        "descriptionSource": "ai",
+        "durationMs": 1000,
+        "hasAudio": true,
+        "hasSpeech": true,
+        "height": 1280,
+        "kind": "video",
+        "materialId": "623e4567-e89b-42d3-a456-426614174105",
+        "shotBoundariesMs": [],
+        "speechSegmentsMs": [[0, 1000]],
+        "speechTranscript": "发布会开场",
+        "width": 720,
+    })
+}
+
+#[test]
+fn smart_edit_prepare_result_digest_and_commit_are_one_authenticated_transaction() {
+    let worker_source = smart_edit_worker();
+    let fixture = TemporaryWorker::new(&worker_source);
+    let launch = editing_launch(&fixture).with_script_model(
+        VideoWorkerScriptModelConfiguration::bailian(
+            "qwen3.7-max-2026-06-08",
+            "sk-private-private-private-private",
+        )
+        .expect("redacted script model"),
+    );
+    let orchestrator = orchestrator();
+    orchestrator.start(launch).expect("start smart-edit Worker");
+    let job_id = Uuid::parse_str("123e4567-e89b-42d3-a456-426614174100").unwrap();
+    let request = VideoWorkerSmartEditRequest::new(
+        "把发布会开场剪成一条节奏明快的短片",
+        vec![smart_edit_material()],
+        false,
+    )
+    .expect("path-free smart-edit request");
+    assert_eq!(
+        format!("{request:?}"),
+        "VideoWorkerSmartEditRequest(<redacted>)"
+    );
+    orchestrator
+        .start_smart_edit_job(job_id, &request)
+        .expect("stage private request and dispatch");
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut prepared = None;
+    while prepared.is_none() {
+        match orchestrator
+            .try_smart_edit_event(job_id)
+            .expect("authenticated smart-edit event")
+        {
+            Some(VideoWorkerSmartEditEvent::Progress {
+                stage: VideoWorkerSmartEditStage::Preparing,
+                progress_per_mille: 0,
+            })
+            | Some(VideoWorkerSmartEditEvent::Progress {
+                stage: VideoWorkerSmartEditStage::Completed,
+                progress_per_mille: 1000,
+            }) => {}
+            Some(VideoWorkerSmartEditEvent::Prepared {
+                result_digest,
+                result,
+            }) => {
+                assert_eq!(result_digest.len(), 64);
+                assert_eq!(
+                    format!("{result:?}"),
+                    "VideoWorkerSmartEditResult(<redacted>)"
+                );
+                prepared = Some(result);
+            }
+            Some(other) => panic!("unexpected smart-edit event: {other:?}"),
+            None => std::thread::sleep(Duration::from_millis(5)),
+        }
+        assert!(Instant::now() < deadline, "smart-edit prepare timed out");
+    }
+    orchestrator
+        .commit_smart_edit_job(job_id)
+        .expect("authenticated commit terminal");
+    assert!(!fixture
+        .root
+        .join("local-executor/smart-edit/jobs")
+        .join(job_id.hyphenated().to_string())
+        .join("request.json")
+        .exists());
+}
+
+#[test]
+fn smart_edit_result_digest_tampering_fails_closed_before_commit() {
+    let worker_source = smart_edit_worker().replace(
+        "prepared_digest = hashlib.sha256(payload).hexdigest()",
+        "prepared_digest = 'a' * 64",
+    );
+    let fixture = TemporaryWorker::new(&worker_source);
+    let launch = editing_launch(&fixture).with_script_model(
+        VideoWorkerScriptModelConfiguration::bailian(
+            "qwen3.7-max-2026-06-08",
+            "sk-private-private-private-private",
+        )
+        .unwrap(),
+    );
+    let orchestrator = orchestrator();
+    orchestrator.start(launch).unwrap();
+    let job_id = Uuid::parse_str("123e4567-e89b-42d3-a456-426614174100").unwrap();
+    let request = VideoWorkerSmartEditRequest::new(
+        "把发布会开场剪成一条节奏明快的短片",
+        vec![smart_edit_material()],
+        false,
+    )
+    .unwrap();
+    orchestrator.start_smart_edit_job(job_id, &request).unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        match orchestrator.try_smart_edit_event(job_id) {
+            Ok(Some(VideoWorkerSmartEditEvent::Progress { .. })) | Ok(None) => {}
+            Err(error) => {
+                assert_eq!(error.code(), VideoWorkerErrorCode::AuthenticationRejected);
+                break;
+            }
+            Ok(Some(other)) => panic!("tampered result became an event: {other:?}"),
+        }
+        assert!(
+            Instant::now() < deadline,
+            "tampered result was not rejected"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    orchestrator
+        .emergency_stop_smart_edit_job(job_id)
+        .expect("tampered transaction is killed and scrubbed");
+    assert!(!fixture
+        .root
+        .join("local-executor/smart-edit/jobs")
+        .join(job_id.hyphenated().to_string())
+        .exists());
+}
+
+#[test]
+fn smart_edit_prepared_transaction_can_abort_without_leaving_private_staging() {
+    let fixture = TemporaryWorker::new(&smart_edit_worker());
+    let launch = editing_launch(&fixture).with_script_model(
+        VideoWorkerScriptModelConfiguration::bailian(
+            "qwen3.7-max-2026-06-08",
+            "sk-private-private-private-private",
+        )
+        .unwrap(),
+    );
+    let orchestrator = orchestrator();
+    orchestrator.start(launch).unwrap();
+    let job_id = Uuid::parse_str("123e4567-e89b-42d3-a456-426614174100").unwrap();
+    let request = VideoWorkerSmartEditRequest::new(
+        "把发布会开场剪成一条节奏明快的短片",
+        vec![smart_edit_material()],
+        false,
+    )
+    .unwrap();
+    orchestrator.start_smart_edit_job(job_id, &request).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        match orchestrator.try_smart_edit_event(job_id).unwrap() {
+            Some(VideoWorkerSmartEditEvent::Prepared { .. }) => break,
+            Some(VideoWorkerSmartEditEvent::Progress { .. }) | None => {}
+            Some(other) => panic!("unexpected smart-edit event: {other:?}"),
+        }
+        assert!(Instant::now() < deadline, "smart-edit prepare timed out");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    orchestrator
+        .abort_smart_edit_job(job_id)
+        .expect("authenticated abort terminal");
+    assert!(!fixture
+        .root
+        .join("local-executor/smart-edit/jobs")
+        .join(job_id.hyphenated().to_string())
+        .exists());
+}
+
+#[test]
+fn smart_edit_cancel_race_accepts_prequeued_authenticated_events_then_aborts() {
+    let fixture = TemporaryWorker::new(&smart_edit_worker());
+    let launch = editing_launch(&fixture).with_script_model(
+        VideoWorkerScriptModelConfiguration::bailian(
+            "qwen3.7-max-2026-06-08",
+            "sk-private-private-private-private",
+        )
+        .unwrap(),
+    );
+    let orchestrator = orchestrator();
+    orchestrator.start(launch).unwrap();
+    let job_id = Uuid::parse_str("123e4567-e89b-42d3-a456-426614174100").unwrap();
+    let request = VideoWorkerSmartEditRequest::new(
+        "把发布会开场剪成一条节奏明快的短片",
+        vec![smart_edit_material()],
+        false,
+    )
+    .unwrap();
+    orchestrator.start_smart_edit_job(job_id, &request).unwrap();
+    orchestrator
+        .request_smart_edit_cancel(job_id)
+        .expect("cooperative cancel enters the authenticated command stream");
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        match orchestrator
+            .try_smart_edit_event(job_id)
+            .expect("events queued before cancel stay authentic")
+        {
+            Some(VideoWorkerSmartEditEvent::Prepared { .. }) => break,
+            Some(VideoWorkerSmartEditEvent::Progress { .. }) | None => {}
+            Some(other) => panic!("unexpected smart-edit race event: {other:?}"),
+        }
+        assert!(Instant::now() < deadline, "smart-edit race timed out");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    orchestrator
+        .abort_smart_edit_job(job_id)
+        .expect("prepared result loses to the user cancellation");
+    assert!(!fixture
+        .root
+        .join("local-executor/smart-edit/jobs")
+        .join(job_id.hyphenated().to_string())
+        .exists());
 }
 
 fn editing_request() -> VideoWorkerLocalEditingJobRequest {

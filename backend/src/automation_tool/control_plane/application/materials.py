@@ -180,13 +180,14 @@ class SmartEditMaterialWriteback:
     def __post_init__(self) -> None:
         if (
             not isinstance(self.analyses, tuple)
-            or not 1 <= len(self.analyses) <= 32
+            or len(self.analyses) > 32
             or not all(
                 isinstance(value, SmartEditMaterialAnalysisWriteback) for value in self.analyses
             )
             or not isinstance(self.narrations, tuple)
             or len(self.narrations) > 32
             or not all(self._valid_narration(value) for value in self.narrations)
+            or (not self.analyses and not self.narrations)
         ):
             raise InvalidMaterialQuery
         analysis_ids = tuple(value.material_id for value in self.analyses)

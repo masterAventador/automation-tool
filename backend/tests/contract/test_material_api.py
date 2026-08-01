@@ -955,6 +955,21 @@ def test_smart_edit_writeback_atomically_updates_analysis_and_registers_narratio
     assert len(repository.materials) == 2
 
 
+def test_smart_edit_writeback_registers_narration_when_analysis_is_already_current() -> None:
+    client, repository = material_client()
+    payload = smart_edit_writeback_payload()
+    payload["analyses"] = []
+
+    response = client.post(
+        "/api/v1/editing-materials/smart-edit-writebacks",
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    assert [value["materialId"] for value in response.json()["materials"]] == [NARRATION_ID]
+    assert len(repository.materials) == 1
+
+
 def test_smart_edit_writeback_snapshot_conflict_rolls_back_the_narration() -> None:
     client, repository = material_client()
     original = make_material()

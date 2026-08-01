@@ -1,18 +1,22 @@
 //! Authenticated, process-owned lifecycle for local video workers.
 
+use crate::control_plane::{
+    SmartEditMaterialAnalysisRequest, SmartEditMaterialWritebackRequest,
+    SmartEditNarrationMaterialRequest,
+};
 use crate::managed_process_tree::{configure_managed_process, ManagedProcessTree};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hmac::{Hmac, KeyInit, Mac};
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt;
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Mutex, MutexGuard};
@@ -334,6 +338,410 @@ pub enum VideoWorkerLocalEditingEvent {
     },
     Failed {
         failure_code: VideoWorkerLocalEditingFailureCode,
+    },
+    Cancelled,
+}
+
+const SMART_EDIT_REQUEST_SCHEMA: &str = "smart-edit-generation-request.v1";
+const SMART_EDIT_RESULT_SCHEMA: &str = "smart-edit-generation-result.v1";
+const SMART_EDIT_RESULT_MAX_BYTES: u64 = 4 * 1024 * 1024;
+
+#[derive(Clone)]
+pub struct VideoWorkerSmartEditRequest {
+    prompt: String,
+    materials: Vec<serde_json::Value>,
+    enable_thinking: bool,
+}
+
+impl fmt::Debug for VideoWorkerSmartEditRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("VideoWorkerSmartEditRequest(<redacted>)")
+    }
+}
+
+impl VideoWorkerSmartEditRequest {
+    pub fn new(
+        prompt: impl Into<String>,
+        materials: Vec<serde_json::Value>,
+        enable_thinking: bool,
+    ) -> Result<Self, VideoWorkerError> {
+        let prompt = prompt.into();
+        const MATERIAL_KEYS: &[&str] = &[
+            "aiDescription",
+            "aiTags",
+            "audioLoudnessLufs",
+            "contentDigest",
+            "describedAt",
+            "descriptionSource",
+            "durationMs",
+            "hasAudio",
+            "hasSpeech",
+            "height",
+            "kind",
+            "materialId",
+            "shotBoundariesMs",
+            "speechSegmentsMs",
+            "speechTranscript",
+            "width",
+        ];
+        if prompt.is_empty()
+            || prompt.trim() != prompt
+            || prompt.chars().count() > 4_000
+            || prompt
+                .chars()
+                .any(|character| character.is_control() && !matches!(character, '\n' | '\t'))
+            || !(1..=32).contains(&materials.len())
+            || materials.iter().any(|material| {
+                material.as_object().is_none_or(|object| {
+                    object.len() != MATERIAL_KEYS.len()
+                        || MATERIAL_KEYS.iter().any(|key| !object.contains_key(*key))
+                        || object
+                            .keys()
+                            .any(|key| key.to_ascii_lowercase().contains("path"))
+                })
+            })
+        {
+            return Err(configuration_invalid());
+        }
+        Ok(Self {
+            prompt,
+            materials,
+            enable_thinking,
+        })
+    }
+
+    fn document(&self, job_id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "enableThinking": self.enable_thinking,
+            "jobId": job_id,
+            "materials": self.materials,
+            "prompt": self.prompt,
+            "schemaVersion": SMART_EDIT_REQUEST_SCHEMA,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoWorkerSmartEditStage {
+    Preparing,
+    Analyzing,
+    Scripting,
+    Synthesizing,
+    Matching,
+    Selecting,
+    Publishing,
+    Completed,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoWorkerSmartEditFailureCode {
+    InsufficientMaterials,
+    SourceTooShort,
+    NoRelevantMaterial,
+    ConfigurationMissing,
+    MaterialUnavailable,
+    UpstreamRejected,
+    WorkspaceUnusable,
+    CommitFailed,
+    LocalFailed,
+}
+
+impl VideoWorkerSmartEditFailureCode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::InsufficientMaterials => "insufficient_materials",
+            Self::SourceTooShort => "source_too_short",
+            Self::NoRelevantMaterial => "no_relevant_material",
+            Self::ConfigurationMissing => "configuration_missing",
+            Self::MaterialUnavailable => "material_unavailable",
+            Self::UpstreamRejected => "upstream_rejected",
+            Self::WorkspaceUnusable => "workspace_unusable",
+            Self::CommitFailed => "commit_failed",
+            Self::LocalFailed => "local_failed",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum VideoWorkerSmartEditParagraphKind {
+    OriginalSpeech,
+    Narrated,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoWorkerSmartEditParagraph {
+    audio_material_id: String,
+    caption_text: String,
+    duration_ms: u64,
+    kind: VideoWorkerSmartEditParagraphKind,
+    sequence: u32,
+    visual_material_id: String,
+    visual_source_in_ms: u64,
+    visual_source_out_ms: u64,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoWorkerSmartEditDraft {
+    duration_ms: u64,
+    paragraphs: Vec<VideoWorkerSmartEditParagraph>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoWorkerSmartEditNarrationRegistration {
+    bytes_written: u64,
+    content_digest: String,
+    duration_ms: u64,
+    material_id: String,
+    relative_path: String,
+    sequence: u32,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VideoWorkerSmartEditResult {
+    analysis_updates: Vec<SmartEditMaterialAnalysisRequest>,
+    draft: VideoWorkerSmartEditDraft,
+    job_id: String,
+    narration_registrations: Vec<VideoWorkerSmartEditNarrationRegistration>,
+    schema_version: String,
+}
+
+impl fmt::Debug for VideoWorkerSmartEditResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("VideoWorkerSmartEditResult(<redacted>)")
+    }
+}
+
+impl VideoWorkerSmartEditResult {
+    fn validate(&self, expected_job_id: &str) -> Result<(), VideoWorkerError> {
+        if self.schema_version != SMART_EDIT_RESULT_SCHEMA
+            || self.job_id != expected_job_id
+            || self.analysis_updates.len() > 32
+            || self.narration_registrations.len() > 32
+            || self.draft.paragraphs.is_empty()
+            || self.draft.paragraphs.len() > 256
+            || !(100..=4 * 60 * 60 * 1000).contains(&self.draft.duration_ms)
+        {
+            return Err(authentication_rejected());
+        }
+        let mut duration_ms = 0_u64;
+        let mut paragraph_ids = std::collections::HashSet::new();
+        for (index, paragraph) in self.draft.paragraphs.iter().enumerate() {
+            let expected_sequence =
+                u32::try_from(index + 1).map_err(|_| authentication_rejected())?;
+            let visual_id = Uuid::parse_str(&paragraph.visual_material_id)
+                .map_err(|_| authentication_rejected())?;
+            let audio_id = Uuid::parse_str(&paragraph.audio_material_id)
+                .map_err(|_| authentication_rejected())?;
+            if paragraph.sequence != expected_sequence
+                || !valid_uuid_v4(visual_id)
+                || !valid_uuid_v4(audio_id)
+                || visual_id.hyphenated().to_string() != paragraph.visual_material_id
+                || audio_id.hyphenated().to_string() != paragraph.audio_material_id
+                || paragraph.duration_ms == 0
+                || paragraph
+                    .visual_source_out_ms
+                    .checked_sub(paragraph.visual_source_in_ms)
+                    != Some(paragraph.duration_ms)
+                || paragraph.caption_text.is_empty()
+                || paragraph.caption_text.trim() != paragraph.caption_text
+                || paragraph.caption_text.chars().count() > 2_000
+                || paragraph
+                    .caption_text
+                    .chars()
+                    .any(|character| character.is_control() && !matches!(character, '\n' | '\t'))
+                || paragraph.kind == VideoWorkerSmartEditParagraphKind::OriginalSpeech
+                    && paragraph.audio_material_id != paragraph.visual_material_id
+                || !paragraph_ids.insert(paragraph.sequence)
+            {
+                return Err(authentication_rejected());
+            }
+            duration_ms = duration_ms
+                .checked_add(paragraph.duration_ms)
+                .ok_or_else(authentication_rejected)?;
+        }
+        if duration_ms != self.draft.duration_ms {
+            return Err(authentication_rejected());
+        }
+        let narrated = self
+            .draft
+            .paragraphs
+            .iter()
+            .filter(|paragraph| paragraph.kind == VideoWorkerSmartEditParagraphKind::Narrated)
+            .collect::<Vec<_>>();
+        if narrated.len() != self.narration_registrations.len() {
+            return Err(authentication_rejected());
+        }
+        let mut material_ids = std::collections::HashSet::new();
+        let mut digests = std::collections::HashSet::new();
+        for (registration, paragraph) in self.narration_registrations.iter().zip(narrated) {
+            if registration.sequence == 0
+                || registration.sequence != paragraph.sequence
+                || registration.material_id != paragraph.audio_material_id
+                || registration.duration_ms != paragraph.duration_ms
+                || registration.bytes_written == 0
+                || registration.bytes_written > 512 * 1024 * 1024
+                || !valid_sha256(&registration.content_digest)
+                || !valid_smart_edit_relative_path(&registration.relative_path)
+                || !material_ids.insert(registration.material_id.as_str())
+                || !digests.insert(registration.content_digest.as_str())
+            {
+                return Err(authentication_rejected());
+            }
+        }
+        let writeback = self.writeback_request()?;
+        if let Some(request) = writeback {
+            request.validate().map_err(|_| authentication_rejected())?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn writeback_request(
+        &self,
+    ) -> Result<Option<SmartEditMaterialWritebackRequest>, VideoWorkerError> {
+        let paragraphs = self
+            .draft
+            .paragraphs
+            .iter()
+            .map(|paragraph| (paragraph.sequence, paragraph))
+            .collect::<BTreeMap<_, _>>();
+        let narrations = self
+            .narration_registrations
+            .iter()
+            .map(|value| {
+                let paragraph = paragraphs
+                    .get(&value.sequence)
+                    .ok_or_else(authentication_rejected)?;
+                Ok(SmartEditNarrationMaterialRequest {
+                    material_id: value.material_id.clone(),
+                    content_digest: value.content_digest.clone(),
+                    duration_ms: value.duration_ms,
+                    speech_transcript: paragraph.caption_text.clone(),
+                })
+            })
+            .collect::<Result<Vec<_>, VideoWorkerError>>()?;
+        if self.analysis_updates.is_empty() && narrations.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(SmartEditMaterialWritebackRequest {
+            analyses: self.analysis_updates.clone(),
+            narrations,
+        }))
+    }
+
+    pub(crate) fn timeline_document(&self) -> serde_json::Value {
+        let mut start_ms = 0_u64;
+        let mut visual = Vec::new();
+        let mut narration = Vec::new();
+        let mut ambient = Vec::new();
+        let mut caption = Vec::new();
+        for paragraph in &self.draft.paragraphs {
+            let suffix = format!("{:04}", paragraph.sequence);
+            visual.push(serde_json::json!({
+                "clipId": format!("visual-{suffix}"),
+                "startMs": start_ms,
+                "durationMs": paragraph.duration_ms,
+                "sourceMaterialId": paragraph.visual_material_id,
+                "sourceInMs": paragraph.visual_source_in_ms,
+                "sourceOutMs": paragraph.visual_source_out_ms,
+                "text": null,
+                "gainDb": null,
+                "transitionIn": null,
+                "originalAudioMode": null,
+            }));
+            let audio = serde_json::json!({
+                "clipId": if paragraph.kind == VideoWorkerSmartEditParagraphKind::Narrated {
+                    format!("narration-{suffix}")
+                } else {
+                    format!("ambient-{suffix}")
+                },
+                "startMs": start_ms,
+                "durationMs": paragraph.duration_ms,
+                "sourceMaterialId": paragraph.audio_material_id,
+                "sourceInMs": if paragraph.kind == VideoWorkerSmartEditParagraphKind::Narrated {
+                    0
+                } else {
+                    paragraph.visual_source_in_ms
+                },
+                "sourceOutMs": if paragraph.kind == VideoWorkerSmartEditParagraphKind::Narrated {
+                    paragraph.duration_ms
+                } else {
+                    paragraph.visual_source_out_ms
+                },
+                "text": null,
+                "gainDb": 0.0,
+                "transitionIn": null,
+                "originalAudioMode": if paragraph.kind == VideoWorkerSmartEditParagraphKind::OriginalSpeech {
+                    serde_json::Value::String("auto_duck".to_owned())
+                } else {
+                    serde_json::Value::Null
+                },
+            });
+            if paragraph.kind == VideoWorkerSmartEditParagraphKind::Narrated {
+                narration.push(audio);
+            } else {
+                ambient.push(audio);
+            }
+            caption.push(serde_json::json!({
+                "clipId": format!("caption-{suffix}"),
+                "startMs": start_ms,
+                "durationMs": paragraph.duration_ms,
+                "sourceMaterialId": null,
+                "sourceInMs": null,
+                "sourceOutMs": null,
+                "text": paragraph.caption_text,
+                "gainDb": null,
+                "transitionIn": null,
+                "originalAudioMode": null,
+            }));
+            start_ms += paragraph.duration_ms;
+        }
+        let mut tracks = vec![serde_json::json!({
+            "trackId": "visual",
+            "kind": "visual",
+            "clips": visual,
+        })];
+        if !narration.is_empty() {
+            tracks.push(serde_json::json!({
+                "trackId": "narration",
+                "kind": "narration",
+                "clips": narration,
+            }));
+        }
+        if !ambient.is_empty() {
+            tracks.push(serde_json::json!({
+                "trackId": "ambient",
+                "kind": "ambient",
+                "clips": ambient,
+            }));
+        }
+        tracks.push(serde_json::json!({
+            "trackId": "caption",
+            "kind": "caption",
+            "clips": caption,
+        }));
+        serde_json::json!({"durationMs": self.draft.duration_ms, "tracks": tracks})
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum VideoWorkerSmartEditEvent {
+    Progress {
+        stage: VideoWorkerSmartEditStage,
+        progress_per_mille: u16,
+    },
+    Prepared {
+        result_digest: String,
+        result: VideoWorkerSmartEditResult,
+    },
+    Failed {
+        failure_code: VideoWorkerSmartEditFailureCode,
     },
     Cancelled,
 }
@@ -829,7 +1237,7 @@ impl fmt::Debug for VideoWorkerScriptModelConfiguration {
 }
 
 impl VideoWorkerScriptModelConfiguration {
-    pub(crate) fn bailian(
+    pub fn bailian(
         model_id: impl Into<String>,
         api_key: impl Into<String>,
     ) -> Result<Self, VideoWorkerError> {
@@ -847,6 +1255,10 @@ impl VideoWorkerScriptModelConfiguration {
 
     pub fn model_id(&self) -> &str {
         &self.model_id
+    }
+
+    fn same_secret_configuration(&self, other: &Self) -> bool {
+        self.model_id == other.model_id && self.api_key.as_bytes() == other.api_key.as_bytes()
     }
 }
 
@@ -1418,7 +1830,7 @@ impl LocalVideoOrchestrator {
     pub fn cancel(&self, kind: VideoWorkerKind, job_id: Uuid) -> Result<(), VideoWorkerError> {
         let mut workers = self.lock_workers()?;
         let running = workers.get_mut(&kind).ok_or_else(not_running)?;
-        if running.editing_job.is_some() {
+        if running.editing_job.is_some() || running.smart_edit_job.is_some() {
             return Err(configuration_invalid());
         }
         let job_id = job_id.hyphenated().to_string();
@@ -1476,7 +1888,10 @@ impl LocalVideoOrchestrator {
         let running = workers
             .get_mut(&VideoWorkerKind::Python)
             .ok_or_else(not_running)?;
-        if running.launch.media_tools.is_none() || running.editing_job.is_some() {
+        if running.launch.media_tools.is_none()
+            || running.editing_job.is_some()
+            || running.smart_edit_job.is_some()
+        {
             return Err(configuration_invalid());
         }
         if running
@@ -1637,6 +2052,312 @@ impl LocalVideoOrchestrator {
             return Err(configuration_invalid());
         }
         running.editing_job = None;
+        Ok(())
+    }
+
+    /// Stage one private smart-edit request and start its authenticated
+    /// two-phase Worker transaction. The prompt and material facts are written
+    /// only below the Worker's private asset root and never enter argv, logs or
+    /// the command line protocol.
+    pub fn start_smart_edit_job(
+        &self,
+        job_id: Uuid,
+        request: &VideoWorkerSmartEditRequest,
+    ) -> Result<(), VideoWorkerError> {
+        if !valid_uuid_v4(job_id) {
+            return Err(configuration_invalid());
+        }
+        let mut workers = self.lock_workers()?;
+        let running = workers
+            .get_mut(&VideoWorkerKind::Python)
+            .ok_or_else(not_running)?;
+        if running.launch.media_tools.is_none()
+            || running.launch.script_model.is_none()
+            || running.editing_job.is_some()
+            || running.smart_edit_job.is_some()
+            || running
+                .child
+                .try_wait()
+                .map_err(|_| process_unavailable())?
+                .is_some()
+        {
+            return Err(configuration_invalid());
+        }
+        let job_id = job_id.hyphenated().to_string();
+        let job_root = write_smart_edit_request(&running.launch.asset_root, &job_id, request)?;
+        let outcome = (|| {
+            let authentication_proof = running.token.command_proof(
+                VideoWorkerKind::Python,
+                "worker.smart_edit.start",
+                &job_id,
+            )?;
+            let command = VideoWorkerCommandDocument {
+                command: "worker.smart_edit.start",
+                job_id: &job_id,
+                protocol_version: WORKER_PROTOCOL_VERSION,
+                worker_kind: VideoWorkerKind::Python.as_str(),
+                authentication_proof: &authentication_proof,
+            };
+            write_command(&mut running.stdin, &command)
+        })();
+        if let Err(error) = outcome {
+            let _ = fs::remove_dir_all(&job_root);
+            return Err(error);
+        }
+        running.smart_edit_job = Some(RunningSmartEditJob {
+            job_id,
+            job_root,
+            stage: None,
+            progress_per_mille: 0,
+            cancelling: false,
+            prepared_digest: None,
+            terminal: false,
+        });
+        Ok(())
+    }
+
+    pub fn try_smart_edit_event(
+        &self,
+        job_id: Uuid,
+    ) -> Result<Option<VideoWorkerSmartEditEvent>, VideoWorkerError> {
+        if !valid_uuid_v4(job_id) {
+            return Err(configuration_invalid());
+        }
+        let mut workers = self.lock_workers()?;
+        let running = workers
+            .get_mut(&VideoWorkerKind::Python)
+            .ok_or_else(not_running)?;
+        let expected_job_id = job_id.hyphenated().to_string();
+        let state = running
+            .smart_edit_job
+            .as_mut()
+            .filter(|state| state.job_id == expected_job_id && !state.terminal)
+            .ok_or_else(configuration_invalid)?;
+        let line = match running.events.try_recv() {
+            Ok(Ok(line)) => line,
+            Ok(Err(())) => return Err(authentication_rejected()),
+            Err(TryRecvError::Empty) => return Ok(None),
+            Err(TryRecvError::Disconnected) => return Err(process_unavailable()),
+        };
+        let event = parse_smart_edit_event(&running.token, &running.launch, state, &line)?;
+        Ok(Some(event))
+    }
+
+    pub fn request_smart_edit_cancel(&self, job_id: Uuid) -> Result<(), VideoWorkerError> {
+        if !valid_uuid_v4(job_id) {
+            return Err(configuration_invalid());
+        }
+        let mut workers = self.lock_workers()?;
+        let running = workers
+            .get_mut(&VideoWorkerKind::Python)
+            .ok_or_else(not_running)?;
+        let job_id = job_id.hyphenated().to_string();
+        let state = running
+            .smart_edit_job
+            .as_mut()
+            .filter(|state| {
+                state.job_id == job_id
+                    && !state.terminal
+                    && state.prepared_digest.is_none()
+                    && !state.cancelling
+            })
+            .ok_or_else(configuration_invalid)?;
+        let authentication_proof =
+            running
+                .token
+                .command_proof(VideoWorkerKind::Python, "worker.cancel", &job_id)?;
+        write_command(
+            &mut running.stdin,
+            &VideoWorkerCommandDocument {
+                command: "worker.cancel",
+                job_id: &job_id,
+                protocol_version: WORKER_PROTOCOL_VERSION,
+                worker_kind: VideoWorkerKind::Python.as_str(),
+                authentication_proof: &authentication_proof,
+            },
+        )?;
+        state.cancelling = true;
+        Ok(())
+    }
+
+    pub fn commit_smart_edit_job(&self, job_id: Uuid) -> Result<(), VideoWorkerError> {
+        self.finalize_smart_edit_job(job_id, true)
+    }
+
+    pub fn abort_smart_edit_job(&self, job_id: Uuid) -> Result<(), VideoWorkerError> {
+        self.finalize_smart_edit_job(job_id, false)
+    }
+
+    /// Kill a smart-edit Worker transaction whose authenticated event stream
+    /// can no longer be trusted, then remove its host-owned private staging.
+    pub fn emergency_stop_smart_edit_job(&self, job_id: Uuid) -> Result<(), VideoWorkerError> {
+        if !valid_uuid_v4(job_id) {
+            return Err(configuration_invalid());
+        }
+        let mut workers = self.lock_workers()?;
+        let expected_job_id = job_id.hyphenated().to_string();
+        let running = workers
+            .get(&VideoWorkerKind::Python)
+            .ok_or_else(not_running)?;
+        let job_root = running
+            .smart_edit_job
+            .as_ref()
+            .filter(|state| state.job_id == expected_job_id)
+            .map(|state| state.job_root.clone())
+            .ok_or_else(configuration_invalid)?;
+        let expected_job_root = running
+            .launch
+            .asset_root
+            .join("local-executor/smart-edit/jobs")
+            .join(&expected_job_id);
+        if job_root != expected_job_root {
+            return Err(authentication_rejected());
+        }
+        let mut running = workers
+            .remove(&VideoWorkerKind::Python)
+            .expect("checked Python Worker exists");
+        force_stop(&mut running);
+        drop(workers);
+        remove_private_smart_edit_job_root(&job_root)
+    }
+
+    fn finalize_smart_edit_job(&self, job_id: Uuid, commit: bool) -> Result<(), VideoWorkerError> {
+        if !valid_uuid_v4(job_id) {
+            return Err(configuration_invalid());
+        }
+        let mut workers = self.lock_workers()?;
+        let running = workers
+            .get_mut(&VideoWorkerKind::Python)
+            .ok_or_else(not_running)?;
+        let job_id = job_id.hyphenated().to_string();
+        let state = running
+            .smart_edit_job
+            .as_ref()
+            .filter(|state| {
+                state.job_id == job_id
+                    && !state.terminal
+                    && state.prepared_digest.is_some()
+                    && (!commit || !state.cancelling)
+            })
+            .ok_or_else(configuration_invalid)?;
+        let digest = state
+            .prepared_digest
+            .as_deref()
+            .ok_or_else(configuration_invalid)?
+            .to_owned();
+        let command_name = if commit {
+            "worker.smart_edit.commit"
+        } else {
+            "worker.smart_edit.abort"
+        };
+        let authentication_proof =
+            running
+                .token
+                .command_proof(VideoWorkerKind::Python, command_name, &job_id)?;
+        write_command(
+            &mut running.stdin,
+            &VideoWorkerCommandDocument {
+                command: command_name,
+                job_id: &job_id,
+                protocol_version: WORKER_PROTOCOL_VERSION,
+                worker_kind: VideoWorkerKind::Python.as_str(),
+                authentication_proof: &authentication_proof,
+            },
+        )?;
+        let line = receive_line(&running.events, self.request_timeout)?;
+        let accepted = if commit {
+            valid_smart_edit_succeeded(&running.token, &running.launch, &job_id, &digest, &line)?
+        } else {
+            valid_smart_edit_aborted(&running.token, &running.launch, &job_id, &line)?
+        };
+        if !accepted {
+            if let Some(state) = running.smart_edit_job.as_mut() {
+                state.terminal = true;
+            }
+            return Err(VideoWorkerError::new(VideoWorkerErrorCode::RenderRejected));
+        }
+        remove_private_smart_edit_job_root(&state.job_root)?;
+        running.smart_edit_job = None;
+        Ok(())
+    }
+
+    pub fn finish_smart_edit_job(&self, job_id: Uuid) -> Result<(), VideoWorkerError> {
+        if !valid_uuid_v4(job_id) {
+            return Err(configuration_invalid());
+        }
+        let mut workers = self.lock_workers()?;
+        let running = workers
+            .get_mut(&VideoWorkerKind::Python)
+            .ok_or_else(not_running)?;
+        let expected = job_id.hyphenated().to_string();
+        let state = running
+            .smart_edit_job
+            .as_ref()
+            .filter(|state| state.job_id == expected && state.terminal)
+            .ok_or_else(configuration_invalid)?;
+        remove_private_smart_edit_job_root(&state.job_root)?;
+        running.smart_edit_job = None;
+        Ok(())
+    }
+
+    pub(crate) fn smart_edit_job_owner(&self) -> Result<Option<Uuid>, VideoWorkerError> {
+        let workers = self.lock_workers()?;
+        let Some(running) = workers.get(&VideoWorkerKind::Python) else {
+            return Ok(None);
+        };
+        running
+            .smart_edit_job
+            .as_ref()
+            .map(|state| Uuid::parse_str(&state.job_id).map_err(|_| authentication_rejected()))
+            .transpose()
+    }
+
+    pub(crate) fn worker_uses_script_model(
+        &self,
+        expected: &VideoWorkerScriptModelConfiguration,
+    ) -> Result<bool, VideoWorkerError> {
+        let workers = self.lock_workers()?;
+        Ok(workers
+            .get(&VideoWorkerKind::Python)
+            .and_then(|running| running.launch.script_model.as_ref())
+            .is_some_and(|actual| actual.same_secret_configuration(expected)))
+    }
+
+    pub(crate) fn rollback_committed_smart_edit(
+        &self,
+        job_id: Uuid,
+        material_ids: &[Uuid],
+    ) -> Result<(), VideoWorkerError> {
+        if !valid_uuid_v4(job_id)
+            || material_ids.len() > 32
+            || material_ids.iter().any(|value| !valid_uuid_v4(*value))
+        {
+            return Err(configuration_invalid());
+        }
+        let mut failed = false;
+        for material_id in material_ids {
+            if self.forget_local_material(*material_id).is_err() {
+                failed = true;
+            }
+        }
+        let workers = self.lock_workers()?;
+        let running = workers
+            .get(&VideoWorkerKind::Python)
+            .ok_or_else(not_running)?;
+        let durable = running
+            .launch
+            .asset_root
+            .join("local-executor/generated-materials")
+            .join(job_id.hyphenated().to_string());
+        drop(workers);
+        if durable.exists()
+            && (validate_directory_path(&durable).is_err() || fs::remove_dir_all(durable).is_err())
+        {
+            failed = true;
+        }
+        if failed {
+            return Err(process_unavailable());
+        }
         Ok(())
     }
 
@@ -1910,6 +2631,7 @@ struct RunningVideoWorker {
     web_ui: Option<VideoWorkerWebUiEndpoint>,
     material_preview: Option<VideoWorkerMaterialPreviewEndpoint>,
     editing_job: Option<RunningLocalEditingJob>,
+    smart_edit_job: Option<RunningSmartEditJob>,
 }
 
 struct RunningLocalEditingJob {
@@ -1917,6 +2639,16 @@ struct RunningLocalEditingJob {
     phase: Option<VideoWorkerLocalEditingPhase>,
     progress_per_mille: u16,
     cancelling: bool,
+    terminal: bool,
+}
+
+struct RunningSmartEditJob {
+    job_id: String,
+    job_root: PathBuf,
+    stage: Option<VideoWorkerSmartEditStage>,
+    progress_per_mille: u16,
+    cancelling: bool,
+    prepared_digest: Option<String>,
     terminal: bool,
 }
 
@@ -2265,6 +2997,67 @@ struct VideoWorkerLocalEditingCancelledEvent {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoWorkerSmartEditProgressEvent {
+    authentication_proof: String,
+    event: String,
+    job_id: String,
+    #[serde(rename = "progressPermille")]
+    progress_per_mille: u16,
+    protocol_version: String,
+    stage: VideoWorkerSmartEditStage,
+    worker_kind: String,
+    worker_version: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoWorkerSmartEditPreparedEvent {
+    authentication_proof: String,
+    event: String,
+    job_id: String,
+    protocol_version: String,
+    result_digest: String,
+    worker_kind: String,
+    worker_version: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoWorkerSmartEditFailedEvent {
+    authentication_proof: String,
+    event: String,
+    failure_code: VideoWorkerSmartEditFailureCode,
+    job_id: String,
+    protocol_version: String,
+    worker_kind: String,
+    worker_version: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoWorkerSmartEditSimpleEvent {
+    authentication_proof: String,
+    event: String,
+    job_id: String,
+    protocol_version: String,
+    worker_kind: String,
+    worker_version: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoWorkerSmartEditSucceededEvent {
+    authentication_proof: String,
+    event: String,
+    job_id: String,
+    protocol_version: String,
+    result_digest: String,
+    worker_kind: String,
+    worker_version: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct VideoWorkerLocalMaterialImportedEvent {
     authentication_proof: String,
     event: String,
@@ -2400,7 +3193,10 @@ fn local_material_worker(
     let running = workers.get_mut(&VideoWorkerKind::Python).ok_or(
         VideoWorkerLocalMaterialError::Lifecycle(VideoWorkerErrorCode::NotRunning),
     )?;
-    if running.launch.media_tools.is_none() || running.editing_job.is_some() {
+    if running.launch.media_tools.is_none()
+        || running.editing_job.is_some()
+        || running.smart_edit_job.is_some()
+    {
         return Err(VideoWorkerLocalMaterialError::Lifecycle(
             VideoWorkerErrorCode::ConfigurationInvalid,
         ));
@@ -2615,6 +3411,410 @@ fn parse_local_editing_event(
     Err(authentication_rejected())
 }
 
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn sha256_hex(payload: &[u8]) -> String {
+    use fmt::Write as _;
+
+    let digest = Sha256::digest(payload);
+    let mut encoded = String::with_capacity(64);
+    for byte in digest {
+        write!(&mut encoded, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    encoded
+}
+
+fn valid_smart_edit_relative_path(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > 512
+        || value.contains('\\')
+        || value.chars().any(char::is_control)
+    {
+        return false;
+    }
+    let path = Path::new(value);
+    !path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+}
+
+struct SmartEditEventAuthentication<'a> {
+    expected_event: &'a str,
+    event: &'a str,
+    expected_job_id: &'a str,
+    job_id: &'a str,
+    protocol_version: &'a str,
+    worker_kind: &'a str,
+    worker_version: &'a str,
+    detail: &'a str,
+    proof: &'a str,
+}
+
+fn smart_edit_event_common(
+    token: &VideoWorkerSessionToken,
+    launch: &VideoWorkerLaunch,
+    authentication: &SmartEditEventAuthentication<'_>,
+) -> bool {
+    authentication.event == authentication.expected_event
+        && authentication.job_id == authentication.expected_job_id
+        && authentication.protocol_version == WORKER_PROTOCOL_VERSION
+        && authentication.worker_kind == VideoWorkerKind::Python.as_str()
+        && authentication.worker_version == launch.expected_version
+        && token.verify_event_proof(
+            authentication.expected_event,
+            VideoWorkerKind::Python,
+            authentication.worker_version,
+            authentication.detail,
+            authentication.proof,
+        )
+}
+
+fn load_smart_edit_result(
+    state: &RunningSmartEditJob,
+    digest: &str,
+) -> Result<VideoWorkerSmartEditResult, VideoWorkerError> {
+    let path = state.job_root.join("result.json");
+    let metadata = path
+        .symlink_metadata()
+        .map_err(|_| authentication_rejected())?;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_file()
+        || !(1..=SMART_EDIT_RESULT_MAX_BYTES).contains(&metadata.len())
+    {
+        return Err(authentication_rejected());
+    }
+    let mut source = fs::File::open(&path).map_err(|_| authentication_rejected())?;
+    let mut payload = Vec::with_capacity(metadata.len() as usize);
+    Read::by_ref(&mut source)
+        .take(SMART_EDIT_RESULT_MAX_BYTES + 1)
+        .read_to_end(&mut payload)
+        .map_err(|_| authentication_rejected())?;
+    if payload.len() as u64 != metadata.len()
+        || payload.len() as u64 > SMART_EDIT_RESULT_MAX_BYTES
+        || sha256_hex(&payload) != digest
+    {
+        return Err(authentication_rejected());
+    }
+    let result: VideoWorkerSmartEditResult =
+        serde_json::from_slice(&payload).map_err(|_| authentication_rejected())?;
+    result.validate(&state.job_id)?;
+    Ok(result)
+}
+
+fn parse_smart_edit_event(
+    token: &VideoWorkerSessionToken,
+    launch: &VideoWorkerLaunch,
+    state: &mut RunningSmartEditJob,
+    line: &str,
+) -> Result<VideoWorkerSmartEditEvent, VideoWorkerError> {
+    if let Ok(event) = serde_json::from_str::<VideoWorkerSmartEditProgressEvent>(line) {
+        let stage = event.stage;
+        let stage_name = match stage {
+            VideoWorkerSmartEditStage::Preparing => "preparing",
+            VideoWorkerSmartEditStage::Analyzing => "analyzing",
+            VideoWorkerSmartEditStage::Scripting => "scripting",
+            VideoWorkerSmartEditStage::Synthesizing => "synthesizing",
+            VideoWorkerSmartEditStage::Matching => "matching",
+            VideoWorkerSmartEditStage::Selecting => "selecting",
+            VideoWorkerSmartEditStage::Publishing => "publishing",
+            VideoWorkerSmartEditStage::Completed => "completed",
+        };
+        let detail = format!(
+            "{}\0{}\0{}",
+            event.job_id, stage_name, event.progress_per_mille
+        );
+        if event.progress_per_mille > 1_000
+            || state.prepared_digest.is_some()
+            || !smart_edit_event_common(
+                token,
+                launch,
+                &SmartEditEventAuthentication {
+                    expected_event: "worker.smart_edit.progress",
+                    event: &event.event,
+                    expected_job_id: &state.job_id,
+                    job_id: &event.job_id,
+                    protocol_version: &event.protocol_version,
+                    worker_kind: &event.worker_kind,
+                    worker_version: &event.worker_version,
+                    detail: &detail,
+                    proof: &event.authentication_proof,
+                },
+            )
+        {
+            return Err(authentication_rejected());
+        }
+        match state.stage {
+            None if stage != VideoWorkerSmartEditStage::Preparing
+                || event.progress_per_mille != 0 =>
+            {
+                return Err(authentication_rejected());
+            }
+            Some(previous)
+                if stage < previous || event.progress_per_mille < state.progress_per_mille =>
+            {
+                return Err(authentication_rejected());
+            }
+            _ => {}
+        }
+        state.stage = Some(stage);
+        state.progress_per_mille = event.progress_per_mille;
+        return Ok(VideoWorkerSmartEditEvent::Progress {
+            stage,
+            progress_per_mille: event.progress_per_mille,
+        });
+    }
+    if let Ok(event) = serde_json::from_str::<VideoWorkerSmartEditPreparedEvent>(line) {
+        let detail = format!("{}\0{}", event.job_id, event.result_digest);
+        if state.stage != Some(VideoWorkerSmartEditStage::Completed)
+            || state.progress_per_mille != 1_000
+            || state.prepared_digest.is_some()
+            || !valid_sha256(&event.result_digest)
+            || !smart_edit_event_common(
+                token,
+                launch,
+                &SmartEditEventAuthentication {
+                    expected_event: "worker.smart_edit.prepared",
+                    event: &event.event,
+                    expected_job_id: &state.job_id,
+                    job_id: &event.job_id,
+                    protocol_version: &event.protocol_version,
+                    worker_kind: &event.worker_kind,
+                    worker_version: &event.worker_version,
+                    detail: &detail,
+                    proof: &event.authentication_proof,
+                },
+            )
+        {
+            return Err(authentication_rejected());
+        }
+        let result = load_smart_edit_result(state, &event.result_digest)?;
+        state.prepared_digest = Some(event.result_digest.clone());
+        return Ok(VideoWorkerSmartEditEvent::Prepared {
+            result_digest: event.result_digest,
+            result,
+        });
+    }
+    if let Ok(event) = serde_json::from_str::<VideoWorkerSmartEditFailedEvent>(line) {
+        let detail = format!("{}\0{}", event.job_id, event.failure_code.as_str());
+        if !smart_edit_event_common(
+            token,
+            launch,
+            &SmartEditEventAuthentication {
+                expected_event: "worker.smart_edit.failed",
+                event: &event.event,
+                expected_job_id: &state.job_id,
+                job_id: &event.job_id,
+                protocol_version: &event.protocol_version,
+                worker_kind: &event.worker_kind,
+                worker_version: &event.worker_version,
+                detail: &detail,
+                proof: &event.authentication_proof,
+            },
+        ) {
+            return Err(authentication_rejected());
+        }
+        state.terminal = true;
+        return Ok(VideoWorkerSmartEditEvent::Failed {
+            failure_code: event.failure_code,
+        });
+    }
+    if let Ok(event) = serde_json::from_str::<VideoWorkerSmartEditSimpleEvent>(line) {
+        if !state.cancelling
+            || state.prepared_digest.is_some()
+            || !smart_edit_event_common(
+                token,
+                launch,
+                &SmartEditEventAuthentication {
+                    expected_event: "worker.smart_edit.cancelled",
+                    event: &event.event,
+                    expected_job_id: &state.job_id,
+                    job_id: &event.job_id,
+                    protocol_version: &event.protocol_version,
+                    worker_kind: &event.worker_kind,
+                    worker_version: &event.worker_version,
+                    detail: &event.job_id,
+                    proof: &event.authentication_proof,
+                },
+            )
+        {
+            return Err(authentication_rejected());
+        }
+        state.terminal = true;
+        return Ok(VideoWorkerSmartEditEvent::Cancelled);
+    }
+    Err(authentication_rejected())
+}
+
+fn valid_smart_edit_succeeded(
+    token: &VideoWorkerSessionToken,
+    launch: &VideoWorkerLaunch,
+    job_id: &str,
+    digest: &str,
+    line: &str,
+) -> Result<bool, VideoWorkerError> {
+    if let Ok(event) = serde_json::from_str::<VideoWorkerSmartEditSucceededEvent>(line) {
+        let detail = format!("{}\0{}", event.job_id, event.result_digest);
+        if event.result_digest == digest
+            && smart_edit_event_common(
+                token,
+                launch,
+                &SmartEditEventAuthentication {
+                    expected_event: "worker.smart_edit.succeeded",
+                    event: &event.event,
+                    expected_job_id: job_id,
+                    job_id: &event.job_id,
+                    protocol_version: &event.protocol_version,
+                    worker_kind: &event.worker_kind,
+                    worker_version: &event.worker_version,
+                    detail: &detail,
+                    proof: &event.authentication_proof,
+                },
+            )
+        {
+            return Ok(true);
+        }
+        return Err(authentication_rejected());
+    }
+    let event: VideoWorkerSmartEditFailedEvent =
+        serde_json::from_str(line).map_err(|_| authentication_rejected())?;
+    let detail = format!("{}\0{}", event.job_id, event.failure_code.as_str());
+    if event.failure_code != VideoWorkerSmartEditFailureCode::CommitFailed
+        || !smart_edit_event_common(
+            token,
+            launch,
+            &SmartEditEventAuthentication {
+                expected_event: "worker.smart_edit.failed",
+                event: &event.event,
+                expected_job_id: job_id,
+                job_id: &event.job_id,
+                protocol_version: &event.protocol_version,
+                worker_kind: &event.worker_kind,
+                worker_version: &event.worker_version,
+                detail: &detail,
+                proof: &event.authentication_proof,
+            },
+        )
+    {
+        return Err(authentication_rejected());
+    }
+    Ok(false)
+}
+
+fn valid_smart_edit_aborted(
+    token: &VideoWorkerSessionToken,
+    launch: &VideoWorkerLaunch,
+    job_id: &str,
+    line: &str,
+) -> Result<bool, VideoWorkerError> {
+    if let Ok(event) = serde_json::from_str::<VideoWorkerSmartEditSimpleEvent>(line) {
+        if smart_edit_event_common(
+            token,
+            launch,
+            &SmartEditEventAuthentication {
+                expected_event: "worker.smart_edit.aborted",
+                event: &event.event,
+                expected_job_id: job_id,
+                job_id: &event.job_id,
+                protocol_version: &event.protocol_version,
+                worker_kind: &event.worker_kind,
+                worker_version: &event.worker_version,
+                detail: &event.job_id,
+                proof: &event.authentication_proof,
+            },
+        ) {
+            return Ok(true);
+        }
+        return Err(authentication_rejected());
+    }
+    let event: VideoWorkerSmartEditFailedEvent =
+        serde_json::from_str(line).map_err(|_| authentication_rejected())?;
+    let detail = format!("{}\0{}", event.job_id, event.failure_code.as_str());
+    if event.failure_code != VideoWorkerSmartEditFailureCode::LocalFailed
+        || !smart_edit_event_common(
+            token,
+            launch,
+            &SmartEditEventAuthentication {
+                expected_event: "worker.smart_edit.failed",
+                event: &event.event,
+                expected_job_id: job_id,
+                job_id: &event.job_id,
+                protocol_version: &event.protocol_version,
+                worker_kind: &event.worker_kind,
+                worker_version: &event.worker_version,
+                detail: &detail,
+                proof: &event.authentication_proof,
+            },
+        )
+    {
+        return Err(authentication_rejected());
+    }
+    Ok(false)
+}
+
+fn write_smart_edit_request(
+    asset_root: &Path,
+    job_id: &str,
+    request: &VideoWorkerSmartEditRequest,
+) -> Result<PathBuf, VideoWorkerError> {
+    validate_directory_path(asset_root)?;
+    let mut jobs_root = asset_root.to_path_buf();
+    for component in ["local-executor", "smart-edit", "jobs"] {
+        jobs_root.push(component);
+        match fs::create_dir(&jobs_root) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(_) => return Err(process_unavailable()),
+        }
+        validate_directory_path(&jobs_root)?;
+    }
+    let job_root = jobs_root.join(job_id);
+    fs::create_dir(&job_root).map_err(|_| configuration_invalid())?;
+    let outcome = (|| {
+        #[cfg(unix)]
+        use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+        #[cfg(unix)]
+        fs::set_permissions(&job_root, fs::Permissions::from_mode(0o700))
+            .map_err(|_| process_unavailable())?;
+        let path = job_root.join("request.json");
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options.open(path).map_err(|_| process_unavailable())?;
+        let payload =
+            serde_json::to_vec(&request.document(job_id)).map_err(|_| configuration_invalid())?;
+        if payload.is_empty() || payload.len() as u64 > SMART_EDIT_RESULT_MAX_BYTES {
+            return Err(configuration_invalid());
+        }
+        file.write_all(&payload)
+            .and_then(|()| file.flush())
+            .and_then(|()| file.sync_all())
+            .map_err(|_| process_unavailable())
+    })();
+    if let Err(error) = outcome {
+        let _ = fs::remove_dir_all(&job_root);
+        return Err(error);
+    }
+    Ok(job_root)
+}
+
+fn remove_private_smart_edit_job_root(job_root: &Path) -> Result<(), VideoWorkerError> {
+    match fs::symlink_metadata(job_root) {
+        Ok(_) => {
+            validate_directory_path(job_root)?;
+            fs::remove_dir_all(job_root).map_err(|_| process_unavailable())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(process_unavailable()),
+    }
+}
+
 fn spawn_worker(
     launch: VideoWorkerLaunch,
     start_timeout: Duration,
@@ -2715,6 +3915,7 @@ fn spawn_worker(
         web_ui,
         material_preview,
         editing_job: None,
+        smart_edit_job: None,
     };
     if let Err(error) = verify_health(&running, start_timeout) {
         force_stop(&mut running);

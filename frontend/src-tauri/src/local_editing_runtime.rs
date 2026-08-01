@@ -14,6 +14,7 @@ use crate::local_video_orchestrator::{
     VideoWorkerMediaToolsConfiguration, VideoWorkerRestartPolicy, VideoWorkerState,
 };
 use crate::material_video_studio::WORKER_VERSION;
+use crate::model_service_settings::ProductionModelServiceSettings;
 use crate::video_job_workspace::VideoJobWorkspaceStore;
 use crate::video_media_toolchain::VideoMediaToolchain;
 use serde::Serialize;
@@ -193,6 +194,66 @@ pub(crate) fn ensure_worker<R: Runtime>(
         runtime.app_data_directory.clone(),
         &toolchain,
     )?;
+    orchestrator
+        .start(launch)
+        .map(|_| ())
+        .map_err(|_| runtime_unavailable())
+}
+
+pub(crate) fn ensure_smart_edit_worker<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<(), LocalEditingRuntimeError> {
+    let orchestrator = app
+        .try_state::<LocalVideoOrchestrator>()
+        .ok_or_else(runtime_unavailable)?;
+    let settings = app
+        .try_state::<ProductionModelServiceSettings>()
+        .ok_or_else(runtime_unavailable)?;
+    let script_model = settings
+        .material_video_script_model()
+        .map_err(|_| runtime_unavailable())?;
+    let status = orchestrator
+        .status(VideoWorkerKind::Python)
+        .map_err(|_| runtime_unavailable())?;
+    if status.state() == VideoWorkerState::Running {
+        if orchestrator
+            .worker_uses_script_model(&script_model)
+            .map_err(|_| runtime_unavailable())?
+        {
+            return orchestrator
+                .health(VideoWorkerKind::Python)
+                .map_err(|_| runtime_unavailable());
+        }
+        if orchestrator
+            .local_editing_job_owner()
+            .map_err(|_| runtime_unavailable())?
+            .is_some()
+            || orchestrator
+                .smart_edit_job_owner()
+                .map_err(|_| runtime_unavailable())?
+                .is_some()
+        {
+            return Err(runtime_unavailable());
+        }
+        orchestrator
+            .stop(VideoWorkerKind::Python)
+            .map_err(|_| runtime_unavailable())?;
+    }
+    let runtime = app
+        .try_state::<LocalEditingRuntime>()
+        .ok_or_else(runtime_unavailable)?;
+    let resource_directory = app
+        .path()
+        .resource_dir()
+        .map_err(|_| runtime_unavailable())?;
+    let toolchain =
+        VideoMediaToolchain::load(&resource_directory).map_err(|_| runtime_unavailable())?;
+    let launch = worker_launch(
+        worker_executable(&resource_directory),
+        runtime.app_data_directory.clone(),
+        &toolchain,
+    )?
+    .with_script_model(script_model);
     orchestrator
         .start(launch)
         .map(|_| ())

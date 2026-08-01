@@ -192,6 +192,25 @@ async def test_real_postgres_writeback_is_atomic_and_exact_retry_is_idempotent(
 
 
 @pytest.mark.asyncio
+async def test_real_postgres_accepts_narration_only_after_analysis_is_current(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyMaterialRepository(database)
+    writeback = SmartEditMaterialWriteback(analyses=(), narrations=(_narration(),))
+    try:
+        await _prepare(database)
+
+        assert await repository.apply_smart_edit_writeback(writeback, OWNER) == (_narration(),)
+        assert await repository.get(NARRATION_ID, OWNER) == _narration()
+    finally:
+        await _cleanup(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
 async def test_real_postgres_user_takeover_rejects_the_whole_writeback(
     postgresql_url: str,
     alembic_runner: AlembicRunner,

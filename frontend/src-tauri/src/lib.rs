@@ -34,6 +34,7 @@ pub mod motion_video_studio;
 pub mod publish_workspace;
 mod runtime_compatibility;
 pub mod secure_store;
+pub mod smart_edit_runtime;
 pub mod startup_environment;
 pub mod video_job_workspace;
 pub mod video_media_toolchain;
@@ -5130,6 +5131,7 @@ pub fn run() {
             )?);
             app.manage(local_editing_job_ledger::LocalEditingJobScheduler::new());
             app.manage(local_material_library::LocalMaterialLibraryCoordinator::new());
+            app.manage(smart_edit_runtime::SmartEditRuntime::new());
             app.manage(local_editing_runtime::LocalEditingRuntime::new(
                 app_data_directory.clone(),
             )?);

@@ -154,6 +154,11 @@ class EditingTimelineSaveRequest(BaseModel):
         min_length=1,
         max_length=len(TimelineTrackKind),
     )
+    expected_revision: StrictInt | None = Field(
+        alias="expectedRevision",
+        default=None,
+        ge=0,
+    )
 
 
 class EditingTimelineResponse(BaseModel):
@@ -294,6 +299,7 @@ async def save_editing_project_timeline(
             installation_id=installation_id,
             duration_ms=payload.duration_ms,
             tracks=tracks,
+            expected_revision=payload.expected_revision,
         )
     except InvalidTimelineQuery:
         raise _validation_error() from None

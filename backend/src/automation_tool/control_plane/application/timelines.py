@@ -103,7 +103,7 @@ class TimelineRevisionConflict(RuntimeError):
     """A safe service-level conflict carrying only the latest revision number."""
 
     def __init__(self, current_revision: int) -> None:
-        if type(current_revision) is not int or current_revision < 1:
+        if type(current_revision) is not int or current_revision < 0:
             raise ValueError("Timeline conflict revision is invalid")
         super().__init__("Timeline revision conflicts")
         self.current_revision = current_revision
@@ -170,14 +170,21 @@ class TimelineService:
         installation_id: InstallationId,
         duration_ms: int,
         tracks: tuple[TimelineTrack, ...],
+        expected_revision: int | None = None,
     ) -> Timeline:
-        if not isinstance(installation_id, InstallationId):
+        if not isinstance(installation_id, InstallationId) or (
+            expected_revision is not None
+            and (type(expected_revision) is not int or expected_revision < 0)
+        ):
             raise InvalidTimelineQuery
         parsed_project_id = self._project_id(project_id)
         latest = await self._repository.latest_revision(
             parsed_project_id,
             installation_id,
         )
+        current_revision = 0 if latest is None else latest.revision
+        if expected_revision is not None and expected_revision != current_revision:
+            raise TimelineRevisionConflict(current_revision)
         try:
             timeline = Timeline(
                 timeline_id=TimelineId.new() if latest is None else latest.timeline_id,

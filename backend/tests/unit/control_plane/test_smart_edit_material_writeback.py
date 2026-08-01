@@ -74,6 +74,15 @@ def test_writeback_command_can_hold_only_analysis_facts_and_narration_materials(
     assert "旁白内容" not in repr(writeback)
 
 
+def test_writeback_command_accepts_narration_only_when_analysis_is_already_current() -> None:
+    narration = _narration()
+
+    writeback = SmartEditMaterialWriteback(analyses=(), narrations=(narration,))
+
+    assert writeback.analyses == ()
+    assert writeback.narrations == (narration,)
+
+
 @pytest.mark.parametrize(
     "analyses,narrations",
     [

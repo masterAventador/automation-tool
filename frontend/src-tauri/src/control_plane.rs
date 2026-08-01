@@ -73,6 +73,7 @@ enum ControlPlaneOperation {
     DeleteEditingMaterial,
     #[allow(dead_code)]
     UpdateEditingMaterialDescription,
+    ApplySmartEditMaterialWriteback,
     ListEditingProjects,
     CreateEditingProject,
     #[allow(dead_code)]
@@ -105,6 +106,14 @@ enum ControlPlaneOperation {
 }
 
 impl ControlPlaneOperation {
+    fn max_response_length(self) -> usize {
+        if matches!(self, Self::ApplySmartEditMaterialWriteback) {
+            8 * 1024 * 1024
+        } else {
+            MAX_RESPONSE_LENGTH
+        }
+    }
+
     fn method(self) -> &'static str {
         match self {
             Self::GetSystemHealth
@@ -136,6 +145,7 @@ impl ControlPlaneOperation {
             | Self::ExchangeDeviceSession
             | Self::PrepareDouyinPlatformSessionLogout
             | Self::RegisterEditingMaterial
+            | Self::ApplySmartEditMaterialWriteback
             | Self::CreateEditingProject
             | Self::SubmitEditingJob
             | Self::CreateTask
@@ -193,6 +203,9 @@ impl ControlPlaneOperation {
             Self::UpdateEditingMaterialDescription => {
                 "/api/v1/editing-materials/{material_id}/description"
             }
+            Self::ApplySmartEditMaterialWriteback => {
+                "/api/v1/editing-materials/smart-edit-writebacks"
+            }
             Self::ListEditingProjects | Self::CreateEditingProject => "/api/v1/editing-projects",
             Self::GetEditingProject => "/api/v1/editing-projects/{project_id}",
             Self::GetEditingProjectTimeline | Self::SaveEditingProjectTimeline => {
@@ -239,6 +252,7 @@ impl ControlPlaneOperation {
             | Self::ListEditingMaterials
             | Self::GetEditingMaterial
             | Self::UpdateEditingMaterialDescription
+            | Self::ApplySmartEditMaterialWriteback
             | Self::ListEditingProjects
             | Self::GetEditingProject
             | Self::GetEditingProjectTimeline
@@ -314,6 +328,7 @@ impl ControlPlaneOperation {
                 | Self::SaveEditingProjectTimeline
                 | Self::SubmitEditingJob
                 | Self::RegisterEditingMaterial
+                | Self::ApplySmartEditMaterialWriteback
                 | Self::DeleteEditingMaterial
                 | Self::ReconcileEditingJob
         )
@@ -546,7 +561,7 @@ struct EditingProjectListResponse {
     next_cursor: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EditingProjectListPage {
     items: Vec<EditingProjectSnapshot>,
@@ -610,6 +625,43 @@ struct EditingMaterialUserDescriptionRequest<'a> {
     description: &'a str,
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SmartEditMaterialAnalysisRequest {
+    pub(crate) material_id: String,
+    pub(crate) content_digest: String,
+    pub(crate) has_speech: bool,
+    pub(crate) speech_segments_ms: Vec<(u64, u64)>,
+    pub(crate) speech_transcript: Option<String>,
+    pub(crate) shot_boundaries_ms: Vec<u64>,
+    pub(crate) ai_description: Option<String>,
+    pub(crate) ai_tags: Vec<String>,
+    pub(crate) description_source: String,
+    pub(crate) described_at: Option<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SmartEditNarrationMaterialRequest {
+    pub(crate) material_id: String,
+    pub(crate) content_digest: String,
+    pub(crate) duration_ms: u64,
+    pub(crate) speech_transcript: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SmartEditMaterialWritebackRequest {
+    pub(crate) analyses: Vec<SmartEditMaterialAnalysisRequest>,
+    pub(crate) narrations: Vec<SmartEditNarrationMaterialRequest>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SmartEditMaterialWritebackResponse {
+    materials: Vec<EditingMaterialSnapshot>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct EditingMaterialRegistrationRequest {
@@ -657,14 +709,14 @@ enum EditingTransitionKind {
     Wipe,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct EditingTimelineTransition {
     kind: EditingTransitionKind,
     duration_ms: u64,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct EditingTimelineClip {
     clip_id: String,
@@ -686,7 +738,7 @@ struct EditingTimelineClip {
     original_audio_mode: Option<EditingOriginalAudioMode>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct EditingTimelineTrack {
     track_id: String,
@@ -699,6 +751,8 @@ struct EditingTimelineTrack {
 pub struct EditingTimelineDraft {
     duration_ms: u64,
     tracks: Vec<EditingTimelineTrack>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expected_revision: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1604,6 +1658,42 @@ impl ControlPlaneClient {
             return Err(protocol_invalid());
         }
         Ok(material)
+    }
+
+    pub(crate) async fn apply_smart_edit_material_writeback<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        request: &SmartEditMaterialWritebackRequest,
+    ) -> Result<Vec<EditingMaterialSnapshot>, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        request.validate()?;
+        let expected = request.expected_materials();
+        let body = serde_json::to_value(request).map_err(|_| protocol_invalid())?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response = self
+            .execute(
+                ControlPlaneOperation::ApplySmartEditMaterialWriteback,
+                Some(session.token()),
+                Some(&body),
+                None,
+                None,
+            )
+            .await?;
+        let parsed: SmartEditMaterialWritebackResponse = parse_exact_json(&response)?;
+        if parsed.materials.len() != expected.len() {
+            return Err(protocol_invalid());
+        }
+        for (material, (expected_id, expected_digest)) in parsed.materials.iter().zip(expected) {
+            material.validate()?;
+            if material.material_id != expected_id || material.content_digest != expected_digest {
+                return Err(protocol_invalid());
+            }
+        }
+        Ok(parsed.materials)
     }
 
     #[cfg(feature = "control-plane-e2e")]
@@ -2528,10 +2618,11 @@ impl ControlPlaneClient {
             cache_control: header_text(response.headers(), CACHE_CONTROL.as_str()),
         };
         validate_response_metadata(operation, &request_id, &metadata)?;
+        let max_response_length = operation.max_response_length();
 
         if response
             .content_length()
-            .is_some_and(|length| length > MAX_RESPONSE_LENGTH as u64)
+            .is_some_and(|length| length > max_response_length as u64)
         {
             return Err(ControlPlaneError::new(
                 ControlPlaneErrorCode::ProtocolInvalid,
@@ -2544,7 +2635,7 @@ impl ControlPlaneClient {
             .await
             .map_err(|_| transport_error(operation))?
         {
-            if response_body.len() + chunk.len() > MAX_RESPONSE_LENGTH {
+            if response_body.len() + chunk.len() > max_response_length {
                 return Err(ControlPlaneError::new(
                     ControlPlaneErrorCode::ProtocolInvalid,
                     false,
@@ -2911,6 +3002,7 @@ fn validate_response_metadata(
                     | ControlPlaneOperation::GetEditingMaterial
                     | ControlPlaneOperation::DeleteEditingMaterial
                     | ControlPlaneOperation::UpdateEditingMaterialDescription
+                    | ControlPlaneOperation::ApplySmartEditMaterialWriteback
                     | ControlPlaneOperation::ListEditingProjects
                     | ControlPlaneOperation::CreateEditingProject
                     | ControlPlaneOperation::GetEditingProject
@@ -4962,6 +5054,135 @@ impl EditingMaterialRegistrationRequest {
     }
 }
 
+fn valid_editing_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+impl SmartEditMaterialAnalysisRequest {
+    fn validate(&self) -> Result<(), ControlPlaneError> {
+        require_canonical_uuid_v4(&self.material_id)?;
+        if !valid_editing_digest(&self.content_digest)
+            || self.speech_segments_ms.len() > 4096
+            || self.shot_boundaries_ms.len() > 4096
+            || self
+                .speech_segments_ms
+                .iter()
+                .any(|(start, end)| start >= end)
+            || self
+                .speech_segments_ms
+                .windows(2)
+                .any(|values| values[0].1 > values[1].0)
+            || self
+                .shot_boundaries_ms
+                .windows(2)
+                .any(|values| values[0] >= values[1])
+            || self.has_speech
+                != (!self.speech_segments_ms.is_empty() && self.speech_transcript.is_some())
+            || self.speech_transcript.as_ref().is_some_and(|value| {
+                value.is_empty()
+                    || value.trim() != value
+                    || value.chars().count() > 100_000
+                    || editing_text_has_forbidden_character(value, true)
+            })
+            || self.ai_description.as_ref().is_some_and(|value| {
+                value.is_empty()
+                    || value.trim() != value
+                    || value.chars().count() > 2_000
+                    || editing_text_has_forbidden_character(value, true)
+            })
+            || self.ai_tags.len() > 32
+            || self.ai_tags.iter().any(|value| {
+                value.is_empty()
+                    || value.trim() != value
+                    || value.chars().count() > 32
+                    || editing_text_has_forbidden_character(value, true)
+            })
+            || self.ai_tags.iter().collect::<HashSet<_>>().len() != self.ai_tags.len()
+            || !matches!(self.description_source.as_str(), "ai" | "user")
+            || self
+                .described_at
+                .as_deref()
+                .is_some_and(|value| require_bounded_timestamp(value).is_err())
+            || self.description_source == "user"
+                && (self.ai_description.is_none()
+                    || !self.ai_tags.is_empty()
+                    || self.described_at.is_some())
+            || self.description_source == "ai"
+                && (self.ai_description.is_some() != self.described_at.is_some()
+                    || self.ai_description.is_none() && !self.ai_tags.is_empty())
+        {
+            return Err(protocol_invalid());
+        }
+        Ok(())
+    }
+}
+
+impl SmartEditNarrationMaterialRequest {
+    fn validate(&self) -> Result<(), ControlPlaneError> {
+        require_canonical_uuid_v4(&self.material_id)?;
+        if !valid_editing_digest(&self.content_digest)
+            || !(1..=MAX_EDITING_MATERIAL_DURATION_MS).contains(&self.duration_ms)
+            || self.speech_transcript.is_empty()
+            || self.speech_transcript.trim() != self.speech_transcript
+            || self.speech_transcript.chars().count() > 100_000
+            || editing_text_has_forbidden_character(&self.speech_transcript, true)
+        {
+            return Err(protocol_invalid());
+        }
+        Ok(())
+    }
+}
+
+impl SmartEditMaterialWritebackRequest {
+    pub(crate) fn validate(&self) -> Result<(), ControlPlaneError> {
+        if self.analyses.len() > 32
+            || self.narrations.len() > 32
+            || self.analyses.is_empty() && self.narrations.is_empty()
+        {
+            return Err(protocol_invalid());
+        }
+        for value in &self.analyses {
+            value.validate()?;
+        }
+        for value in &self.narrations {
+            value.validate()?;
+        }
+        let mut identifiers = HashSet::new();
+        let mut digests = HashSet::new();
+        if self
+            .analyses
+            .iter()
+            .map(|value| (&value.material_id, &value.content_digest))
+            .chain(
+                self.narrations
+                    .iter()
+                    .map(|value| (&value.material_id, &value.content_digest)),
+            )
+            .any(|(identifier, digest)| {
+                !identifiers.insert(identifier.as_str()) || !digests.insert(digest.as_str())
+            })
+        {
+            return Err(protocol_invalid());
+        }
+        Ok(())
+    }
+
+    fn expected_materials(&self) -> Vec<(&str, &str)> {
+        self.analyses
+            .iter()
+            .map(|value| (value.material_id.as_str(), value.content_digest.as_str()))
+            .chain(
+                self.narrations
+                    .iter()
+                    .map(|value| (value.material_id.as_str(), value.content_digest.as_str())),
+            )
+            .collect()
+    }
+}
+
 impl EditingMaterialSnapshot {
     fn validate(&self) -> Result<(), ControlPlaneError> {
         require_canonical_uuid_v4(&self.material_id)?;
@@ -5086,6 +5307,34 @@ impl EditingMaterialSnapshot {
 
     pub(crate) fn content_digest(&self) -> &str {
         &self.content_digest
+    }
+
+    pub(crate) fn matches_smart_edit_narration(
+        &self,
+        expected: &SmartEditNarrationMaterialRequest,
+    ) -> bool {
+        self.validate().is_ok()
+            && self.material_id == expected.material_id
+            && self.kind == EditingMaterialKind::Audio
+            && self.duration_ms == Some(expected.duration_ms)
+            && self.width.is_none()
+            && self.height.is_none()
+            && self.content_digest == expected.content_digest
+            && self.has_audio
+            && self.audio_loudness_lufs.is_none()
+            && self.has_speech
+            && self.speech_segments_ms == [(0, expected.duration_ms)]
+            && self.speech_transcript.as_deref() == Some(expected.speech_transcript.as_str())
+            && self.shot_boundaries_ms.is_empty()
+            && self.ai_description.is_none()
+            && self.ai_tags.is_empty()
+            && self.description_source == "ai"
+            && self.described_at.is_none()
+    }
+
+    pub(crate) fn worker_document(&self) -> Result<serde_json::Value, ControlPlaneError> {
+        self.validate()?;
+        serde_json::to_value(self).map_err(|_| protocol_invalid())
     }
 }
 
@@ -5225,10 +5474,32 @@ impl EditingTimelineTrack {
 }
 
 impl EditingTimelineDraft {
+    pub(crate) fn from_worker_document(
+        mut document: serde_json::Value,
+        expected_revision: u64,
+    ) -> Result<Self, ControlPlaneError> {
+        let object = document.as_object_mut().ok_or_else(protocol_invalid)?;
+        if object
+            .insert(
+                "expectedRevision".to_owned(),
+                serde_json::json!(expected_revision),
+            )
+            .is_some()
+        {
+            return Err(protocol_invalid());
+        }
+        let draft: Self = serde_json::from_value(document).map_err(|_| protocol_invalid())?;
+        draft.validate()?;
+        Ok(draft)
+    }
+
     fn validate(&self) -> Result<(), ControlPlaneError> {
         if !(100..=MAX_EDITING_TIMELINE_DURATION_MS).contains(&self.duration_ms)
             || self.tracks.is_empty()
             || self.tracks.len() > 5
+            || self
+                .expected_revision
+                .is_some_and(|value| value > MAX_CROSS_RUNTIME_SEQUENCE)
         {
             return Err(protocol_invalid());
         }
@@ -5268,6 +5539,7 @@ impl EditingTimelineSnapshot {
         EditingTimelineDraft {
             duration_ms: self.duration_ms,
             tracks: self.tracks.clone(),
+            expected_revision: None,
         }
         .validate()?;
         require_bounded_timestamp(&self.created_at)?;
@@ -5286,6 +5558,18 @@ impl EditingTimelineSnapshot {
 
     pub(crate) const fn revision(&self) -> u64 {
         self.revision
+    }
+
+    pub(crate) fn confirms_saved_draft(
+        &self,
+        project_id: &str,
+        expected_revision: u64,
+        draft: &EditingTimelineDraft,
+    ) -> bool {
+        self.project_id == project_id
+            && expected_revision.checked_add(1) == Some(self.revision)
+            && self.duration_ms == draft.duration_ms
+            && self.tracks == draft.tracks
     }
 
     pub(crate) fn material_ids(&self) -> Vec<&str> {
@@ -5542,7 +5826,7 @@ mod tests {
         validated_demo_origin, validated_loopback_origin, ControlPlaneErrorCode,
         ControlPlaneOperation, ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
         DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition, EditingJobStatus,
-        ResponseMetadata,
+        EditingTimelineDraft, ResponseMetadata, SmartEditNarrationMaterialRequest,
     };
     use crate::device_credentials::DeviceCredentialVault;
     use crate::secure_store::{SecretStore, SecureStoreError};
@@ -5889,6 +6173,12 @@ mod tests {
                 200,
             ),
             (
+                ControlPlaneOperation::ApplySmartEditMaterialWriteback,
+                "POST",
+                "/api/v1/editing-materials/smart-edit-writebacks",
+                200,
+            ),
+            (
                 ControlPlaneOperation::ListEditingProjects,
                 "GET",
                 "/api/v1/editing-projects",
@@ -6143,6 +6433,10 @@ mod tests {
             (
                 ControlPlaneOperation::UpdateEditingMaterialDescription,
                 "updateEditingMaterialDescription",
+            ),
+            (
+                ControlPlaneOperation::ApplySmartEditMaterialWriteback,
+                "applySmartEditMaterialWriteback",
             ),
             (
                 ControlPlaneOperation::ListEditingProjects,
@@ -6605,6 +6899,106 @@ mod tests {
             &serde_json::to_vec(&expanded).expect("expanded material page JSON")
         )
         .is_err());
+    }
+
+    #[test]
+    fn smart_edit_compensation_matches_only_the_exact_generated_narration() {
+        let digest = "ab".repeat(32);
+        let page = serde_json::json!({
+            "items": [{
+                "materialId": IDENTIFIER,
+                "kind": "audio",
+                "durationMs": 1200,
+                "width": null,
+                "height": null,
+                "contentDigest": digest,
+                "hasAudio": true,
+                "audioLoudnessLufs": null,
+                "hasSpeech": true,
+                "speechSegmentsMs": [[0, 1200]],
+                "speechTranscript": "发布会开场",
+                "shotBoundariesMs": [],
+                "aiDescription": null,
+                "aiTags": [],
+                "descriptionSource": "ai",
+                "describedAt": null
+            }],
+            "nextCursor": null
+        });
+        let material = parse_editing_material_list(
+            &serde_json::to_vec(&page).expect("narration material page"),
+        )
+        .expect("exact narration material")
+        .items
+        .remove(0);
+        let expected = SmartEditNarrationMaterialRequest {
+            material_id: IDENTIFIER.to_owned(),
+            content_digest: "ab".repeat(32),
+            duration_ms: 1200,
+            speech_transcript: "发布会开场".to_owned(),
+        };
+        assert!(material.matches_smart_edit_narration(&expected));
+
+        for changed in [
+            SmartEditNarrationMaterialRequest {
+                content_digest: "cd".repeat(32),
+                ..expected.clone()
+            },
+            SmartEditNarrationMaterialRequest {
+                duration_ms: 1199,
+                ..expected.clone()
+            },
+            SmartEditNarrationMaterialRequest {
+                speech_transcript: "另一份旁白".to_owned(),
+                ..expected.clone()
+            },
+        ] {
+            assert!(!material.matches_smart_edit_narration(&changed));
+        }
+    }
+
+    #[test]
+    fn uncertain_timeline_save_is_reconciled_only_by_the_exact_next_revision() {
+        let draft_document = serde_json::json!({
+            "durationMs": 1200,
+            "tracks": [{
+                "trackId": "visual",
+                "kind": "visual",
+                "clips": [{
+                    "clipId": "visual-0001",
+                    "startMs": 0,
+                    "durationMs": 1200,
+                    "sourceMaterialId": "9f48954d-2df1-4168-8f33-b62c5772845b",
+                    "sourceInMs": 0,
+                    "sourceOutMs": 1200,
+                    "text": null,
+                    "gainDb": null,
+                    "transitionIn": null,
+                    "originalAudioMode": null
+                }]
+            }]
+        });
+        let draft = EditingTimelineDraft::from_worker_document(draft_document.clone(), 1)
+            .expect("revision-bound Worker draft");
+        let mut snapshot_document = draft_document;
+        let snapshot = snapshot_document.as_object_mut().expect("timeline object");
+        snapshot.insert(
+            "timelineId".to_owned(),
+            serde_json::json!("0a48954d-2df1-4168-8f33-b62c5772845a"),
+        );
+        snapshot.insert("projectId".to_owned(), serde_json::json!(IDENTIFIER));
+        snapshot.insert("revision".to_owned(), serde_json::json!(2));
+        snapshot.insert(
+            "createdAt".to_owned(),
+            serde_json::json!("2026-08-01T00:00:00Z"),
+        );
+        let saved = parse_editing_timeline(
+            &serde_json::to_vec(&snapshot_document).expect("saved timeline document"),
+        )
+        .expect("saved timeline snapshot");
+        assert!(saved.confirms_saved_draft(IDENTIFIER, 1, &draft));
+        assert!(!saved.confirms_saved_draft(IDENTIFIER, 0, &draft));
+        assert!(!saved.confirms_saved_draft("623e4567-e89b-42d3-a456-426614174105", 1, &draft,));
     }
 
     #[test]
