@@ -70,6 +70,7 @@ FONT_SOURCE_URL_PREFIX = (
     "https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/"
 )
 FETCH_TIMEOUT_SECONDS = 120
+FETCH_ATTEMPTS = 3
 MAXIMUM_FETCH_BYTES = 64 * 1024 * 1024
 
 # The SIL OFL is a template: unlike MIT or Apache-2.0 its text names no
@@ -400,11 +401,19 @@ def _fetch_locked_url(url: str) -> bytes:
     """Fetch one locked artifact, refusing anything unexpected."""
     if not url.startswith(FONT_SOURCE_URL_PREFIX):
         raise SubtitleFontUnavailable(f"{url} is not the locked upstream release")
-    try:
-        with urllib.request.urlopen(url, timeout=FETCH_TIMEOUT_SECONDS) as response:
-            payload = response.read(MAXIMUM_FETCH_BYTES + 1)
-    except (urllib.error.URLError, OSError, ValueError) as error:
-        raise SubtitleFontUnavailable(f"cannot fetch {url}: {error}") from error
+    last_error: urllib.error.URLError | OSError | ValueError | None = None
+    for _attempt in range(FETCH_ATTEMPTS):
+        try:
+            with urllib.request.urlopen(url, timeout=FETCH_TIMEOUT_SECONDS) as response:
+                payload = response.read(MAXIMUM_FETCH_BYTES + 1)
+            break
+        except (urllib.error.URLError, OSError, ValueError) as error:
+            last_error = error
+    else:
+        assert last_error is not None
+        raise SubtitleFontUnavailable(
+            f"cannot fetch {url}: {last_error}"
+        ) from last_error
     if len(payload) > MAXIMUM_FETCH_BYTES:
         raise SubtitleFontUnavailable(f"{url} is larger than the fetch limit")
     return payload

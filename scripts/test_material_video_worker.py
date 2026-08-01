@@ -13,6 +13,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -530,6 +531,40 @@ class SubtitleFontPayloadVerificationTest(unittest.TestCase):
 
 class SubtitleFontFetchTest(unittest.TestCase):
     """Fetching is fail-closed: no fallback font, no half-populated cache."""
+
+    def test_locked_fetch_retries_a_transient_network_failure(self) -> None:
+        payload = b"locked-font"
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = payload
+        url = f"{subtitle_font_assets.FONT_SOURCE_URL_PREFIX}font.otf"
+
+        with mock.patch.object(
+            subtitle_font_assets.urllib.request,
+            "urlopen",
+            side_effect=[TimeoutError("temporary stall"), response],
+        ) as urlopen:
+            self.assertEqual(subtitle_font_assets._fetch_locked_url(url), payload)
+
+        self.assertEqual(urlopen.call_count, 2)
+
+    def test_locked_fetch_stops_after_the_bounded_attempts(self) -> None:
+        url = f"{subtitle_font_assets.FONT_SOURCE_URL_PREFIX}font.otf"
+
+        with (
+            mock.patch.object(
+                subtitle_font_assets.urllib.request,
+                "urlopen",
+                side_effect=TimeoutError("persistent stall"),
+            ) as urlopen,
+            self.assertRaisesRegex(
+                subtitle_font_assets.SubtitleFontUnavailable,
+                "persistent stall",
+            ),
+        ):
+            subtitle_font_assets._fetch_locked_url(url)
+
+        self.assertEqual(urlopen.call_count, subtitle_font_assets.FETCH_ATTEMPTS)
 
     def test_fetches_verifies_and_caches_every_cleared_font(self) -> None:
         payloads, fonts, notice = _synthetic_bundle()
