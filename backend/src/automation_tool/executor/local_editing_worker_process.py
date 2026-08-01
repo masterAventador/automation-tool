@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -38,11 +39,19 @@ from automation_tool.executor.local_editing_worker import (
     LocalEditingStartCommand,
     LocalEditingWorkerBootstrap,
     LocalEditingWorkerFailureCode,
+    LocalMaterialForgetCommand,
+    LocalMaterialImportCommand,
+    LocalMaterialWorkerFailureCode,
 )
 from automation_tool.executor.material_probe import (
     MATERIAL_PATH_REGISTRY_FILE_NAME,
+    MaterialFacts,
     MaterialPathRegistry,
     MaterialPathRegistryRejected,
+    MaterialProbeRejected,
+    approve_source,
+    probe_material,
+    require_source_unchanged,
 )
 from automation_tool.executor.visual_render_execution import (
     VisualRenderExecutionRejected,
@@ -95,11 +104,49 @@ class LocalEditingRenderCancelled(RuntimeError):
         super().__init__("local editing render cancelled")
 
 
+class LocalMaterialOperationRejected(RuntimeError):
+    """A fixed, path-free probe or registry failure for the Worker protocol."""
+
+    def __init__(self, code: LocalMaterialWorkerFailureCode) -> None:
+        self.code = code
+        super().__init__("local material operation rejected")
+
+    def __repr__(self) -> str:
+        return "LocalMaterialOperationRejected(<redacted>)"
+
+
 def _reject(
     code: LocalEditingWorkerFailureCode,
     diagnostic: LocalEditingRenderDiagnosticCode = LocalEditingRenderDiagnosticCode.REJECTED,
 ) -> Never:
     raise LocalEditingRenderRejected(code, diagnostic) from None
+
+
+def _reject_material(code: LocalMaterialWorkerFailureCode) -> Never:
+    raise LocalMaterialOperationRejected(code) from None
+
+
+def _material_registry(bootstrap: LocalEditingWorkerBootstrap) -> MaterialPathRegistry:
+    """Create the App-owned registry home explicitly private, or revalidate it."""
+
+    state_directory = bootstrap.asset_root / "local-executor" / "state"
+    created = False
+    try:
+        state_directory.mkdir(parents=True, mode=0o700, exist_ok=False)
+        created = True
+    except FileExistsError:
+        pass
+    except OSError:
+        _reject_material(LocalMaterialWorkerFailureCode.REGISTRY_UNWRITABLE)
+    if created and os.name != "nt":
+        try:
+            state_directory.chmod(0o700)
+        except OSError:
+            _reject_material(LocalMaterialWorkerFailureCode.REGISTRY_UNWRITABLE)
+    try:
+        return MaterialPathRegistry(state_directory=state_directory)
+    except MaterialPathRegistryRejected as error:
+        _reject_material(LocalMaterialWorkerFailureCode(error.rejection.value))
 
 
 def _object(value: object, keys: set[str]) -> dict[str, object]:
@@ -343,6 +390,61 @@ def _render_failure(error: VisualRenderExecutionRejected) -> Never:
     _reject(mapping[error.code], diagnostic)
 
 
+def execute_local_material_import(
+    bootstrap: LocalEditingWorkerBootstrap,
+    command: LocalMaterialImportCommand,
+) -> MaterialFacts:
+    """Approve, probe, register and close one source window as one operation.
+
+    The registration is already durable when the final identity check runs. If
+    that check notices a swap, forgetting the mapping is part of this operation,
+    not best-effort cleanup. A failed forget therefore replaces the probe reason
+    with the registry reason: claiming `source_not_at_rest` alone would imply no
+    local state remained to repair when in fact compensation did not complete.
+    """
+
+    if not isinstance(bootstrap, LocalEditingWorkerBootstrap) or not isinstance(
+        command, LocalMaterialImportCommand
+    ):
+        _reject_material(LocalMaterialWorkerFailureCode.UNUSABLE_IDENTIFIER)
+    registry = _material_registry(bootstrap)
+    registered = False
+    try:
+        source, approved = approve_source(command.source_path)
+        facts = probe_material(bootstrap.media_tools, source)
+        registry.register(command.material_id, source)
+        registered = True
+        require_source_unchanged(source, approved)
+        return facts
+    except MaterialProbeRejected as error:
+        if registered:
+            try:
+                registry.forget(command.material_id)
+            except MaterialPathRegistryRejected as compensation:
+                _reject_material(LocalMaterialWorkerFailureCode(compensation.rejection.value))
+        _reject_material(LocalMaterialWorkerFailureCode(error.rejection.value))
+    except MaterialPathRegistryRejected as error:
+        _reject_material(LocalMaterialWorkerFailureCode(error.rejection.value))
+
+
+def execute_local_material_forget(
+    bootstrap: LocalEditingWorkerBootstrap,
+    command: LocalMaterialForgetCommand,
+) -> None:
+    """Idempotently compensate a local mapping whose CP operation did not commit."""
+
+    if not isinstance(bootstrap, LocalEditingWorkerBootstrap) or not isinstance(
+        command, LocalMaterialForgetCommand
+    ):
+        _reject_material(LocalMaterialWorkerFailureCode.UNUSABLE_IDENTIFIER)
+    try:
+        _material_registry(bootstrap).forget(command.material_id)
+    except LocalMaterialOperationRejected:
+        raise
+    except MaterialPathRegistryRejected as error:
+        _reject_material(LocalMaterialWorkerFailureCode(error.rejection.value))
+
+
 def execute_local_editing_job(
     bootstrap: LocalEditingWorkerBootstrap,
     command: LocalEditingStartCommand,
@@ -460,5 +562,8 @@ __all__ = [
     "LocalEditingRenderCancelled",
     "LocalEditingRenderDiagnosticCode",
     "LocalEditingRenderRejected",
+    "LocalMaterialOperationRejected",
     "execute_local_editing_job",
+    "execute_local_material_forget",
+    "execute_local_material_import",
 ]

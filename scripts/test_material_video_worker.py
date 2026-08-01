@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import hashlib
+import hmac
 import io
 import json
 import struct
@@ -26,13 +28,6 @@ import gateway  # noqa: E402
 import subtitle_font_assets  # noqa: E402
 import webui_runtime  # noqa: E402
 import worker_main  # noqa: E402
-from automation_tool.executor.local_editing_worker import (  # noqa: E402
-    LocalEditingWorkerFailureCode,
-)
-from automation_tool.executor.local_editing_worker_process import (  # noqa: E402
-    LocalEditingRenderDiagnosticCode,
-    LocalEditingRenderRejected,
-)
 from job_observation_bridge import (  # noqa: E402
     CANCEL_FILE,
     OBSERVATION_FILE,
@@ -45,6 +40,20 @@ from webui_runtime import (  # noqa: E402
     _prepare_private_project,
     _private_config_document,
     default_subtitle_font_name,
+)
+
+from automation_tool.executor.local_editing_worker import (  # noqa: E402
+    LocalEditingWorkerFailureCode,
+    LocalMaterialWorkerFailureCode,
+)
+from automation_tool.executor.local_editing_worker_process import (  # noqa: E402
+    LocalEditingRenderDiagnosticCode,
+    LocalEditingRenderRejected,
+    LocalMaterialOperationRejected,
+)
+from automation_tool.executor.material_probe import (  # noqa: E402
+    MaterialFacts,
+    ProbedMaterialKind,
 )
 
 UPSTREAM_WEBUI = ROOT / "vendor/moneyprinterturbo/webui"
@@ -82,6 +91,19 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
         self.assertEqual(
             output.getvalue(),
             "Material video worker local editing rejected: registry_unreadable\n",
+        )
+
+    def test_local_material_rejection_diagnostic_is_closed_and_path_free(self) -> None:
+        error = LocalMaterialOperationRejected(
+            LocalMaterialWorkerFailureCode.SOURCE_NOT_AT_REST
+        )
+        output = io.StringIO()
+
+        worker_main._report_local_material_rejection(error, output)
+
+        self.assertEqual(
+            output.getvalue(),
+            "Material video worker material operation rejected: source_not_at_rest\n",
         )
 
     def test_legacy_gateway_bootstrap_still_starts_without_local_editing_tools(
@@ -152,6 +174,102 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
                 gateway.parse_bootstrap(
                     (json.dumps(document, separators=(",", ":")) + "\n").encode()
                 )
+
+    def test_gateway_dispatches_authenticated_material_import_without_echoing_path(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="material-video-import-", dir=ROOT / ".local"
+        ) as directory:
+            root = Path(directory)
+            asset_root = root / "assets"
+            asset_root.mkdir(mode=0o700)
+            source = (root / "operator private source.mp4").resolve()
+            source.write_bytes(b"source")
+            ffmpeg = root / "ffmpeg"
+            ffprobe = root / "ffprobe"
+            for tool in (ffmpeg, ffprobe):
+                tool.write_bytes(b"controlled executable")
+                tool.chmod(0o700)
+            token = bytes.fromhex("a1" * 32)
+            material_id = str(uuid4())
+            bootstrap = {
+                "assetRoot": str(asset_root),
+                "bootstrapVersion": "1",
+                "enableWebUi": False,
+                "localSessionToken": token.hex(),
+                "mediaTools": {
+                    "ffmpegPath": str(ffmpeg),
+                    "ffprobePath": str(ffprobe),
+                },
+                "protocolVersion": "1.0",
+                "renderBrowser": None,
+                "scriptModel": None,
+                "workerKind": "python",
+            }
+            message = b"automation-tool.video-worker-command.v1\0" + b"\0".join(
+                part.encode()
+                for part in (
+                    "worker.material.import",
+                    "python",
+                    "1.0",
+                    material_id,
+                    str(source),
+                )
+            )
+            proof = (
+                "atvwc1."
+                + base64.urlsafe_b64encode(hmac.digest(token, message, hashlib.sha256))
+                .rstrip(b"=")
+                .decode()
+            )
+            command = {
+                "authenticationProof": proof,
+                "command": "worker.material.import",
+                "materialId": material_id,
+                "protocolVersion": "1.0",
+                "sourcePath": str(source),
+                "workerKind": "python",
+            }
+            stream = io.StringIO(
+                json.dumps(bootstrap, separators=(",", ":"))
+                + "\n"
+                + json.dumps(command, separators=(",", ":"))
+                + "\n"
+            )
+            output = io.StringIO()
+            facts = MaterialFacts(
+                kind=ProbedMaterialKind.VIDEO,
+                duration_ms=1000,
+                width=720,
+                height=1280,
+                video_codec="h264",
+                audio_codec=None,
+                has_audio=False,
+                audio_loudness_lufs=None,
+                content_digest="ab" * 32,
+            )
+
+            with mock.patch(
+                "automation_tool.executor.local_editing_worker_process.execute_local_material_import",
+                return_value=facts,
+            ) as execute:
+                result = worker_main._gateway_process(stream, output)
+
+            self.assertEqual(result, 0)
+            events = [json.loads(line) for line in output.getvalue().splitlines()]
+            self.assertEqual(
+                [item["event"] for item in events],
+                [
+                    "worker.ready",
+                    "worker.material.imported",
+                ],
+            )
+            self.assertNotIn(str(source), output.getvalue())
+            imported_command = execute.call_args.args[1]
+            self.assertEqual(str(imported_command.material_id), material_id)
+            self.assertEqual(imported_command.source_path, source)
+            self.assertNotIn(str(source), repr(imported_command))
 
     @unittest.skipUnless(sys.platform == "win32", "Windows extended-path boundary")
     def test_webui_normalizes_canonical_windows_paths_before_upstream_use(self) -> None:
@@ -252,6 +370,24 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
     def test_dependency_probe_rejects_non_startup_dependency(self) -> None:
         with self.assertRaisesRegex(ValueError, "not part of the startup set"):
             worker_main.dependency_probe("litellm")
+
+    def test_dependency_probe_reports_only_a_closed_failure_type(self) -> None:
+        stdout = io.StringIO()
+        with mock.patch.object(
+            worker_main, "dependency_probe", side_effect=RuntimeError("private path")
+        ), contextlib.redirect_stdout(stdout):
+            result = worker_main.main(["--probe-dependency", "local-editing-runtime"])
+
+        self.assertEqual(result, 70)
+        self.assertEqual(
+            json.loads(stdout.getvalue()),
+            {
+                "dependency": "local-editing-runtime",
+                "failureType": "RuntimeError",
+                "status": "unavailable",
+            },
+        )
+        self.assertNotIn("private path", stdout.getvalue())
 
 
 class MaterialVideoWorkerExcludedModulesTest(unittest.TestCase):

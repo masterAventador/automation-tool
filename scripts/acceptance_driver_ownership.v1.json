@@ -270,7 +270,8 @@
         "run_im_04_acceptance.py",
         "run_im_05_acceptance.py",
         "run_im_06_acceptance.py",
-        "run_im_07_acceptance.py"
+        "run_im_07_acceptance.py",
+        "run_le_18_t3_acceptance.py"
       ]
     }
   }
