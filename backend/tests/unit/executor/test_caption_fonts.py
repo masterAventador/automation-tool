@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import pkgutil
 import sys
 from collections.abc import Iterator, Mapping, Sequence
@@ -86,12 +87,8 @@ def test_the_user_font_catalog_matches_the_runtime_registry_and_default() -> Non
 
     assert catalog["schemaVersion"] == 1
     assert catalog["defaultKey"] == fonts.DEFAULT_CAPTION_FONT_KEY
-    assert [option["key"] for option in catalog["options"]] == list(
-        fonts.REGISTERED_CAPTION_FONTS
-    )
-    selectable = {
-        option["key"] for option in catalog["options"] if option["selectable"]
-    }
+    assert [option["key"] for option in catalog["options"]] == list(fonts.REGISTERED_CAPTION_FONTS)
+    selectable = {option["key"] for option in catalog["options"] if option["selectable"]}
     assert "plangothic-p1-regular" in selectable
     assert "plangothic-p2-regular" not in selectable
 
@@ -518,10 +515,14 @@ class TestBuildCacheRootBranches:
         monkeypatch.delenv(fonts.BUILD_CACHE_OVERRIDE_VARIABLE, raising=False)
         monkeypatch.delenv("LOCALAPPDATA", raising=False)
         monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
-        # `HOME` rather than a patched `Path.home`: `expanduser` reads the
-        # environment directly, so patching only the method would leave the
-        # override branch expanding `~` against this machine's real home.
-        monkeypatch.setenv("HOME", "/home/u")
+        # `expanduser` reads HOME on POSIX and USERPROFILE on Windows, while
+        # the platform-default branches call Path.home(). Pin all three views
+        # to one native path so these platform-branch tests never depend on the
+        # account running them or compare a WindowsPath with a POSIX literal.
+        self.home = Path("C:/Users/font-test") if os.name == "nt" else Path("/home/u")
+        monkeypatch.setenv("HOME", str(self.home))
+        monkeypatch.setenv("USERPROFILE", str(self.home))
+        monkeypatch.setattr(Path, "home", classmethod(lambda _path: self.home))
 
     def _fetched_bundle_root(self) -> Path:
         return fonts.bundle_root(fonts.MATERIAL_VIDEO_WORKER_BUNDLE)
@@ -529,13 +530,13 @@ class TestBuildCacheRootBranches:
     def test_an_explicit_override_wins(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(fonts.BUILD_CACHE_OVERRIDE_VARIABLE, "~/custom")
 
-        assert self._fetched_bundle_root() == Path("/home/u/custom/subtitle-fonts")
+        assert self._fetched_bundle_root() == self.home / "custom/subtitle-fonts"
 
     def test_macos_uses_library_caches(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(sys, "platform", "darwin")
 
-        assert self._fetched_bundle_root().parent == Path(
-            "/home/u/Library/Caches/automation-tool-build"
+        assert self._fetched_bundle_root().parent == (
+            self.home / "Library/Caches/automation-tool-build"
         )
 
     def test_windows_uses_local_appdata(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -549,8 +550,8 @@ class TestBuildCacheRootBranches:
     ) -> None:
         monkeypatch.setattr(sys, "platform", "win32")
 
-        assert self._fetched_bundle_root().parent == Path(
-            "/home/u/AppData/Local/automation-tool-build"
+        assert self._fetched_bundle_root().parent == (
+            self.home / "AppData/Local/automation-tool-build"
         )
 
     def test_linux_honours_xdg_cache_home(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -562,7 +563,7 @@ class TestBuildCacheRootBranches:
     def test_linux_without_xdg_uses_dot_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(sys, "platform", "linux")
 
-        assert self._fetched_bundle_root().parent == Path("/home/u/.cache/automation-tool-build")
+        assert self._fetched_bundle_root().parent == (self.home / ".cache/automation-tool-build")
 
 
 def _synthesise_face(path: Path, inked: Sequence[int] = (), blank: Sequence[int] = ()) -> None:
