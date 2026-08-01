@@ -49,7 +49,7 @@
     "expectedInstalledDistributionCountByTarget": {
       "macos-arm64": 116,
       "macos-x86_64": 116,
-      "windows-x86_64": 119
+      "windows-x86_64": 120
     },
     "productRequired": {
       "brotli": "1.2.0",
