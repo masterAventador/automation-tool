@@ -5,12 +5,11 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 _SCRIPT = Path(__file__).resolve().parent / "check_local_editing_roadmap_counts.py"
-_LEDGER = (
-    Path(__file__).resolve().parents[1] / "docs/local-video-editing-roadmap.md"
-)
+_LEDGER = Path(__file__).resolve().parents[1] / "docs/local-video-editing-roadmap.md"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -30,7 +29,18 @@ _DONE_COUNT = re.compile(r"^- ✅ 已完成：(\d+)$", re.MULTILINE)
 _NOT_STARTED_COUNT = re.compile(r"^- ⬜ 未开始：(\d+)$", re.MULTILINE)
 _IN_FLIGHT_COUNT = re.compile(r"^- 🧪 RED / 🚧 实现中：(\d+)$", re.MULTILINE)
 _PENDING_ACCEPT_COUNT = re.compile(r"^- 🔍 待验收：(\d+)$", re.MULTILINE)
-_NOT_STARTED_ROW = re.compile(r"^\| LE-\d+ \|.*\| ⬜ 未开始 \|$", re.MULTILINE)
+_MUTABLE_TASK_ROW = re.compile(
+    r"^(?P<prefix>\| LE-\d+ \|.*\| )"
+    r"(?P<status>⬜ 未开始|🔍 待验收|✅ 已完成)"
+    r"(?P<suffix> \|)$",
+    re.MULTILINE,
+)
+_TASK_ROW = re.compile(r"^\| LE-\d+ \|.*\|$", re.MULTILINE)
+_DECLARED_STATUS = {
+    "⬜ 未开始": (_NOT_STARTED_COUNT, "- ⬜ 未开始："),
+    "🔍 待验收": (_PENDING_ACCEPT_COUNT, "- 🔍 待验收："),
+    "✅ 已完成": (_DONE_COUNT, "- ✅ 已完成："),
+}
 
 
 def _run(ledger_path: Path) -> subprocess.CompletedProcess[str]:
@@ -100,20 +110,24 @@ def _with_in_flight(text: str, wanted: int) -> str:
     can fire.
     """
     in_flight_match = _IN_FLIGHT_COUNT.search(text)
-    not_started_match = _NOT_STARTED_COUNT.search(text)
     assert in_flight_match is not None
-    assert not_started_match is not None
     added = wanted - int(in_flight_match.group(1))
+    assert added >= 0
 
-    not_started_rows = _NOT_STARTED_ROW.findall(text)
-    assert len(not_started_rows) >= added, "需要足够多的「⬜ 未开始」行才能构造本场景"
-    for row in not_started_rows[:added]:
-        text = text.replace(row, row[: -len("⬜ 未开始 |")] + "🚧 实现中 |", 1)
+    candidates = list(_MUTABLE_TASK_ROW.finditer(text))
+    assert len(candidates) >= added, "需要足够多的非在途任务行才能构造本场景"
+    changed = Counter(match.group("status") for match in candidates[:added])
+    for match in candidates[:added]:
+        replacement = match.group("prefix") + "🚧 实现中" + match.group("suffix")
+        text = text.replace(match.group(0), replacement, 1)
 
-    text = _IN_FLIGHT_COUNT.sub(f"- 🧪 RED / 🚧 实现中：{wanted}", text)
-    return _NOT_STARTED_COUNT.sub(
-        f"- ⬜ 未开始：{int(not_started_match.group(1)) - added}", text
-    )
+    for status, removed in changed.items():
+        pattern, prefix = _DECLARED_STATUS[status]
+        count_match = pattern.search(text)
+        assert count_match is not None
+        text = pattern.sub(f"{prefix}{int(count_match.group(1)) - removed}", text)
+
+    return _IN_FLIGHT_COUNT.sub(f"- 🧪 RED / 🚧 实现中：{wanted}", text)
 
 
 def test_one_in_flight_per_work_line_passes(tmp_path: Path) -> None:
@@ -131,9 +145,7 @@ def test_more_in_flight_than_work_lines_fails(tmp_path: Path) -> None:
     """超过授权的并行线数就没有工作线认领它，必须判红。"""
     ledger = tmp_path / "roadmap.md"
     ledger.write_text(
-        _with_in_flight(
-            _LEDGER.read_text(encoding="utf-8"), MAX_CONCURRENT_WORK_LINES + 1
-        ),
+        _with_in_flight(_LEDGER.read_text(encoding="utf-8"), MAX_CONCURRENT_WORK_LINES + 1),
         encoding="utf-8",
     )
     result = _run(ledger)
@@ -172,7 +184,7 @@ def test_a_task_row_that_lost_its_dependency_cell_fails(tmp_path: Path) -> None:
     text = _LEDGER.read_text(encoding="utf-8")
     row = next(
         candidate.group(0)
-        for candidate in _NOT_STARTED_ROW.finditer(text)
+        for candidate in _TASK_ROW.finditer(text)
         if len(candidate.group(0).strip("|").split("|")) == _TASK_ROW_CELLS
     )
     cells = row.strip("|").split("|")
@@ -196,7 +208,7 @@ def test_an_unescaped_pipe_inside_a_cell_fails(tmp_path: Path) -> None:
     text = _LEDGER.read_text(encoding="utf-8")
     row = next(
         candidate.group(0)
-        for candidate in _NOT_STARTED_ROW.finditer(text)
+        for candidate in _TASK_ROW.finditer(text)
         if len(candidate.group(0).strip("|").split("|")) == _TASK_ROW_CELLS
     )
     cells = row.strip("|").split("|")
