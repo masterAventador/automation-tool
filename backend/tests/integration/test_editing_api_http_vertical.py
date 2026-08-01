@@ -137,7 +137,7 @@ def request_json(
         response = error
     with response:
         text = response.read().decode("utf-8")
-        body = json.loads(text)
+        body = {} if text == "" else json.loads(text)
         assert isinstance(body, dict)
         assert response.headers["x-request-id"] == request_id
         assert response.headers["cache-control"] == "no-store"
@@ -639,6 +639,23 @@ def test_real_uvicorn_process_round_trips_the_editing_surface_through_postgresql
         )
         assert by_id.body == registered.body
         assert by_digest.body == registered.body
+        owner_materials = request_json(
+            server.port,
+            "GET",
+            "/api/v1/editing-materials/library?limit=1",
+            token=owner_session,
+        )
+        assert owner_materials.body == {
+            "items": [registered.body],
+            "nextCursor": None,
+        }
+        outsider_materials = request_json(
+            server.port,
+            "GET",
+            "/api/v1/editing-materials/library",
+            token=outsider_session,
+        )
+        assert outsider_materials.body == {"items": [], "nextCursor": None}
         assert_error(
             request_json(
                 server.port,
@@ -750,6 +767,16 @@ def test_real_uvicorn_process_round_trips_the_editing_surface_through_postgresql
         timeline_id = UUID(saved_timeline.body["timelineId"])
         assert saved_timeline.body["projectId"] == str(project_id)
         assert saved_timeline.body["revision"] == 1
+        assert_error(
+            request_json(
+                server.port,
+                "DELETE",
+                f"/api/v1/editing-materials/{material_id}",
+                token=owner_session,
+            ),
+            status=409,
+            code="material_in_use",
+        )
         loaded_timeline = request_json(
             server.port,
             "GET",

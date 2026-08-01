@@ -41,6 +41,7 @@ from automation_tool.control_plane.application.local_editing_timeline import (
 )
 from automation_tool.control_plane.application.timelines import (
     TimelineDataRejected,
+    TimelineMaterialMissing,
     TimelineNotFound,
     TimelinePersistenceUnavailable,
     TimelineProjectMissing,
@@ -48,11 +49,14 @@ from automation_tool.control_plane.application.timelines import (
 )
 from automation_tool.control_plane.domain import (
     CaptionStyle,
+    DescriptionSource,
     EditingProject,
     EditingProjectId,
     InstallationId,
     InvalidTimelineModel,
+    Material,
     MaterialId,
+    MaterialKind,
     OriginalAudioMode,
     OutputSpec,
     Timeline,
@@ -77,10 +81,15 @@ from automation_tool.control_plane.infrastructure.database import (
     editing_project_timelines,
     editing_projects,
     installations,
+    materials,
+    timeline_material_references,
     timelines,
 )
 from automation_tool.control_plane.infrastructure.database.editing_project_repository import (
     SqlAlchemyEditingProjectRepository,
+)
+from automation_tool.control_plane.infrastructure.database.material_repository import (
+    SqlAlchemyMaterialRepository,
 )
 from automation_tool.control_plane.infrastructure.database.timeline_repository import (
     SqlAlchemyTimelineRepository,
@@ -428,6 +437,47 @@ async def reset_data(database: Database) -> None:
         await session.execute(delete(timelines))
         await session.execute(delete(editing_project_timelines))
         await session.execute(delete(editing_projects))
+        await session.execute(delete(materials))
+
+
+def make_source_material(material_id: MaterialId) -> Material:
+    return Material(
+        material_id=material_id,
+        kind=MaterialKind.VIDEO,
+        duration_ms=20_000,
+        width=1920,
+        height=1080,
+        content_digest=material_id.uuid.hex * 2,
+        has_audio=True,
+        audio_loudness_lufs=-14.0,
+        has_speech=False,
+        speech_segments_ms=(),
+        speech_transcript=None,
+        shot_boundaries_ms=(0,),
+        ai_description="时间线仓储测试素材",
+        ai_tags=("测试",),
+        description_source=DescriptionSource.AI,
+        described_at=CREATED_AT,
+    )
+
+
+async def store_source_materials(database: Database) -> None:
+    repository = SqlAlchemyMaterialRepository(database)
+    for material_id in (
+        MATERIAL_ONE,
+        MATERIAL_TWO,
+        MATERIAL_THREE,
+        MATERIAL_FOUR,
+        MATERIAL_FIVE,
+    ):
+        if await repository.find_by_digest(material_id.uuid.hex * 2, OWNER) is None:
+            await repository.save(make_source_material(material_id), OWNER)
+
+
+async def store_source_material(database: Database, material_id: MaterialId) -> None:
+    repository = SqlAlchemyMaterialRepository(database)
+    if await repository.find_by_digest(material_id.uuid.hex * 2, OWNER) is None:
+        await repository.save(make_source_material(material_id), OWNER)
 
 
 async def store_project(database: Database, project_id: EditingProjectId) -> None:
@@ -447,6 +497,7 @@ async def store_project(database: Database, project_id: EditingProjectId) -> Non
         make_project(project_id),
         OWNER,
     )
+    await store_source_materials(database)
 
 
 async def stored_row(database: Database, timeline_id: UUID, revision: int) -> dict[str, object]:
@@ -516,6 +567,23 @@ async def test_saved_timeline_lands_as_typed_columns_and_hydrates_back_equal(
         await repository.save(timeline, OWNER)
 
         row = await stored_row(database, timeline_id.uuid, 1)
+        async with database.session() as session:
+            references = set(
+                await session.scalars(
+                    select(timeline_material_references.c.material_id).where(
+                        timeline_material_references.c.timeline_id == timeline_id.uuid,
+                        timeline_material_references.c.timeline_revision == 1,
+                        timeline_material_references.c.installation_id == OWNER.uuid,
+                    )
+                )
+            )
+        assert references == {
+            MATERIAL_ONE.uuid,
+            MATERIAL_TWO.uuid,
+            MATERIAL_THREE.uuid,
+            MATERIAL_FOUR.uuid,
+            MATERIAL_FIVE.uuid,
+        }
         assert row == row_values(timeline_id.uuid, project_id.uuid)
         # The JSONB codec facts, pinned all four levels down. A driver or
         # dialect change that started handing the document back as text would
@@ -615,10 +683,7 @@ async def test_original_audio_mode_round_trips_through_real_postgresql_jsonb(
         loaded = await repository.get(timeline_id, 1, OWNER)
         loaded_ambient = loaded.track_of(TimelineTrackKind.AMBIENT)
         assert loaded_ambient is not None
-        assert (
-            loaded_ambient.clips[0].original_audio_mode
-            is OriginalAudioMode.FIXED_VOLUME
-        )
+        assert loaded_ambient.clips[0].original_audio_mode is OriginalAudioMode.FIXED_VOLUME
     finally:
         await reset_data(database)
         await database.close()
@@ -670,6 +735,8 @@ async def test_local_editing_draft_round_trips_through_real_postgresql(
             project_id=project_id,
             created_at=CREATED_AT,
         )
+        for material_id in (original_video, narrated_image, voiceover):
+            await store_source_material(database, material_id)
 
         await repository.save(timeline, OWNER)
 
@@ -926,6 +993,42 @@ async def test_a_timeline_naming_a_project_nobody_stored_is_refused(
         await store_project(database, absent_project)
         await repository.save(make_timeline(timeline_id, absent_project), OWNER)
         assert await stored_keys(database) == {(timeline_id.uuid, 1)}
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_a_timeline_naming_an_absent_material_is_atomically_refused(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyTimelineRepository(database)
+    try:
+        await reset_data(database)
+        project_id = EditingProjectId.new()
+        timeline_id = TimelineId.new()
+        await store_project(database, project_id)
+        async with database.session() as session:
+            await session.execute(
+                delete(materials).where(materials.c.material_id == MATERIAL_THREE.uuid)
+            )
+
+        with pytest.raises(TimelineMaterialMissing):
+            await repository.save(make_timeline(timeline_id, project_id), OWNER)
+
+        assert await stored_keys(database) == set()
+        async with database.session() as session:
+            assert (
+                await session.scalar(
+                    select(editing_project_timelines.c.timeline_id).where(
+                        editing_project_timelines.c.project_id == project_id.uuid
+                    )
+                )
+                is None
+            )
     finally:
         await reset_data(database)
         await database.close()

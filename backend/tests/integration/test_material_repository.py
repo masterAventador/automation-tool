@@ -25,6 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from automation_tool.control_plane.application.materials import (
     MaterialAlreadyRegistered,
     MaterialDescriptionProtected,
+    MaterialInUse,
     MaterialNotFound,
     MaterialPersistenceUnavailable,
 )
@@ -44,6 +45,7 @@ from automation_tool.control_plane.infrastructure.database import (
     Database,
     installations,
     materials,
+    timeline_material_references,
 )
 from automation_tool.control_plane.infrastructure.database.material_repository import (
     SqlAlchemyMaterialRepository,
@@ -1213,4 +1215,312 @@ async def test_migration_creates_the_declared_shape_and_drops_it(
         assert removed is None
     finally:
         alembic_runner(postgresql_url, "upgrade", "head")
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_material_library_pages_are_stable_and_installation_scoped(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyMaterialRepository(database)
+    try:
+        await reset_data(database)
+        other_owner = await seed_installation(database)
+        identifiers = tuple(
+            MaterialId.parse(f"00000000-0000-4000-8000-{number:012d}") for number in (1, 2, 3)
+        )
+        for number, material_id in enumerate(identifiers, start=1):
+            await repository.save(
+                make_material(material_id, content_digest=f"{number:064x}"),
+                OWNER,
+            )
+        foreign = MaterialId.parse("00000000-0000-4000-8000-000000000004")
+        await repository.save(
+            make_material(foreign, content_digest=f"{4:064x}"),
+            other_owner,
+        )
+
+        first = await repository.list_page(
+            installation_id=OWNER,
+            before_material_id=None,
+            limit=2,
+        )
+        second = await repository.list_page(
+            installation_id=OWNER,
+            before_material_id=first[-1].material_id,
+            limit=2,
+        )
+        foreign_page = await repository.list_page(
+            installation_id=other_owner,
+            before_material_id=None,
+            limit=2,
+        )
+
+        assert tuple(item.material_id for item in first) == identifiers[::-1][:2]
+        assert tuple(item.material_id for item in second) == identifiers[:1]
+        assert tuple(item.material_id for item in foreign_page) == (foreign,)
+
+        with pytest.raises(MaterialNotFound):
+            await repository.delete(identifiers[0], other_owner)
+        await repository.delete(identifiers[0], OWNER)
+        with pytest.raises(MaterialNotFound):
+            await repository.get(identifiers[0], OWNER)
+        with pytest.raises(MaterialNotFound):
+            await repository.delete(identifiers[0], OWNER)
+    finally:
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_material_delete_is_refused_by_a_structural_timeline_reference(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    repository = SqlAlchemyMaterialRepository(database)
+    material_id = MaterialId.new()
+    project_id = UUID("00000000-0000-4000-8000-000000000091")
+    timeline_id = UUID("00000000-0000-4000-8000-000000000092")
+    try:
+        await reset_data(database)
+        await repository.save(make_material(material_id), OWNER)
+        async with database.session() as session:
+            await session.execute(
+                text(
+                    "insert into editing_projects "
+                    "(project_id, installation_id, title, output_width, output_height, "
+                    "output_fps, caption_font_key, caption_font_px, caption_stroke_px, "
+                    "caption_line_spacing, created_at) values "
+                    "(:project_id, :owner, 'delete guard', 1280, 720, 30, "
+                    "'source-han-sans', 48, 3, 1.25, :created_at)"
+                ),
+                {"project_id": project_id, "owner": OWNER.uuid, "created_at": DESCRIBED_AT},
+            )
+            await session.execute(
+                text(
+                    "insert into editing_project_timelines (project_id, timeline_id) "
+                    "values (:project_id, :timeline_id)"
+                ),
+                {"project_id": project_id, "timeline_id": timeline_id},
+            )
+            await session.execute(
+                text(
+                    "insert into timelines "
+                    "(timeline_id, revision, project_id, duration_ms, tracks, created_at) "
+                    "values (:timeline_id, 1, :project_id, 1000, '[]'::jsonb, :created_at)"
+                ),
+                {"timeline_id": timeline_id, "project_id": project_id, "created_at": DESCRIBED_AT},
+            )
+            await session.execute(
+                text(
+                    "insert into timeline_material_references "
+                    "(timeline_id, timeline_revision, project_id, installation_id, material_id) "
+                    "values (:timeline_id, 1, :project_id, :owner, :material_id)"
+                ),
+                {
+                    "timeline_id": timeline_id,
+                    "project_id": project_id,
+                    "owner": OWNER.uuid,
+                    "material_id": material_id.uuid,
+                },
+            )
+
+        with pytest.raises(MaterialInUse):
+            await repository.delete(material_id, OWNER)
+        assert await repository.get(material_id, OWNER) == make_material(material_id)
+    finally:
+        async with database.session() as session:
+            await session.execute(
+                text("delete from timelines where timeline_id = :timeline_id"),
+                {"timeline_id": timeline_id},
+            )
+            await session.execute(
+                text("delete from editing_project_timelines where project_id = :project_id"),
+                {"project_id": project_id},
+            )
+            await session.execute(
+                text("delete from editing_projects where project_id = :project_id"),
+                {"project_id": project_id},
+            )
+        await reset_data(database)
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_material_reference_migration_backfills_existing_timeline_documents(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "downgrade", "20260729_0039")
+    database = Database.from_url(postgresql_url)
+    material_id = MaterialId.new()
+    project_id = UUID("00000000-0000-4000-8000-000000000093")
+    timeline_id = UUID("00000000-0000-4000-8000-000000000094")
+    try:
+        await reset_data(database)
+        await SqlAlchemyMaterialRepository(database).save(make_material(material_id), OWNER)
+        async with database.session() as session:
+            await session.execute(
+                text(
+                    "insert into editing_projects "
+                    "(project_id, installation_id, title, output_width, output_height, "
+                    "output_fps, caption_font_key, caption_font_px, caption_stroke_px, "
+                    "caption_line_spacing, created_at) values "
+                    "(:project_id, :owner, 'backfill', 1280, 720, 30, "
+                    "'source-han-sans', 48, 3, 1.25, :created_at)"
+                ),
+                {"project_id": project_id, "owner": OWNER.uuid, "created_at": DESCRIBED_AT},
+            )
+            await session.execute(
+                text(
+                    "insert into editing_project_timelines (project_id, timeline_id) "
+                    "values (:project_id, :timeline_id)"
+                ),
+                {"project_id": project_id, "timeline_id": timeline_id},
+            )
+            await session.execute(
+                text(
+                    "insert into timelines "
+                    "(timeline_id, revision, project_id, duration_ms, tracks, created_at) "
+                    "values (:timeline_id, 1, :project_id, 1000, "
+                    "jsonb_build_array(jsonb_build_object('clips', jsonb_build_array("
+                    "jsonb_build_object('source_material_id', cast(:material_id as text))))), "
+                    ":created_at)"
+                ),
+                {
+                    "timeline_id": timeline_id,
+                    "project_id": project_id,
+                    "material_id": str(material_id),
+                    "created_at": DESCRIBED_AT,
+                },
+            )
+
+        alembic_runner(postgresql_url, "upgrade", "head")
+        async with database.session() as session:
+            reference = (
+                (
+                    await session.execute(
+                        text(
+                            "select timeline_id, timeline_revision, project_id, installation_id, "
+                            "material_id from timeline_material_references"
+                        )
+                    )
+                )
+                .mappings()
+                .one()
+            )
+        assert dict(reference) == {
+            "timeline_id": timeline_id,
+            "timeline_revision": 1,
+            "project_id": project_id,
+            "installation_id": OWNER.uuid,
+            "material_id": material_id.uuid,
+        }
+    finally:
+        alembic_runner(postgresql_url, "downgrade", "20260729_0039")
+        async with database.session() as session:
+            await session.execute(
+                text("delete from timelines where timeline_id = :timeline_id"),
+                {"timeline_id": timeline_id},
+            )
+            await session.execute(
+                text("delete from editing_project_timelines where project_id = :project_id"),
+                {"project_id": project_id},
+            )
+            await session.execute(
+                text("delete from editing_projects where project_id = :project_id"),
+                {"project_id": project_id},
+            )
+        await reset_data(database)
+        alembic_runner(postgresql_url, "upgrade", "head")
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_material_reference_schema_declares_the_complete_structural_guard(
+    postgresql_url: str,
+    alembic_runner: AlembicRunner,
+) -> None:
+    alembic_runner(postgresql_url, "upgrade", "head")
+    database = Database.from_url(postgresql_url)
+    try:
+        async with database.session() as session:
+            columns = {
+                cast(str, row["column_name"]): (
+                    cast(str, row["data_type"]),
+                    cast(str, row["is_nullable"]),
+                )
+                for row in (
+                    await session.execute(
+                        text(
+                            "select column_name, data_type, is_nullable "
+                            "from information_schema.columns where table_schema = 'public' "
+                            "and table_name = 'timeline_material_references'"
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            }
+            constraints = set(
+                await session.scalars(
+                    text(
+                        "select conname from pg_constraint where conrelid = "
+                        "'public.timeline_material_references'::regclass "
+                        "and contype in ('p', 'f', 'u', 'c')"
+                    )
+                )
+            )
+            material_constraints = set(
+                await session.scalars(
+                    text(
+                        "select conname from pg_constraint where conrelid = "
+                        "'public.materials'::regclass "
+                        "and contype in ('p', 'f', 'u', 'c')"
+                    )
+                )
+            )
+            indexes = set(
+                await session.scalars(
+                    text(
+                        "select indexname from pg_indexes where schemaname = 'public' "
+                        "and tablename = 'timeline_material_references'"
+                    )
+                )
+            )
+
+        assert columns == {
+            "timeline_id": ("uuid", "NO"),
+            "timeline_revision": ("integer", "NO"),
+            "project_id": ("uuid", "NO"),
+            "installation_id": ("uuid", "NO"),
+            "material_id": ("uuid", "NO"),
+        }
+        assert constraints == {
+            "pk_timeline_material_references",
+            "fk_timeline_material_references_timeline",
+            "fk_timeline_material_references_project_owner",
+            "fk_timeline_material_references_material_owner",
+        }
+        assert "uq_materials_material_installation" in material_constraints
+        assert indexes == {
+            "pk_timeline_material_references",
+            "ix_timeline_material_references_installation_material",
+        }
+        assert [column.name for column in timeline_material_references.columns] == [
+            "timeline_id",
+            "timeline_revision",
+            "project_id",
+            "installation_id",
+            "material_id",
+        ]
+        assert {constraint.name for constraint in timeline_material_references.constraints} == (
+            constraints
+        )
+    finally:
         await database.close()

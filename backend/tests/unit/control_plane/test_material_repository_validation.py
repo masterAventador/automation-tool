@@ -27,6 +27,7 @@ from automation_tool.control_plane.application.materials import (
     MaterialAlreadyRegistered,
     MaterialDataRejected,
     MaterialDescriptionProtected,
+    MaterialInUse,
     MaterialNotFound,
     MaterialPersistenceUnavailable,
 )
@@ -101,6 +102,9 @@ class StubResult:
 
     def one_or_none(self) -> RowMapping | None:
         return self._row
+
+    def all(self) -> list[RowMapping]:
+        return [] if self._row is None else [self._row]
 
 
 class StubSession:
@@ -216,6 +220,17 @@ def test_repository_has_one_required_installation_scoped_api() -> None:
         "content_digest",
         "installation_id",
     ]
+    assert list(inspect.signature(repository_type.list_page).parameters) == [
+        "self",
+        "installation_id",
+        "before_material_id",
+        "limit",
+    ]
+    assert list(inspect.signature(repository_type.delete).parameters) == [
+        "self",
+        "material_id",
+        "installation_id",
+    ]
     assert list(inspect.signature(repository_type.update_user_description).parameters) == [
         "self",
         "material",
@@ -259,6 +274,20 @@ async def test_repository_refuses_foreign_argument_types() -> None:
         with pytest.raises(MaterialDataRejected):
             await repository.find_by_digest(cast(str, None), installation_id)
         with pytest.raises(MaterialDataRejected):
+            await repository.list_page(
+                installation_id=installation_id,
+                before_material_id=cast(MaterialId, TaskId.new()),
+                limit=10,
+            )
+        with pytest.raises(MaterialDataRejected):
+            await repository.list_page(
+                installation_id=installation_id,
+                before_material_id=None,
+                limit=cast(int, True),
+            )
+        with pytest.raises(MaterialDataRejected):
+            await repository.delete(cast(MaterialId, TaskId.new()), installation_id)
+        with pytest.raises(MaterialDataRejected):
             await repository.save(
                 material,
                 cast(InstallationId, object()),
@@ -271,6 +300,17 @@ async def test_repository_refuses_foreign_argument_types() -> None:
         with pytest.raises(MaterialDataRejected):
             await repository.find_by_digest(
                 DIGEST,
+                cast(InstallationId, object()),
+            )
+        with pytest.raises(MaterialDataRejected):
+            await repository.list_page(
+                installation_id=cast(InstallationId, object()),
+                before_material_id=None,
+                limit=10,
+            )
+        with pytest.raises(MaterialDataRejected):
+            await repository.delete(
+                material.material_id,
                 cast(InstallationId, object()),
             )
         with pytest.raises(MaterialDataRejected):
@@ -302,9 +342,17 @@ async def test_an_unreachable_database_is_refused_without_leaking_the_connection
             await repository.save(material, installation_id)
         with pytest.raises(MaterialPersistenceUnavailable) as found:
             await repository.find_by_digest(DIGEST, installation_id)
+        with pytest.raises(MaterialPersistenceUnavailable) as listed:
+            await repository.list_page(
+                installation_id=installation_id,
+                before_material_id=None,
+                limit=10,
+            )
+        with pytest.raises(MaterialPersistenceUnavailable) as deleted:
+            await repository.delete(material.material_id, installation_id)
         with pytest.raises(MaterialPersistenceUnavailable) as updated:
             await repository.update_ai_understanding(material, installation_id)
-        for captured in (loaded, saved, found, updated):
+        for captured in (loaded, saved, found, listed, deleted, updated):
             rendered = "".join(traceback.format_exception(captured.value))
             for token in LEAKED_TOKENS:
                 assert token not in rendered
@@ -473,6 +521,33 @@ async def test_a_scoped_insert_only_calls_known_unique_constraints_a_duplicate()
         assert "private unknown integrity failure" not in "".join(
             traceback.format_exception(captured.value)
         )
+        assert captured.value.__cause__ is None
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_only_the_timeline_reference_constraint_means_material_in_use() -> None:
+    database = unreachable_database()
+    try:
+        repository = repository_module.SqlAlchemyMaterialRepository(database)
+        driver_error = Exception("le18_private_material_reference")
+        constraint_error = Exception()
+        constraint_error.constraint_name = (  # type: ignore[attr-defined]
+            "fk_timeline_material_references_material_owner"
+        )
+        driver_error.__cause__ = constraint_error
+        object.__setattr__(
+            database,
+            "_sessions",
+            FailingSessions(IntegrityError("delete from materials", None, driver_error)),
+        )
+
+        with pytest.raises(MaterialInUse) as captured:
+            await repository.delete(MaterialId.new(), InstallationId.new())
+
+        rendered = "".join(traceback.format_exception(captured.value))
+        assert "le18_private_material_reference" not in rendered
         assert captured.value.__cause__ is None
     finally:
         await database.close()

@@ -1,13 +1,13 @@
 """The material persistence boundary's failure vocabulary.
 
-Five outcomes, because a caller has five different things to do about them: a
+Six outcomes, because a caller has six different things to do about them: a
 duplicate is either the same file arriving twice or the same identifier reused,
 and neither gets better on a retry; a missing row is a question that got an
-answer; a description a person has taken over is a refusal aimed at one caller
-and nobody else; an unavailable database is worth retrying; and a rejected
-argument is a bug upstairs. Collapsing them into one exception makes every
-caller guess, and leaves the REST layer above answering 409, 404 and 503 with
-the same status.
+answer; a material used by an immutable timeline cannot be deleted; a
+description a person has taken over is a refusal aimed at one caller and nobody
+else; an unavailable database is worth retrying; and a rejected argument is a
+bug upstairs. Collapsing them into one exception makes every caller guess, and
+leaves the REST layer above answering 409, 404 and 503 with the same status.
 
 Every message is a fixed string and no constructor takes an argument, so nothing
 reaching a log through one of these can carry a connection string, a content
@@ -19,7 +19,11 @@ exactly the moment something would be tempted to name it.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
@@ -32,6 +36,7 @@ from automation_tool.control_plane.domain import (
 from automation_tool.control_plane.domain.resource_ids import InvalidResourceId
 
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}\Z")
+_CURSOR_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
 
 
 class _MaterialPersistenceFailure(RuntimeError):
@@ -47,6 +52,10 @@ class MaterialAlreadyRegistered(_MaterialPersistenceFailure):
 
 class MaterialNotFound(_MaterialPersistenceFailure):
     message = "Material was not found"
+
+
+class MaterialInUse(_MaterialPersistenceFailure):
+    message = "Material is used by a timeline"
 
 
 class MaterialDescriptionProtected(_MaterialPersistenceFailure):
@@ -97,6 +106,17 @@ class InvalidMaterialQuery(ValueError):
         super().__init__("Material query is invalid")
 
 
+@dataclass(frozen=True, slots=True)
+class MaterialListBoundary:
+    material_id: MaterialId
+
+
+@dataclass(frozen=True, slots=True)
+class MaterialListPage:
+    items: tuple[Material, ...]
+    next_cursor: str | None
+
+
 class MaterialRepository(Protocol):
     async def save(
         self,
@@ -116,6 +136,20 @@ class MaterialRepository(Protocol):
         installation_id: InstallationId,
     ) -> Material | None: ...
 
+    async def list_page(
+        self,
+        *,
+        installation_id: InstallationId,
+        before_material_id: MaterialId | None,
+        limit: int,
+    ) -> tuple[Material, ...]: ...
+
+    async def delete(
+        self,
+        material_id: MaterialId,
+        installation_id: InstallationId,
+    ) -> None: ...
+
     async def update_user_description(
         self,
         material: Material,
@@ -133,6 +167,46 @@ class MaterialRepository(Protocol):
         material: Material,
         installation_id: InstallationId,
     ) -> None: ...
+
+
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate key")
+        value[key] = item
+    return value
+
+
+def _encode_cursor(boundary: MaterialListBoundary) -> str:
+    payload = json.dumps(
+        {"materialId": str(boundary.material_id)},
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("ascii")
+    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+
+
+def _decode_cursor(value: object) -> MaterialListBoundary:
+    if not isinstance(value, str) or _CURSOR_PATTERN.fullmatch(value) is None:
+        raise InvalidMaterialQuery
+    boundary: MaterialListBoundary | None = None
+    try:
+        decoded = base64.urlsafe_b64decode(value + ("=" * (-len(value) % 4)))
+        if base64.urlsafe_b64encode(decoded).rstrip(b"=").decode("ascii") != value:
+            raise ValueError("noncanonical cursor")
+        payload = json.loads(decoded.decode("ascii"), object_pairs_hook=_unique_object)
+        if not isinstance(payload, dict) or set(payload) != {"materialId"}:
+            raise ValueError("invalid cursor object")
+        boundary = MaterialListBoundary(material_id=MaterialId.parse(payload["materialId"]))
+        if _encode_cursor(boundary) != value:
+            raise ValueError("noncanonical cursor payload")
+    except (binascii.Error, InvalidResourceId, TypeError, UnicodeDecodeError, ValueError):
+        boundary = None
+    if boundary is None:
+        raise InvalidMaterialQuery
+    return boundary
 
 
 class MaterialService:
@@ -190,6 +264,45 @@ class MaterialService:
         if material is None:
             raise MaterialNotFound
         return material
+
+    async def list(
+        self,
+        *,
+        installation_id: InstallationId,
+        cursor: str | None,
+        limit: int,
+    ) -> MaterialListPage:
+        owner = self._require_installation(installation_id)
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise InvalidMaterialQuery
+        boundary = None if cursor is None else _decode_cursor(cursor)
+        materials = await self._repository.list_page(
+            installation_id=owner,
+            before_material_id=None if boundary is None else boundary.material_id,
+            limit=limit + 1,
+        )
+        items = materials[:limit]
+        next_cursor = (
+            _encode_cursor(MaterialListBoundary(material_id=items[-1].material_id))
+            if len(materials) > limit
+            else None
+        )
+        return MaterialListPage(items=items, next_cursor=next_cursor)
+
+    async def delete(
+        self,
+        *,
+        installation_id: InstallationId,
+        material_id: str,
+    ) -> None:
+        owner = self._require_installation(installation_id)
+        try:
+            parsed_material_id = MaterialId.parse(material_id)
+        except (InvalidResourceId, TypeError):
+            parsed_material_id = None
+        if parsed_material_id is None:
+            raise MaterialNotFound
+        await self._repository.delete(parsed_material_id, owner)
 
     async def update_understanding(
         self,
@@ -265,6 +378,9 @@ __all__ = [
     "MaterialAlreadyRegistered",
     "MaterialDataRejected",
     "MaterialDescriptionProtected",
+    "MaterialInUse",
+    "MaterialListBoundary",
+    "MaterialListPage",
     "MaterialNotFound",
     "MaterialPersistenceUnavailable",
     "MaterialRepository",

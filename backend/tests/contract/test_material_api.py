@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -15,6 +17,7 @@ from automation_tool.control_plane.application.materials import (
     InvalidMaterialQuery,
     MaterialAlreadyRegistered,
     MaterialDescriptionProtected,
+    MaterialInUse,
     MaterialNotFound,
     MaterialPersistenceUnavailable,
     MaterialService,
@@ -59,6 +62,7 @@ class MemoryMaterialRepository:
     def __init__(self) -> None:
         self.materials: dict[MaterialId, tuple[InstallationId, Material]] = {}
         self.failure: Exception | None = None
+        self.in_use: set[MaterialId] = set()
 
     async def save(
         self,
@@ -105,6 +109,42 @@ class MemoryMaterialRepository:
             None,
         )
 
+    async def list_page(
+        self,
+        *,
+        installation_id: InstallationId,
+        before_material_id: MaterialId | None,
+        limit: int,
+    ) -> tuple[Material, ...]:
+        if self.failure is not None:
+            raise self.failure
+        visible = sorted(
+            (
+                material
+                for owner, material in self.materials.values()
+                if owner == installation_id
+                and (
+                    before_material_id is None
+                    or material.material_id.uuid < before_material_id.uuid
+                )
+            ),
+            key=lambda material: material.material_id.uuid,
+            reverse=True,
+        )
+        return tuple(visible[:limit])
+
+    async def delete(
+        self,
+        material_id: MaterialId,
+        installation_id: InstallationId,
+    ) -> None:
+        if self.failure is not None:
+            raise self.failure
+        await self.get(material_id, installation_id)
+        if material_id in self.in_use:
+            raise MaterialInUse
+        del self.materials[material_id]
+
     async def update_user_description(
         self,
         material: Material,
@@ -125,6 +165,16 @@ class MemoryMaterialRepository:
         stored = await self.get(material.material_id, installation_id)
         if stored.description_source is DescriptionSource.USER:
             raise MaterialDescriptionProtected
+        self.materials[material.material_id] = (installation_id, material)
+
+    async def update_speech_analysis(
+        self,
+        material: Material,
+        installation_id: InstallationId,
+    ) -> None:
+        if self.failure is not None:
+            raise self.failure
+        await self.get(material.material_id, installation_id)
         self.materials[material.material_id] = (installation_id, material)
 
 
@@ -194,26 +244,143 @@ def expected_snapshot(material: Material) -> dict[str, object]:
     }
 
 
-def test_openapi_exposes_only_registration_queries_and_description_update() -> None:
+def test_openapi_exposes_material_library_list_and_constrained_delete() -> None:
     schema = create_app(database=None).openapi()
     collection = schema["paths"]["/api/v1/editing-materials"]
     detail = schema["paths"]["/api/v1/editing-materials/{material_id}"]
+    library = schema["paths"]["/api/v1/editing-materials/library"]
     description = schema["paths"]["/api/v1/editing-materials/{material_id}/description"]
 
     assert set(collection) == {"get", "post"}
-    assert set(detail) == {"get"}
+    assert set(detail) == {"delete", "get"}
+    assert set(library) == {"get"}
     assert set(description) == {"put"}
     assert collection["post"]["operationId"] == "registerEditingMaterial"
     assert collection["get"]["operationId"] == "findEditingMaterialByDigest"
     assert detail["get"]["operationId"] == "getEditingMaterial"
+    assert detail["delete"]["operationId"] == "deleteEditingMaterial"
+    assert library["get"]["operationId"] == "listEditingMaterials"
     assert description["put"]["operationId"] == "updateEditingMaterialDescription"
     for operation in (
         collection["post"],
         collection["get"],
         detail["get"],
+        detail["delete"],
+        library["get"],
         description["put"],
     ):
         assert operation["security"] == [{"AppSession": []}]
+
+
+def test_material_library_pages_without_cross_installation_visibility() -> None:
+    repository = MemoryMaterialRepository()
+    owner_client, _ = material_client(repository)
+    other_client, _ = material_client(repository, installation_id=OTHER_INSTALLATION_ID)
+    material_ids = [
+        "00000000-0000-4000-8000-000000000001",
+        "00000000-0000-4000-8000-000000000002",
+        "00000000-0000-4000-8000-000000000003",
+    ]
+    for index, material_id in enumerate(material_ids, start=1):
+        payload = {
+            **VALID_PAYLOAD,
+            "materialId": material_id,
+            "contentDigest": f"{index:064x}",
+        }
+        assert owner_client.post("/api/v1/editing-materials", json=payload).status_code == 201
+    foreign = {
+        **VALID_PAYLOAD,
+        "materialId": "00000000-0000-4000-8000-000000000004",
+        "contentDigest": f"{4:064x}",
+    }
+    assert other_client.post("/api/v1/editing-materials", json=foreign).status_code == 201
+
+    first = owner_client.get("/api/v1/editing-materials/library", params={"limit": 2})
+    assert first.status_code == 200
+    assert first.headers["cache-control"] == "no-store"
+    assert [item["materialId"] for item in first.json()["items"]] == material_ids[::-1][:2]
+    cursor = first.json()["nextCursor"]
+    assert isinstance(cursor, str)
+    assert not any(token in cursor for token in ("/", "\\", "private"))
+
+    second = owner_client.get(
+        "/api/v1/editing-materials/library",
+        params={"limit": 2, "cursor": cursor},
+    )
+    assert second.status_code == 200
+    assert [item["materialId"] for item in second.json()["items"]] == material_ids[:1]
+    assert second.json()["nextCursor"] is None
+    assert str(foreign["materialId"]) not in first.text + second.text
+
+
+def test_material_library_rejects_invalid_paging_and_delete_is_constrained() -> None:
+    client, repository = material_client()
+    registered = client.post("/api/v1/editing-materials", json=VALID_PAYLOAD)
+    assert registered.status_code == 201
+    material_id = MaterialId.parse(registered.json()["materialId"])
+
+    for params in (
+        {"limit": 0},
+        {"limit": 101},
+        {"limit": True},
+        {"cursor": "private/invalid"},
+    ):
+        response = client.get("/api/v1/editing-materials/library", params=params)
+        assert response.status_code == 422
+        assert response.headers["cache-control"] == "no-store"
+        assert response.json()["error"]["code"] == "validation"
+        assert "private" not in response.text
+
+    repository.in_use.add(material_id)
+    refused = client.delete(f"/api/v1/editing-materials/{material_id}")
+    assert refused.status_code == 409
+    assert refused.headers["cache-control"] == "no-store"
+    assert refused.json()["error"]["code"] == "material_in_use"
+    assert material_id in repository.materials
+
+    repository.in_use.clear()
+    deleted = client.delete(f"/api/v1/editing-materials/{material_id}")
+    assert deleted.status_code == 204
+    assert deleted.headers["cache-control"] == "no-store"
+    assert deleted.content == b""
+    missing = client.delete(f"/api/v1/editing-materials/{material_id}")
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "material_not_found"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cursor",
+    [
+        "",
+        "private/invalid",
+        "A" * 257,
+        base64.urlsafe_b64encode(
+            json.dumps(
+                {"materialId": "00000000-0000-4000-8000-000000000001", "extra": 1},
+                separators=(",", ":"),
+            ).encode("ascii")
+        )
+        .rstrip(b"=")
+        .decode("ascii"),
+        base64.urlsafe_b64encode(
+            b'{"materialId":"00000000-0000-4000-8000-000000000001",'
+            b'"materialId":"00000000-0000-4000-8000-000000000002"}'
+        )
+        .rstrip(b"=")
+        .decode("ascii"),
+        base64.urlsafe_b64encode(b'{"materialId":"not-a-material"}').rstrip(b"=").decode("ascii"),
+    ],
+)
+async def test_material_library_cursor_is_canonical_and_fail_closed(cursor: str) -> None:
+    service = MaterialService(repository=MemoryMaterialRepository())
+
+    with pytest.raises(InvalidMaterialQuery):
+        await service.list(
+            installation_id=INSTALLATION_ID,
+            cursor=cursor,
+            limit=10,
+        )
 
 
 def test_registration_and_both_queries_return_only_the_domain_snapshot() -> None:
@@ -548,17 +715,17 @@ async def test_service_rejects_foreign_types_before_the_repository() -> None:
 
     with pytest.raises(InvalidMaterialQuery):
         await service.register(
-            installation_id=foreign,  # type: ignore[arg-type]
+            installation_id=foreign,
             material=make_material(),
         )
     with pytest.raises(InvalidMaterialQuery):
         await service.register(
             installation_id=INSTALLATION_ID,
-            material=foreign,  # type: ignore[arg-type]
+            material=foreign,
         )
     with pytest.raises(InvalidMaterialQuery):
         await service.get(
-            installation_id=foreign,  # type: ignore[arg-type]
+            installation_id=foreign,
             material_id=MATERIAL_ID,
         )
     with pytest.raises(InvalidMaterialQuery):
@@ -572,10 +739,33 @@ async def test_service_rejects_foreign_types_before_the_repository() -> None:
             content_digest="not-a-digest",
         )
     with pytest.raises(InvalidMaterialQuery):
+        await service.list(
+            installation_id=foreign,
+            cursor=None,
+            limit=10,
+        )
+    with pytest.raises(InvalidMaterialQuery):
+        await service.list(
+            installation_id=INSTALLATION_ID,
+            cursor=foreign,  # type: ignore[arg-type]
+            limit=10,
+        )
+    with pytest.raises(InvalidMaterialQuery):
+        await service.list(
+            installation_id=INSTALLATION_ID,
+            cursor=None,
+            limit=True,
+        )
+    with pytest.raises(MaterialNotFound):
+        await service.delete(
+            installation_id=INSTALLATION_ID,
+            material_id=foreign,  # type: ignore[arg-type]
+        )
+    with pytest.raises(InvalidMaterialQuery):
         await service.update_understanding(
             installation_id=INSTALLATION_ID,
             material_id=MATERIAL_ID,
-            source=foreign,  # type: ignore[arg-type]
+            source=foreign,
             description="不会写入",
             tags=(),
             shot_boundaries_ms=None,

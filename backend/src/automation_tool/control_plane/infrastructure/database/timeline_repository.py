@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from automation_tool.control_plane.application.timelines import (
     TimelineDataRejected,
+    TimelineMaterialMissing,
     TimelineNotFound,
     TimelinePersistenceUnavailable,
     TimelineProjectMissing,
@@ -35,7 +36,12 @@ from automation_tool.control_plane.domain import (
 )
 
 from .hydration import enumeration_member, normalise_timestamp
-from .schema import editing_project_timelines, editing_projects, timelines
+from .schema import (
+    editing_project_timelines,
+    editing_projects,
+    timeline_material_references,
+    timelines,
+)
 from .session import Database
 
 # A refused or timed-out connection surfaces as an `OSError`, not a
@@ -56,6 +62,7 @@ _CONNECTION_FAILURES = (OSError, SQLAlchemyError)
 
 _REVISION_CONSTRAINT: Final = "pk_timelines"
 _PROJECT_CONSTRAINT: Final = "fk_editing_project_timelines_project"
+_MATERIAL_OWNER_CONSTRAINT: Final = "fk_timeline_material_references_material_owner"
 
 # The keys a stored document is allowed to have, at each of the three levels.
 # Read off the dataclasses rather than written out, so that a field added to the
@@ -68,7 +75,7 @@ _TRANSITION_KEYS: Final = frozenset(field.name for field in fields(TimelineTrans
 
 
 def _refuse_integrity_violation(error: IntegrityError) -> Never:
-    """Turn one exception class into the three answers a caller can act on.
+    """Turn one exception class into the four answers a caller can act on.
 
     SQLSTATE alone is no longer enough: both the revision key and the identity
     table's two unique constraints are `23505`, but only `pk_timelines` means a
@@ -88,6 +95,8 @@ def _refuse_integrity_violation(error: IntegrityError) -> Never:
         raise TimelineRevisionAlreadyStored from None
     if constraint_name == _PROJECT_CONSTRAINT:
         raise TimelineProjectMissing from None
+    if constraint_name == _MATERIAL_OWNER_CONSTRAINT:
+        raise TimelineMaterialMissing from None
     raise TimelineDataRejected from None
 
 
@@ -143,12 +152,8 @@ def _track(document: dict[str, object]) -> object:
     return TimelineTrack(
         track_id=cast(str, document["track_id"]),
         kind=kind,
-        clips=cast(
-            "tuple[TimelineClip, ...]",
-            tuple(
-                _clip(clip, kind)
-                for clip in cast("list[dict[str, object]]", document["clips"])
-            ),
+        clips=tuple(
+            _clip(clip, kind) for clip in cast("list[dict[str, object]]", document["clips"])
         ),
     )
 
@@ -170,9 +175,7 @@ def _clip(document: dict[str, object], track_kind: TimelineTrackKind) -> object:
         # behaviour was the product default, automatic ducking; preserving it
         # is an explicit one-shape upgrade, not a general missing-key fallback.
         stored_original_audio_mode = (
-            OriginalAudioMode.AUTO_DUCK.value
-            if track_kind is TimelineTrackKind.AMBIENT
-            else None
+            OriginalAudioMode.AUTO_DUCK.value if track_kind is TimelineTrackKind.AMBIENT else None
         )
     else:
         return document
@@ -303,6 +306,28 @@ def _column_values(timeline: Timeline) -> dict[str, object]:
     }
 
 
+def _material_reference_values(
+    timeline: Timeline,
+    installation_id: InstallationId,
+) -> list[dict[str, object]]:
+    material_ids = {
+        clip.source_material_id
+        for track in timeline.tracks
+        for clip in track.clips
+        if clip.source_material_id is not None
+    }
+    return [
+        {
+            "timeline_id": timeline.timeline_id.uuid,
+            "timeline_revision": timeline.revision,
+            "project_id": timeline.project_id.uuid,
+            "installation_id": installation_id.uuid,
+            "material_id": material_id.uuid,
+        }
+        for material_id in sorted(material_ids, key=lambda item: item.uuid)
+    ]
+
+
 class SqlAlchemyTimelineRepository:
     """Write-once revision rows: a stored revision is never rewritten."""
 
@@ -339,6 +364,7 @@ class SqlAlchemyTimelineRepository:
         ):
             raise TimelineDataRejected
         values = _column_values(timeline)
+        reference_values = _material_reference_values(timeline, installation_id)
         claim_identity = (
             postgresql_insert(editing_project_timelines)
             .from_select(
@@ -389,8 +415,14 @@ class SqlAlchemyTimelineRepository:
                     if existing_timeline_id != timeline.timeline_id.uuid:
                         raise TimelineRevisionAlreadyStored
                 await session.execute(insert(timelines).values(**values))
+                if reference_values:
+                    await session.execute(
+                        insert(timeline_material_references),
+                        reference_values,
+                    )
         except (
             TimelineDataRejected,
+            TimelineMaterialMissing,
             TimelineProjectMissing,
             TimelineRevisionAlreadyStored,
         ):

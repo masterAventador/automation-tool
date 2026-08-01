@@ -66,7 +66,11 @@ enum ControlPlaneOperation {
     FindEditingMaterialByDigest,
     #[cfg_attr(not(feature = "control-plane-e2e"), allow(dead_code))]
     RegisterEditingMaterial,
+    #[allow(dead_code)]
+    ListEditingMaterials,
     GetEditingMaterial,
+    #[allow(dead_code)]
+    DeleteEditingMaterial,
     #[allow(dead_code)]
     UpdateEditingMaterialDescription,
     ListEditingProjects,
@@ -111,6 +115,7 @@ impl ControlPlaneOperation {
             | Self::GetDouyinPlatformSession
             | Self::ListAccountInstallations
             | Self::FindEditingMaterialByDigest
+            | Self::ListEditingMaterials
             | Self::GetEditingMaterial
             | Self::ListEditingProjects
             | Self::GetEditingProject
@@ -148,7 +153,9 @@ impl ControlPlaneOperation {
             Self::UpdateEditingMaterialDescription
             | Self::SaveEditingProjectTimeline
             | Self::ReplaceTaskTargetExclusions => "PUT",
-            Self::LogoutAccountSession | Self::RevokeAccountInstallation => "DELETE",
+            Self::LogoutAccountSession
+            | Self::RevokeAccountInstallation
+            | Self::DeleteEditingMaterial => "DELETE",
         }
     }
 
@@ -179,7 +186,10 @@ impl ControlPlaneOperation {
             Self::FindEditingMaterialByDigest | Self::RegisterEditingMaterial => {
                 "/api/v1/editing-materials"
             }
-            Self::GetEditingMaterial => "/api/v1/editing-materials/{material_id}",
+            Self::ListEditingMaterials => "/api/v1/editing-materials/library",
+            Self::GetEditingMaterial | Self::DeleteEditingMaterial => {
+                "/api/v1/editing-materials/{material_id}"
+            }
             Self::UpdateEditingMaterialDescription => {
                 "/api/v1/editing-materials/{material_id}/description"
             }
@@ -226,6 +236,7 @@ impl ControlPlaneOperation {
             | Self::GetWorkbenchMetrics
             | Self::GetDouyinPlatformSession
             | Self::FindEditingMaterialByDigest
+            | Self::ListEditingMaterials
             | Self::GetEditingMaterial
             | Self::UpdateEditingMaterialDescription
             | Self::ListEditingProjects
@@ -265,7 +276,8 @@ impl ControlPlaneOperation {
             | Self::EmergencyStopTask => 202,
             Self::LogoutAccountSession
             | Self::ChangeAccountPassword
-            | Self::RecoverAccountPassword => 204,
+            | Self::RecoverAccountPassword
+            | Self::DeleteEditingMaterial => 204,
         }
     }
 
@@ -302,6 +314,7 @@ impl ControlPlaneOperation {
                 | Self::SaveEditingProjectTimeline
                 | Self::SubmitEditingJob
                 | Self::RegisterEditingMaterial
+                | Self::DeleteEditingMaterial
                 | Self::ReconcileEditingJob
         )
     }
@@ -2446,10 +2459,12 @@ fn request_path(
             Ok(format!("/api/v1/editing-projects/{project_id}/jobs"))
         }
         (
-            ControlPlaneOperation::GetEditingMaterial,
+            operation @ (ControlPlaneOperation::GetEditingMaterial
+            | ControlPlaneOperation::DeleteEditingMaterial),
             Some(ControlPlaneRequestTarget::EditingMaterial(material_id)),
         ) => {
             require_canonical_uuid_v4(material_id)?;
+            let _ = operation;
             Ok(format!("/api/v1/editing-materials/{material_id}"))
         }
         (
@@ -2570,6 +2585,7 @@ fn request_path(
             | ControlPlaneOperation::SubmitEditingJob
             | ControlPlaneOperation::GetEditingJob
             | ControlPlaneOperation::GetEditingMaterial
+            | ControlPlaneOperation::DeleteEditingMaterial
             | ControlPlaneOperation::ReconcileEditingJob
             | ControlPlaneOperation::GetTask
             | ControlPlaneOperation::GetTaskTargetResults
@@ -2713,7 +2729,9 @@ fn validate_response_metadata(
                     | ControlPlaneOperation::GetCurrentInstallationAccess
                     | ControlPlaneOperation::FindEditingMaterialByDigest
                     | ControlPlaneOperation::RegisterEditingMaterial
+                    | ControlPlaneOperation::ListEditingMaterials
                     | ControlPlaneOperation::GetEditingMaterial
+                    | ControlPlaneOperation::DeleteEditingMaterial
                     | ControlPlaneOperation::UpdateEditingMaterialDescription
                     | ControlPlaneOperation::ListEditingProjects
                     | ControlPlaneOperation::CreateEditingProject
@@ -2740,6 +2758,7 @@ fn validate_response_metadata(
             && matches!(
                 operation,
                 ControlPlaneOperation::GetEditingMaterial
+                    | ControlPlaneOperation::DeleteEditingMaterial
                     | ControlPlaneOperation::GetEditingProject
                     | ControlPlaneOperation::GetEditingProjectTimeline
                     | ControlPlaneOperation::GetEditingJob
@@ -5480,10 +5499,22 @@ mod tests {
                 201,
             ),
             (
+                ControlPlaneOperation::ListEditingMaterials,
+                "GET",
+                "/api/v1/editing-materials/library",
+                200,
+            ),
+            (
                 ControlPlaneOperation::GetEditingMaterial,
                 "GET",
                 "/api/v1/editing-materials/{material_id}",
                 200,
+            ),
+            (
+                ControlPlaneOperation::DeleteEditingMaterial,
+                "DELETE",
+                "/api/v1/editing-materials/{material_id}",
+                204,
             ),
             (
                 ControlPlaneOperation::UpdateEditingMaterialDescription,
@@ -5732,8 +5763,16 @@ mod tests {
                 "registerEditingMaterial",
             ),
             (
+                ControlPlaneOperation::ListEditingMaterials,
+                "listEditingMaterials",
+            ),
+            (
                 ControlPlaneOperation::GetEditingMaterial,
                 "getEditingMaterial",
+            ),
+            (
+                ControlPlaneOperation::DeleteEditingMaterial,
+                "deleteEditingMaterial",
             ),
             (
                 ControlPlaneOperation::UpdateEditingMaterialDescription,

@@ -23,10 +23,12 @@ from automation_tool.control_plane.application.editing_projects import (
 from automation_tool.control_plane.application.materials import (
     MaterialAlreadyRegistered,
     MaterialDescriptionProtected,
+    MaterialInUse,
     MaterialNotFound,
     MaterialPersistenceUnavailable,
 )
 from automation_tool.control_plane.application.timelines import (
+    TimelineMaterialMissing,
     TimelineNotFound,
     TimelinePersistenceUnavailable,
     TimelineProjectMissing,
@@ -50,8 +52,10 @@ _PUBLIC_FAILURES: Final[dict[type[Exception], _PublicFailure]] = {
     MaterialAlreadyRegistered: _PublicFailure(409, "material_already_registered"),
     MaterialNotFound: _PublicFailure(404, "material_not_found"),
     MaterialDescriptionProtected: _PublicFailure(409, "material_description_protected"),
+    MaterialInUse: _PublicFailure(409, "material_in_use"),
     MaterialPersistenceUnavailable: _PublicFailure(503, "material_persistence_unavailable", True),
     TimelineRevisionAlreadyStored: _PublicFailure(409, "timeline_revision_already_stored"),
+    TimelineMaterialMissing: _PublicFailure(409, "timeline_material_missing"),
     TimelineProjectMissing: _PublicFailure(409, "timeline_project_missing"),
     TimelineNotFound: _PublicFailure(404, "timeline_not_found"),
     TimelinePersistenceUnavailable: _PublicFailure(503, "timeline_persistence_unavailable", True),

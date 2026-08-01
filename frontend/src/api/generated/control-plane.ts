@@ -244,6 +244,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/editing-materials/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Editing Materials */
+        get: operations["listEditingMaterials"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/editing-materials/{material_id}": {
         parameters: {
             query?: never;
@@ -255,7 +272,8 @@ export interface paths {
         get: operations["getEditingMaterial"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete Editing Material */
+        delete: operations["deleteEditingMaterial"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1005,6 +1023,13 @@ export interface components {
             speechTranscript: string | null;
             /** Width */
             width: number | null;
+        };
+        /** EditingMaterialListResponse */
+        EditingMaterialListResponse: {
+            /** Items */
+            items: components["schemas"]["EditingMaterialResponse"][];
+            /** Nextcursor */
+            nextCursor: string | null;
         };
         /** EditingMaterialResponse */
         EditingMaterialResponse: {
@@ -2165,6 +2190,38 @@ export interface operations {
             };
         };
     };
+    listEditingMaterials: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditingMaterialListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     getEditingMaterial: {
         parameters: {
             query?: never;
@@ -2184,6 +2241,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["EditingMaterialResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deleteEditingMaterial: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                material_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

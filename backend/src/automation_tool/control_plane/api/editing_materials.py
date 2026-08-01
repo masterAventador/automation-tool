@@ -146,6 +146,13 @@ class EditingMaterialResponse(BaseModel):
     described_at: datetime | None = Field(alias="describedAt")
 
 
+class EditingMaterialListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[EditingMaterialResponse]
+    next_cursor: str | None = Field(alias="nextCursor")
+
+
 class UserMaterialDescriptionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -286,6 +293,38 @@ async def find_editing_material_by_digest(
 
 
 @router.get(
+    "/library",
+    response_model=EditingMaterialListResponse,
+    operation_id="listEditingMaterials",
+)
+async def list_editing_materials(
+    response: Response,
+    installation_id: Annotated[
+        InstallationId,
+        Depends(require_current_installation_access),
+    ],
+    service: Annotated[MaterialService, Depends(_service)],
+    cursor: Annotated[str | None, Query(min_length=1, max_length=256)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> EditingMaterialListResponse:
+    response.headers["cache-control"] = "no-store"
+    try:
+        page = await service.list(
+            installation_id=installation_id,
+            cursor=cursor,
+            limit=limit,
+        )
+    except InvalidMaterialQuery:
+        raise _validation_error() from None
+    except Exception as error:
+        raise translate_editing_error(error) from None
+    return EditingMaterialListResponse(
+        items=[_material_response(material) for material in page.items],
+        nextCursor=page.next_cursor,
+    )
+
+
+@router.get(
     "/{material_id}",
     response_model=EditingMaterialResponse,
     operation_id="getEditingMaterial",
@@ -310,6 +349,32 @@ async def get_editing_material(
     except Exception as error:
         raise translate_editing_error(error) from None
     return _material_response(material)
+
+
+@router.delete(
+    "/{material_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="deleteEditingMaterial",
+)
+async def delete_editing_material(
+    material_id: str,
+    response: Response,
+    installation_id: Annotated[
+        InstallationId,
+        Depends(require_current_installation_access),
+    ],
+    service: Annotated[MaterialService, Depends(_service)],
+) -> None:
+    response.headers["cache-control"] = "no-store"
+    try:
+        await service.delete(
+            installation_id=installation_id,
+            material_id=material_id,
+        )
+    except InvalidMaterialQuery:
+        raise _validation_error() from None
+    except Exception as error:
+        raise translate_editing_error(error) from None
 
 
 @router.put(

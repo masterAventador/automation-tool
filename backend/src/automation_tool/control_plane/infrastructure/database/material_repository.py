@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import ColumnElement, CursorResult, and_, insert, select, update
+from sqlalchemy import ColumnElement, CursorResult, and_, delete, desc, insert, select, update
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -13,6 +13,7 @@ from automation_tool.control_plane.application.materials import (
     MaterialAlreadyRegistered,
     MaterialDataRejected,
     MaterialDescriptionProtected,
+    MaterialInUse,
     MaterialNotFound,
     MaterialPersistenceUnavailable,
 )
@@ -252,6 +253,72 @@ class SqlAlchemyMaterialRepository:
             )
         )
         return None if row is None else _hydrate(row)
+
+    async def list_page(
+        self,
+        *,
+        installation_id: InstallationId,
+        before_material_id: MaterialId | None,
+        limit: int,
+    ) -> tuple[Material, ...]:
+        if (
+            not isinstance(installation_id, InstallationId)
+            or type(limit) is not int
+            or not 1 <= limit <= 101
+            or (before_material_id is not None and not isinstance(before_material_id, MaterialId))
+        ):
+            raise MaterialDataRejected
+        statement = select(materials).where(materials.c.installation_id == installation_id.uuid)
+        if before_material_id is not None:
+            statement = statement.where(materials.c.material_id < before_material_id.uuid)
+        statement = statement.order_by(desc(materials.c.material_id)).limit(limit)
+        try:
+            async with self._database.session() as session:
+                rows = (await session.execute(statement)).mappings().all()
+        except _CONNECTION_FAILURES:
+            raise MaterialPersistenceUnavailable from None
+        except Exception:
+            raise MaterialPersistenceUnavailable from None
+        return tuple(_hydrate(row) for row in rows)
+
+    async def delete(
+        self,
+        material_id: MaterialId,
+        installation_id: InstallationId,
+    ) -> None:
+        if not isinstance(material_id, MaterialId) or not isinstance(
+            installation_id, InstallationId
+        ):
+            raise MaterialDataRejected
+        try:
+            async with self._database.session() as session:
+                result = cast(
+                    "CursorResult[Any]",
+                    await session.execute(
+                        delete(materials).where(
+                            materials.c.material_id == material_id.uuid,
+                            materials.c.installation_id == installation_id.uuid,
+                        )
+                    ),
+                )
+                matched = result.rowcount != 0
+        except IntegrityError as error:
+            constraint = getattr(error.orig, "constraint_name", None)
+            if constraint is None:
+                constraint = getattr(
+                    getattr(error.orig, "__cause__", None),
+                    "constraint_name",
+                    None,
+                )
+            if constraint == "fk_timeline_material_references_material_owner":
+                raise MaterialInUse from None
+            raise MaterialDataRejected from None
+        except _CONNECTION_FAILURES:
+            raise MaterialPersistenceUnavailable from None
+        except Exception:
+            raise MaterialPersistenceUnavailable from None
+        if not matched:
+            raise MaterialNotFound
 
     async def update_user_description(
         self,

@@ -29,6 +29,7 @@ from automation_tool.control_plane.application.editing_jobs import (
     EditingJobRevisionAlreadyQueued,
     EditingJobStale,
     EditingJobTimelineRevisionMissing,
+    EditingJobTransitionConflict,
 )
 from automation_tool.control_plane.application.editing_projects import (
     EditingProjectAlreadyRegistered,
@@ -40,11 +41,13 @@ from automation_tool.control_plane.application.materials import (
     MaterialAlreadyRegistered,
     MaterialDataRejected,
     MaterialDescriptionProtected,
+    MaterialInUse,
     MaterialNotFound,
     MaterialPersistenceUnavailable,
 )
 from automation_tool.control_plane.application.timelines import (
     TimelineDataRejected,
+    TimelineMaterialMissing,
     TimelineNotFound,
     TimelinePersistenceUnavailable,
     TimelineProjectMissing,
@@ -76,10 +79,12 @@ PUBLIC_FAILURES: Final = {
     MaterialAlreadyRegistered: ExpectedPublicFailure(409, "material_already_registered"),
     MaterialNotFound: ExpectedPublicFailure(404, "material_not_found"),
     MaterialDescriptionProtected: ExpectedPublicFailure(409, "material_description_protected"),
+    MaterialInUse: ExpectedPublicFailure(409, "material_in_use"),
     MaterialPersistenceUnavailable: ExpectedPublicFailure(
         503, "material_persistence_unavailable", True
     ),
     TimelineRevisionAlreadyStored: ExpectedPublicFailure(409, "timeline_revision_already_stored"),
+    TimelineMaterialMissing: ExpectedPublicFailure(409, "timeline_material_missing"),
     TimelineProjectMissing: ExpectedPublicFailure(409, "timeline_project_missing"),
     TimelineNotFound: ExpectedPublicFailure(404, "timeline_not_found"),
     TimelinePersistenceUnavailable: ExpectedPublicFailure(
@@ -94,6 +99,7 @@ PUBLIC_FAILURES: Final = {
     ),
     EditingJobNotFound: ExpectedPublicFailure(404, "editing_job_not_found"),
     EditingJobStale: ExpectedPublicFailure(409, "editing_job_stale"),
+    EditingJobTransitionConflict: ExpectedPublicFailure(409, "editing_job_conflict"),
     EditingJobPersistenceUnavailable: ExpectedPublicFailure(
         503, "editing_job_persistence_unavailable", True
     ),

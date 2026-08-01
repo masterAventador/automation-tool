@@ -2420,6 +2420,11 @@ materials = Table(
         name="fk_materials_installation",
         ondelete="RESTRICT",
     ),
+    UniqueConstraint(
+        "material_id",
+        "installation_id",
+        name="uq_materials_material_installation",
+    ),
 )
 
 Index(
@@ -2497,6 +2502,45 @@ timelines = Table(
     # two of the three. Dropping this as redundant would silently remove that
     # invariant's only enforcement.
     UniqueConstraint("timeline_id", "revision", "project_id", name="uq_timelines_revision_project"),
+)
+
+timeline_material_references = Table(
+    "timeline_material_references",
+    metadata,
+    Column("timeline_id", UUID(as_uuid=True), nullable=False),
+    Column("timeline_revision", Integer(), nullable=False),
+    Column("project_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("material_id", UUID(as_uuid=True), nullable=False),
+    PrimaryKeyConstraint(
+        "timeline_id",
+        "timeline_revision",
+        "material_id",
+        name="pk_timeline_material_references",
+    ),
+    ForeignKeyConstraint(
+        ["timeline_id", "timeline_revision", "project_id"],
+        ["timelines.timeline_id", "timelines.revision", "timelines.project_id"],
+        name="fk_timeline_material_references_timeline",
+        ondelete="CASCADE",
+    ),
+    ForeignKeyConstraint(
+        ["project_id", "installation_id"],
+        ["editing_projects.project_id", "editing_projects.installation_id"],
+        name="fk_timeline_material_references_project_owner",
+    ),
+    ForeignKeyConstraint(
+        ["material_id", "installation_id"],
+        ["materials.material_id", "materials.installation_id"],
+        name="fk_timeline_material_references_material_owner",
+        ondelete="RESTRICT",
+    ),
+)
+
+Index(
+    "ix_timeline_material_references_installation_material",
+    timeline_material_references.c.installation_id,
+    timeline_material_references.c.material_id,
 )
 
 editing_jobs = Table(
@@ -2605,6 +2649,7 @@ __all__ = [
     "task_events",
     "task_targets",
     "tasks",
+    "timeline_material_references",
     "timelines",
     "user_password_credentials",
     "users",
