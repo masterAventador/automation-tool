@@ -15,10 +15,14 @@ from automation_tool.executor.local_editing_worker import (
     parse_local_editing_worker_bootstrap,
 )
 from automation_tool.executor.local_editing_worker_process import (
+    LocalEditingRenderDiagnosticCode,
     LocalEditingRenderRejected,
     execute_local_editing_job,
 )
-from automation_tool.executor.material_probe import MaterialPathRegistry
+from automation_tool.executor.material_probe import (
+    MATERIAL_PATH_REGISTRY_FILE_NAME,
+    MaterialPathRegistry,
+)
 from automation_tool.executor.visual_render_execution import VisualRenderReceipt
 
 JOB_ID = UUID("00000000-0000-4000-8000-000000000001")
@@ -193,3 +197,20 @@ def test_job_bundle_fails_closed_when_the_command_and_checkpoint_disagree(
 
     assert rejected.value.code is LocalEditingWorkerFailureCode.INVALID_TIMELINE
     assert str(rejected.value) == "local editing render rejected"
+
+
+def test_job_bundle_preserves_a_path_free_missing_registry_diagnostic(tmp_path: Path) -> None:
+    app_data, _ = prepare_job(tmp_path)
+    (app_data / "local-executor" / "state" / MATERIAL_PATH_REGISTRY_FILE_NAME).unlink()
+
+    with pytest.raises(LocalEditingRenderRejected) as rejected:
+        execute_local_editing_job(
+            bootstrap(app_data),
+            LocalEditingStartCommand(JOB_ID, PROJECT_ID, TIMELINE_ID, 1),
+            cancel_requested=lambda: False,
+            artifact_id_factory=lambda: ARTIFACT_ID,
+        )
+
+    assert rejected.value.code is LocalEditingWorkerFailureCode.MATERIAL_UNAVAILABLE
+    assert rejected.value.diagnostic is LocalEditingRenderDiagnosticCode.REGISTRY_FILE_MISSING
+    assert repr(rejected.value) == "LocalEditingRenderRejected(<redacted>)"

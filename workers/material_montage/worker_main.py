@@ -88,6 +88,22 @@ def dependency_probe(name: str) -> dict[str, object]:
     return {"dependency": name, "status": "ready"}
 
 
+def _report_local_editing_rejection(error: object, output: TextIO | None = None) -> None:
+    """Emit one closed operational reason without paths, exceptions or user data."""
+    from automation_tool.executor.local_editing_worker_process import (
+        LocalEditingRenderRejected,
+    )
+
+    if not isinstance(error, LocalEditingRenderRejected):
+        return
+    sink = sys.stderr if output is None else output
+    print(
+        f"Material video worker local editing rejected: {error.diagnostic.value}",
+        file=sink,
+        flush=True,
+    )
+
+
 def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
     sink = sys.stdout if output is None else output
     line = stream.readline(MAX_BOOTSTRAP_BYTES + 1)
@@ -207,6 +223,7 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
                     cancelled = editing_protocol.cancelled(command.job_id)
                 emit(cancelled)
         except LocalEditingRenderRejected as error:
+            _report_local_editing_rejection(error)
             with suppress(Exception):
                 with editing_protocol_lock:
                     failed = editing_protocol.fail(command.job_id, error.code)

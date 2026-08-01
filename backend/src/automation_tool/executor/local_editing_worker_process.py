@@ -6,6 +6,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Never
 from uuid import RFC_4122, UUID, uuid4
@@ -59,9 +60,34 @@ _MAX_CHECKPOINT_BYTES = 1024 * 1024
 class LocalEditingRenderRejected(RuntimeError):
     """A fixed, path-free terminal failure for the Worker protocol."""
 
-    def __init__(self, code: LocalEditingWorkerFailureCode) -> None:
+    def __init__(
+        self,
+        code: LocalEditingWorkerFailureCode,
+        diagnostic: LocalEditingRenderDiagnosticCode | None = None,
+    ) -> None:
         self.code = code
+        self.diagnostic = diagnostic or LocalEditingRenderDiagnosticCode.REJECTED
         super().__init__("local editing render rejected")
+
+    def __repr__(self) -> str:
+        return "LocalEditingRenderRejected(<redacted>)"
+
+
+class LocalEditingRenderDiagnosticCode(StrEnum):
+    """Closed, path-free reason retained only for local operational diagnostics."""
+
+    REJECTED = "rejected"
+    REGISTRY_FILE_MISSING = "registry_file_missing"
+    BINDING_MISSING = "binding_missing"
+    SOURCE_CHANGED = "source_changed"
+    UNUSABLE_IDENTIFIER = "unusable_identifier"
+    NOT_REGISTERED = "not_registered"
+    FILE_MISSING = "file_missing"
+    FILE_UNREADABLE = "file_unreadable"
+    FILE_CHANGED = "file_changed"
+    REGISTRY_UNREADABLE = "registry_unreadable"
+    REGISTRY_UNWRITABLE = "registry_unwritable"
+    REGISTRY_FULL = "registry_full"
 
 
 class LocalEditingRenderCancelled(RuntimeError):
@@ -69,8 +95,11 @@ class LocalEditingRenderCancelled(RuntimeError):
         super().__init__("local editing render cancelled")
 
 
-def _reject(code: LocalEditingWorkerFailureCode) -> Never:
-    raise LocalEditingRenderRejected(code) from None
+def _reject(
+    code: LocalEditingWorkerFailureCode,
+    diagnostic: LocalEditingRenderDiagnosticCode = LocalEditingRenderDiagnosticCode.REJECTED,
+) -> Never:
+    raise LocalEditingRenderRejected(code, diagnostic) from None
 
 
 def _object(value: object, keys: set[str]) -> dict[str, object]:
@@ -306,7 +335,12 @@ def _render_failure(error: VisualRenderExecutionRejected) -> Never:
     }
     if error.code is VisualRenderExecutionRejection.CANCELLED:
         raise LocalEditingRenderCancelled from None
-    _reject(mapping[error.code])
+    diagnostic = (
+        LocalEditingRenderDiagnosticCode.SOURCE_CHANGED
+        if error.code is VisualRenderExecutionRejection.SOURCE_CHANGED
+        else LocalEditingRenderDiagnosticCode.REJECTED
+    )
+    _reject(mapping[error.code], diagnostic)
 
 
 def execute_local_editing_job(
@@ -334,7 +368,10 @@ def execute_local_editing_job(
     binding_by_id = {item.material_id: item for item in bindings}
     registry_directory = bootstrap.asset_root / "local-executor" / "state"
     if not (registry_directory / MATERIAL_PATH_REGISTRY_FILE_NAME).is_file():
-        _reject(LocalEditingWorkerFailureCode.MATERIAL_UNAVAILABLE)
+        _reject(
+            LocalEditingWorkerFailureCode.MATERIAL_UNAVAILABLE,
+            LocalEditingRenderDiagnosticCode.REGISTRY_FILE_MISSING,
+        )
     try:
         registry = MaterialPathRegistry(state_directory=registry_directory)
         visual_plan = create_local_editing_visual_render_plan(project, timeline)
@@ -346,7 +383,10 @@ def execute_local_editing_job(
             *(clip.material_id for clip in audio_plan.clips),
         }:
             if material_id not in binding_by_id:
-                _reject(LocalEditingWorkerFailureCode.MATERIAL_UNAVAILABLE)
+                _reject(
+                    LocalEditingWorkerFailureCode.MATERIAL_UNAVAILABLE,
+                    LocalEditingRenderDiagnosticCode.BINDING_MISSING,
+                )
             resolved[material_id] = registry.resolve(material_id)
         visual_sources = tuple(
             VisualRenderSourceBinding(
@@ -369,8 +409,11 @@ def execute_local_editing_job(
         audio_approvals = tuple(resolved[material_id][1] for material_id in audio_material_ids)
     except LocalEditingRenderRejected:
         raise
-    except MaterialPathRegistryRejected:
-        _reject(LocalEditingWorkerFailureCode.MATERIAL_UNAVAILABLE)
+    except MaterialPathRegistryRejected as error:
+        _reject(
+            LocalEditingWorkerFailureCode.MATERIAL_UNAVAILABLE,
+            LocalEditingRenderDiagnosticCode(error.rejection.value),
+        )
     except Exception:
         _reject(LocalEditingWorkerFailureCode.INVALID_TIMELINE)
 
@@ -415,6 +458,7 @@ def execute_local_editing_job(
 
 __all__ = [
     "LocalEditingRenderCancelled",
+    "LocalEditingRenderDiagnosticCode",
     "LocalEditingRenderRejected",
     "execute_local_editing_job",
 ]

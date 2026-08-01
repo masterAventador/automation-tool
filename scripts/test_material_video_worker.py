@@ -19,6 +19,7 @@ from uuid import uuid4
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "workers/material_montage"))
 sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "backend/src"))
 
 import build_material_video_worker_candidate as build_candidate_module  # noqa: E402
 import gateway  # noqa: E402
@@ -37,6 +38,14 @@ from webui_runtime import (  # noqa: E402
     _prepare_private_project,
     _private_config_document,
     default_subtitle_font_name,
+)
+
+from automation_tool.executor.local_editing_worker import (  # noqa: E402
+    LocalEditingWorkerFailureCode,
+)
+from automation_tool.executor.local_editing_worker_process import (  # noqa: E402
+    LocalEditingRenderDiagnosticCode,
+    LocalEditingRenderRejected,
 )
 
 UPSTREAM_WEBUI = ROOT / "vendor/moneyprinterturbo/webui"
@@ -60,6 +69,20 @@ class MemoryStateFixture:
 
 
 class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
+    def test_local_editing_rejection_diagnostic_is_closed_and_path_free(self) -> None:
+        error = LocalEditingRenderRejected(
+            LocalEditingWorkerFailureCode.MATERIAL_UNAVAILABLE,
+            LocalEditingRenderDiagnosticCode.REGISTRY_UNREADABLE,
+        )
+        output = io.StringIO()
+
+        worker_main._report_local_editing_rejection(error, output)
+
+        self.assertEqual(
+            output.getvalue(),
+            "Material video worker local editing rejected: registry_unreadable\n",
+        )
+
     def test_legacy_gateway_bootstrap_still_starts_without_local_editing_tools(
         self,
     ) -> None:
