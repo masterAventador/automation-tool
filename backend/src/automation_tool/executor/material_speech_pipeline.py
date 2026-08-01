@@ -792,8 +792,14 @@ def _same_pcm_file(left: os.stat_result, right: os.stat_result) -> bool:
         and left.st_mode == right.st_mode
         and left.st_size == right.st_size
         and left.st_mtime_ns == right.st_mtime_ns
-        and left.st_ctime_ns == right.st_ctime_ns
+        and _pcm_identity_time_ns(left) == _pcm_identity_time_ns(right)
     )
+
+
+def _pcm_identity_time_ns(metadata: os.stat_result) -> int:
+    if os.name == "nt":
+        return int(getattr(metadata, "st_birthtime_ns", metadata.st_ctime_ns))
+    return metadata.st_ctime_ns
 
 
 def _read_exact(descriptor: int, byte_count: int) -> bytes:

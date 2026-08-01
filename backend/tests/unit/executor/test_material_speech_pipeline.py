@@ -6,6 +6,7 @@ import io
 import os
 import wave
 from pathlib import Path
+from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
@@ -437,6 +438,24 @@ def test_a_linked_pcm_output_is_rejected_before_vad_reads_it(tmp_path: Path) -> 
         pipeline._detect_speech_segments(linked_output, vad, duration_ms=256)
 
     assert vad.calls == 0
+
+
+def test_windows_pcm_identity_uses_stable_birth_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shared = {
+        "st_dev": 1,
+        "st_ino": 2,
+        "st_mode": 0o100666,
+        "st_size": 32_000,
+        "st_mtime_ns": 100,
+        "st_birthtime_ns": 50,
+    }
+    descriptor = SimpleNamespace(**shared, st_ctime_ns=100)
+    path = SimpleNamespace(**shared, st_ctime_ns=50)
+    monkeypatch.setattr(pipeline.os, "name", "nt")
+
+    assert pipeline._same_pcm_file(descriptor, path)
 
 
 def test_output_at_the_exact_limit_is_accepted(tmp_path: Path) -> None:
