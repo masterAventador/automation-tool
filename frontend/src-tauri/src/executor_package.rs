@@ -589,10 +589,15 @@ pub(crate) fn ensure_no_symlink_ancestors(path: &Path) -> Result<(), ExecutorPac
         }
         normalized
     };
-    let mut current = PathBuf::new();
-    for component in absolute.components() {
-        current.push(component.as_os_str());
-        match fs::symlink_metadata(&current) {
+    // On Windows a verbatim absolute path starts with a standalone `\\?\F:`
+    // prefix component. That prefix is not itself a filesystem object, so
+    // probing components while incrementally pushing them reports an I/O
+    // failure before reaching the real `\\?\F:\` root. `ancestors()` only
+    // yields complete filesystem paths on every supported platform.
+    let mut ancestors = absolute.ancestors().collect::<Vec<_>>();
+    ancestors.reverse();
+    for current in ancestors {
+        match fs::symlink_metadata(current) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err(ExecutorPackageError::new(
                     ExecutorPackageErrorCode::PackageInvalid,
