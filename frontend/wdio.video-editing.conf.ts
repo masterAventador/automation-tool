@@ -6,7 +6,6 @@ import { wdioRuntimeArtifacts } from "./wdio-runtime-artifacts";
 const binaryName =
   process.platform === "win32" ? "automation-tool-desktop.exe" : "automation-tool-desktop";
 const appBinaryPath = resolve("src-tauri/target/debug", binaryName);
-const driverProvider = process.platform === "win32" ? "external" : "embedded";
 const capabilities: TauriCapabilities = {
   browserName: "tauri",
   "tauri:options": { application: appBinaryPath },
@@ -22,7 +21,7 @@ export const config: WebdriverIO.Config = {
       "@wdio/tauri-service",
       {
         appBinaryPath,
-        driverProvider,
+        driverProvider: "embedded",
         autoInstallTauriDriver: false,
         autoDownloadEdgeDriver: true,
         captureBackendLogs: true,
