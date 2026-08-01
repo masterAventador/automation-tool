@@ -152,11 +152,30 @@ def host_platform() -> str:
     )
 
 
+def media_toolchain_bash(*, platform: str) -> str:
+    if platform != "windows":
+        return "bash"
+
+    git_executable = shutil.which("git")
+    if git_executable is not None:
+        candidate = Path(git_executable).parent.parent / "bin" / "bash.exe"
+        if candidate.is_file():
+            return str(candidate)
+    raise VideoRuntimeUnavailable(
+        "Git Bash is required to build the Windows media toolchain"
+    )
+
+
 def _build_media_toolchain(destination: Path, *, platform: str) -> None:
     target = MEDIA_TOOLCHAIN_TARGETS[platform]
     # The builder creates the directory itself and refuses to reuse one.
     completed = subprocess.run(
-        ["bash", str(MEDIA_TOOLCHAIN_BUILDER), target, str(destination)],
+        [
+            media_toolchain_bash(platform=platform),
+            str(MEDIA_TOOLCHAIN_BUILDER),
+            target,
+            str(destination),
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,

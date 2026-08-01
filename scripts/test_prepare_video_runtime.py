@@ -176,6 +176,40 @@ def stamped_motion_worker(staging: Path) -> Path:
     return package
 
 
+class WindowsMediaToolchainShell(unittest.TestCase):
+    def test_windows_resolves_git_bash_absolutely_instead_of_the_system32_wsl_stub(
+        self,
+    ) -> None:
+        with TemporaryDirectory(prefix="automation-tool-git-bash-") as directory:
+            git_root = Path(directory) / "Git"
+            git = git_root / "cmd" / "git.exe"
+            bash = git_root / "bin" / "bash.exe"
+            git.parent.mkdir(parents=True)
+            bash.parent.mkdir(parents=True)
+            git.write_bytes(b"git")
+            bash.write_bytes(b"bash")
+
+            with mock.patch.object(
+                prepare_video_runtime.shutil, "which", return_value=str(git)
+            ):
+                resolved = prepare_video_runtime.media_toolchain_bash(
+                    platform="windows"
+                )
+
+            self.assertEqual(bash, Path(resolved))
+            self.assertNotEqual("bash", resolved)
+
+    def test_windows_fails_closed_when_git_bash_is_not_installed(self) -> None:
+        with (
+            mock.patch.object(prepare_video_runtime.shutil, "which", return_value=None),
+            self.assertRaisesRegex(
+                prepare_video_runtime.VideoRuntimeUnavailable,
+                r"^Git Bash is required to build the Windows media toolchain$",
+            ),
+        ):
+            prepare_video_runtime.media_toolchain_bash(platform="windows")
+
+
 def run_prepare(*arguments: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(SCRIPT), *arguments],
