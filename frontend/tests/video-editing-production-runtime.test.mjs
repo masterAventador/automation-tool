@@ -23,7 +23,7 @@ test("editing submission owns a real packaged Worker and durable Artifact bridge
     /fail_submitted_job[\s\S]{0,700}"operation_unavailable"/u,
   );
   assert.match(runtime, /local-editing-render-request\.v1/u);
-  assert.match(runtime, /material-video-worker[\/\\]package/u);
+  assert.match(runtime, /material-video-worker(?:\\|\x2f)package/u);
   assert.match(runtime, /VideoWorkerMediaToolsConfiguration::new/u);
   assert.match(runtime, /scheduler\s*\.dispatch/u);
   assert.match(runtime, /poll_with_recovery/u);

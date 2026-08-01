@@ -5083,6 +5083,7 @@ mod tests {
     /// 文案是「这是本产品自身的问题，重新操作不会有效」。b5_13 的四轮插桩
     /// 之所以只查到「删 Profile 一步失败了」而定位不到是哪一步，就是因为
     /// 到达用户和日志的那个字符串已经把五种原因抹平。每一种都要有自己的码。
+    #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
     #[test]
     fn every_profile_removal_failure_reaches_the_operator_as_its_own_code() {
         use browser_profiles::BrowserProfileErrorCode as Code;

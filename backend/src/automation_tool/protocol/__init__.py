@@ -9,11 +9,22 @@ Executor envelope.
 from importlib import import_module
 from typing import Any
 
+from automation_tool.protocol.douyin_candidate import (
+    DOUYIN_CANDIDATE_VERSION,
+    MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS,
+    MAX_CANDIDATE_PUBLIC_HANDLE_CHARACTERS,
+    MAX_DOUYIN_TARGET_ID_CHARACTERS,
+    DouyinCandidate,
+    DouyinCandidateKey,
+    DouyinCandidateRejected,
+    DouyinCandidateSource,
+    DouyinCandidateSummary,
+)
+
 _PUBLIC_MODULES = (
     "action_authorization",
     "action_message_template",
     "action_result",
-    "douyin_candidate",
     "douyin_search",
     "executor_envelope",
     "version",
