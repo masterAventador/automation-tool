@@ -28,6 +28,8 @@ from automation_tool.control_plane.application.materials import (
     MaterialInUse,
     MaterialNotFound,
     MaterialPersistenceUnavailable,
+    SmartEditMaterialAnalysisWriteback,
+    SmartEditMaterialWriteback,
 )
 from automation_tool.control_plane.domain import (
     MAX_DESCRIPTION_CHARACTERS,
@@ -1114,7 +1116,7 @@ async def test_wrong_credentials_are_refused_without_leaking_the_identity(
         -> PostgresError -> PostgresMessage -> Exception -> BaseException
 
     `SQLAlchemyError` appears nowhere on it, and neither does `OSError`. All
-    four public methods are checked, because a catch-all tail missing from one
+    every public connection method is checked, because a catch-all tail missing from one
     of them leaks from that one alone.
     """
     alembic_runner(postgresql_url, "upgrade", "head")
@@ -1135,7 +1137,26 @@ async def test_wrong_credentials_are_refused_without_leaking_the_identity(
             await repository.find_by_digest(DIGEST_ONE, OWNER)
         with pytest.raises(MaterialPersistenceUnavailable) as updated:
             await repository.update_ai_understanding(material, OWNER)
-        for captured in (loaded, saved, found, updated):
+        writeback = SmartEditMaterialWriteback(
+            analyses=(
+                SmartEditMaterialAnalysisWriteback(
+                    material_id=material.material_id,
+                    content_digest=material.content_digest,
+                    has_speech=material.has_speech,
+                    speech_segments_ms=material.speech_segments_ms,
+                    speech_transcript=material.speech_transcript,
+                    shot_boundaries_ms=material.shot_boundaries_ms,
+                    ai_description=material.ai_description,
+                    ai_tags=material.ai_tags,
+                    description_source=material.description_source,
+                    described_at=material.described_at,
+                ),
+            ),
+            narrations=(),
+        )
+        with pytest.raises(MaterialPersistenceUnavailable) as batch_updated:
+            await repository.apply_smart_edit_writeback(writeback, OWNER)
+        for captured in (loaded, saved, found, updated, batch_updated):
             rendered = "".join(traceback.format_exception(captured.value))
             assert role not in rendered
             assert "password authentication failed" not in rendered

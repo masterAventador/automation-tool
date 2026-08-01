@@ -21,6 +21,8 @@ from automation_tool.control_plane.application.materials import (
     MaterialNotFound,
     MaterialPersistenceUnavailable,
     MaterialService,
+    MaterialSnapshotConflict,
+    SmartEditMaterialWriteback,
 )
 from automation_tool.control_plane.domain import (
     DescriptionSource,
@@ -37,6 +39,7 @@ OTHER_INSTALLATION_ID = InstallationId.new()
 DIGEST = "a1b2c3d4" * 8
 OTHER_DIGEST = "9f8e7d6c" * 8
 MATERIAL_ID = "00000000-0000-4000-8000-000000000001"
+NARRATION_ID = "00000000-0000-4000-8000-000000000002"
 
 VALID_PAYLOAD: dict[str, object] = {
     "materialId": MATERIAL_ID,
@@ -177,6 +180,67 @@ class MemoryMaterialRepository:
         await self.get(material.material_id, installation_id)
         self.materials[material.material_id] = (installation_id, material)
 
+    async def apply_smart_edit_writeback(
+        self,
+        writeback: SmartEditMaterialWriteback,
+        installation_id: InstallationId,
+    ) -> tuple[Material, ...]:
+        if self.failure is not None:
+            raise self.failure
+        working = dict(self.materials)
+        changed: list[Material] = []
+        for analysis in writeback.analyses:
+            stored = working.get(analysis.material_id)
+            if stored is None or stored[0] != installation_id:
+                raise MaterialNotFound
+            current = stored[1]
+            if current.content_digest != analysis.content_digest:
+                raise MaterialSnapshotConflict
+            if analysis.description_source is DescriptionSource.USER:
+                if (
+                    current.description_source is not DescriptionSource.USER
+                    or current.ai_description != analysis.ai_description
+                    or current.ai_tags != analysis.ai_tags
+                    or current.shot_boundaries_ms != analysis.shot_boundaries_ms
+                    or current.described_at != analysis.described_at
+                ):
+                    raise MaterialSnapshotConflict
+                updated = current
+            else:
+                if current.description_source is DescriptionSource.USER:
+                    raise MaterialDescriptionProtected
+                if analysis.ai_description is None:
+                    updated = current
+                else:
+                    assert analysis.described_at is not None
+                    updated = current.with_ai_understanding(
+                        analysis.ai_description,
+                        analysis.ai_tags,
+                        analysis.shot_boundaries_ms,
+                        analysis.described_at,
+                    )
+            updated = updated.with_speech_analysis(
+                has_speech=analysis.has_speech,
+                speech_segments_ms=analysis.speech_segments_ms,
+                speech_transcript=analysis.speech_transcript,
+            )
+            working[updated.material_id] = (installation_id, updated)
+            changed.append(updated)
+        for narration in writeback.narrations:
+            existing = working.get(narration.material_id)
+            if existing is not None:
+                if existing != (installation_id, narration):
+                    raise MaterialAlreadyRegistered
+            elif any(
+                owner == installation_id and stored.content_digest == narration.content_digest
+                for owner, stored in working.values()
+            ):
+                raise MaterialAlreadyRegistered
+            else:
+                working[narration.material_id] = (installation_id, narration)
+        self.materials = working
+        return (*changed, *writeback.narrations)
+
 
 def material_client(
     repository: MemoryMaterialRepository | None = None,
@@ -241,6 +305,36 @@ def expected_snapshot(material: Material) -> dict[str, object]:
             if material.described_at is None
             else material.described_at.isoformat().replace("+00:00", "Z")
         ),
+    }
+
+
+def smart_edit_writeback_payload(
+    *,
+    content_digest: str = DIGEST,
+) -> dict[str, object]:
+    return {
+        "analyses": [
+            {
+                "materialId": MATERIAL_ID,
+                "contentDigest": content_digest,
+                "hasSpeech": True,
+                "speechSegmentsMs": [[500, 3_000]],
+                "speechTranscript": "更新后的原声内容",
+                "shotBoundariesMs": [0, 8_000],
+                "aiDescription": "更新后的素材理解",
+                "aiTags": ["产品", "特写"],
+                "descriptionSource": "ai",
+                "describedAt": "2026-08-01T08:00:00Z",
+            }
+        ],
+        "narrations": [
+            {
+                "materialId": NARRATION_ID,
+                "contentDigest": OTHER_DIGEST,
+                "durationMs": 1_200,
+                "speechTranscript": "生成的旁白内容",
+            }
+        ],
     }
 
 
@@ -828,6 +922,110 @@ async def test_service_detects_a_user_write_that_wins_before_the_return_read() -
         3_200,
         15_000,
     )
+
+
+def test_smart_edit_writeback_atomically_updates_analysis_and_registers_narration() -> None:
+    client, repository = material_client()
+    original = make_material()
+    repository.materials[original.material_id] = (INSTALLATION_ID, original)
+    payload = smart_edit_writeback_payload()
+
+    response = client.post(
+        "/api/v1/editing-materials/smart-edit-writebacks",
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    materials = response.json()["materials"]
+    assert [value["materialId"] for value in materials] == [MATERIAL_ID, NARRATION_ID]
+    assert materials[0]["aiDescription"] == "更新后的素材理解"
+    assert materials[0]["speechTranscript"] == "更新后的原声内容"
+    assert materials[1]["kind"] == "audio"
+    assert materials[1]["speechSegmentsMs"] == [[0, 1_200]]
+    assert "relativePath" not in response.text
+    assert "prompt" not in response.text
+
+    retry = client.post(
+        "/api/v1/editing-materials/smart-edit-writebacks",
+        json=payload,
+    )
+    assert retry.status_code == 200
+    assert retry.json() == response.json()
+    assert len(repository.materials) == 2
+
+
+def test_smart_edit_writeback_snapshot_conflict_rolls_back_the_narration() -> None:
+    client, repository = material_client()
+    original = make_material()
+    repository.materials[original.material_id] = (INSTALLATION_ID, original)
+
+    response = client.post(
+        "/api/v1/editing-materials/smart-edit-writebacks",
+        json=smart_edit_writeback_payload(content_digest="c" * 64),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "material_snapshot_conflict"
+    assert repository.materials == {original.material_id: (INSTALLATION_ID, original)}
+
+
+def test_smart_edit_writeback_cannot_overwrite_a_user_description() -> None:
+    client, repository = material_client()
+    original = make_material(
+        description="用户刚刚改写的描述",
+        source=DescriptionSource.USER,
+    )
+    repository.materials[original.material_id] = (INSTALLATION_ID, original)
+
+    response = client.post(
+        "/api/v1/editing-materials/smart-edit-writebacks",
+        json=smart_edit_writeback_payload(),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "material_description_protected"
+    assert repository.materials == {original.material_id: (INSTALLATION_ID, original)}
+
+
+def test_smart_edit_writeback_rejects_worker_paths_and_unknown_fields() -> None:
+    client, repository = material_client()
+    original = make_material()
+    repository.materials[original.material_id] = (INSTALLATION_ID, original)
+    payload = smart_edit_writeback_payload()
+    narrations = payload["narrations"]
+    assert isinstance(narrations, list)
+    assert isinstance(narrations[0], dict)
+    narrations[0]["relativePath"] = "voiceover/sentence-0001.wav"
+
+    response = client.post(
+        "/api/v1/editing-materials/smart-edit-writebacks",
+        json=payload,
+    )
+
+    assert response.status_code == 422
+    assert repository.materials == {original.material_id: (INSTALLATION_ID, original)}
+
+
+def test_smart_edit_writeback_cannot_reach_another_installations_material() -> None:
+    repository = MemoryMaterialRepository()
+    owner_client, _ = material_client(repository)
+    outsider_client, _ = material_client(
+        repository,
+        installation_id=OTHER_INSTALLATION_ID,
+    )
+    original = make_material()
+    repository.materials[original.material_id] = (INSTALLATION_ID, original)
+
+    response = outsider_client.post(
+        "/api/v1/editing-materials/smart-edit-writebacks",
+        json=smart_edit_writeback_payload(),
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "material_not_found"
+    assert repository.materials == {original.material_id: (INSTALLATION_ID, original)}
+    assert owner_client.get(f"/api/v1/editing-materials/{MATERIAL_ID}").status_code == 200
 
 
 def test_application_factory_wires_the_real_repository() -> None:

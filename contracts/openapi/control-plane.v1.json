@@ -1802,6 +1802,193 @@
         "title": "RotatedDeviceCredentialResponse",
         "type": "object"
       },
+      "SmartEditMaterialAnalysisRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "aiDescription": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aidescription"
+          },
+          "aiTags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Aitags",
+            "type": "array"
+          },
+          "contentDigest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Contentdigest",
+            "type": "string"
+          },
+          "describedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Describedat"
+          },
+          "descriptionSource": {
+            "$ref": "#/components/schemas/DescriptionSource"
+          },
+          "hasSpeech": {
+            "title": "Hasspeech",
+            "type": "boolean"
+          },
+          "materialId": {
+            "title": "Materialid",
+            "type": "string"
+          },
+          "shotBoundariesMs": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 4096,
+            "title": "Shotboundariesms",
+            "type": "array"
+          },
+          "speechSegmentsMs": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "maxItems": 4096,
+            "title": "Speechsegmentsms",
+            "type": "array"
+          },
+          "speechTranscript": {
+            "anyOf": [
+              {
+                "maxLength": 100000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speechtranscript"
+          }
+        },
+        "required": [
+          "materialId",
+          "contentDigest",
+          "hasSpeech",
+          "speechSegmentsMs",
+          "speechTranscript",
+          "shotBoundariesMs",
+          "aiDescription",
+          "aiTags",
+          "descriptionSource",
+          "describedAt"
+        ],
+        "title": "SmartEditMaterialAnalysisRequest",
+        "type": "object"
+      },
+      "SmartEditMaterialWritebackRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "analyses": {
+            "items": {
+              "$ref": "#/components/schemas/SmartEditMaterialAnalysisRequest"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Analyses",
+            "type": "array"
+          },
+          "narrations": {
+            "items": {
+              "$ref": "#/components/schemas/SmartEditNarrationMaterialRequest"
+            },
+            "maxItems": 32,
+            "title": "Narrations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "analyses",
+          "narrations"
+        ],
+        "title": "SmartEditMaterialWritebackRequest",
+        "type": "object"
+      },
+      "SmartEditMaterialWritebackResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "materials": {
+            "items": {
+              "$ref": "#/components/schemas/EditingMaterialResponse"
+            },
+            "title": "Materials",
+            "type": "array"
+          }
+        },
+        "required": [
+          "materials"
+        ],
+        "title": "SmartEditMaterialWritebackResponse",
+        "type": "object"
+      },
+      "SmartEditNarrationMaterialRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "contentDigest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Contentdigest",
+            "type": "string"
+          },
+          "durationMs": {
+            "minimum": 1.0,
+            "title": "Durationms",
+            "type": "integer"
+          },
+          "materialId": {
+            "title": "Materialid",
+            "type": "string"
+          },
+          "speechTranscript": {
+            "maxLength": 100000,
+            "minLength": 1,
+            "title": "Speechtranscript",
+            "type": "string"
+          }
+        },
+        "required": [
+          "materialId",
+          "contentDigest",
+          "durationMs",
+          "speechTranscript"
+        ],
+        "title": "SmartEditNarrationMaterialRequest",
+        "type": "object"
+      },
       "TaskCommandStatus": {
         "enum": [
           "pending",
@@ -3481,6 +3668,52 @@
           }
         ],
         "summary": "List Editing Materials",
+        "tags": [
+          "editing-materials"
+        ]
+      }
+    },
+    "/api/v1/editing-materials/smart-edit-writebacks": {
+      "post": {
+        "operationId": "applySmartEditMaterialWriteback",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmartEditMaterialWritebackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SmartEditMaterialWritebackResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Apply Smart Edit Material Writeback",
         "tags": [
           "editing-materials"
         ]

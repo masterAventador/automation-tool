@@ -23,7 +23,8 @@ import base64
 import binascii
 import json
 import re
-from dataclasses import dataclass
+from contextlib import suppress
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
 
@@ -32,6 +33,7 @@ from automation_tool.control_plane.domain import (
     InstallationId,
     Material,
     MaterialId,
+    MaterialKind,
 )
 from automation_tool.control_plane.domain.resource_ids import InvalidResourceId
 
@@ -101,6 +103,10 @@ class MaterialPersistenceUnavailable(_MaterialPersistenceFailure):
     message = "Material persistence is unavailable"
 
 
+class MaterialSnapshotConflict(_MaterialPersistenceFailure):
+    message = "Material snapshot has changed"
+
+
 class InvalidMaterialQuery(ValueError):
     def __init__(self) -> None:
         super().__init__("Material query is invalid")
@@ -115,6 +121,105 @@ class MaterialListBoundary:
 class MaterialListPage:
     items: tuple[Material, ...]
     next_cursor: str | None
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class SmartEditMaterialAnalysisWriteback:
+    """One path-free, digest-bound Worker analysis snapshot."""
+
+    material_id: MaterialId
+    content_digest: str = field(repr=False)
+    has_speech: bool
+    speech_segments_ms: tuple[tuple[int, int], ...] = field(repr=False)
+    speech_transcript: str | None = field(repr=False)
+    shot_boundaries_ms: tuple[int, ...] = field(repr=False)
+    ai_description: str | None = field(repr=False)
+    ai_tags: tuple[str, ...] = field(repr=False)
+    description_source: DescriptionSource
+    described_at: datetime | None = field(repr=False)
+
+    def __post_init__(self) -> None:
+        validation: Material | None = None
+        with suppress(Exception):
+            validation = Material.register(
+                material_id=self.material_id,
+                kind=MaterialKind.VIDEO,
+                duration_ms=max(
+                    1,
+                    max((end for _start, end in self.speech_segments_ms), default=0),
+                    max(self.shot_boundaries_ms, default=0) + 1,
+                ),
+                width=1,
+                height=1,
+                content_digest=self.content_digest,
+                has_audio=self.has_speech,
+                audio_loudness_lufs=None,
+                has_speech=self.has_speech,
+                speech_segments_ms=self.speech_segments_ms,
+                speech_transcript=self.speech_transcript,
+                shot_boundaries_ms=self.shot_boundaries_ms,
+                ai_description=self.ai_description,
+                ai_tags=self.ai_tags,
+                description_source=self.description_source,
+                described_at=self.described_at,
+            )
+        if validation is None:
+            raise InvalidMaterialQuery from None
+
+    def __repr__(self) -> str:
+        return "SmartEditMaterialAnalysisWriteback(<redacted>)"
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class SmartEditMaterialWriteback:
+    """Every material mutation from one generated draft, committed together."""
+
+    analyses: tuple[SmartEditMaterialAnalysisWriteback, ...] = field(repr=False)
+    narrations: tuple[Material, ...] = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.analyses, tuple)
+            or not 1 <= len(self.analyses) <= 32
+            or not all(
+                isinstance(value, SmartEditMaterialAnalysisWriteback) for value in self.analyses
+            )
+            or not isinstance(self.narrations, tuple)
+            or len(self.narrations) > 32
+            or not all(self._valid_narration(value) for value in self.narrations)
+        ):
+            raise InvalidMaterialQuery
+        analysis_ids = tuple(value.material_id for value in self.analyses)
+        narration_ids = tuple(value.material_id for value in self.narrations)
+        narration_digests = tuple(value.content_digest for value in self.narrations)
+        if (
+            len(set(analysis_ids)) != len(analysis_ids)
+            or len(set(narration_ids)) != len(narration_ids)
+            or len(set(narration_digests)) != len(narration_digests)
+            or not set(analysis_ids).isdisjoint(narration_ids)
+            or not {value.content_digest for value in self.analyses}.isdisjoint(narration_digests)
+        ):
+            raise InvalidMaterialQuery
+
+    @staticmethod
+    def _valid_narration(value: object) -> bool:
+        return (
+            isinstance(value, Material)
+            and value.kind is MaterialKind.AUDIO
+            and value.duration_ms is not None
+            and value.has_audio
+            and value.has_speech
+            and value.speech_segments_ms == ((0, value.duration_ms),)
+            and value.speech_transcript is not None
+            and not value.shot_boundaries_ms
+            and value.ai_description is None
+            and not value.ai_tags
+            and value.description_source is DescriptionSource.AI
+            and value.described_at is None
+        )
+
+    def __repr__(self) -> str:
+        return "SmartEditMaterialWriteback(<redacted>)"
 
 
 class MaterialRepository(Protocol):
@@ -167,6 +272,12 @@ class MaterialRepository(Protocol):
         material: Material,
         installation_id: InstallationId,
     ) -> None: ...
+
+    async def apply_smart_edit_writeback(
+        self,
+        writeback: SmartEditMaterialWriteback,
+        installation_id: InstallationId,
+    ) -> tuple[Material, ...]: ...
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -372,6 +483,19 @@ class MaterialService:
         await self._repository.update_speech_analysis(changed, owner)
         return await self._repository.get(changed.material_id, owner)
 
+    async def apply_smart_edit_writeback(
+        self,
+        *,
+        installation_id: InstallationId,
+        writeback: SmartEditMaterialWriteback,
+    ) -> tuple[Material, ...]:
+        """Persist one generated draft's analyses and narrations atomically."""
+
+        owner = self._require_installation(installation_id)
+        if not isinstance(writeback, SmartEditMaterialWriteback):
+            raise InvalidMaterialQuery
+        return await self._repository.apply_smart_edit_writeback(writeback, owner)
+
 
 __all__ = [
     "InvalidMaterialQuery",
@@ -385,4 +509,7 @@ __all__ = [
     "MaterialPersistenceUnavailable",
     "MaterialRepository",
     "MaterialService",
+    "MaterialSnapshotConflict",
+    "SmartEditMaterialAnalysisWriteback",
+    "SmartEditMaterialWriteback",
 ]

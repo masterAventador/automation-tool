@@ -133,8 +133,9 @@ def _timestamp(value: object) -> datetime | None:
         return None
     parsed: datetime | None = None
     if isinstance(value, str):
+        normalized = f"{value[:-1]}+00:00" if value.endswith("Z") else value
         with suppress(ValueError):
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(normalized)
     if parsed is None or parsed.tzinfo is None:
         _reject(LocalSmartEditFailureCode.LOCAL_FAILED)
     return parsed
@@ -278,7 +279,7 @@ def _analysis(update: SmartEditMaterialAnalysis) -> dict[str, object]:
         "aiTags": list(update.ai_tags),
         "contentDigest": update.content_digest,
         "describedAt": (
-            update.described_at.isoformat().replace("+00:00", "Z")
+            update.described_at.astimezone(UTC).isoformat().removesuffix("+00:00") + "Z"
             if update.described_at is not None
             else None
         ),
@@ -667,7 +668,7 @@ def commit_smart_edit_job(
     try:
         if durable.exists() or durable.is_symlink():
             _reject(LocalSmartEditFailureCode.COMMIT_FAILED)
-        os.replace(staged.workspace_root, durable)
+        os.rename(staged.workspace_root, durable)
         moved = True
         mappings = tuple(
             (
@@ -686,7 +687,7 @@ def commit_smart_edit_job(
         if moved:
             rolled_back = False
             try:
-                os.replace(durable, staged.workspace_root)
+                os.rename(durable, staged.workspace_root)
                 rolled_back = True
             except OSError:
                 pass

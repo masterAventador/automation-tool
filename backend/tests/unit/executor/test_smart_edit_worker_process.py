@@ -420,21 +420,21 @@ def test_commit_cleans_durable_audio_when_registry_and_rollback_both_fail(
         cancel_requested=lambda: False,
         progress=lambda _stage, _value: None,
     )
-    real_replace = os.replace
-    replacements = 0
+    real_rename = os.rename
+    renames = 0
 
-    def replace(source: Path, target: Path) -> None:
-        nonlocal replacements
-        replacements += 1
-        if replacements == 1:
-            real_replace(source, target)
+    def rename(source: Path, target: Path) -> None:
+        nonlocal renames
+        renames += 1
+        if renames == 1:
+            real_rename(source, target)
             return
         raise OSError("rollback unavailable")
 
     def reject_registry(_bootstrap: LocalEditingWorkerBootstrap) -> MaterialPathRegistry:
         raise LocalSmartEditWorkerRejected(LocalSmartEditFailureCode.COMMIT_FAILED)
 
-    monkeypatch.setattr(os, "replace", replace)
+    monkeypatch.setattr(os, "rename", rename)
     monkeypatch.setattr(
         "automation_tool.executor.smart_edit_worker_process._state_registry",
         reject_registry,

@@ -44,6 +44,7 @@ from automation_tool.control_plane.application.materials import (
     MaterialInUse,
     MaterialNotFound,
     MaterialPersistenceUnavailable,
+    MaterialSnapshotConflict,
 )
 from automation_tool.control_plane.application.timelines import (
     TimelineDataRejected,
@@ -83,6 +84,7 @@ PUBLIC_FAILURES: Final = {
     MaterialPersistenceUnavailable: ExpectedPublicFailure(
         503, "material_persistence_unavailable", True
     ),
+    MaterialSnapshotConflict: ExpectedPublicFailure(409, "material_snapshot_conflict"),
     TimelineRevisionAlreadyStored: ExpectedPublicFailure(409, "timeline_revision_already_stored"),
     TimelineMaterialMissing: ExpectedPublicFailure(409, "timeline_material_missing"),
     TimelineProjectMissing: ExpectedPublicFailure(409, "timeline_project_missing"),

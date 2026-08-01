@@ -26,6 +26,7 @@ from automation_tool.control_plane.application.materials import (
     MaterialInUse,
     MaterialNotFound,
     MaterialPersistenceUnavailable,
+    MaterialSnapshotConflict,
 )
 from automation_tool.control_plane.application.timelines import (
     TimelineMaterialMissing,
@@ -54,6 +55,7 @@ _PUBLIC_FAILURES: Final[dict[type[Exception], _PublicFailure]] = {
     MaterialDescriptionProtected: _PublicFailure(409, "material_description_protected"),
     MaterialInUse: _PublicFailure(409, "material_in_use"),
     MaterialPersistenceUnavailable: _PublicFailure(503, "material_persistence_unavailable", True),
+    MaterialSnapshotConflict: _PublicFailure(409, "material_snapshot_conflict"),
     TimelineRevisionAlreadyStored: _PublicFailure(409, "timeline_revision_already_stored"),
     TimelineMaterialMissing: _PublicFailure(409, "timeline_material_missing"),
     TimelineProjectMissing: _PublicFailure(409, "timeline_project_missing"),

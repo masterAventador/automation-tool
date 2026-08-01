@@ -26,6 +26,8 @@ from automation_tool.control_plane.api.installation_access import (
 from automation_tool.control_plane.application.materials import (
     InvalidMaterialQuery,
     MaterialService,
+    SmartEditMaterialAnalysisWriteback,
+    SmartEditMaterialWriteback,
 )
 from automation_tool.control_plane.domain import (
     MAX_DESCRIPTION_CHARACTERS,
@@ -151,6 +153,117 @@ class EditingMaterialListResponse(BaseModel):
 
     items: list[EditingMaterialResponse]
     next_cursor: str | None = Field(alias="nextCursor")
+
+
+class SmartEditMaterialAnalysisRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    material_id: str = Field(alias="materialId", strict=True)
+    content_digest: str = Field(
+        alias="contentDigest",
+        min_length=64,
+        max_length=64,
+        pattern=_SHA256_PATTERN,
+        strict=True,
+    )
+    has_speech: StrictBool = Field(alias="hasSpeech")
+    speech_segments_ms: list[tuple[StrictInt, StrictInt]] = Field(
+        alias="speechSegmentsMs",
+        max_length=MAX_SPEECH_SEGMENTS,
+    )
+    speech_transcript: str | None = Field(
+        alias="speechTranscript",
+        max_length=MAX_TRANSCRIPT_CHARACTERS,
+        strict=True,
+    )
+    shot_boundaries_ms: list[StrictInt] = Field(
+        alias="shotBoundariesMs",
+        max_length=MAX_SHOT_BOUNDARIES,
+    )
+    ai_description: str | None = Field(
+        alias="aiDescription",
+        max_length=MAX_DESCRIPTION_CHARACTERS,
+        strict=True,
+    )
+    ai_tags: list[str] = Field(alias="aiTags", max_length=MAX_TAGS)
+    description_source: DescriptionSource = Field(alias="descriptionSource")
+    described_at: StrictAwareDatetime | None = Field(alias="describedAt")
+
+    def to_command(self) -> SmartEditMaterialAnalysisWriteback:
+        return SmartEditMaterialAnalysisWriteback(
+            material_id=MaterialId.parse(self.material_id),
+            content_digest=self.content_digest,
+            has_speech=self.has_speech,
+            speech_segments_ms=tuple(self.speech_segments_ms),
+            speech_transcript=self.speech_transcript,
+            shot_boundaries_ms=tuple(self.shot_boundaries_ms),
+            ai_description=self.ai_description,
+            ai_tags=tuple(self.ai_tags),
+            description_source=self.description_source,
+            described_at=self.described_at,
+        )
+
+
+class SmartEditNarrationMaterialRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    material_id: str = Field(alias="materialId", strict=True)
+    content_digest: str = Field(
+        alias="contentDigest",
+        min_length=64,
+        max_length=64,
+        pattern=_SHA256_PATTERN,
+        strict=True,
+    )
+    duration_ms: StrictInt = Field(alias="durationMs", ge=1)
+    speech_transcript: str = Field(
+        alias="speechTranscript",
+        min_length=1,
+        max_length=MAX_TRANSCRIPT_CHARACTERS,
+        strict=True,
+    )
+
+    def to_domain(self) -> Material:
+        return Material.register(
+            material_id=MaterialId.parse(self.material_id),
+            kind=MaterialKind.AUDIO,
+            duration_ms=self.duration_ms,
+            width=None,
+            height=None,
+            content_digest=self.content_digest,
+            has_audio=True,
+            audio_loudness_lufs=None,
+            has_speech=True,
+            speech_segments_ms=((0, self.duration_ms),),
+            speech_transcript=self.speech_transcript,
+            shot_boundaries_ms=(),
+            ai_description=None,
+            ai_tags=(),
+            description_source=DescriptionSource.AI,
+            described_at=None,
+        )
+
+
+class SmartEditMaterialWritebackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    analyses: list[SmartEditMaterialAnalysisRequest] = Field(
+        min_length=1,
+        max_length=32,
+    )
+    narrations: list[SmartEditNarrationMaterialRequest] = Field(max_length=32)
+
+    def to_command(self) -> SmartEditMaterialWriteback:
+        return SmartEditMaterialWriteback(
+            analyses=tuple(value.to_command() for value in self.analyses),
+            narrations=tuple(value.to_domain() for value in self.narrations),
+        )
+
+
+class SmartEditMaterialWritebackResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    materials: list[EditingMaterialResponse]
 
 
 class UserMaterialDescriptionRequest(BaseModel):
@@ -321,6 +434,35 @@ async def list_editing_materials(
     return EditingMaterialListResponse(
         items=[_material_response(material) for material in page.items],
         nextCursor=page.next_cursor,
+    )
+
+
+@router.post(
+    "/smart-edit-writebacks",
+    response_model=SmartEditMaterialWritebackResponse,
+    operation_id="applySmartEditMaterialWriteback",
+)
+async def apply_smart_edit_material_writeback(
+    payload: SmartEditMaterialWritebackRequest,
+    response: Response,
+    installation_id: Annotated[
+        InstallationId,
+        Depends(require_current_installation_access),
+    ],
+    service: Annotated[MaterialService, Depends(_service)],
+) -> SmartEditMaterialWritebackResponse:
+    response.headers["cache-control"] = "no-store"
+    try:
+        stored = await service.apply_smart_edit_writeback(
+            installation_id=installation_id,
+            writeback=payload.to_command(),
+        )
+    except (InvalidMaterialModel, InvalidMaterialQuery, InvalidResourceId):
+        raise _validation_error() from None
+    except Exception as error:
+        raise translate_editing_error(error) from None
+    return SmartEditMaterialWritebackResponse(
+        materials=[_material_response(material) for material in stored]
     )
 
 

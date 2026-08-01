@@ -5,7 +5,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import ColumnElement, CursorResult, and_, delete, desc, insert, select, update
+from sqlalchemy import (
+    ColumnElement,
+    CursorResult,
+    and_,
+    delete,
+    desc,
+    insert,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -16,6 +26,8 @@ from automation_tool.control_plane.application.materials import (
     MaterialInUse,
     MaterialNotFound,
     MaterialPersistenceUnavailable,
+    MaterialSnapshotConflict,
+    SmartEditMaterialWriteback,
 )
 from automation_tool.control_plane.domain import (
     DescriptionSource,
@@ -428,6 +440,177 @@ class SqlAlchemyMaterialRepository:
             raise MaterialPersistenceUnavailable from None
         if not matched:
             raise MaterialNotFound
+
+    async def apply_smart_edit_writeback(
+        self,
+        writeback: SmartEditMaterialWriteback,
+        installation_id: InstallationId,
+    ) -> tuple[Material, ...]:
+        """Lock, validate and persist one generated draft as a single transaction."""
+
+        if not isinstance(writeback, SmartEditMaterialWriteback) or not isinstance(
+            installation_id, InstallationId
+        ):
+            raise MaterialDataRejected
+        analysis_ids = tuple(value.material_id.uuid for value in writeback.analyses)
+        narration_ids = tuple(value.material_id.uuid for value in writeback.narrations)
+        narration_digests = tuple(value.content_digest for value in writeback.narrations)
+        try:
+            async with self._database.session() as session:
+                analysis_rows = (
+                    (
+                        await session.execute(
+                            select(materials)
+                            .where(
+                                materials.c.installation_id == installation_id.uuid,
+                                materials.c.material_id.in_(analysis_ids),
+                            )
+                            .order_by(materials.c.material_id)
+                            .with_for_update()
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
+                hydrated_analyses = tuple(_hydrate(row) for row in analysis_rows)
+                stored_analyses = {material.material_id: material for material in hydrated_analyses}
+                if len(stored_analyses) != len(writeback.analyses):
+                    raise MaterialNotFound
+
+                changed_analyses: list[Material] = []
+                for analysis in writeback.analyses:
+                    current = stored_analyses[analysis.material_id]
+                    if current.content_digest != analysis.content_digest:
+                        raise MaterialSnapshotConflict
+                    if analysis.description_source is DescriptionSource.USER:
+                        if (
+                            current.description_source is not DescriptionSource.USER
+                            or current.ai_description != analysis.ai_description
+                            or current.ai_tags != analysis.ai_tags
+                            or current.shot_boundaries_ms != analysis.shot_boundaries_ms
+                            or current.described_at != analysis.described_at
+                        ):
+                            raise MaterialSnapshotConflict
+                        changed = current
+                    else:
+                        if current.description_source is DescriptionSource.USER:
+                            raise MaterialDescriptionProtected
+                        if analysis.ai_description is None:
+                            if (
+                                current.ai_description is not None
+                                or current.ai_tags
+                                or current.shot_boundaries_ms != analysis.shot_boundaries_ms
+                                or current.described_at is not None
+                            ):
+                                raise MaterialSnapshotConflict
+                            changed = current
+                        else:
+                            if analysis.described_at is None:
+                                raise MaterialSnapshotConflict
+                            changed = current.with_ai_understanding(
+                                analysis.ai_description,
+                                analysis.ai_tags,
+                                analysis.shot_boundaries_ms,
+                                analysis.described_at,
+                            )
+                    changed_analyses.append(
+                        changed.with_speech_analysis(
+                            has_speech=analysis.has_speech,
+                            speech_segments_ms=analysis.speech_segments_ms,
+                            speech_transcript=analysis.speech_transcript,
+                        )
+                    )
+
+                stored_narration_rows: list[RowMapping] = []
+                if writeback.narrations:
+                    stored_narration_rows = list(
+                        (
+                            await session.execute(
+                                select(materials)
+                                .where(
+                                    or_(
+                                        materials.c.material_id.in_(narration_ids),
+                                        and_(
+                                            materials.c.installation_id == installation_id.uuid,
+                                            materials.c.content_digest.in_(narration_digests),
+                                        ),
+                                    )
+                                )
+                                .order_by(materials.c.material_id)
+                                .with_for_update()
+                            )
+                        )
+                        .mappings()
+                        .all()
+                    )
+                rows_by_id = {row["material_id"]: row for row in stored_narration_rows}
+                rows_by_digest = {
+                    cast(str, row["content_digest"]): row
+                    for row in stored_narration_rows
+                    if row["installation_id"] == installation_id.uuid
+                }
+                new_narrations: list[Material] = []
+                for narration in writeback.narrations:
+                    existing = rows_by_id.get(narration.material_id.uuid)
+                    if existing is not None:
+                        if (
+                            existing["installation_id"] != installation_id.uuid
+                            or _hydrate(existing) != narration
+                        ):
+                            raise MaterialAlreadyRegistered
+                        continue
+                    if narration.content_digest in rows_by_digest:
+                        raise MaterialAlreadyRegistered
+                    new_narrations.append(narration)
+
+                for analysis, changed in zip(
+                    writeback.analyses,
+                    changed_analyses,
+                    strict=True,
+                ):
+                    values = _speech_analysis_values(changed)
+                    if analysis.description_source is DescriptionSource.AI:
+                        values.update(_understanding_values(changed))
+                    result = cast(
+                        "CursorResult[Any]",
+                        await session.execute(
+                            update(materials)
+                            .where(
+                                materials.c.material_id == changed.material_id.uuid,
+                                materials.c.installation_id == installation_id.uuid,
+                                materials.c.content_digest == analysis.content_digest,
+                            )
+                            .values(**values)
+                        ),
+                    )
+                    if result.rowcount != 1:
+                        raise MaterialSnapshotConflict
+                if new_narrations:
+                    await session.execute(
+                        insert(materials),
+                        [
+                            {
+                                **_column_values(material),
+                                "installation_id": installation_id.uuid,
+                            }
+                            for material in new_narrations
+                        ],
+                    )
+        except (
+            InvalidMaterialModel,
+            MaterialAlreadyRegistered,
+            MaterialDescriptionProtected,
+            MaterialNotFound,
+            MaterialSnapshotConflict,
+        ):
+            raise
+        except IntegrityError:
+            raise MaterialAlreadyRegistered from None
+        except _CONNECTION_FAILURES:
+            raise MaterialPersistenceUnavailable from None
+        except Exception:
+            raise MaterialPersistenceUnavailable from None
+        return (*changed_analyses, *writeback.narrations)
 
     async def _update_understanding_fields(
         self,
