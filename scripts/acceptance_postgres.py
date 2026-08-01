@@ -23,6 +23,25 @@ def _required_postgres_tool(name: str) -> str:
     return executable
 
 
+def _run_captured_postgres_command(
+    command: list[str],
+    *,
+    environment: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            command,
+            check=True,
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as error:
+        diagnostic = (error.stderr or error.stdout or "no PostgreSQL diagnostic").strip()
+        name = Path(command[0]).stem.lower()
+        raise RuntimeError(f"{name} failed: {diagnostic}") from error
+
+
 @contextmanager
 def _windows_postgres_root(
     environment: dict[str, str],
@@ -68,7 +87,7 @@ def _native_windows_postgres(
         server_log = root / "postgres.log"
         password_path.write_text(f"{password}\n", encoding="utf-8")
         try:
-            subprocess.run(
+            _run_captured_postgres_command(
                 [
                     initdb,
                     "--pgdata",
@@ -86,10 +105,7 @@ def _native_windows_postgres(
                     "--data-checksums",
                     "--no-sync",
                 ],
-                check=True,
-                env=process_environment,
-                capture_output=True,
-                text=True,
+                environment=process_environment,
             )
         finally:
             password_path.unlink(missing_ok=True)
