@@ -357,7 +357,7 @@ def audit_installed_motion_catalog(root: Path) -> dict[str, object]:
         )
 
     typography = json.loads(TYPOGRAPHY_CONTRACT.read_text(encoding="utf-8"))
-    font_relative = typography.get("cjk", {}).get("artifactPath")
+    font_relative = typography.get("chineseFace", {}).get("artifactPath")
     if not isinstance(font_relative, str) or font_relative not in inventory:
         raise AcceptanceFailed("installed Windows package carries no locked CJK font")
     font_bytes, font_digest = inventory[font_relative]

@@ -160,7 +160,7 @@ class InstalledCatalogAuditTests(unittest.TestCase):
         )
         self.typography = self.root / "typography.json"
         self.typography.write_text(
-            json.dumps({"cjk": {"artifactPath": self.font_relative}}),
+            json.dumps({"chineseFace": {"artifactPath": self.font_relative}}),
             encoding="utf-8",
         )
 
