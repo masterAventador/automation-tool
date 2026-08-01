@@ -24,17 +24,23 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "backend" / "src"))
 
-from prepare_video_runtime import prepare  # noqa: E402
-
+from automation_tool.executor.local_editing_worker import (  # noqa: E402
+    LocalMaterialWorkerFailureCode,
+)
 from automation_tool.executor.material_probe import (  # noqa: E402
     MaterialPathRegistry,
     MaterialPathRegistryRejected,
     MaterialPathRegistryRejection,
 )
+from prepare_video_runtime import prepare  # noqa: E402
 
 COMMAND_DOMAIN = b"automation-tool.video-worker-command.v1\0"
 EVENT_DOMAIN = b"automation-tool.video-worker-event.v1\0"
 TIMEOUT_SECONDS = 90
+_FAILURE_EVENT_FOR = {
+    "worker.material.imported": "worker.material.import_failed",
+    "worker.material.forgotten": "worker.material.forget_failed",
+}
 
 
 def _proof(token: bytes, domain: bytes, prefix: str, parts: tuple[str, ...]) -> str:
@@ -95,16 +101,36 @@ def _next_event(
                 diagnostics.append(errors.get_nowait())
             closed = "".join(diagnostics).strip()
             if str(source) in closed:
-                raise AssertionError("frozen Worker stderr leaked the selected source path")
+                raise AssertionError(
+                    "frozen Worker stderr leaked the selected source path"
+                )
             raise AssertionError(
                 f"frozen Worker exited before {expected}: {closed or '(no diagnostic)'}"
             )
         transcript.append(line)
+        if str(source) in line:
+            raise AssertionError("frozen Worker event leaked the selected source path")
         document = json.loads(line)
         if not isinstance(document, dict):
             raise AssertionError("Worker emitted a non-object event")
-        if document.get("event") == expected:
+        event = document.get("event")
+        if event == expected:
             return document
+        if event == _FAILURE_EVENT_FOR.get(expected):
+            failure = document.get("failureCode")
+            if not isinstance(failure, str):
+                raise AssertionError(
+                    f"frozen Worker reported an invalid {event}"
+                ) from None
+            try:
+                closed_failure = LocalMaterialWorkerFailureCode(failure)
+            except ValueError:
+                raise AssertionError(
+                    f"frozen Worker reported an invalid {event}"
+                ) from None
+            raise AssertionError(
+                f"frozen Worker reported {event}: {closed_failure.value}"
+            )
 
 
 def _verify_event(event: dict[str, object], token: bytes, detail: str) -> None:
@@ -286,7 +312,9 @@ def main() -> int:
         facts = imported.get("facts")
         if not isinstance(facts, dict):
             raise AssertionError("imported event has no material facts")
-        canonical = json.dumps(facts, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        canonical = json.dumps(
+            facts, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        )
         _verify_event(imported, token, f"{material_id}\0{canonical}")
         if set(facts) != {
             "audioLoudnessLufs",
