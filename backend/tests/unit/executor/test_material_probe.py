@@ -5522,6 +5522,28 @@ class TestMaterialPathRegistryOnAPlatformWithoutTheseFlags:
         assert not hasattr(os, "O_NONBLOCK")
         assert read_content_digest(source) == hashlib.sha256(source.read_bytes()).hexdigest()
 
+    def test_the_digest_requests_binary_mode_when_the_platform_provides_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Windows CRT text mode treats the first 0x1a byte as end-of-file."""
+
+        source = _source(tmp_path, payload=b"before\x1aafter")
+        binary_flag = 1 << 29
+        real_open = os.open
+        opened_with: list[int] = []
+
+        def record_open(
+            path: str | bytes | os.PathLike[str] | os.PathLike[bytes], flags: int
+        ) -> int:
+            opened_with.append(flags)
+            return real_open(path, flags & ~binary_flag)
+
+        monkeypatch.setattr(os, "O_BINARY", binary_flag, raising=False)
+        monkeypatch.setattr(os, "open", record_open)
+
+        assert read_content_digest(source) == hashlib.sha256(source.read_bytes()).hexdigest()
+        assert opened_with and opened_with[0] & binary_flag
+
 
 # --- T7: the window a consumer has to close ---------------------------------
 

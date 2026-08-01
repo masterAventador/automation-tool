@@ -1069,10 +1069,18 @@ def _digest_stable_file(path: Path, expected: os.stat_result) -> str | MaterialP
     # On a regular file the flag changes nothing — measured, the same bytes in
     # the same chunks.
     #
-    # Through `getattr` because Windows has no `O_NONBLOCK`, and Windows is a
-    # shipping target: `os.O_NONBLOCK` would raise a bare `AttributeError` here,
-    # which is not one of the reasons this module promises to fail with.
-    descriptor = os.open(os.fspath(path), os.O_RDONLY | cast(int, getattr(os, "O_NONBLOCK", 0)))
+    # Through `getattr` because the flags are platform opposites: POSIX has
+    # `O_NONBLOCK`, while Windows needs `O_BINARY`. Without the latter its CRT
+    # text mode treats a 0x1a byte inside ordinary media as end-of-file, making
+    # an unchanged MP4 look truncated and therefore `SOURCE_NOT_AT_REST`.
+    # Referencing either constant directly would raise a bare `AttributeError`
+    # on the other shipping platform instead of one of this module's reasons.
+    descriptor = os.open(
+        os.fspath(path),
+        os.O_RDONLY
+        | cast(int, getattr(os, "O_NONBLOCK", 0))
+        | cast(int, getattr(os, "O_BINARY", 0)),
+    )
     try:
         # Taken from the descriptor rather than from the path, so everything
         # below is about the file actually being read. A path stat leaves room
