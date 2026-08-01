@@ -41,6 +41,32 @@ APP_IDENTIFIER = "com.aventador.automationtool.le17acceptance"
 ENVIRONMENT_ID = "le17-acceptance"
 MATERIAL_ID = UUID("718cdcf5-0ff4-4f14-8259-30431a2447ce")
 DEFAULT_EVIDENCE = ROOT / ".local/local-video-editing/le17-evidence"
+SAFE_STARTUP_DESKTOP_EVENTS = frozenset(
+    {
+        "app.setup.started",
+        "app.setup.control_plane_client.initialized",
+        "app.setup.profile_data_directory.ready",
+        "app.setup.update_coordinator.initialized",
+        "app.setup.local_services.initialized",
+        "app.setup.workspace.initialized",
+        "app.setup.executor_service.initialized",
+        "app.setup.credentials.initialized",
+        "app.setup.completed",
+        "startup.local.started",
+        "startup.local.app_data.completed",
+        "startup.local.browser.completed",
+        "startup.local.executor.started",
+        "startup.local.executor.completed",
+        "startup.local.completed",
+        "startup.local.rejected",
+        "startup.control_plane.started",
+        "startup.control_plane.service_health.completed",
+        "startup.control_plane.registration.completed",
+        "startup.control_plane.installation_access.completed",
+        "startup.control_plane.completed",
+        "startup.control_plane.rejected",
+    }
+)
 
 
 def acceptance_environment(source: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -185,6 +211,37 @@ def local_runtime_diagnostics(private_app_data: Path) -> str:
         if (candidate / "outputs").is_dir()
     )
     return f"workspaces={len(workspaces)} checkpoints={checkpoint_count} outputs={output_count}"
+
+
+def desktop_event_diagnostics(private_app_data: Path) -> str:
+    """Return only validated fixed event names from the isolated desktop log."""
+    events: list[str] = []
+    logs = private_app_data / "logs"
+    if not logs.is_dir():
+        return "none"
+    for path in sorted(logs.glob("desktop-*.log*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeError):
+            continue
+        for line in lines:
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(record, dict) or set(record) != {"timestampUnixMs", "event"}:
+                continue
+            event = record.get("event")
+            timestamp = record.get("timestampUnixMs")
+            if (
+                isinstance(timestamp, int)
+                and isinstance(event, str)
+                and event in SAFE_STARTUP_DESKTOP_EVENTS
+            ):
+                events.append(event)
+    return ",".join(events[-64:]) or "none"
 
 
 def inspect_artifact(
@@ -336,6 +393,10 @@ def main() -> int:
                     print(
                         "LE-17 local-runtime diagnostics: "
                         f"{local_runtime_diagnostics(private_app_data)}"
+                    )
+                    print(
+                        "LE-17 desktop-event diagnostics: "
+                        f"{desktop_event_diagnostics(private_app_data)}"
                     )
                     raise RuntimeError("LE-17 hidden App editing journey failed")
                 app_process = None

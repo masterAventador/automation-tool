@@ -8,11 +8,29 @@ interface VideoEditingPreparation {
   readonly materialId: string;
 }
 
+interface LocalStartupEnvironment {
+  readonly appData: "ready" | "unavailable";
+  readonly executor: "ready" | "configuration_required" | "unavailable";
+  readonly embeddedBrowser:
+    | "ready"
+    | "component_missing"
+    | "component_damaged"
+    | "version_incompatible";
+}
+
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 describe("LE-17 production App local-video editing acceptance", () => {
   it("creates, saves and renders a controlled material into a real Artifact", async () => {
+    const startup = (await browser.tauri.execute(({ core }) =>
+      core.invoke("check_local_startup_environment"),
+    )) as LocalStartupEnvironment;
+    assert.deepEqual(startup, {
+      appData: "ready",
+      executor: "ready",
+      embeddedBrowser: "ready",
+    });
     await waitForStartup();
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_video_editing_for_acceptance"),

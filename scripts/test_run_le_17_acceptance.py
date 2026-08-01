@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -34,6 +35,25 @@ class Le17AcceptanceEnvironmentTest(unittest.TestCase):
                 "PATH": "trusted-tools",
             },
         )
+
+    def test_desktop_diagnostics_emit_only_fixed_event_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            app_data = Path(temporary)
+            logs = app_data / "logs"
+            logs.mkdir()
+            (logs / "desktop-1-42.log").write_text(
+                '{"timestampUnixMs":1,"event":"startup.local.started"}\n'
+                '{"timestampUnixMs":2,"event":"token=must-not-cross"}\n'
+                '{"timestampUnixMs":2,"event":"token.mustnotcross"}\n'
+                '{"timestampUnixMs":3,"event":"startup.local.completed","detail":"secret"}\n'
+                "not-json\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                run_le_17_acceptance.desktop_event_diagnostics(app_data),
+                "startup.local.started",
+            )
 
 
 if __name__ == "__main__":

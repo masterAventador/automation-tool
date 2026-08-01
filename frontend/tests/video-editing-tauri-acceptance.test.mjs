@@ -31,6 +31,10 @@ test("LE-17 owns one real App editing journey with an isolated production runtim
   assert.match(spec, /提交结果暂时无法确认/u);
   assert.match(spec, /includes\("尚未保存"\)/u);
   assert.match(spec, /getValue\(\)/u);
+  assert.match(spec, /core\.invoke\("check_local_startup_environment"\)/u);
+  assert.match(spec, /appData:\s*"ready"/u);
+  assert.match(spec, /executor:\s*"ready"/u);
+  assert.match(spec, /embeddedBrowser:\s*"ready"/u);
   assert.match(spec, /await waitForStartup\(\);/u);
   assert.doesNotMatch(spec, /startupTimeout/u);
   assert.doesNotMatch(spec, /云端剪辑功能尚未开通|sessionStorage|localStorage/u);
@@ -65,6 +69,7 @@ test("LE-17 owns one real App editing journey with an isolated production runtim
     "ffprobe",
     "video-workspaces-v1",
     "editing_job_diagnostics",
+    "desktop_event_diagnostics",
   ]) {
     assert.ok(runner.includes(required), `acceptance runner is missing ${required}`);
   }
