@@ -12,6 +12,14 @@ from contextlib import contextmanager
 from pathlib import Path
 
 WINDOWS_POSTGRES_ROOT_ENVIRONMENT = "AUTOMATION_TOOL_ACCEPTANCE_WINDOWS_POSTGRES_ROOT"
+WINDOWS_NATIVE_POSTGRES_TOOLS = ("initdb", "pg_ctl", "createdb")
+
+
+def _native_windows_postgres_available() -> bool:
+    discovered = tuple(shutil.which(name) for name in WINDOWS_NATIVE_POSTGRES_TOOLS)
+    if any(discovered) and not all(discovered):
+        raise RuntimeError("native Windows PostgreSQL toolchain is partially installed")
+    return all(discovered)
 
 
 def _required_postgres_tool(name: str) -> str:
@@ -185,7 +193,7 @@ def managed_test_postgres(
 ) -> Iterator[None]:
     """Start one isolated test database and always remove its resources."""
 
-    if platform.system() == "Windows":
+    if platform.system() == "Windows" and _native_windows_postgres_available():
         with _native_windows_postgres(
             database_port=database_port,
             environment=environment,
