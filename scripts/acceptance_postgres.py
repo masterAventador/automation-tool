@@ -192,7 +192,10 @@ def _isolated_windows_docker_environment(
         ignore_cleanup_errors=True,
     ) as directory:
         docker_config = Path(directory)
-        (docker_config / "config.json").write_text("{}\n", encoding="utf-8")
+        (docker_config / "config.json").write_text(
+            '{"auths":{"https://index.docker.io/v1/":{}}}\n',
+            encoding="utf-8",
+        )
         isolated_environment = environment.copy()
         isolated_environment["DOCKER_CONFIG"] = os.fspath(docker_config)
         yield isolated_environment

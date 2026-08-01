@@ -93,7 +93,7 @@ class NativePostgresDiagnosticTest(unittest.TestCase):
             docker_config = Path(environment["DOCKER_CONFIG"])  # type: ignore[index]
             self.assertEqual(
                 (docker_config / "config.json").read_text(encoding="utf-8"),
-                "{}\n",
+                '{"auths":{"https://index.docker.io/v1/":{}}}\n',
             )
             docker_configs.append(docker_config)
             return subprocess.CompletedProcess(command, 0, "", "")
