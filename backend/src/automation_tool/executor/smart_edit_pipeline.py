@@ -16,6 +16,7 @@ from uuid import UUID
 
 from automation_tool.control_plane.domain.material import Material, MaterialKind
 from automation_tool.executor.adaptive_frame_extraction import (
+    AdaptiveFrameArtifact,
     AdaptiveFrameRejection,
     extract_adaptive_frames,
 )
@@ -137,6 +138,13 @@ class _LocalMaterial:
     decodable: VerifiedDecodableMaterial | None
 
 
+@dataclass(frozen=True, slots=True, repr=False)
+class _UnderstandingInput:
+    workspace: Path
+    artifacts: tuple[AdaptiveFrameArtifact, ...]
+    duration_ms: int
+
+
 @dataclass(slots=True, repr=False)
 class LocalSmartEditGenerationPipeline:
     """Own paths and credentials while exposing only validated path-free facts."""
@@ -187,24 +195,39 @@ class LocalSmartEditGenerationPipeline:
             validated,
             cancellation_requested=cancellation_requested,
         )
+        understanding_inputs = self._prepare_understanding_inputs(
+            local,
+            cancellation_requested=cancellation_requested,
+        )
         enriched: list[Material] = []
         updates: list[SmartEditMaterialAnalysis] = []
-        for value in local:
-            _cancel(cancellation_requested)
-            current = self._understand_if_needed(
-                value,
-                cancellation_requested=cancellation_requested,
-            )
-            current = self._analyze_speech_if_needed(
-                value,
-                current,
-                cancellation_requested=cancellation_requested,
-            )
-            if current.ai_description is None:
-                _reject()
-            enriched.append(current)
-            if current != value.material:
-                updates.append(SmartEditMaterialAnalysis.from_material(current))
+        try:
+            for value, understanding_input in zip(
+                local,
+                understanding_inputs,
+                strict=True,
+            ):
+                _cancel(cancellation_requested)
+                current = self._understand_if_needed(
+                    value,
+                    understanding_input,
+                    cancellation_requested=cancellation_requested,
+                )
+                current = self._analyze_speech_if_needed(
+                    value,
+                    current,
+                    cancellation_requested=cancellation_requested,
+                )
+                if current.ai_description is None:
+                    _reject()
+                enriched.append(current)
+                if current != value.material:
+                    updates.append(SmartEditMaterialAnalysis.from_material(current))
+        finally:
+            for understanding_input in understanding_inputs:
+                if understanding_input is not None:
+                    with suppress(OSError):
+                        shutil.rmtree(understanding_input.workspace)
         self._prepared = True
         return PreparedSmartEditMaterials(
             materials=tuple(enriched),
@@ -258,45 +281,85 @@ class LocalSmartEditGenerationPipeline:
             local.append(_LocalMaterial(material, source, checked, facts, decodable))
         return tuple(local)
 
+    @staticmethod
+    def _needs_understanding(material: Material) -> bool:
+        return material.description_source.value != "user" and (
+            material.ai_description is None
+            or (material.kind is MaterialKind.VIDEO and not material.shot_boundaries_ms)
+        )
+
+    def _prepare_understanding_inputs(
+        self,
+        local_materials: tuple[_LocalMaterial, ...],
+        *,
+        cancellation_requested: CancellationProbe,
+    ) -> tuple[_UnderstandingInput | None, ...]:
+        prepared: list[_UnderstandingInput | None] = []
+        workspaces: list[Path] = []
+        failed = False
+        try:
+            for local in local_materials:
+                _cancel(cancellation_requested)
+                if not self._needs_understanding(local.material):
+                    prepared.append(None)
+                    continue
+                workspace = Path(tempfile.mkdtemp(prefix="automation-tool-smart-edit-frames-"))
+                workspaces.append(workspace)
+                duration_ms = (
+                    local.material.duration_ms if local.material.duration_ms is not None else 1
+                )
+                artifacts = extract_adaptive_frames(
+                    self.tools,
+                    local.source,
+                    local.approved,
+                    workspace,
+                    duration_ms=duration_ms,
+                )
+                if isinstance(artifacts, AdaptiveFrameRejection):
+                    _reject()
+                require_source_unchanged(local.source, local.approved)
+                prepared.append(_UnderstandingInput(workspace, artifacts, duration_ms))
+        except (SmartEditGenerationCancelled, SmartEditGenerationRejected):
+            self._cleanup_understanding_workspaces(workspaces)
+            raise
+        except Exception:
+            failed = True
+        if failed:
+            self._cleanup_understanding_workspaces(workspaces)
+            _reject()
+        return tuple(prepared)
+
+    @staticmethod
+    def _cleanup_understanding_workspaces(workspaces: list[Path]) -> None:
+        for workspace in workspaces:
+            with suppress(OSError):
+                shutil.rmtree(workspace)
+
     def _understand_if_needed(
         self,
         local: _LocalMaterial,
+        prepared: _UnderstandingInput | None,
         *,
         cancellation_requested: CancellationProbe,
     ) -> Material:
         material = local.material
-        protected = material.description_source.value == "user"
-        needs_understanding = not protected and (
-            material.ai_description is None
-            or (material.kind is MaterialKind.VIDEO and not material.shot_boundaries_ms)
-        )
+        needs_understanding = self._needs_understanding(material)
         if not needs_understanding:
+            if prepared is not None:
+                _reject()
             return material
+        if prepared is None:
+            _reject()
         _cancel(cancellation_requested)
         candidate: Material | None = None
         failed = False
         try:
-            workspace = Path(tempfile.mkdtemp(prefix="automation-tool-smart-edit-frames-"))
-        except OSError:
-            _reject()
-        try:
-            duration_ms = material.duration_ms if material.duration_ms is not None else 1
-            artifacts = extract_adaptive_frames(
-                self.tools,
-                local.source,
-                local.approved,
-                workspace,
-                duration_ms=duration_ms,
-            )
-            if isinstance(artifacts, AdaptiveFrameRejection):
-                _reject()
             require_source_unchanged(local.source, local.approved)
-            _cancel(cancellation_requested)
             result = understand_material_artifacts(
                 self.understanding_adapter,
-                output_directory=workspace,
-                artifacts=artifacts,
-                duration_ms=duration_ms,
+                output_directory=prepared.workspace,
+                artifacts=prepared.artifacts,
+                duration_ms=prepared.duration_ms,
                 options=MaterialUnderstandingOptions(),
             )
             require_source_unchanged(local.source, local.approved)
@@ -315,9 +378,6 @@ class LocalSmartEditGenerationPipeline:
             raise
         except Exception:
             failed = True
-        finally:
-            with suppress(OSError):
-                shutil.rmtree(workspace)
         if failed or candidate is None:
             _reject()
         return candidate

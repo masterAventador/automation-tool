@@ -82,6 +82,27 @@ def _material(*, user_description: bool = False, has_audio: bool = True) -> Mate
     )
 
 
+def _image_material() -> Material:
+    return Material.register(
+        material_id=MaterialId.new(),
+        kind=MaterialKind.IMAGE,
+        duration_ms=None,
+        width=720,
+        height=1_280,
+        content_digest="b" * 64,
+        has_audio=False,
+        audio_loudness_lufs=None,
+        has_speech=False,
+        speech_segments_ms=(),
+        speech_transcript=None,
+        shot_boundaries_ms=(),
+        ai_description=None,
+        ai_tags=(),
+        description_source=DescriptionSource.AI,
+        described_at=None,
+    )
+
+
 def _pipeline(
     tmp_path: Path,
     registry: MaterialPathRegistry,
@@ -121,8 +142,9 @@ def test_prepare_proves_every_local_source_before_models_and_returns_updates(
         ffmpeg_path=_executable(tmp_path / "ffmpeg"),
     )
     first = _material()
+    second = _material()
     protected = _material(user_description=True)
-    for material in (first, protected):
+    for material in (first, second, protected):
         source = tmp_path / f"{material.material_id}.mp4"
         source.write_bytes(b"video")
         registry.register(material.material_id.uuid, source)
@@ -168,7 +190,8 @@ def test_prepare_proves_every_local_source_before_models_and_returns_updates(
     def understand(*_args: object, **_kwargs: object) -> MaterialUnderstandingResult:
         events.append("understand")
         assert events.count("probe:" + protected.material_id.__str__() + ".mp4") == 1
-        assert events.count("decode") == 2
+        assert events.count("decode") == 3
+        assert events.count("extract") == 2
         return MaterialUnderstandingResult(
             request_id="understanding-request",
             description="AI 产品发布会特写",
@@ -197,18 +220,20 @@ def test_prepare_proves_every_local_source_before_models_and_returns_updates(
     )
 
     result = _pipeline(tmp_path, registry, tools).prepare(
-        (first, protected),
+        (first, second, protected),
         cancellation_requested=lambda: False,
     )
 
-    assert len(result.decodable_materials) == 2
+    assert len(result.decodable_materials) == 3
     assert result.materials[0].ai_description == "AI 产品发布会特写"
     assert result.materials[0].shot_boundaries_ms == (0,)
     assert result.materials[0].has_speech is True
-    assert result.materials[1].ai_description == "人工写的产品描述"
-    assert events.count("understand") == 1
+    assert result.materials[1].ai_description == "AI 产品发布会特写"
+    assert result.materials[2].ai_description == "人工写的产品描述"
+    assert events.count("understand") == 2
     assert tuple(update.material_id for update in result.analysis_updates) == (
         first.material_id.uuid,
+        second.material_id.uuid,
         protected.material_id.uuid,
     )
     assert all(".mp4" not in repr(update) for update in result.analysis_updates)
@@ -392,3 +417,62 @@ def test_silent_source_never_constructs_the_audible_lower_funnel(
 
     assert result.materials == (material,)
     assert calls == 0
+
+
+def test_image_understanding_drops_synthetic_analysis_duration_and_shots(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    registry = MaterialPathRegistry(state_directory=state)
+    tools = PackagedMediaTools(
+        ffprobe_path=_executable(tmp_path / "ffprobe"),
+        ffmpeg_path=_executable(tmp_path / "ffmpeg"),
+    )
+    material = _image_material()
+    source = tmp_path / "product.jpg"
+    source.write_bytes(b"image")
+    registry.register(material.material_id.uuid, source)
+    monkeypatch.setattr(
+        "automation_tool.executor.smart_edit_pipeline.probe_material",
+        lambda *_args: MaterialFacts(
+            ProbedMaterialKind.IMAGE,
+            None,
+            720,
+            1_280,
+            "mjpeg",
+            None,
+            False,
+            None,
+            "b" * 64,
+        ),
+    )
+    monkeypatch.setattr(
+        "automation_tool.executor.smart_edit_pipeline.verify_decodable_video",
+        lambda *_args, **_kwargs: pytest.fail("an image must not enter video decoding"),
+    )
+    monkeypatch.setattr(
+        "automation_tool.executor.smart_edit_pipeline.extract_adaptive_frames",
+        lambda *_args, **_kwargs: (AdaptiveFrameArtifact("frame-000001.jpg", 0, True, 4),),
+    )
+    monkeypatch.setattr(
+        "automation_tool.executor.smart_edit_pipeline.understand_material_artifacts",
+        lambda *_args, **_kwargs: MaterialUnderstandingResult(
+            request_id="image-understanding-request",
+            description="产品白底主图",
+            tags=("产品",),
+            shots=(MaterialUnderstandingShot(0, 1, "产品主图"),),
+        ),
+    )
+
+    prepared = _pipeline(tmp_path, registry, tools).prepare(
+        (material,),
+        cancellation_requested=lambda: False,
+    )
+
+    assert prepared.decodable_materials == ()
+    assert prepared.materials[0].duration_ms is None
+    assert prepared.materials[0].shot_boundaries_ms == ()
+    assert prepared.materials[0].ai_description == "产品白底主图"
+    assert prepared.analysis_updates[0].material_id == material.material_id.uuid
