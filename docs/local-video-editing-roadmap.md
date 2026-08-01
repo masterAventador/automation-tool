@@ -78,20 +78,20 @@
 | LE-17 | 工作台接真实网关 | `main.tsx` 生产组合根从 sessionStorage 草稿网关换成真实 Control Plane 网关；提交路径打通不再固定抛错；重写 `e2e-tauri/video-editing.spec.ts`，断言目标从"诚实展示不可用"改为真实出片；**同任务内必须重写前端 Timeline 契约**——`video-editing-dto.ts` 那份手写 zod 副本与新后端模型**整体不兼容，需按 `timeline.py` 重写而非逐点修补**（drift 由 LE-03 在 T2/T3/T4 改后端时造成，终审核基线 `d00f547` 确认此前前后端逐字同步）。LE-03 终审用真实 zod 探针实测：带转场的后端时间轴、带 `sourceInMs`/`sourceOutMs`/`gainDb` 的 clip、`narration`/`ambient`/`music` 三种轨道，**前端一律拒绝**。分歧至少七处：① `timelineClipSchema` 是 `z.strictObject` 且缺三个新字段，后端快照是硬报错不是静默忽略；② 仍用 `sourceArtifactId`（`ArtifactId`），后端已改指 `MaterialId`；③ 布局 refine 对所有轨道要求「不许重叠」，而新后端转场靠真实重叠实现；④ 无画面轨首尾相接、`visual.end == duration`、每种轨道至多一条等核心不变式；⑤ `transitionKindSchema` 仍含 `"cut"`；⑥ `timelineTrackKindSchema` 仍是单一音频轨；⑦ `MAX_TRACKS = 32`（应为 5）。2026-08-01 已按 `docs/development/LE-17.md` 拆为六项；T1～T6 已完成领域契约、Rust/Tauri 边界、真实前端网关、生产组合根接线、工作台真实状态/刷新语义、取消终态审查修复和双平台真实出片。最终提交 `904f2075` 在 macOS/Windows 各由同一非 ignored 正式 App 驱动得到 `1 passing`，ffprobe 均为 H.264 `720×1280@20`、20 帧、1 秒；完整 backend integration `460 passed, 17 skipped`，模块门禁与最终 Review 全部闭环，证据见 `docs/development/LE-17.md` | LE-06 | ✅ 已完成 |
 | LE-18 | 素材库界面 | 导入素材、展示 AI 描述与标签、**标注哪些素材有人说话并可试听/查看转写**、编辑描述、去重提示、缺失素材提示；缺失素材严格区分 `FILE_MISSING`、`FILE_UNREADABLE`、`FILE_CHANGED`，并保留 `UNDECODABLE` 稍后重试、`SOURCE_NOT_AT_REST` 等待写完与 `WORKSPACE_UNUSABLE` 本机暂存空间动作。T1～T7 已完成注册表幂等 forget、Control Plane 分页/受约束删除与引用投影、双平台冻结 Worker 四步导入/补偿、Rust/Tauri 原生协调、仅凭 Material ID 的本机 Range 预览、严格 DTO/gateway/正式工作台 UI，以及 macOS/Windows 同一 SHA 的正式 App 正常/失败纵向验收。真实旅程覆盖视频/音频/图片、去重、取消 picker、预览、人工描述、引用冲突、未引用素材删除和三类本机状态；完整 integration 与模块门禁、最终 Review 均已收口，证据见 `docs/development/LE-18.md` | LE-17 | ✅ 已完成 |
 | LE-19 | 智能剪辑入口 | 一句话输入 → 生成 Timeline 草稿落进工作台；"一键直出片"跳过审阅走同一生成器；进度与取消可见；**剪辑模块的产品形态在此最终确定，同任务内复核 `contracts/quality/user-facing-terminology.v1.json` 的 `video_editing_module` 条目与实际界面一致，并让当前已绿的 `check_user_facing_branding.py` 保持绿色**（见 §7 现状）。2026-08-01 已按 `docs/development/LE-19.md` 拆为七项；T1～T6 已完成逐任务 Review 与专项验收，T7 正式隐藏 App Harness 已实现并通过结构门禁。真实正常/失败纵向、macOS/Windows 同 SHA、完整集成与最终收口仍待执行；因旅程会把固定提示词和程序生成图片发送给外部模型，未获授权前不冒充验收通过 | LE-16,LE-18 | 🔍 待验收 |
-| LE-24 | 深度思考开关与耗时告知 | 智能剪辑入口的高级选项里增加一个总开关，统一控制素材理解、文案分句、语义匹配三处模型调用是否开启深度思考；默认关闭；用户偏好持久化并在下次进入时保持；**开关旁必须显示开启后预计多花的时间，该数字由实测得出，禁止估计或编造**——先用固定素材集实测开/关两种模式的端到端耗时差，若耗时随素材条数线性增长则按条数动态计算展示（如"约多花 3 秒 × 素材条数"），否则展示实测区间；实测数据与计算方式写入 `docs/development/LE-24.md`；用户可见文案无未解释术语，过 `check_user_facing_branding.py`；开关状态真实传达到模型请求参数，断言请求体中该字段随开关变化。T1/T2 已完成；T3 单次正式 App 计时入口已实现，真实成对观测待外部发送授权 | LE-16,LE-19 | 🚧 实现中 |
+| LE-24 | 深度思考开关与耗时告知 | 智能剪辑入口的高级选项里增加一个总开关，统一控制素材理解、文案分句、语义匹配三处模型调用是否开启深度思考；默认关闭；用户偏好持久化并在下次进入时保持；**开关旁必须显示开启后预计多花的时间，该数字由实测得出，禁止估计或编造**——先用固定素材集实测开/关两种模式的端到端耗时差，若耗时随素材条数线性增长则按条数动态计算展示（如"约多花 3 秒 × 素材条数"），否则展示实测区间；实测数据与计算方式写入 `docs/development/LE-24.md`；用户可见文案无未解释术语，过 `check_user_facing_branding.py`；开关状态真实传达到模型请求参数，断言请求体中该字段随开关变化。T1/T2、单次正式 App 计时入口与三轮成对采样判型器已完成；真实成对观测、实测文案与正式验收待外部发送授权 | LE-16,LE-19 | 🔍 待验收 |
 
 ### 3.7 字体（1 项）
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| LE-20 | 中文字体扩充与装配 | **本任务的前提已被 LE-09 调研推翻，开工前必须先重估必要性**：设计文档 §6.1 称「Noto Sans SC 覆盖约 3 万字、扩展 B 以上是豆腐块」，但生产在册的中文字体其实是 `contracts/quality/asset-rights-policy.v1.json` 锁的 **Noto Sans CJK SC**（静态 OTF，`Sans2.004`，由 `scripts/subtitle_font_assets.py` 按 SHA-256 取到构建缓存），LE-09 实测 `𠮷`（U+20BB7，扩展 B）在其 cmap 中映射到真实字形 `cid59625`。**先量清楚它到底缺哪些字**，再决定是否引入 Plangothic/文津宋体/霞鹜文楷 GB；若确需引入：锁版本、锁 SHA256，登记许可证与 SBOM，**必须有生产装配路径与出厂门禁**，不允许只有测试路径；用户可选字体。**装配整体归本任务**（LE-09 只交付机制，完成后最多 `🔍 待验收`）。原先硬编码的 `local-executor: 177 MiB` 已在 LE-14 T2 按最小 ONNX Runtime 实包重测并更新为 246 MiB；若本任务再引入字体资产，仍须按最终实包重新核对声明负载与正式包上限 | LE-09 | ⬜ 未开始 |
+| LE-20 | 中文字体扩充与装配 | **本任务的前提已被 LE-09 调研推翻，开工前必须先重估必要性**：设计文档 §6.1 称「Noto Sans SC 覆盖约 3 万字、扩展 B 以上是豆腐块」，但生产在册的中文字体其实是 `contracts/quality/asset-rights-policy.v1.json` 锁的 **Noto Sans CJK SC**（静态 OTF，`Sans2.004`，由 `scripts/subtitle_font_assets.py` 按 SHA-256 取到构建缓存），LE-09 实测 `𠮷`（U+20BB7，扩展 B）在其 cmap 中映射到真实字形 `cid59625`。已实测确认缺口并引入锁版本/SHA/许可证/SBOM 的遍黑体 P1/P2，完成生产注册表、装配、出厂门禁、用户选择和 Windows 真机专项；完整 macOS/Windows PyInstaller 实包、总尺寸复测及 LE 级 integration 仍待获准执行，证据见 `docs/development/LE-20.md` | LE-09 | 🔍 待验收 |
 
 ### 3.8 验收（3 项）
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
 | LE-21 | 失败矩阵联合验收 | 设计文档 §8 全部场景；素材消失、磁盘满、权限拒绝、渲染超时、进程被杀、取消竞争、App 退出恢复均有测试；七场景机器可读矩阵、Executor 精确注入、Rust ledger 与真实 Worker 生命周期已在 macOS/Windows 执行，Windows LE 收口集成 `459 passed, 29 skipped`（LE20 PyInstaller 候选构建单项不冒充 LE21 证据），逐项 Review 与功能验收均闭环，证据见 `docs/development/LE-21.md` | LE-12,LE-19 | ✅ 已完成 |
-| LE-22 | macOS 正式包纵向验收 | 从全新安装的正式 App 正常入口导入本地素材 → 一句话生成草稿 → 出片 → 成片入库并可播放；素材含至少一条有人声素材，核对它走的是原声而非 TTS；证据含 ffprobe 读数与产物尺寸 | LE-20,LE-21 | ⬜ 未开始 |
+| LE-22 | macOS 正式包纵向验收 | 从全新安装的正式 App 正常入口导入本地素材 → 一句话生成草稿 → 出片 → 成片入库并可播放；素材含至少一条有人声素材，核对它走的是原声而非 TTS；证据含 ffprobe 读数与产物尺寸。已按 `docs/development/LE-22.md` 拆为三项；T1 正式包旅程、数据库/ffprobe/原声音频相关性证据契约已完成，下一步 T2 接生产 release assembly 与隔离安装 | LE-20,LE-21 | 🚧 实现中 |
 | LE-23 | Windows 正式包纵向验收 | 同 LE-22，在 Windows 正式包上独立完成；核对随包 ffmpeg、VAD/ASR 运行时与字体在 Windows 包内真实存在 | LE-22 | ⬜ 未开始 |
 
 ## 4. 进度
@@ -100,13 +100,13 @@
 
 - 任务总数：24
 - ✅ 已完成：12
-- 🔍 待验收：8
+- 🔍 待验收：10
 - 🧪 RED / 🚧 实现中：1
-- ⬜ 未开始：3
+- ⬜ 未开始：1
 
 ## 5. 历史进度与当前下一步
 
-**LE-19 正式 App Harness 已就绪并转待验收；当前推进 LE-24 T3 固定素材成对计时。** LE-19/LE-24 的真实模型旅程待外部发送授权；下文保留 LE-10～LE-18 的推进背景，
+**LE-19/LE-24 转待真实外部验收，LE-20 转待双平台实包验收；当前推进 LE-22 macOS 正式包旅程与证据契约。** 下文保留 LE-10～LE-18 的推进背景，
 不再把其中“下一步进入 LE-17”的历史句子解释为当前状态。
 
 **LE-12 T1～T5 已完成；下一步进入 LE-17 工作台接真实网关。** LE-10 已交付从真实领域投影、绝对
