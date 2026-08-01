@@ -336,49 +336,12 @@ def resolve_locked_python(
     return version, interpreter
 
 
-def normalize_windows_uv_python_home(
-    runtime: Path,
-    *,
-    platform: str = os.name,
-) -> None:
-    """Replace an unusable uv managed-Python junction with its exact target.
-
-    Current Windows hardening can reject traversal through uv's version alias
-    junction even though the exact managed interpreter remains executable. uv
-    writes that alias into ``pyvenv.cfg`` regardless of the exact interpreter
-    passed to it, so its trampoline cannot start until the home is normalized.
-    """
-    if platform != "nt":
-        return
-    configuration = runtime / "pyvenv.cfg"
-    try:
-        lines = configuration.read_text(encoding="utf-8").splitlines(keepends=True)
-    except OSError as error:
-        reject(f"无法读取 uv Python 环境配置：{error}")
-    home_lines = [
-        index for index, line in enumerate(lines) if line.startswith("home = ")
-    ]
-    if len(home_lines) != 1:
-        reject("uv Python 环境配置缺少唯一 home")
-    index = home_lines[0]
-    home = Path(lines[index].removeprefix("home = ").rstrip("\r\n"))
-    try:
-        target = os.readlink(home)
-    except OSError:
-        return
-    if target.startswith("\\\\?\\UNC\\"):
-        target = f"\\\\{target[8:]}"
-    elif target.startswith("\\\\?\\"):
-        target = target[4:]
-    target_path = Path(target)
-    if not (target_path / "python.exe").is_file():
-        reject("uv Python home junction 未指向可执行解释器")
-    newline = "\r\n" if lines[index].endswith("\r\n") else "\n"
-    lines[index] = f"home = {target_path}{newline}"
-    try:
-        configuration.write_text("".join(lines), encoding="utf-8")
-    except OSError as error:
-        reject(f"无法规范化 uv Python 环境配置：{error}")
+def create_locked_python_environment(interpreter: Path, runtime: Path) -> None:
+    """Create a standard venv without uv's Windows managed-Python trampoline."""
+    run(
+        [str(interpreter), "-m", "venv", str(runtime)],
+        cwd=ROOT,
+    )
 
 
 def probe_environment() -> dict[str, str]:
@@ -421,6 +384,7 @@ def build_candidate(output: Path) -> MaterialVideoWorkerAudit:
             environment,
         )
         environment["UV_PYTHON"] = str(interpreter)
+        create_locked_python_environment(interpreter, runtime)
         run(
             [
                 "uv",
@@ -434,7 +398,6 @@ def build_candidate(output: Path) -> MaterialVideoWorkerAudit:
             cwd=ROOT,
             environment=environment,
         )
-        normalize_windows_uv_python_home(runtime)
         python = environment_python(runtime)
         actual_python = run(
             [str(python), "-c", "import platform; print(platform.python_version())"],
