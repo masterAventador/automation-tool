@@ -293,6 +293,58 @@ describe("video editing workbench", () => {
     expect(await screen.findByText("已保存修订：第 2 版")).toBeVisible();
   });
 
+  it("creates a project with the user-selected registered caption font", async () => {
+    const user = userEvent.setup();
+    const create = vi
+      .fn<VideoEditingGateway["createProject"]>()
+      .mockImplementation(async (input) => ({
+        ...projectSnapshot(),
+        title: input.title,
+        captionStyle: input.captionStyle,
+      }));
+    const gateway: VideoEditingGateway = {
+      async listProjects() {
+        return [];
+      },
+      createProject: create,
+      async getTimeline() {
+        return null;
+      },
+      async saveTimeline() {
+        throw new Error("unused");
+      },
+      async listEditingJobs() {
+        return [];
+      },
+      async submitEditingJob() {
+        throw new Error("unused");
+      },
+    };
+    render(<VideoEditingWorkbench gateway={gateway} />);
+
+    expect(await screen.findByText("还没有剪辑项目")).toBeVisible();
+    const font = screen.getByRole("combobox", { name: "字幕字体" });
+    expect(font).toHaveValue("noto-sans-cjk-sc-bold");
+    expect(screen.getByRole("option", { name: "遍黑体（生僻字优先）" })).toBeVisible();
+    expect(
+      screen.queryByRole("option", { name: /P2/u }),
+    ).not.toBeInTheDocument();
+    await user.selectOptions(font, "plangothic-p1-regular");
+    await user.type(screen.getByLabelText("剪辑项目标题"), "生僻字字幕");
+    await user.click(screen.getByRole("button", { name: "创建剪辑项目" }));
+
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "生僻字字幕",
+          captionStyle: expect.objectContaining({
+            fontKey: "plangothic-p1-regular",
+          }),
+        }),
+      ),
+    );
+  });
+
   it("reorders and deletes clips before saving", async () => {
     const user = userEvent.setup();
     render(

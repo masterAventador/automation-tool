@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "defaultKey": "noto-sans-cjk-sc-bold",
+  "options": [
+    {
+      "key": "noto-sans-cjk-sc-bold",
+      "label": "Noto 思源黑体（粗体，推荐）",
+      "description": "适合大多数中文字幕，笔画醒目；遇到生僻字会自动使用遍黑体。",
+      "selectable": true
+    },
+    {
+      "key": "noto-sans-cjk-sc-regular",
+      "label": "Noto 思源黑体（常规）",
+      "description": "字重较轻，适合信息密度较高的字幕；生僻字仍会自动 fallback。",
+      "selectable": true
+    },
+    {
+      "key": "plangothic-p1-regular",
+      "label": "遍黑体（生僻字优先）",
+      "description": "优先绘制 Unicode 扩展 B 至 J 的生僻汉字，普通文字由 fallback 补齐。",
+      "selectable": true
+    },
+    {
+      "key": "plangothic-p2-regular",
+      "label": "遍黑体 P2（内部 fallback）",
+      "description": "遍黑体的第二字库文件，只由运行时自动使用，不作为独立样式显示。",
+      "selectable": false
+    },
+    {
+      "key": "big-shoulders-display",
+      "label": "Big Shoulders（拉丁标题）",
+      "description": "适合英文与数字标题；中文和生僻字由 Noto 与遍黑体自动补齐。",
+      "selectable": true
+    }
+  ]
+}

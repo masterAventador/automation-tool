@@ -30,6 +30,12 @@ import {
 import type { MaterialLibraryGateway } from "./material-library-gateway";
 import { MaterialLibraryPage } from "./MaterialLibraryPage";
 import {
+  captionFontDescription,
+  captionFontLabel,
+  DEFAULT_CAPTION_FONT_KEY,
+  SELECTABLE_CAPTION_FONTS,
+} from "./caption-font-catalog";
+import {
   SmartEditGatewayError,
   smartEditFailureText,
   type SmartEditGateway,
@@ -411,12 +417,13 @@ function ProjectsPage({
   readonly loaded: boolean;
   readonly loading: boolean;
   readonly creating: boolean;
-  readonly onCreate: (title: string) => void;
+  readonly onCreate: (title: string, fontKey: string) => void;
   readonly onOpen: (projectId: string) => void;
   readonly onRefresh: () => void;
   readonly message: Message | null;
 }) {
   const [title, setTitle] = useState("");
+  const [fontKey, setFontKey] = useState(DEFAULT_CAPTION_FONT_KEY);
   return (
     <Space orientation="vertical" size="middle" className="video-editing-projects">
       {/*
@@ -446,13 +453,33 @@ function ProjectsPage({
             value={title}
             onChange={(event) => setTitle(event.target.value)}
           />
+          <label>
+            <Space orientation="vertical" size={4}>
+              <Typography.Text>字幕字体</Typography.Text>
+              <select
+                aria-label="字幕字体"
+                className="video-editing-transition-select"
+                value={fontKey}
+                onChange={(event) => setFontKey(event.target.value)}
+              >
+                {SELECTABLE_CAPTION_FONTS.map((option) => (
+                  <option key={option.key} value={option.key}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <Typography.Text type="secondary">
+                {captionFontDescription(fontKey)}
+              </Typography.Text>
+            </Space>
+          </label>
           <div>
             <Space size="small">
               <Button
                 type="primary"
                 aria-label="创建剪辑项目"
                 loading={creating}
-                onClick={() => onCreate(title)}
+                onClick={() => onCreate(title, fontKey)}
               >
                 创建剪辑项目
               </Button>
@@ -491,6 +518,7 @@ function ProjectsPage({
               <Typography.Text strong>{project.title}</Typography.Text>
               <Typography.Text type="secondary">
                 {project.output.width}×{project.output.height} · {project.output.fps} 帧/秒
+                {` · ${captionFontLabel(project.captionStyle.fontKey)}`}
               </Typography.Text>
               <Button onClick={() => onOpen(project.projectId)}>打开时间轴编辑</Button>
             </Space>
@@ -1253,7 +1281,7 @@ export function VideoEditingWorkbench({
   const selectedProject =
     projects.find((project) => project.projectId === selectedProjectId) ?? null;
 
-  const createProject = (title: string) => {
+  const createProject = (title: string, fontKey: string) => {
     if (creatingRef.current) {
       return;
     }
@@ -1266,7 +1294,7 @@ export function VideoEditingWorkbench({
           title: title.trim(),
           output: { width: 720, height: 1280, fps: 20 },
           captionStyle: {
-            fontKey: "noto-sans-cjk-sc-bold",
+            fontKey,
             fontPx: 48,
             strokePx: 3,
             lineSpacing: 1.2,

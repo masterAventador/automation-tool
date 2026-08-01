@@ -20,6 +20,7 @@ from automation_tool.executor.captions import fonts
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 _ASSET_RIGHTS = _REPOSITORY_ROOT / "contracts/quality/asset-rights-policy.v1.json"
+_FONT_CATALOG = _REPOSITORY_ROOT / "contracts/video/caption-font-catalog.v1.json"
 
 _OPEN_FONT_LICENSE = "OFL-1.1"
 
@@ -78,6 +79,21 @@ def test_the_registry_matches_the_cleared_faces_in_the_rights_register() -> None
     assert {
         registered.packaged_name for registered in fonts.REGISTERED_CAPTION_FONTS.values()
     } == set(cleared)
+
+
+def test_the_user_font_catalog_matches_the_runtime_registry_and_default() -> None:
+    catalog = json.loads(_FONT_CATALOG.read_text(encoding="utf-8"))
+
+    assert catalog["schemaVersion"] == 1
+    assert catalog["defaultKey"] == fonts.DEFAULT_CAPTION_FONT_KEY
+    assert [option["key"] for option in catalog["options"]] == list(
+        fonts.REGISTERED_CAPTION_FONTS
+    )
+    selectable = {
+        option["key"] for option in catalog["options"] if option["selectable"]
+    }
+    assert "plangothic-p1-regular" in selectable
+    assert "plangothic-p2-regular" not in selectable
 
 
 def test_every_registered_face_records_the_bundle_that_carries_it() -> None:
