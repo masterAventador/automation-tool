@@ -63,6 +63,8 @@ def test_every_evidence_anchor_is_an_executable_test_inside_the_repository() -> 
             anchor = item["anchor"]
             assert isinstance(anchor, str) and re.fullmatch(r"[a-z][a-z0-9_]+", anchor)
             source = path.read_text(encoding="utf-8")
+            if item["runner"] == "cargo-test":
+                assert not source.lstrip().startswith("#![cfg(")
             declaration = (
                 f"def {anchor}" if item["runner"] == "pytest" else f"fn {anchor}"
             )

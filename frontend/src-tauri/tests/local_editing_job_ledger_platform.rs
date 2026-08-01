@@ -4,9 +4,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use automation_tool_desktop_lib::local_editing_job_ledger::{
-    LocalEditingJobScheduler, LocalEditingJobStatus,
+    LocalEditingJobFailureCode, LocalEditingJobLedger, LocalEditingJobScheduler,
+    LocalEditingJobStatus,
 };
-use automation_tool_desktop_lib::local_video_orchestrator::VideoWorkerLocalEditingJobRequest;
+use automation_tool_desktop_lib::local_video_orchestrator::{
+    VideoWorkerLocalEditingEvent, VideoWorkerLocalEditingFailureCode,
+    VideoWorkerLocalEditingJobRequest,
+};
 use automation_tool_desktop_lib::video_job_workspace::{
     VideoJobWorkspacePolicy, VideoJobWorkspaceStore,
 };
@@ -56,18 +60,84 @@ fn store(root: &Path) -> VideoJobWorkspaceStore {
     .expect("workspace store")
 }
 
+fn job_id() -> Uuid {
+    Uuid::parse_str("123e4567-e89b-42d3-a456-426614174100").expect("job ID")
+}
+
+fn other_job_id() -> Uuid {
+    Uuid::parse_str("523e4567-e89b-42d3-a456-426614174104").expect("other job ID")
+}
+
+fn request() -> VideoWorkerLocalEditingJobRequest {
+    VideoWorkerLocalEditingJobRequest::new(
+        Uuid::parse_str("223e4567-e89b-42d3-a456-426614174101").expect("project ID"),
+        Uuid::parse_str("323e4567-e89b-42d3-a456-426614174102").expect("timeline ID"),
+        7,
+    )
+    .expect("editing request")
+}
+
+#[test]
+fn cross_platform_workspace_failure_maps_to_resource_exhausted() {
+    let app_data = TemporaryAppData::new();
+    let store = store(&app_data.path);
+    let ledger = LocalEditingJobLedger::new();
+    ledger.create(&store, job_id(), &request()).unwrap();
+    ledger.mark_running(&store, job_id(), 0).unwrap();
+
+    let failed = ledger
+        .apply_event(
+            &store,
+            job_id(),
+            &VideoWorkerLocalEditingEvent::Failed {
+                failure_code: VideoWorkerLocalEditingFailureCode::WorkspaceUnusable,
+            },
+        )
+        .expect("persist workspace failure");
+
+    assert_eq!(failed.status(), LocalEditingJobStatus::Failed);
+    assert_eq!(
+        failed.failure_code(),
+        Some(LocalEditingJobFailureCode::ResourceExhausted),
+    );
+    assert_ne!(
+        failed.failure_code(),
+        Some(LocalEditingJobFailureCode::MaterialUnsupported),
+    );
+}
+
+#[test]
+fn cross_platform_cancellation_races_settle_once() {
+    let app_data = TemporaryAppData::new();
+    let store = store(&app_data.path);
+    let ledger = LocalEditingJobLedger::new();
+
+    ledger.create(&store, job_id(), &request()).unwrap();
+    let queued_cancel = ledger.request_cancel(&store, job_id()).unwrap();
+    assert_eq!(queued_cancel.status(), LocalEditingJobStatus::Cancelling);
+    let never_dispatched = ledger.confirm_cancelled(&store, job_id()).unwrap();
+    assert_eq!(never_dispatched.status(), LocalEditingJobStatus::Cancelled);
+
+    ledger.create(&store, other_job_id(), &request()).unwrap();
+    ledger.mark_running(&store, other_job_id(), 0).unwrap();
+    ledger.request_cancel(&store, other_job_id()).unwrap();
+    let cancelled = ledger
+        .apply_event(
+            &store,
+            other_job_id(),
+            &VideoWorkerLocalEditingEvent::Cancelled,
+        )
+        .unwrap();
+    assert_eq!(cancelled.status(), LocalEditingJobStatus::Cancelled);
+}
+
 #[test]
 fn native_platform_reopens_and_cancels_a_never_dispatched_job() {
     let app_data = TemporaryAppData::new();
     let store = store(&app_data.path);
     let scheduler = LocalEditingJobScheduler::new();
-    let job_id = Uuid::parse_str("123e4567-e89b-42d3-a456-426614174100").expect("job ID");
-    let request = VideoWorkerLocalEditingJobRequest::new(
-        Uuid::parse_str("223e4567-e89b-42d3-a456-426614174101").expect("project ID"),
-        Uuid::parse_str("323e4567-e89b-42d3-a456-426614174102").expect("timeline ID"),
-        7,
-    )
-    .expect("editing request");
+    let job_id = job_id();
+    let request = request();
 
     let queued = scheduler
         .create(&store, job_id, &request)

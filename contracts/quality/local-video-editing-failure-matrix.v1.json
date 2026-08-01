@@ -27,8 +27,8 @@
         },
         {
           "runner": "cargo-test",
-          "path": "frontend/src-tauri/tests/local_editing_job_ledger.rs",
-          "anchor": "workspace_failure_maps_to_resource_exhausted_not_material_damage"
+          "path": "frontend/src-tauri/tests/local_editing_job_ledger_platform.rs",
+          "anchor": "cross_platform_workspace_failure_maps_to_resource_exhausted"
         }
       ]
     },
@@ -44,8 +44,8 @@
         },
         {
           "runner": "cargo-test",
-          "path": "frontend/src-tauri/tests/local_editing_job_ledger.rs",
-          "anchor": "workspace_failure_maps_to_resource_exhausted_not_material_damage"
+          "path": "frontend/src-tauri/tests/local_editing_job_ledger_platform.rs",
+          "anchor": "cross_platform_workspace_failure_maps_to_resource_exhausted"
         }
       ]
     },
@@ -85,8 +85,8 @@
       "evidence": [
         {
           "runner": "cargo-test",
-          "path": "frontend/src-tauri/tests/local_editing_job_ledger.rs",
-          "anchor": "cancellation_races_follow_the_editing_job_state_machine"
+          "path": "frontend/src-tauri/tests/local_editing_job_ledger_platform.rs",
+          "anchor": "cross_platform_cancellation_races_settle_once"
         },
         {
           "runner": "cargo-test",
