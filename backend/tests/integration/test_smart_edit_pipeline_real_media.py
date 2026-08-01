@@ -118,7 +118,11 @@ def test_real_h264_picture_is_fully_decoded_before_prepare_succeeds(tmp_path: Pa
         material_id_factory=uuid4,
     )
 
-    prepared = pipeline.prepare((material,), cancellation_requested=lambda: False)
+    prepared = pipeline.prepare(
+        (material,),
+        enable_thinking=False,
+        cancellation_requested=lambda: False,
+    )
 
     assert prepared.materials == (material,)
     assert prepared.analysis_updates == ()
