@@ -64,9 +64,8 @@ enum ControlPlaneOperation {
     ExchangeDeviceSession,
     #[allow(dead_code)]
     FindEditingMaterialByDigest,
-    #[allow(dead_code)]
+    #[cfg_attr(not(feature = "control-plane-e2e"), allow(dead_code))]
     RegisterEditingMaterial,
-    #[allow(dead_code)]
     GetEditingMaterial,
     #[allow(dead_code)]
     UpdateEditingMaterialDescription,
@@ -80,6 +79,7 @@ enum ControlPlaneOperation {
     SubmitEditingJob,
     #[allow(dead_code)]
     GetEditingJob,
+    ReconcileEditingJob,
     CreateTask,
     StartTaskDiscovery,
     GetTaskTargetPreview,
@@ -144,6 +144,7 @@ impl ControlPlaneOperation {
             | Self::RefreshAccountSession
             | Self::ChangeAccountPassword
             | Self::RecoverAccountPassword => "POST",
+            Self::ReconcileEditingJob => "PATCH",
             Self::UpdateEditingMaterialDescription
             | Self::SaveEditingProjectTimeline
             | Self::ReplaceTaskTargetExclusions => "PUT",
@@ -190,7 +191,7 @@ impl ControlPlaneOperation {
             Self::ListEditingJobs | Self::SubmitEditingJob => {
                 "/api/v1/editing-projects/{project_id}/jobs"
             }
-            Self::GetEditingJob => "/api/v1/editing-jobs/{job_id}",
+            Self::GetEditingJob | Self::ReconcileEditingJob => "/api/v1/editing-jobs/{job_id}",
             Self::CreateTask => "/api/v1/tasks",
             Self::StartTaskDiscovery => "/api/v1/tasks/{task_id}/discoveries",
             Self::GetTaskTargetPreview => "/api/v1/tasks/{task_id}/target-preview",
@@ -232,6 +233,7 @@ impl ControlPlaneOperation {
             | Self::GetEditingProjectTimeline
             | Self::ListEditingJobs
             | Self::GetEditingJob
+            | Self::ReconcileEditingJob
             | Self::GetTaskTargetPreview
             | Self::ReplaceTaskTargetExclusions
             | Self::PrepareDouyinPlatformSessionLogout
@@ -299,6 +301,8 @@ impl ControlPlaneOperation {
                 | Self::CreateEditingProject
                 | Self::SaveEditingProjectTimeline
                 | Self::SubmitEditingJob
+                | Self::RegisterEditingMaterial
+                | Self::ReconcileEditingJob
         )
     }
 }
@@ -336,6 +340,8 @@ enum ControlPlaneRequestTarget<'a> {
         limit: u16,
     },
     EditingProjectJobs(&'a str),
+    EditingMaterial(&'a str),
+    EditingJob(&'a str),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -529,6 +535,64 @@ pub struct EditingProjectListPage {
     next_cursor: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum EditingMaterialKind {
+    Image,
+    Video,
+    Audio,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct EditingMaterialSnapshot {
+    material_id: String,
+    kind: EditingMaterialKind,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    duration_ms: Option<u64>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    width: Option<u16>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    height: Option<u16>,
+    content_digest: String,
+    has_audio: bool,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    audio_loudness_lufs: Option<f64>,
+    has_speech: bool,
+    speech_segments_ms: Vec<(u64, u64)>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    speech_transcript: Option<String>,
+    shot_boundaries_ms: Vec<u64>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    ai_description: Option<String>,
+    ai_tags: Vec<String>,
+    description_source: String,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    described_at: Option<String>,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EditingVideoMaterialAcceptanceRequest<'a> {
+    material_id: &'a str,
+    kind: EditingMaterialKind,
+    duration_ms: u64,
+    width: u16,
+    height: u16,
+    content_digest: &'a str,
+    has_audio: bool,
+    audio_loudness_lufs: Option<f64>,
+    has_speech: bool,
+    speech_segments_ms: Vec<(u64, u64)>,
+    speech_transcript: Option<&'a str>,
+    shot_boundaries_ms: Vec<u64>,
+    ai_description: Option<&'a str>,
+    ai_tags: Vec<&'a str>,
+    description_source: &'static str,
+    described_at: Option<&'a str>,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum EditingTrackKind {
@@ -612,7 +676,7 @@ pub struct EditingTimelineSnapshot {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EditingJobStatus {
+pub(crate) enum EditingJobStatus {
     Queued,
     Running,
     Cancelling,
@@ -623,7 +687,7 @@ enum EditingJobStatus {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EditingJobFailureCode {
+pub(crate) enum EditingJobFailureCode {
     InvalidTimeline,
     MaterialUnavailable,
     MaterialUnsupported,
@@ -663,6 +727,15 @@ struct EditingJobListResponse {
 pub struct EditingJobListPage {
     items: Vec<EditingJobSnapshot>,
     next_cursor: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EditingJobReconcileRequest<'a> {
+    expected_updated_at: &'a str,
+    status: EditingJobStatus,
+    failure_code: Option<EditingJobFailureCode>,
+    output_artifact_id: Option<&'a str>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1293,6 +1366,108 @@ impl ControlPlaneClient {
         parse_editing_project_list(&body)
     }
 
+    pub(crate) async fn get_editing_material<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        material_id: &str,
+    ) -> Result<EditingMaterialSnapshot, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_canonical_uuid_v4(material_id)?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let body = self
+            .execute(
+                ControlPlaneOperation::GetEditingMaterial,
+                Some(session.token()),
+                None,
+                None,
+                Some(ControlPlaneRequestTarget::EditingMaterial(material_id)),
+            )
+            .await?;
+        let material: EditingMaterialSnapshot = parse_exact_json(&body)?;
+        material.validate()?;
+        if material.material_id != material_id {
+            return Err(protocol_invalid());
+        }
+        Ok(material)
+    }
+
+    #[cfg(feature = "control-plane-e2e")]
+    pub(crate) async fn register_editing_video_material_for_acceptance<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        material_id: &str,
+        content_digest: &str,
+    ) -> Result<EditingMaterialSnapshot, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_canonical_uuid_v4(material_id)?;
+        if content_digest.len() != 64
+            || !content_digest
+                .bytes()
+                .all(|value| value.is_ascii_digit() || (b'a'..=b'f').contains(&value))
+        {
+            return Err(protocol_invalid());
+        }
+        let request = EditingVideoMaterialAcceptanceRequest {
+            material_id,
+            kind: EditingMaterialKind::Video,
+            duration_ms: 1_000,
+            width: 1_280,
+            height: 720,
+            content_digest,
+            has_audio: false,
+            audio_loudness_lufs: None,
+            has_speech: false,
+            speech_segments_ms: Vec::new(),
+            speech_transcript: None,
+            shot_boundaries_ms: Vec::new(),
+            ai_description: None,
+            ai_tags: Vec::new(),
+            description_source: "ai",
+            described_at: None,
+        };
+        let body = serde_json::to_value(&request).map_err(|_| protocol_invalid())?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response = self
+            .execute(
+                ControlPlaneOperation::RegisterEditingMaterial,
+                Some(session.token()),
+                Some(&body),
+                None,
+                None,
+            )
+            .await?;
+        let material: EditingMaterialSnapshot = parse_exact_json(&response)?;
+        material.validate()?;
+        if material.material_id != material_id
+            || material.kind != EditingMaterialKind::Video
+            || material.duration_ms != Some(1_000)
+            || material.width != Some(1_280)
+            || material.height != Some(720)
+            || material.content_digest != content_digest
+            || material.has_audio
+            || material.audio_loudness_lufs.is_some()
+            || material.has_speech
+            || !material.speech_segments_ms.is_empty()
+            || material.speech_transcript.is_some()
+            || !material.shot_boundaries_ms.is_empty()
+            || material.ai_description.is_some()
+            || !material.ai_tags.is_empty()
+            || material.description_source != "ai"
+            || material.described_at.is_some()
+        {
+            return Err(protocol_invalid());
+        }
+        Ok(material)
+    }
+
     pub async fn create_editing_project<S>(
         &self,
         vault: &DeviceCredentialVault<S>,
@@ -1445,6 +1620,96 @@ impl ControlPlaneClient {
             return Err(protocol_invalid());
         }
         Ok(job)
+    }
+
+    pub(crate) async fn get_editing_job<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        job_id: &str,
+    ) -> Result<EditingJobSnapshot, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_canonical_uuid_v4(job_id)?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response = self
+            .execute(
+                ControlPlaneOperation::GetEditingJob,
+                Some(session.token()),
+                None,
+                None,
+                Some(ControlPlaneRequestTarget::EditingJob(job_id)),
+            )
+            .await?;
+        let job = parse_editing_job(&response)?;
+        if job.job_id != job_id {
+            return Err(protocol_invalid());
+        }
+        Ok(job)
+    }
+
+    pub(crate) async fn reconcile_editing_job<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        previous: &EditingJobSnapshot,
+        status: EditingJobStatus,
+        failure_code: Option<EditingJobFailureCode>,
+        output_artifact_id: Option<&str>,
+    ) -> Result<EditingJobSnapshot, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        previous.validate()?;
+        if (status == EditingJobStatus::Running
+            && (failure_code.is_some() || output_artifact_id.is_some()))
+            || (status == EditingJobStatus::Succeeded
+                && (failure_code.is_some() || output_artifact_id.is_none()))
+            || (status == EditingJobStatus::Failed
+                && (failure_code.is_none() || output_artifact_id.is_some()))
+            || !matches!(
+                status,
+                EditingJobStatus::Running | EditingJobStatus::Succeeded | EditingJobStatus::Failed
+            )
+        {
+            return Err(protocol_invalid());
+        }
+        if let Some(identifier) = output_artifact_id {
+            require_canonical_uuid_v4(identifier)?;
+        }
+        let request = EditingJobReconcileRequest {
+            expected_updated_at: &previous.updated_at,
+            status,
+            failure_code,
+            output_artifact_id,
+        };
+        let body = serde_json::to_value(request).map_err(|_| protocol_invalid())?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response = self
+            .execute(
+                ControlPlaneOperation::ReconcileEditingJob,
+                Some(session.token()),
+                Some(&body),
+                None,
+                Some(ControlPlaneRequestTarget::EditingJob(&previous.job_id)),
+            )
+            .await?;
+        let changed = parse_editing_job(&response)?;
+        if changed.job_id != previous.job_id
+            || changed.project_id != previous.project_id
+            || changed.timeline_id != previous.timeline_id
+            || changed.timeline_revision != previous.timeline_revision
+            || changed.created_at != previous.created_at
+            || changed.status != status
+            || changed.failure_code != failure_code
+            || changed.output_artifact_id.as_deref() != output_artifact_id
+        {
+            return Err(protocol_invalid());
+        }
+        Ok(changed)
     }
 
     pub async fn create_task<S>(
@@ -2070,6 +2335,7 @@ impl ControlPlaneClient {
             "GET" => self.client.get(url),
             "POST" => self.client.post(url),
             "PUT" => self.client.put(url),
+            "PATCH" => self.client.patch(url),
             "DELETE" => self.client.delete(url),
             _ => {
                 return Err(ControlPlaneError::new(
@@ -2180,6 +2446,22 @@ fn request_path(
             Ok(format!("/api/v1/editing-projects/{project_id}/jobs"))
         }
         (
+            ControlPlaneOperation::GetEditingMaterial,
+            Some(ControlPlaneRequestTarget::EditingMaterial(material_id)),
+        ) => {
+            require_canonical_uuid_v4(material_id)?;
+            Ok(format!("/api/v1/editing-materials/{material_id}"))
+        }
+        (
+            operation @ (ControlPlaneOperation::GetEditingJob
+            | ControlPlaneOperation::ReconcileEditingJob),
+            Some(ControlPlaneRequestTarget::EditingJob(job_id)),
+        ) => {
+            require_canonical_uuid_v4(job_id)?;
+            let _ = operation;
+            Ok(format!("/api/v1/editing-jobs/{job_id}"))
+        }
+        (
             ControlPlaneOperation::RevokeAccountInstallation,
             Some(ControlPlaneRequestTarget::AccountDevice {
                 installation_id,
@@ -2287,6 +2569,8 @@ fn request_path(
             | ControlPlaneOperation::ListEditingJobs
             | ControlPlaneOperation::SubmitEditingJob
             | ControlPlaneOperation::GetEditingJob
+            | ControlPlaneOperation::GetEditingMaterial
+            | ControlPlaneOperation::ReconcileEditingJob
             | ControlPlaneOperation::GetTask
             | ControlPlaneOperation::GetTaskTargetResults
             | ControlPlaneOperation::GetTaskTargetPreview
@@ -2439,6 +2723,7 @@ fn validate_response_metadata(
                     | ControlPlaneOperation::ListEditingJobs
                     | ControlPlaneOperation::SubmitEditingJob
                     | ControlPlaneOperation::GetEditingJob
+                    | ControlPlaneOperation::ReconcileEditingJob
                     | ControlPlaneOperation::CreateTask
                     | ControlPlaneOperation::StartTaskDiscovery
                     | ControlPlaneOperation::ListTasks
@@ -2454,7 +2739,8 @@ fn validate_response_metadata(
         } else if metadata.status == 404
             && matches!(
                 operation,
-                ControlPlaneOperation::GetEditingProject
+                ControlPlaneOperation::GetEditingMaterial
+                    | ControlPlaneOperation::GetEditingProject
                     | ControlPlaneOperation::GetEditingProjectTimeline
                     | ControlPlaneOperation::GetEditingJob
             )
@@ -4371,6 +4657,107 @@ impl EditingProjectSnapshot {
     }
 }
 
+impl EditingProjectSnapshot {
+    pub(crate) fn project_id(&self) -> &str {
+        &self.project_id
+    }
+}
+
+impl EditingProjectListPage {
+    pub(crate) fn items(&self) -> &[EditingProjectSnapshot] {
+        &self.items
+    }
+
+    pub(crate) fn next_cursor(&self) -> Option<&str> {
+        self.next_cursor.as_deref()
+    }
+}
+
+impl EditingMaterialSnapshot {
+    fn validate(&self) -> Result<(), ControlPlaneError> {
+        require_canonical_uuid_v4(&self.material_id)?;
+        let digest_is_valid = self.content_digest.len() == 64
+            && self
+                .content_digest
+                .bytes()
+                .all(|value| value.is_ascii_digit() || (b'a'..=b'f').contains(&value));
+        if !digest_is_valid
+            || self
+                .duration_ms
+                .is_some_and(|value| value == 0 || value > MAX_EDITING_MATERIAL_DURATION_MS)
+            || self.width.is_some_and(|value| value == 0)
+            || self.height.is_some_and(|value| value == 0)
+            || self
+                .audio_loudness_lufs
+                .is_some_and(|value| !value.is_finite())
+            || self.speech_segments_ms.len() > 4096
+            || self.shot_boundaries_ms.len() > 4096
+            || self
+                .speech_transcript
+                .as_ref()
+                .is_some_and(|value| value.is_empty() || value.chars().count() > 100_000)
+            || self
+                .ai_description
+                .as_ref()
+                .is_some_and(|value| value.is_empty() || value.chars().count() > 2_000)
+            || self.ai_tags.len() > 32
+            || self
+                .ai_tags
+                .iter()
+                .any(|value| value.is_empty() || value.chars().count() > 32)
+            || self
+                .described_at
+                .as_deref()
+                .is_some_and(|value| require_bounded_timestamp(value).is_err())
+        {
+            return Err(protocol_invalid());
+        }
+        let shape_matches = match self.kind {
+            EditingMaterialKind::Image => {
+                self.duration_ms.is_none()
+                    && self.width.is_some()
+                    && self.height.is_some()
+                    && !self.has_audio
+            }
+            EditingMaterialKind::Video => {
+                self.duration_ms.is_some() && self.width.is_some() && self.height.is_some()
+            }
+            EditingMaterialKind::Audio => {
+                self.duration_ms.is_some()
+                    && self.width.is_none()
+                    && self.height.is_none()
+                    && self.has_audio
+            }
+        };
+        if !shape_matches
+            || self.has_speech && !self.has_audio
+            || (!self.has_speech
+                && (!self.speech_segments_ms.is_empty() || self.speech_transcript.is_some()))
+            || !matches!(self.description_source.as_str(), "ai" | "user")
+            || (self.description_source == "user"
+                && (self.ai_description.is_none()
+                    || !self.ai_tags.is_empty()
+                    || self.described_at.is_some()))
+            || (self.ai_description.is_none()
+                && (!self.ai_tags.is_empty() || self.described_at.is_some()))
+            || (self.description_source == "ai"
+                && self.ai_description.is_some()
+                && self.described_at.is_none())
+        {
+            return Err(protocol_invalid());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn material_id(&self) -> &str {
+        &self.material_id
+    }
+
+    pub(crate) const fn has_audio(&self) -> bool {
+        self.has_audio
+    }
+}
+
 impl EditingTimelineClip {
     fn validate(&self) -> Result<(), ControlPlaneError> {
         validate_editing_local_id(&self.clip_id)?;
@@ -4547,6 +4934,32 @@ impl EditingTimelineSnapshot {
     }
 }
 
+impl EditingTimelineSnapshot {
+    pub(crate) fn timeline_id(&self) -> &str {
+        &self.timeline_id
+    }
+
+    pub(crate) fn project_id(&self) -> &str {
+        &self.project_id
+    }
+
+    pub(crate) const fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub(crate) fn material_ids(&self) -> Vec<&str> {
+        let mut identifiers = self
+            .tracks
+            .iter()
+            .flat_map(|track| track.clips.iter())
+            .filter_map(|clip| clip.source_material_id.as_deref())
+            .collect::<Vec<_>>();
+        identifiers.sort_unstable();
+        identifiers.dedup();
+        identifiers
+    }
+}
+
 impl EditingJobSnapshot {
     fn validate(&self) -> Result<(), ControlPlaneError> {
         for identifier in [&self.job_id, &self.project_id, &self.timeline_id] {
@@ -4573,6 +4986,32 @@ impl EditingJobSnapshot {
             return Err(protocol_invalid());
         }
         Ok(())
+    }
+}
+
+impl EditingJobSnapshot {
+    pub(crate) fn job_id(&self) -> &str {
+        &self.job_id
+    }
+
+    pub(crate) fn project_id(&self) -> &str {
+        &self.project_id
+    }
+
+    pub(crate) fn timeline_id(&self) -> &str {
+        &self.timeline_id
+    }
+
+    pub(crate) const fn timeline_revision(&self) -> u64 {
+        self.timeline_revision
+    }
+
+    pub(crate) const fn status(&self) -> EditingJobStatus {
+        self.status
+    }
+
+    pub(crate) fn output_artifact_id(&self) -> Option<&str> {
+        self.output_artifact_id.as_deref()
     }
 }
 
@@ -4729,7 +5168,8 @@ mod tests {
         validate_preview_command, validate_response_metadata, validated_demo_origin,
         validated_loopback_origin, ControlPlaneErrorCode, ControlPlaneOperation,
         ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
-        DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition, ResponseMetadata,
+        DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition, EditingJobStatus,
+        ResponseMetadata,
     };
     use crate::device_credentials::DeviceCredentialVault;
     use crate::secure_store::{SecretStore, SecureStoreError};
@@ -5100,6 +5540,12 @@ mod tests {
                 200,
             ),
             (
+                ControlPlaneOperation::ReconcileEditingJob,
+                "PATCH",
+                "/api/v1/editing-jobs/{job_id}",
+                200,
+            ),
+            (
                 ControlPlaneOperation::CreateTask,
                 "POST",
                 "/api/v1/tasks",
@@ -5316,6 +5762,10 @@ mod tests {
             (ControlPlaneOperation::ListEditingJobs, "listEditingJobs"),
             (ControlPlaneOperation::SubmitEditingJob, "submitEditingJob"),
             (ControlPlaneOperation::GetEditingJob, "getEditingJob"),
+            (
+                ControlPlaneOperation::ReconcileEditingJob,
+                "reconcileEditingJob",
+            ),
             (ControlPlaneOperation::CreateTask, "createTask"),
             (
                 ControlPlaneOperation::StartTaskDiscovery,
@@ -5389,7 +5839,7 @@ mod tests {
             .as_object()
             .expect("OpenAPI path inventory")
         {
-            for method in ["get", "post", "put", "delete"] {
+            for method in ["get", "post", "put", "patch", "delete"] {
                 let Some(operation) = item.get(method) else {
                     continue;
                 };
@@ -5772,7 +6222,35 @@ mod tests {
                 authorization: format!("Bearer {session_token}"),
                 body: Some(serde_json::json!({})),
                 status: 201,
-                response: job_response,
+                response: job_response.clone(),
+            },
+            device_session_exchange(&device_credential, &session_token),
+            ExpectedHttpExchange {
+                method: "GET",
+                path: "/api/v1/editing-jobs/3d594650-b5f4-4498-8e38-0cf85d6dfa72".to_owned(),
+                authorization: format!("Bearer {session_token}"),
+                body: None,
+                status: 200,
+                response: job_response.clone(),
+            },
+            device_session_exchange(&device_credential, &session_token),
+            ExpectedHttpExchange {
+                method: "PATCH",
+                path: "/api/v1/editing-jobs/3d594650-b5f4-4498-8e38-0cf85d6dfa72".to_owned(),
+                authorization: format!("Bearer {session_token}"),
+                body: Some(serde_json::json!({
+                    "expectedUpdatedAt": "2026-08-01T00:00:00Z",
+                    "status": "running",
+                    "failureCode": null,
+                    "outputArtifactId": null
+                })),
+                status: 200,
+                response: {
+                    let mut running = job_response;
+                    running["status"] = serde_json::json!("running");
+                    running["updatedAt"] = serde_json::json!("2026-08-01T00:00:01Z");
+                    running
+                },
             },
         ]);
         let client = super::ControlPlaneClient::from_validated_origins(
@@ -5793,10 +6271,18 @@ mod tests {
                 .save_editing_project_timeline(&vault, IDENTIFIER, &timeline)
                 .await
                 .expect("save timeline over HTTP");
-            client
+            let submitted = client
                 .submit_editing_job(&vault, IDENTIFIER)
                 .await
                 .expect("submit job over HTTP");
+            let loaded = client
+                .get_editing_job(&vault, submitted.job_id())
+                .await
+                .expect("load job over HTTP");
+            client
+                .reconcile_editing_job(&vault, &loaded, EditingJobStatus::Running, None, None)
+                .await
+                .expect("reconcile job over HTTP");
         });
         server.join().expect("HTTP contract server");
     }

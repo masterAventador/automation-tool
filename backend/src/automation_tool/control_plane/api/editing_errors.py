@@ -13,6 +13,7 @@ from automation_tool.control_plane.application.editing_jobs import (
     EditingJobRevisionAlreadyQueued,
     EditingJobStale,
     EditingJobTimelineRevisionMissing,
+    EditingJobTransitionConflict,
 )
 from automation_tool.control_plane.application.editing_projects import (
     EditingProjectAlreadyRegistered,
@@ -59,6 +60,7 @@ _PUBLIC_FAILURES: Final[dict[type[Exception], _PublicFailure]] = {
     EditingJobTimelineRevisionMissing: _PublicFailure(409, "editing_job_timeline_revision_missing"),
     EditingJobNotFound: _PublicFailure(404, "editing_job_not_found"),
     EditingJobStale: _PublicFailure(409, "editing_job_stale"),
+    EditingJobTransitionConflict: _PublicFailure(409, "editing_job_conflict"),
     EditingJobPersistenceUnavailable: _PublicFailure(
         503, "editing_job_persistence_unavailable", True
     ),

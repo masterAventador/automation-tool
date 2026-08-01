@@ -537,9 +537,28 @@ impl VideoJobWorkspaceStore {
         media_type: &str,
         role: &str,
     ) -> Result<VideoArtifactRecord, VideoWorkspaceError> {
+        self.import_output_with_id(workspace, generate_uuid_v4()?, file_name, media_type, role)
+    }
+
+    /// Import a Worker-authenticated output under the identifier its terminal
+    /// event already committed to. The same validation and atomic copy used by
+    /// ordinary imports still applies; only UUID generation moves across the
+    /// authenticated process boundary.
+    pub fn import_output_with_id(
+        &self,
+        workspace: &VideoJobWorkspace,
+        artifact_id: Uuid,
+        file_name: &str,
+        media_type: &str,
+        role: &str,
+    ) -> Result<VideoArtifactRecord, VideoWorkspaceError> {
         self.revalidate_workspace(workspace)?;
         self.revalidate_roots()?;
-        if !valid_file_name(file_name) || !valid_media_type(media_type) || !valid_role(role) {
+        if !valid_uuid_v4(artifact_id)
+            || !valid_file_name(file_name)
+            || !valid_media_type(media_type)
+            || !valid_role(role)
+        {
             return Err(path_rejected());
         }
         let source = workspace.directory.join(OUTPUTS_DIRECTORY).join(file_name);
@@ -556,7 +575,11 @@ impl VideoJobWorkspaceStore {
             source_metadata.len(),
             self.policy,
         )?;
-        let artifact_id = generate_uuid_v4()?;
+        if fs::symlink_metadata(self.artifact_directory(artifact_id)).is_ok() {
+            return Err(VideoWorkspaceError::new(
+                VideoWorkspaceErrorCode::AlreadyExists,
+            ));
+        }
         let sequence = TEMPORARY_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let temporary = self.artifacts_directory.join(format!(
             ".import-{}-{}-{sequence}",

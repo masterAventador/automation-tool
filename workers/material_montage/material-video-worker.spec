@@ -2,6 +2,7 @@
 
 import json
 import sys
+import tomllib
 from pathlib import Path, PurePosixPath
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules, copy_metadata
@@ -10,6 +11,8 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules, copy_metada
 worker_root = Path(SPECPATH)
 repository_root = worker_root.parents[1]
 upstream_root = repository_root / "vendor/moneyprinterturbo"
+backend_source_root = repository_root / "backend" / "src"
+sys.path.insert(0, str(backend_source_root))
 sys.path.insert(0, str(upstream_root))
 sys.path.insert(0, str(repository_root / "scripts"))
 
@@ -22,6 +25,18 @@ from subtitle_font_assets import (  # noqa: E402
 
 contract_path = repository_root / "contracts/quality/material-video-worker-package.v1.json"
 contract = json.loads(contract_path.read_text(encoding="utf-8"))
+backend_project = tomllib.loads(
+    (repository_root / "backend/pyproject.toml").read_text(encoding="utf-8")
+)
+backend_version = backend_project["project"]["version"]
+backend_metadata = Path(workpath) / f"automation_tool-{backend_version}.dist-info"
+backend_metadata.mkdir(parents=True, exist_ok=False)
+(backend_metadata / "METADATA").write_text(
+    "Metadata-Version: 2.3\n"
+    "Name: automation-tool\n"
+    f"Version: {backend_version}\n",
+    encoding="utf-8",
+)
 excluded_modules = list(contract["build"]["excludedModules"])
 excluded_upstream_resources = set(contract["build"]["excludedUpstreamResources"])
 # `excludedUpstreamResourceFiles` removes individual proprietary assets from a
@@ -54,8 +69,12 @@ runtime_distributions = [
     "pydub",
     "litellm",
     "google-genai",
+    "brotli",
+    "fonttools",
 ]
 hiddenimports = [
+    "automation_tool.executor.local_editing_worker",
+    "automation_tool.executor.local_editing_worker_process",
     "app",
     "moviepy",
     "streamlit",
@@ -87,6 +106,7 @@ datas = [
 ]
 for distribution in runtime_distributions:
     datas += copy_metadata(distribution)
+datas.append((str(backend_metadata), backend_metadata.name))
 upstream_resource_root = upstream_root / "resource"
 for entry in sorted(upstream_resource_root.rglob("*")):
     if not entry.is_file():
@@ -125,7 +145,7 @@ for source in (upstream_root / "app").rglob("*"):
 
 analysis = Analysis(
     [str(worker_root / "worker_main.py")],
-    pathex=[str(worker_root), str(upstream_root)],
+    pathex=[str(worker_root), str(upstream_root), str(backend_source_root)],
     binaries=[
         *moviepy_binaries,
         *imageio_binaries,

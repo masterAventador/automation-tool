@@ -53,6 +53,7 @@ class GatewayBootstrap:
     asset_root: Path
     script_model: ScriptModelConfiguration | None = None
     web_ui: bool = False
+    local_editing: bool = False
 
 
 def _fixed_json(code: str) -> bytes:
@@ -103,7 +104,7 @@ def parse_bootstrap(line: bytes) -> GatewayBootstrap:
     if not line.endswith(b"\n") or not 1 < len(line) <= MAX_BOOTSTRAP_BYTES:
         raise GatewayRejected("invalid bootstrap")
     value = _load_object(line[:-1])
-    if set(value) != {
+    base_keys = {
         "assetRoot",
         "bootstrapVersion",
         "enableWebUi",
@@ -112,8 +113,28 @@ def parse_bootstrap(line: bytes) -> GatewayBootstrap:
         "renderBrowser",
         "scriptModel",
         "workerKind",
-    }:
+    }
+    keys = set(value)
+    local_editing = keys == base_keys | {"mediaTools"}
+    if keys != base_keys and not local_editing:
         raise GatewayRejected("invalid bootstrap")
+    if local_editing:
+        media_tools = value.get("mediaTools")
+        if not isinstance(media_tools, dict) or set(media_tools) != {
+            "ffmpegPath",
+            "ffprobePath",
+        }:
+            raise GatewayRejected("invalid bootstrap")
+        ffmpeg = media_tools.get("ffmpegPath")
+        ffprobe = media_tools.get("ffprobePath")
+        if (
+            not isinstance(ffmpeg, str)
+            or not isinstance(ffprobe, str)
+            or not Path(ffmpeg).is_absolute()
+            or not Path(ffprobe).is_absolute()
+            or ffmpeg == ffprobe
+        ):
+            raise GatewayRejected("invalid bootstrap")
     token = value.get("localSessionToken")
     if (
         value.get("bootstrapVersion") != BOOTSTRAP_VERSION
@@ -131,24 +152,21 @@ def parse_bootstrap(line: bytes) -> GatewayBootstrap:
         asset_root=validate_asset_root(value.get("assetRoot")),
         script_model=parse_script_model(value.get("scriptModel")),
         web_ui=value["enableWebUi"],
+        local_editing=local_editing,
     )
 
 
 def event_proof(bootstrap: GatewayBootstrap, event: str, detail: str) -> str:
     message = EVENT_DOMAIN + b"\0".join(
-        value.encode()
-        for value in [event, "python", PROTOCOL_VERSION, WORKER_VERSION, detail]
+        value.encode() for value in [event, "python", PROTOCOL_VERSION, WORKER_VERSION, detail]
     )
     digest = hmac.digest(bootstrap.token_bytes, message, hashlib.sha256)
     return "atvwp1." + base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
 
 
-def verify_cancel_proof(
-    bootstrap: GatewayBootstrap, job_id: str, proof: object
-) -> bool:
+def verify_cancel_proof(bootstrap: GatewayBootstrap, job_id: str, proof: object) -> bool:
     message = COMMAND_DOMAIN + b"\0".join(
-        value.encode()
-        for value in ["worker.cancel", "python", PROTOCOL_VERSION, job_id]
+        value.encode() for value in ["worker.cancel", "python", PROTOCOL_VERSION, job_id]
     )
     digest = hmac.digest(bootstrap.token_bytes, message, hashlib.sha256)
     expected = "atvwc1." + base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
@@ -186,12 +204,7 @@ def parse_cancel_command(bootstrap: GatewayBootstrap, payload: bytes) -> str:
 
 
 def inspect_asset(root: Path, value: object) -> int:
-    if (
-        not isinstance(value, str)
-        or not value
-        or len(value.encode()) > 512
-        or "\\" in value
-    ):
+    if not isinstance(value, str) or not value or len(value.encode()) > 512 or "\\" in value:
         raise GatewayRejected("invalid asset path")
     relative = PurePosixPath(value)
     if (
@@ -214,9 +227,7 @@ def inspect_asset(root: Path, value: object) -> int:
     return size
 
 
-def gateway_handler(
-    bootstrap: GatewayBootstrap, port: int
-) -> type[BaseHTTPRequestHandler]:
+def gateway_handler(bootstrap: GatewayBootstrap, port: int) -> type[BaseHTTPRequestHandler]:
     class GatewayHandler(BaseHTTPRequestHandler):
         server_version = "AutomationTool"
         sys_version = ""
@@ -257,9 +268,7 @@ def gateway_handler(
                 raise GatewayRejected("path rejected")
             return parsed.path
 
-        def _respond(
-            self, status_code: int, body: bytes, origin: str | None = None
-        ) -> None:
+        def _respond(self, status_code: int, body: bytes, origin: str | None = None) -> None:
             self.send_response(status_code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -283,8 +292,7 @@ def gateway_handler(
                 or not content_lengths[0].isdigit()
                 or not 0 < int(content_lengths[0]) <= MAX_BODY_BYTES
                 or len(content_types) != 1
-                or content_types[0].split(";", 1)[0].strip().lower()
-                != "application/json"
+                or content_types[0].split(";", 1)[0].strip().lower() != "application/json"
             ):
                 raise GatewayRejected("body rejected")
             return _load_object(self.rfile.read(int(content_lengths[0])))
@@ -296,9 +304,7 @@ def gateway_handler(
                 requested_method = self.headers.get("Access-Control-Request-Method")
                 requested_headers = {
                     value.strip().lower()
-                    for value in self.headers.get(
-                        "Access-Control-Request-Headers", ""
-                    ).split(",")
+                    for value in self.headers.get("Access-Control-Request-Headers", "").split(",")
                     if value.strip()
                 }
                 allowed_headers = {"authorization", "content-type", "x-request-id"}
@@ -341,10 +347,7 @@ def gateway_handler(
                     self._respond(404, _fixed_json("route_unavailable"), origin)
                     return
                 request_id = self.headers.get("X-Request-ID")
-                if (
-                    request_id is not None
-                    and REQUEST_ID_PATTERN.fullmatch(request_id) is None
-                ):
+                if request_id is not None and REQUEST_ID_PATTERN.fullmatch(request_id) is None:
                     raise GatewayRejected("request id rejected")
                 if method == "GET" and path == "/health":
                     body = json.dumps(
@@ -377,9 +380,7 @@ def gateway_handler(
                     value = self._read_json()
                     if set(value) != {"relativePath"}:
                         raise GatewayRejected("asset request rejected")
-                    size = inspect_asset(
-                        bootstrap.asset_root, value.get("relativePath")
-                    )
+                    size = inspect_asset(bootstrap.asset_root, value.get("relativePath"))
                     body = json.dumps(
                         {"sizeBytes": size, "status": "available"},
                         separators=(",", ":"),
@@ -397,9 +398,7 @@ class LoopbackGateway(ThreadingHTTPServer):
 
 
 def create_gateway(bootstrap: GatewayBootstrap) -> LoopbackGateway:
-    server = LoopbackGateway(
-        (HOST, 0), gateway_handler(bootstrap, 0), bind_and_activate=False
-    )
+    server = LoopbackGateway((HOST, 0), gateway_handler(bootstrap, 0), bind_and_activate=False)
     server.server_bind()
     port = int(server.server_address[1])
     server.RequestHandlerClass = gateway_handler(bootstrap, port)

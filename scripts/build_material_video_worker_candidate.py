@@ -4,8 +4,6 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Iterator
-from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -16,14 +14,16 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import NoReturn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import subtitle_font_assets  # noqa: E402
-from frozen_artifact_environment import frozen_artifact_environment  # noqa: E402
+import subtitle_font_assets
+from frozen_artifact_environment import frozen_artifact_environment
 
 ROOT = Path(__file__).resolve().parents[1]
 UPSTREAM = ROOT / "vendor/moneyprinterturbo"
@@ -95,9 +95,7 @@ def required_dependencies(contract: dict[str, object]) -> dict[str, str]:
         reject("依赖契约缺失")
     common = dependencies.get("required")
     by_target = dependencies.get("platformRequired")
-    platform_required = (
-        by_target.get(current_target_id()) if isinstance(by_target, dict) else None
-    )
+    platform_required = by_target.get(current_target_id()) if isinstance(by_target, dict) else None
     if not isinstance(common, dict) or not isinstance(platform_required, dict):
         reject("平台依赖版本契约缺失")
     combined = {str(name).lower(): str(version) for name, version in common.items()}
@@ -107,6 +105,20 @@ def required_dependencies(contract: dict[str, object]) -> dict[str, str]:
             reject("平台依赖与公共依赖重复")
         combined[normalized] = str(version)
     return combined
+
+
+def product_dependencies(contract: dict[str, object]) -> dict[str, str]:
+    dependencies = contract.get("dependencies")
+    if not isinstance(dependencies, dict):
+        reject("依赖契约缺失")
+    product = dependencies.get("productRequired")
+    required = dependencies.get("required")
+    if not isinstance(product, dict) or not product or not isinstance(required, dict):
+        reject("产品依赖契约缺失")
+    normalized = {str(name).lower(): str(version) for name, version in product.items()}
+    if any(required.get(name) != version for name, version in normalized.items()):
+        reject("产品依赖必须属于启动探针的锁定依赖")
+    return normalized
 
 
 def excluded_modules(contract: dict[str, object]) -> tuple[str, ...]:
@@ -122,9 +134,7 @@ def excluded_modules(contract: dict[str, object]) -> tuple[str, ...]:
     return tuple(str(name) for name in names)
 
 
-def assert_excluded_modules_absent(
-    candidate: Path, contract: dict[str, object]
-) -> None:
+def assert_excluded_modules_absent(candidate: Path, contract: dict[str, object]) -> None:
     """Fail closed when the frozen candidate still carries an excluded module."""
     internal = candidate / "_internal"
     present = sorted(
@@ -152,15 +162,11 @@ def excluded_upstream_resources(contract: dict[str, object]) -> tuple[str, ...]:
     return tuple(str(name) for name in names)
 
 
-def assert_excluded_upstream_resources_absent(
-    candidate: Path, contract: dict[str, object]
-) -> None:
+def assert_excluded_upstream_resources_absent(candidate: Path, contract: dict[str, object]) -> None:
     """Fail closed when the frozen candidate still carries an excluded asset tree."""
     resource_root = candidate / "_internal/upstream/resource"
     present = sorted(
-        name
-        for name in excluded_upstream_resources(contract)
-        if (resource_root / name).exists()
+        name for name in excluded_upstream_resources(contract) if (resource_root / name).exists()
     )
     if present:
         reject(f"候选仍包含产品不再分发的上游资源：{','.join(present)}")
@@ -249,10 +255,7 @@ def assert_bundled_subtitle_fonts_present(
     if drifted:
         reject(f"候选中的字幕字体与登记字节不一致：{','.join(sorted(drifted))}")
     if misattributed:
-        reject(
-            "候选中的字幕字体自带的版权声明与权利登记不一致："
-            f"{','.join(sorted(misattributed))}"
-        )
+        reject(f"候选中的字幕字体自带的版权声明与权利登记不一致：{','.join(sorted(misattributed))}")
     if not (font_root / default_font_name).is_file():
         reject(f"候选缺少默认字幕字体：{default_font_name}")
 
@@ -370,6 +373,20 @@ def build_candidate(output: Path) -> MaterialVideoWorkerAudit:
         if actual_python != expected_python.get("version"):
             reject("Python 版本未精确锁定")
 
+        product = product_dependencies(contract)
+        run(
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                str(python),
+                *[f"{name}=={version}" for name, version in sorted(product.items())],
+            ],
+            cwd=ROOT,
+            environment=environment,
+        )
+
         license_inventory = temporary / "dependency-licenses.json"
         run(
             [
@@ -451,9 +468,7 @@ def audit_candidate(
     build = contract.get("build")
     dependencies = contract.get("dependencies")
     probe_contract = contract.get("probe")
-    if not all(
-        isinstance(value, dict) for value in (build, dependencies, probe_contract)
-    ):
+    if not all(isinstance(value, dict) for value in (build, dependencies, probe_contract)):
         reject("候选审计契约缺失")
     assert isinstance(build, dict)
     assert isinstance(dependencies, dict)
@@ -476,25 +491,18 @@ def audit_candidate(
             reject("候选包含特殊文件")
         files += 1
         package_bytes += metadata.st_size
-    if files > build.get("maximumFiles", 0) or package_bytes > build.get(
-        "maximumBytes", 0
-    ):
+    if files > build.get("maximumFiles", 0) or package_bytes > build.get("maximumBytes", 0):
         reject("候选文件数或包体超过上限")
     executable = candidate / (f"{ENTRYPOINT}.exe" if os.name == "nt" else ENTRYPOINT)
     if not executable.is_file() or not os.access(executable, os.X_OK):
         reject("候选缺少独立可执行入口")
-    if any(
-        path.name.startswith("automation-tool-executor")
-        for path in candidate.rglob("*")
-    ):
+    if any(path.name.startswith("automation-tool-executor") for path in candidate.rglob("*")):
         reject("候选错误混入 RPA Executor")
     assert_excluded_modules_absent(candidate, contract)
     assert_excluded_upstream_resources_absent(candidate, contract)
     assert_excluded_upstream_resource_files_absent(candidate, contract)
     assert_bundled_subtitle_fonts_present(candidate, contract)
-    inventory_path = (
-        candidate / "_internal/licenses/material-video-worker-dependencies.json"
-    )
+    inventory_path = candidate / "_internal/licenses/material-video-worker-dependencies.json"
     if not inventory_path.is_file():
         reject("候选缺少依赖许可证清单")
     inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
@@ -516,7 +524,7 @@ def audit_candidate(
     )
     startup_seconds = time.perf_counter() - started
     if probe.returncode != 0:
-        startup_modules = ["upstream-app"] + [
+        startup_modules = ["upstream-app", "local-editing-runtime"] + [
             name
             for name, module in {
                 "moviepy": "moviepy",

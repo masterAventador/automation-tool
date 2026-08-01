@@ -41,14 +41,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from release_assembly import (  # noqa: E402
+from process_diagnostics import builder_diagnostic
+from release_assembly import (
     MOTION_CATALOG_RESOURCES,
     VIDEO_RUNTIME_RESOURCES,
     _VideoResource,
 )
-from subtitle_font_assets import ensure_subtitle_fonts  # noqa: E402
-from process_diagnostics import builder_diagnostic  # noqa: E402
-from video_runtime_cache import cache_root, ensure_cached  # noqa: E402
+from subtitle_font_assets import ensure_subtitle_fonts
+from video_runtime_cache import cache_root, ensure_cached
 
 ASSET_RIGHTS_CONTRACT = ROOT / "contracts/quality/asset-rights-policy.v1.json"
 MEDIA_TOOLCHAIN_CONTRACT = ROOT / "contracts/video/ffmpeg-toolchain.v1.json"
@@ -62,6 +62,8 @@ MOTION_WORKER_BUILDER = ROOT / "scripts/build_motion_video_worker_candidate.py"
 MOTION_WORKER_SOURCE = ROOT / "workers/motion_composition/worker.mjs"
 MATERIAL_WORKER_BUILDER = ROOT / "scripts/build_material_video_worker_candidate.py"
 MATERIAL_WORKER_SOURCE = ROOT / "workers/material_montage"
+BACKEND_PACKAGE_SOURCE = ROOT / "backend/src/automation_tool"
+BACKEND_PROJECT = ROOT / "backend/pyproject.toml"
 SUBTITLE_FONT_ASSETS = ROOT / "scripts/subtitle_font_assets.py"
 
 # What each artifact is made of, in full. A cache key is a promise that nothing
@@ -99,6 +101,8 @@ MATERIAL_WORKER_INPUTS: tuple[Path, ...] = (
     # whose absence shipped a fixed Worker as its unfixed predecessor.
     MATERIAL_WORKER_SOURCE,
     MATERIAL_WORKER_BUILDER,
+    BACKEND_PACKAGE_SOURCE,
+    BACKEND_PROJECT,
     # Imported by the spec; decides which font bytes land in the package and
     # under what name.
     SUBTITLE_FONT_ASSETS,

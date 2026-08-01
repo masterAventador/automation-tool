@@ -1,19 +1,7 @@
 """Local Executor components that depend only on the shared protocol."""
 
-from automation_tool.executor.authentication import (
-    LocalSessionAuthenticationRejected,
-    LocalSessionAuthenticator,
-    require_local_session_token,
-)
-from automation_tool.executor.bootstrap import (
-    ExecutorBootstrap,
-    ExecutorBootstrapRejected,
-    read_executor_bootstrap,
-)
-from automation_tool.executor.command_processor import (
-    ExecutorCommandProcessor,
-    ExecutorCommandRejected,
-)
+from importlib import import_module
+from typing import Any
 
 # The FakeExecutor doubles are deliberately absent from this package's exports.
 # `automation-tool-executor.spec` declares `excludes=[]`, so what ships is decided
@@ -23,12 +11,19 @@ from automation_tool.executor.command_processor import (
 # importable as `automation_tool.executor.fake` and `...fake_client`, which is how
 # the tests that need them already import them. Guarded by
 # `tests/unit/executor/test_shipped_package_boundary.py`.
-from automation_tool.executor.runtime import (
-    ExecutorProcessRejected,
-    ExecutorProcessReporter,
-    LocalExecutorProcess,
-    RuntimeMetadata,
-)
+_PUBLIC_MODULES = ("authentication", "bootstrap", "command_processor", "runtime")
+
+
+def __getattr__(name: str) -> Any:
+    if name not in __all__:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    for module_name in _PUBLIC_MODULES:
+        module = import_module(f"{__name__}.{module_name}")
+        if name in vars(module):
+            value = vars(module)[name]
+            globals()[name] = value
+            return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "ExecutorBootstrap",

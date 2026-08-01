@@ -21,6 +21,7 @@ from automation_tool.control_plane.application.editing_jobs import (
     EditingJobPersistenceUnavailable,
     EditingJobRevisionAlreadyQueued,
     EditingJobService,
+    EditingJobStale,
     InvalidEditingJobQuery,
 )
 from automation_tool.control_plane.bootstrap.editing_jobs import (
@@ -119,6 +120,18 @@ class MemoryEditingJobRepository:
             reverse=True,
         )
         return tuple(jobs[:limit])
+
+    async def update(
+        self,
+        previous: EditingJob,
+        changed: EditingJob,
+    ) -> None:
+        if self.failure is not None:
+            raise self.failure
+        stored = self.jobs.get(previous.job_id)
+        if stored is None or stored[1] != previous:
+            raise EditingJobStale
+        self.jobs[previous.job_id] = (stored[0], changed)
 
 
 class MemoryTimelineLookup:
@@ -247,17 +260,18 @@ def assert_error(
     return cast("dict[str, object]", error)
 
 
-def test_openapi_exposes_only_submit_project_list_and_job_detail() -> None:
+def test_openapi_exposes_submit_project_list_job_detail_and_worker_reconciliation() -> None:
     schema = create_app(database=None).openapi()
     collection = schema["paths"]["/api/v1/editing-projects/{project_id}/jobs"]
     detail = schema["paths"]["/api/v1/editing-jobs/{job_id}"]
 
     assert set(collection) == {"get", "post"}
-    assert set(detail) == {"get"}
+    assert set(detail) == {"get", "patch"}
     assert collection["post"]["operationId"] == "submitEditingJob"
     assert collection["get"]["operationId"] == "listEditingJobs"
     assert detail["get"]["operationId"] == "getEditingJob"
-    for operation in (*collection.values(), detail["get"]):
+    assert detail["patch"]["operationId"] == "reconcileEditingJob"
+    for operation in (*collection.values(), *detail.values()):
         assert operation["security"] == [{"AppSession": []}]
         assert operation["responses"]["422"]["content"]["application/json"]["schema"] == {
             "$ref": "#/components/schemas/ErrorEnvelope"
@@ -266,6 +280,78 @@ def test_openapi_exposes_only_submit_project_list_and_job_detail() -> None:
     assert "delete" not in collection
     submit_schema = schema["components"]["schemas"]["EditingJobSubmitRequest"]
     assert submit_schema["additionalProperties"] is False
+
+
+def test_worker_reconciliation_moves_one_owned_job_through_running_to_succeeded() -> None:
+    client, repository, _ = job_client()
+    queued = job(identifier="00000000-0000-4000-8000-000000000031")
+    repository.jobs[queued.job_id] = (INSTALLATION_ID, queued)
+    artifact_id = "00000000-0000-4000-8000-000000000041"
+
+    running = client.patch(
+        f"/api/v1/editing-jobs/{queued.job_id}",
+        json={
+            "expectedUpdatedAt": "2026-07-30T10:11:12.123456Z",
+            "status": "running",
+            "failureCode": None,
+            "outputArtifactId": None,
+        },
+    )
+    succeeded = client.patch(
+        f"/api/v1/editing-jobs/{queued.job_id}",
+        json={
+            "expectedUpdatedAt": running.json()["updatedAt"],
+            "status": "succeeded",
+            "failureCode": None,
+            "outputArtifactId": artifact_id,
+        },
+    )
+
+    assert running.status_code == 200
+    assert running.json()["status"] == "running"
+    assert succeeded.status_code == 200
+    assert succeeded.headers["cache-control"] == "no-store"
+    assert succeeded.json()["status"] == "succeeded"
+    assert succeeded.json()["outputArtifactId"] == artifact_id
+    assert repository.jobs[queued.job_id][1].status is EditingJobStatus.SUCCEEDED
+
+
+@pytest.mark.parametrize(
+    ("payload", "status_code", "code"),
+    [
+        (
+            {
+                "expectedUpdatedAt": "2026-07-30T10:11:12.123456Z",
+                "status": "succeeded",
+                "failureCode": None,
+                "outputArtifactId": "00000000-0000-4000-8000-000000000041",
+            },
+            409,
+            "editing_job_conflict",
+        ),
+        (
+            {
+                "expectedUpdatedAt": "2026-07-30T10:11:12.123456Z",
+                "status": "failed",
+                "failureCode": None,
+                "outputArtifactId": None,
+            },
+            422,
+            "validation",
+        ),
+    ],
+)
+def test_worker_reconciliation_rejects_illegal_or_incomplete_terminal_updates(
+    payload: dict[str, object], status_code: int, code: str
+) -> None:
+    client, repository, _ = job_client()
+    queued = job(identifier="00000000-0000-4000-8000-000000000032")
+    repository.jobs[queued.job_id] = (INSTALLATION_ID, queued)
+
+    response = client.patch(f"/api/v1/editing-jobs/{queued.job_id}", json=payload)
+
+    assert_error(response, status_code=status_code, code=code)
+    assert repository.jobs[queued.job_id][1] == queued
 
 
 def test_empty_submission_uses_the_latest_revision_and_returns_the_domain_shape() -> None:

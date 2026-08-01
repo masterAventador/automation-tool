@@ -222,7 +222,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** Reconcile Editing Job */
+        patch: operations["reconcileEditingJob"];
         trace?: never;
     };
     "/api/v1/editing-materials": {
@@ -917,6 +918,18 @@ export interface components {
             items: components["schemas"]["EditingJobResponse"][];
             /** Nextcursor */
             nextCursor: string | null;
+        };
+        /** EditingJobReconcileRequest */
+        EditingJobReconcileRequest: {
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
+            failureCode: components["schemas"]["EditingJobFailureCode"] | null;
+            /** Outputartifactid */
+            outputArtifactId: string | null;
+            status: components["schemas"]["EditingJobStatus"];
         };
         /** EditingJobResponse */
         EditingJobResponse: {
@@ -2031,6 +2044,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EditingJobResponse"];
+                };
+            };
+            /** @description Request validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    reconcileEditingJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditingJobReconcileRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditingJobResponse"];
+                };
+            };
+            /** @description Editing job transition conflicts with stored state */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Request validation failed */

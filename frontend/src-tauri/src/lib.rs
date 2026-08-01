@@ -23,6 +23,7 @@ pub mod executor_package;
 pub mod executor_platform;
 pub mod executor_protocol;
 pub mod local_editing_job_ledger;
+pub mod local_editing_runtime;
 pub mod local_registration;
 pub mod local_video_orchestrator;
 mod managed_process_tree;
@@ -2666,13 +2667,31 @@ async fn list_editing_jobs(
 #[tauri::command]
 async fn submit_editing_job(
     project_id: String,
+    app: tauri::AppHandle,
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     vault: tauri::State<'_, ProductionDeviceCredentialVault>,
 ) -> Result<control_plane::EditingJobSnapshot, ControlPlaneCommandError> {
-    client
+    let submitted = client
         .submit_editing_job(&vault, &project_id)
         .await
-        .map_err(map_control_plane_error)
+        .map_err(map_control_plane_error)?;
+    if local_editing_runtime::dispatch_submitted_job(&app, &submitted)
+        .await
+        .is_err()
+    {
+        let settled = local_editing_runtime::fail_submitted_job(&app, &submitted)
+            .await
+            .is_ok();
+        return Err(ControlPlaneCommandError {
+            code: if settled {
+                "operation_unavailable"
+            } else {
+                "outcome_uncertain"
+            },
+            retryable: false,
+        });
+    }
+    Ok(submitted)
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -3332,6 +3351,14 @@ struct TaskCreateFormAcceptancePreparation {
 #[cfg(feature = "control-plane-e2e")]
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+struct VideoEditingAcceptancePreparation {
+    installation_id: String,
+    material_id: String,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TaskRunAcceptancePreparation {
     installation_id: String,
     controlled_task_id: String,
@@ -3944,6 +3971,77 @@ async fn prepare_task_create_form_for_acceptance(
     Ok(TaskCreateFormAcceptancePreparation {
         installation_id: registration.installation_id().to_owned(),
     })
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+async fn prepare_video_editing_for_acceptance(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<VideoEditingAcceptancePreparation, ControlPlaneCommandError> {
+    let token = std::env::var("AUTOMATION_TOOL_LE17_BOOTSTRAP_TOKEN").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let environment_id = std::env::var("AUTOMATION_TOOL_LE17_ENVIRONMENT_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let material_id = std::env::var("AUTOMATION_TOOL_LE17_MATERIAL_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let content_digest = std::env::var("AUTOMATION_TOOL_LE17_MATERIAL_DIGEST").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let bootstrap = control_plane::DemoBootstrap::new(token, environment_id)
+        .map_err(map_control_plane_error)?;
+    let registration = client
+        .register_installation(&bootstrap, &identity, &vault)
+        .await
+        .map_err(|error| map_video_editing_acceptance_error("registration", error))?;
+    let material = client
+        .register_editing_video_material_for_acceptance(&vault, &material_id, &content_digest)
+        .await
+        .map_err(|error| map_video_editing_acceptance_error("material", error))?;
+    Ok(VideoEditingAcceptancePreparation {
+        installation_id: registration.installation_id().to_owned(),
+        material_id: material.material_id().to_owned(),
+    })
+}
+
+#[cfg(feature = "control-plane-e2e")]
+fn map_video_editing_acceptance_error(
+    stage: &'static str,
+    error: control_plane::ControlPlaneError,
+) -> ControlPlaneCommandError {
+    let retryable = error.retryable();
+    let code = match (stage, error.code()) {
+        ("registration", control_plane::ControlPlaneErrorCode::ProtocolInvalid) => {
+            "acceptance_registration_protocol_invalid"
+        }
+        ("registration", control_plane::ControlPlaneErrorCode::RequestRejected) => {
+            "acceptance_registration_rejected"
+        }
+        ("material", control_plane::ControlPlaneErrorCode::ProtocolInvalid) => {
+            "acceptance_material_protocol_invalid"
+        }
+        ("material", control_plane::ControlPlaneErrorCode::RequestRejected) => {
+            "acceptance_material_rejected"
+        }
+        _ => map_control_plane_error(error).code,
+    };
+    ControlPlaneCommandError { code, retryable }
 }
 
 #[cfg(feature = "control-plane-e2e")]
@@ -4634,6 +4732,9 @@ pub fn run() {
                 local_video_orchestrator::DEFAULT_VIDEO_WORKER_REQUEST_TIMEOUT,
             )?);
             app.manage(local_editing_job_ledger::LocalEditingJobScheduler::new());
+            app.manage(local_editing_runtime::LocalEditingRuntime::new(
+                app_data_directory.clone(),
+            )?);
             app_logging::record(app_logging::DesktopLogEvent::LocalServicesInitialized);
             app.manage(video_job_workspace::VideoJobWorkspaceStore::initialize(
                 &app_data_directory,
@@ -4856,6 +4957,7 @@ pub fn run() {
         stream_task_events_for_acceptance,
         prepare_task_projection_for_acceptance,
         prepare_task_create_form_for_acceptance,
+        prepare_video_editing_for_acceptance,
         prepare_task_run_for_acceptance,
         prepare_task_lifecycle_for_acceptance,
         prepare_executor_lifecycle_for_acceptance,

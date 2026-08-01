@@ -1,215 +1,48 @@
-"""Control Plane domain contracts and errors."""
+"""Control Plane domain contracts and errors.
 
-from automation_tool.control_plane.domain.accounts import (
-    MAX_PASSWORD_CHARACTERS,
-    MIN_PASSWORD_CHARACTERS,
-    AccountAuditActorKind,
-    AccountAuditEventType,
-    AccountStatus,
-    InvalidAccountModel,
-    LoginName,
-    PasswordHash,
+Public names remain available from this package, while leaf modules are loaded
+only when requested.  The local video Worker can therefore embed the editing
+domain without importing unrelated platform integrations.
+"""
+
+from importlib import import_module
+from typing import Any
+
+_PUBLIC_MODULES = (
+    "accounts",
+    "action_risk_policy",
+    "bilibili_open_api",
+    "demo_bootstrap",
+    "douyin_candidate_policy",
+    "editing_job",
+    "editing_project",
+    "errors",
+    "execution_models",
+    "installations",
+    "material",
+    "ports",
+    "resource_ids",
+    "task_commands",
+    "task_definitions",
+    "task_events",
+    "task_state_machine",
+    "timeline",
+    "video_creation",
+    "video_publishing",
 )
-from automation_tool.control_plane.domain.action_risk_policy import (
-    ACTION_RISK_POLICY_VERSION,
-    MAX_ACTION_RISK_LIMIT,
-    ActionRiskPlatform,
-    ActionRiskPolicy,
-    ActionRiskScope,
-    InvalidActionRiskPolicy,
-)
-from automation_tool.control_plane.domain.bilibili_open_api import (
-    BILIBILI_OPEN_API_CONTRACT_VERSION,
-    ArchiveListPage,
-    ArchiveStatusNotification,
-    ArchiveStatusSnapshot,
-    ArchiveSubmissionReceipt,
-    BilibiliErrorCategory,
-    BilibiliOpenApiContract,
-    BilibiliPlatformRejection,
-    CoverUploadResult,
-    InvalidBilibiliOpenApiContract,
-    InvalidBilibiliOpenApiMessage,
-    TokenGrant,
-    TokenRefresh,
-    UploadSession,
-    classify_error_code,
-    compute_webhook_signature,
-    load_bilibili_open_api_contract,
-    parse_archive_add,
-    parse_archive_status_notification,
-    parse_archive_view,
-    parse_archive_viewlist,
-    parse_cover_upload,
-    parse_token_grant,
-    parse_token_refresh,
-    parse_transfer_ack,
-    parse_upload_init,
-    parse_webhook_verification,
-    plan_upload_parts,
-    validate_archive_submission,
-    validate_part_number,
-    validate_upload_init_request,
-    verify_webhook_signature,
-)
-from automation_tool.control_plane.domain.demo_bootstrap import (
-    MAX_DEMO_BOOTSTRAP_LIFETIME,
-    BootstrapAuthorizationDenied,
-    BootstrapDenialReason,
-    BootstrapPurpose,
-    DemoBootstrapGrant,
-    DemoEnvironmentId,
-    InvalidDemoBootstrap,
-    InvalidDemoEnvironmentId,
-)
-from automation_tool.control_plane.domain.douyin_candidate_policy import (
-    DOUYIN_CANDIDATE_HISTORY_WINDOW,
-    DOUYIN_CANDIDATE_POLICY_VERSION,
-    DouyinCandidateDecision,
-    DouyinCandidateDisposition,
-    DouyinCandidateEvaluation,
-    DouyinCandidateHistoryFact,
-    InvalidDouyinCandidatePolicy,
-    evaluate_douyin_candidates,
-)
-from automation_tool.control_plane.domain.editing_job import (
-    EditingJob,
-    EditingJobFailureCode,
-    EditingJobId,
-    EditingJobStateMachine,
-    EditingJobStatus,
-    InvalidEditingJobModel,
-    InvalidEditingJobTransition,
-)
-from automation_tool.control_plane.domain.editing_project import (
-    MAX_CAPTION_FONT_PX,
-    MAX_CAPTION_LINE_SPACING,
-    MAX_CAPTION_STROKE_PX,
-    MAX_OUTPUT_DIMENSION,
-    MAX_OUTPUT_FPS,
-    MAX_PROJECT_TITLE_CHARACTERS,
-    MIN_CAPTION_FONT_PX,
-    MIN_CAPTION_LINE_SPACING,
-    MIN_OUTPUT_DIMENSION,
-    MIN_OUTPUT_FPS,
-    CaptionStyle,
-    EditingProject,
-    EditingProjectId,
-    InvalidEditingProjectModel,
-    OutputSpec,
-)
-from automation_tool.control_plane.domain.errors import DependencyUnavailable
-from automation_tool.control_plane.domain.execution_models import (
-    TERMINAL_ACTION_STATUSES,
-    TERMINAL_EXECUTION_ATTEMPT_STATUSES,
-    ActionOutcome,
-    ActionStatus,
-    ExecutionAttemptStatus,
-)
-from automation_tool.control_plane.domain.installations import InstallationStatus
-from automation_tool.control_plane.domain.material import (
-    MAX_DESCRIPTION_CHARACTERS,
-    MAX_MATERIAL_DIMENSION,
-    MAX_MATERIAL_DURATION_MS,
-    MAX_SHOT_BOUNDARIES,
-    MAX_SPEECH_SEGMENTS,
-    MAX_TAG_CHARACTERS,
-    MAX_TAGS,
-    MAX_TRANSCRIPT_CHARACTERS,
-    DescriptionSource,
-    InvalidMaterialModel,
-    Material,
-    MaterialId,
-    MaterialKind,
-)
-from automation_tool.control_plane.domain.ports import DatabaseLifecycle
-from automation_tool.control_plane.domain.resource_ids import (
-    ActionId,
-    ArtifactId,
-    ExecutionAttemptId,
-    ExecutorConnectionId,
-    ExecutorId,
-    InstallationId,
-    InvalidResourceId,
-    ResourceId,
-    TargetId,
-    TaskId,
-    UserId,
-)
-from automation_tool.control_plane.domain.task_commands import (
-    TERMINAL_TASK_COMMAND_STATUSES,
-    TaskCommandResponseType,
-    TaskCommandStatus,
-    TaskCommandType,
-)
-from automation_tool.control_plane.domain.task_definitions import (
-    DOUYIN_SEARCH_EXPOSURE_TEMPLATE,
-    MAX_MESSAGE_TEMPLATE_CHARACTERS,
-    MAX_SEARCH_KEYWORD_CHARACTERS,
-    MAX_TASK_INTERVAL_SECONDS,
-    MAX_TASK_TARGET_LIMIT,
-    DouyinSearchExposureAction,
-    DouyinSearchExposureDefinition,
-    InvalidTaskDefinition,
-)
-from automation_tool.control_plane.domain.task_events import (
-    MAX_SAFE_TASK_EVENT_MESSAGE_CHARACTERS,
-    MAX_TASK_EVENT_SEQUENCE,
-    InvalidTaskEventModel,
-    SafeTaskEventMessage,
-    TaskEventType,
-    TaskEventVersion,
-    TaskSnapshotProjection,
-)
-from automation_tool.control_plane.domain.task_state_machine import (
-    InvalidTaskTransition,
-    TaskStateMachine,
-    TaskStatus,
-)
-from automation_tool.control_plane.domain.timeline import (
-    AUDIBLE_TRACK_KINDS,
-    InvalidTimelineModel,
-    OriginalAudioMode,
-    Timeline,
-    TimelineClip,
-    TimelineId,
-    TimelineTrack,
-    TimelineTrackKind,
-    TimelineTransition,
-    TransitionKind,
-)
-from automation_tool.control_plane.domain.video_creation import (
-    Artifact,
-    ArtifactRole,
-    ContentBrief,
-    ContentBriefId,
-    InvalidVideoDomainModel,
-    RenderFailureCode,
-    RenderJob,
-    RenderJobId,
-    RenderJobStatus,
-    Storyboard,
-    StoryboardId,
-    StoryboardScene,
-    VideoAspectRatio,
-    VideoCreationMethod,
-)
-from automation_tool.control_plane.domain.video_publishing import (
-    FIRST_RELEASE_PUBLISHING_CAPABILITIES,
-    PUBLISHING_CAPABILITIES_CONTRACT_VERSION,
-    InvalidPublishJobTransition,
-    InvalidVideoPublishingModel,
-    PublishCapability,
-    PublishFailureCode,
-    PublishJob,
-    PublishJobId,
-    PublishJobStateMachine,
-    PublishJobStatus,
-    PublishMechanism,
-    PublishPlatform,
-    enabled_publish_platforms,
-    publish_capability_for,
-)
+
+
+def __getattr__(name: str) -> Any:
+    if name not in __all__:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    for module_name in _PUBLIC_MODULES:
+        module = import_module(f"{__name__}.{module_name}")
+        if name in vars(module):
+            value = vars(module)[name]
+            globals()[name] = value
+            return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "ACTION_RISK_POLICY_VERSION",

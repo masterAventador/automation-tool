@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from automation_tool.control_plane.api.editing_errors import translate_editing_error
 from automation_tool.control_plane.api.errors import AppError, ErrorEnvelope
@@ -55,6 +55,47 @@ class EditingJobListResponse(BaseModel):
 
     items: list[EditingJobResponse]
     next_cursor: str | None = Field(alias="nextCursor")
+
+
+def _require_datetime_wire(value: object) -> object:
+    if not isinstance(value, str):
+        raise ValueError("timestamp must be a string")
+    return value
+
+
+StrictAwareDatetime = Annotated[AwareDatetime, BeforeValidator(_require_datetime_wire)]
+
+
+class EditingJobReconcileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_updated_at: StrictAwareDatetime = Field(alias="expectedUpdatedAt")
+    status: EditingJobStatus
+    failure_code: EditingJobFailureCode | None = Field(alias="failureCode")
+    output_artifact_id: str | None = Field(alias="outputArtifactId", strict=True)
+
+    @model_validator(mode="after")
+    def require_status_facts(self) -> EditingJobReconcileRequest:
+        valid = (
+            (
+                self.status is EditingJobStatus.RUNNING
+                and self.failure_code is None
+                and self.output_artifact_id is None
+            )
+            or (
+                self.status is EditingJobStatus.SUCCEEDED
+                and self.failure_code is None
+                and self.output_artifact_id is not None
+            )
+            or (
+                self.status is EditingJobStatus.FAILED
+                and self.failure_code is not None
+                and self.output_artifact_id is None
+            )
+        )
+        if not valid:
+            raise ValueError("status facts do not match")
+        return self
 
 
 def _service(request: Request) -> EditingJobService:
@@ -199,6 +240,48 @@ async def get_editing_job(
         job = await service.get(
             installation_id=installation_id,
             job_id=job_id,
+        )
+    except InvalidEditingJobQuery:
+        raise _validation_error() from None
+    except Exception as error:
+        raise translate_editing_error(error) from None
+    return _job_response(job)
+
+
+@detail_router.patch(
+    "/{job_id}",
+    response_model=EditingJobResponse,
+    operation_id="reconcileEditingJob",
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "description": "Editing job transition conflicts with stored state",
+            "model": ErrorEnvelope,
+        },
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "description": "Request validation failed",
+            "model": ErrorEnvelope,
+        },
+    },
+)
+async def reconcile_editing_job(
+    job_id: str,
+    payload: EditingJobReconcileRequest,
+    response: Response,
+    installation_id: Annotated[
+        InstallationId,
+        Depends(require_current_installation_access),
+    ],
+    service: Annotated[EditingJobService, Depends(_service)],
+) -> EditingJobResponse:
+    response.headers["cache-control"] = "no-store"
+    try:
+        job = await service.reconcile(
+            installation_id=installation_id,
+            job_id=job_id,
+            expected_updated_at=payload.expected_updated_at,
+            status=payload.status,
+            failure_code=payload.failure_code,
+            output_artifact_id=payload.output_artifact_id,
         )
     except InvalidEditingJobQuery:
         raise _validation_error() from None

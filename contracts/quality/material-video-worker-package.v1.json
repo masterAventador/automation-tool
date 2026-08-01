@@ -47,9 +47,13 @@
   },
   "dependencies": {
     "expectedInstalledDistributionCountByTarget": {
-      "macos-arm64": 112,
-      "macos-x86_64": 112,
-      "windows-x86_64": 115
+      "macos-arm64": 114,
+      "macos-x86_64": 114,
+      "windows-x86_64": 117
+    },
+    "productRequired": {
+      "brotli": "1.2.0",
+      "fonttools": "4.63.0"
     },
     "platformRequired": {
       "macos-arm64": {},
@@ -74,7 +78,9 @@
       "python-multipart": "0.0.27",
       "pydub": "0.25.1",
       "litellm": "1.86.2",
-      "google-genai": "2.11.0"
+      "google-genai": "2.11.0",
+      "brotli": "1.2.0",
+      "fonttools": "4.63.0"
     }
   },
   "probe": {

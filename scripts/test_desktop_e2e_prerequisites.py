@@ -351,6 +351,10 @@ def check_executor_cache_key_tracks_real_source_inputs() -> None:
         _write_executor_input(
             repository_root,
             "backend/automation-tool-executor.spec",
+            "silero_vad_contract_source = (\n"
+            "    repository_root / "
+            '"contracts/quality/silero-vad-runtime.v1.json"\n'
+            ")\n"
             "motion_authoring_resources = [\n"
             '    "contracts/video/motion-render-canvas.v1.json",\n'
             '    "vendor/hyperframes/skills/hyperframes-core/references/'
@@ -375,6 +379,7 @@ def check_executor_cache_key_tracks_real_source_inputs() -> None:
         )
         for relative in (
             "contracts/protocol/executor-v1.schema.json",
+            "contracts/quality/silero-vad-runtime.v1.json",
             "contracts/quality/motion-catalog.v1.json",
             "contracts/video/motion-render-canvas.v1.json",
             "contracts/video/motion-one-sentence-brief.v1.json",
@@ -480,6 +485,18 @@ def check_executor_cache_key_tracks_real_source_inputs() -> None:
         )
 
 
+def check_executor_spec_resource_discovery_ignores_destination_directories() -> None:
+    inputs = prerequisites._executor_input_paths(prerequisites.REPOSITORY_ROOT)
+
+    assert inputs
+    assert (
+        prerequisites.REPOSITORY_ROOT / "contracts/quality/silero-vad-runtime.v1.json" in inputs
+    ), "the frozen Silero VAD contract must remain part of the Executor cache key"
+    assert all(path.is_file() for path in inputs), (
+        "Executor cache inputs must contain source files, not PyInstaller destination directories"
+    )
+
+
 def check_locked_browser_archives_use_shared_archive_resolver() -> None:
     module_source = Path(prerequisites.__file__).read_text(encoding="utf-8")
     assert "archive_path(" in module_source, (
@@ -552,6 +569,7 @@ CHECKS = (
     check_every_app_created_task_offer_seeds_the_production_confirmation,
     check_every_driver_stops_the_whole_app_process_tree,
     check_executor_cache_key_tracks_real_source_inputs,
+    check_executor_spec_resource_discovery_ignores_destination_directories,
     check_locked_browser_archives_use_shared_archive_resolver,
     check_a_stale_cache_names_the_step_that_rebuilds_it,
     check_every_declared_check_is_registered,

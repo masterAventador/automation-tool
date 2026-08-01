@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT / "workers/material_montage"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import build_material_video_worker_candidate as build_candidate_module  # noqa: E402
+import gateway  # noqa: E402
 import subtitle_font_assets  # noqa: E402
 import webui_runtime  # noqa: E402
 import worker_main  # noqa: E402
@@ -44,9 +45,7 @@ class MemoryStateFixture:
     def __init__(self) -> None:
         self.tasks: dict[str, dict[str, object]] = {}
 
-    def update_task(
-        self, task_id: str, state: int, progress: int, **kwargs: object
-    ) -> None:
+    def update_task(self, task_id: str, state: int, progress: int, **kwargs: object) -> None:
         self.tasks[task_id] = {"state": state, "progress": progress, **kwargs}
 
     def get_task(self, task_id: str) -> object:
@@ -60,6 +59,75 @@ class MemoryStateFixture:
 
 
 class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
+    def test_legacy_gateway_bootstrap_still_starts_without_local_editing_tools(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="material-video-legacy-", dir=ROOT / ".local"
+        ) as directory:
+            asset_root = Path(directory) / "assets"
+            asset_root.mkdir()
+            document = {
+                "assetRoot": str(asset_root),
+                "bootstrapVersion": "1",
+                "enableWebUi": False,
+                "localSessionToken": "a" * 64,
+                "protocolVersion": "1.0",
+                "renderBrowser": None,
+                "scriptModel": None,
+                "workerKind": "python",
+            }
+            stream = io.StringIO(json.dumps(document, separators=(",", ":")) + "\n")
+            output = io.StringIO()
+
+            result = worker_main._gateway_process(stream, output)
+
+            self.assertEqual(result, 0)
+            ready = json.loads(output.getvalue())
+            self.assertEqual(ready["event"], "worker.ready")
+            self.assertEqual(ready["workerVersion"], gateway.WORKER_VERSION)
+
+    def test_gateway_bootstrap_accepts_the_strict_local_editing_media_tools_extension(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="material-video-bootstrap-", dir=ROOT / ".local"
+        ) as directory:
+            root = Path(directory)
+            asset_root = root / "assets"
+            asset_root.mkdir()
+            ffmpeg = root / "ffmpeg"
+            ffprobe = root / "ffprobe"
+            ffmpeg.touch()
+            ffprobe.touch()
+            document = {
+                "assetRoot": str(asset_root),
+                "bootstrapVersion": "1",
+                "enableWebUi": False,
+                "localSessionToken": "a" * 64,
+                "mediaTools": {
+                    "ffmpegPath": str(ffmpeg),
+                    "ffprobePath": str(ffprobe),
+                },
+                "protocolVersion": "1.0",
+                "renderBrowser": None,
+                "scriptModel": None,
+                "workerKind": "python",
+            }
+
+            parsed = gateway.parse_bootstrap(
+                (json.dumps(document, separators=(",", ":")) + "\n").encode()
+            )
+
+            self.assertEqual(parsed.asset_root, asset_root)
+            self.assertTrue(parsed.local_editing)
+
+            document["mediaTools"] = {"ffmpegPath": str(ffmpeg)}
+            with self.assertRaises(gateway.GatewayRejected):
+                gateway.parse_bootstrap(
+                    (json.dumps(document, separators=(",", ":")) + "\n").encode()
+                )
+
     @unittest.skipUnless(sys.platform == "win32", "Windows extended-path boundary")
     def test_webui_normalizes_canonical_windows_paths_before_upstream_use(self) -> None:
         self.assertEqual(
@@ -67,11 +135,7 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
             r"C:\workspace\job",
         )
         self.assertEqual(
-            str(
-                _native_path_for_upstream(
-                    Path(r"\\?\UNC\server.example\share\workspace")
-                )
-            ),
+            str(_native_path_for_upstream(Path(r"\\?\UNC\server.example\share\workspace"))),
             r"\\server.example\share\workspace",
         )
 
@@ -103,9 +167,7 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
             succeeded = json.loads((runtime_root / OBSERVATION_FILE).read_text())
             self.assertEqual(succeeded["status"], "succeeded")
             self.assertEqual(succeeded["outputFile"], "material-result.mp4")
-            self.assertEqual(
-                (output_root / "material-result.mp4").read_bytes(), b"verified-video"
-            )
+            self.assertEqual((output_root / "material-result.mp4").read_bytes(), b"verified-video")
             with self.assertRaises(PermissionError):
                 bridge.delete_task(task_id)
 
@@ -141,9 +203,7 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
                 result = worker_main.main(arguments)
             self.assertEqual(result, 64)
             self.assertEqual(stdout.getvalue(), "")
-            self.assertEqual(
-                stderr.getvalue(), "Material video worker command is required\n"
-            )
+            self.assertEqual(stderr.getvalue(), "Material video worker command is required\n")
 
     def test_rejects_missing_bootstrap_without_starting_gateway(self) -> None:
         stdout = io.StringIO()
@@ -152,9 +212,7 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
             result = worker_main.main([], io.StringIO(""))
         self.assertEqual(result, 64)
         self.assertEqual(stdout.getvalue(), "")
-        self.assertEqual(
-            stderr.getvalue(), "Material video worker command is required\n"
-        )
+        self.assertEqual(stderr.getvalue(), "Material video worker command is required\n")
 
     def test_dependency_probe_rejects_non_startup_dependency(self) -> None:
         with self.assertRaisesRegex(ValueError, "not part of the startup set"):
@@ -189,9 +247,7 @@ class MaterialVideoWorkerExcludedModulesTest(unittest.TestCase):
             with self.assertRaisesRegex(
                 build_candidate_module.MaterialVideoWorkerPackageError, "pyarrow"
             ):
-                build_candidate_module.assert_excluded_modules_absent(
-                    candidate, contract
-                )
+                build_candidate_module.assert_excluded_modules_absent(candidate, contract)
 
     def test_candidate_without_excluded_modules_is_accepted(self) -> None:
         contract = build_candidate_module.load_contract()
@@ -199,6 +255,26 @@ class MaterialVideoWorkerExcludedModulesTest(unittest.TestCase):
             candidate = Path(directory) / "candidate"
             (candidate / "_internal/pandas").mkdir(parents=True)
             build_candidate_module.assert_excluded_modules_absent(candidate, contract)
+
+
+class MaterialVideoWorkerProductDependenciesTest(unittest.TestCase):
+    def test_local_editing_font_runtime_is_a_locked_product_dependency(self) -> None:
+        contract = build_candidate_module.load_contract()
+
+        self.assertEqual(
+            build_candidate_module.product_dependencies(contract),
+            {"brotli": "1.2.0", "fonttools": "4.63.0"},
+        )
+
+    def test_product_dependencies_must_be_part_of_the_probed_required_set(self) -> None:
+        contract = build_candidate_module.load_contract()
+        contract["dependencies"]["productRequired"]["fonttools"] = "0.0.0"
+
+        with self.assertRaisesRegex(
+            build_candidate_module.MaterialVideoWorkerPackageError,
+            "产品依赖",
+        ):
+            build_candidate_module.product_dependencies(contract)
 
 
 class MaterialVideoWorkerExcludedUpstreamResourcesTest(unittest.TestCase):
@@ -237,9 +313,7 @@ class MaterialVideoWorkerExcludedUpstreamResourcesTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             candidate = Path(directory) / "candidate"
             (candidate / "_internal/upstream/resource/fonts").mkdir(parents=True)
-            build_candidate_module.assert_excluded_upstream_resources_absent(
-                candidate, contract
-            )
+            build_candidate_module.assert_excluded_upstream_resources_absent(candidate, contract)
 
 
 OFL_HEADLINE = "SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007"
@@ -328,9 +402,7 @@ class SubtitleFontRightsTest(unittest.TestCase):
         for font in fonts:
             self.assertEqual(font.license, "OFL-1.1")
             self.assertTrue(font.packaged_name.endswith((".ttf", ".ttc")))
-            self.assertTrue(
-                font.source_url.startswith(subtitle_font_assets.FONT_SOURCE_URL_PREFIX)
-            )
+            self.assertTrue(font.source_url.startswith(subtitle_font_assets.FONT_SOURCE_URL_PREFIX))
             self.assertRegex(font.sha256, r"^[0-9a-f]{64}$")
             self.assertGreater(font.bytes, 0)
             self.assertTrue(font.attribution)
@@ -356,9 +428,7 @@ class SubtitleFontRightsTest(unittest.TestCase):
             )
 
     def test_no_registered_font_is_a_proprietary_system_face(self) -> None:
-        registered = {
-            font.packaged_name for font in subtitle_font_assets.bundled_subtitle_fonts()
-        }
+        registered = {font.packaged_name for font in subtitle_font_assets.bundled_subtitle_fonts()}
         for proprietary in (
             "MicrosoftYaHeiBold.ttc",
             "MicrosoftYaHeiNormal.ttc",
@@ -382,9 +452,7 @@ class SubtitleFontRightsTest(unittest.TestCase):
         for entry in rights["entries"]:
             if entry.get("category") == "font":
                 entry["redistributionAllowed"] = False
-        with self.assertRaisesRegex(
-            subtitle_font_assets.SubtitleFontRightsError, "redistribution"
-        ):
+        with self.assertRaisesRegex(subtitle_font_assets.SubtitleFontRightsError, "redistribution"):
             subtitle_font_assets.bundled_subtitle_fonts(rights)
 
     def test_registry_rejects_a_packaged_name_that_escapes_the_font_directory(
@@ -394,9 +462,7 @@ class SubtitleFontRightsTest(unittest.TestCase):
         for entry in rights["entries"]:
             if entry.get("category") == "font":
                 entry["packagedName"] = "../evil.ttf"
-        with self.assertRaisesRegex(
-            subtitle_font_assets.SubtitleFontRightsError, "packagedName"
-        ):
+        with self.assertRaisesRegex(subtitle_font_assets.SubtitleFontRightsError, "packagedName"):
             subtitle_font_assets.bundled_subtitle_fonts(rights)
 
     def test_registry_rejects_a_download_location_off_the_locked_upstream(self) -> None:
@@ -404,32 +470,25 @@ class SubtitleFontRightsTest(unittest.TestCase):
         for entry in rights["entries"]:
             if entry.get("category") == "font":
                 entry["sourceUrl"] = "https://example.invalid/NotoSansCJKsc-Bold.otf"
-        with self.assertRaisesRegex(
-            subtitle_font_assets.SubtitleFontRightsError, "sourceUrl"
-        ):
+        with self.assertRaisesRegex(subtitle_font_assets.SubtitleFontRightsError, "sourceUrl"):
             subtitle_font_assets.bundled_subtitle_fonts(rights)
 
     def test_licence_notice_travels_with_every_registered_font(self) -> None:
         notice = subtitle_font_assets.packaged_license_notice()
         self.assertNotIn("/", notice.packaged_name)
-        self.assertTrue(
-            notice.source_url.startswith(subtitle_font_assets.FONT_SOURCE_URL_PREFIX)
-        )
+        self.assertTrue(notice.source_url.startswith(subtitle_font_assets.FONT_SOURCE_URL_PREFIX))
         self.assertRegex(notice.sha256, r"^[0-9a-f]{64}$")
 
     def test_app_ships_the_same_licence_text_the_package_carries(self) -> None:
         shipped = (
-            ROOT
-            / "frontend/src/features/legal/third-party-software/license-texts/ofl-1.1.txt"
+            ROOT / "frontend/src/features/legal/third-party-software/license-texts/ofl-1.1.txt"
         )
         payload = shipped.read_bytes().replace(b"\r\n", b"\n")
         notice = subtitle_font_assets.packaged_license_notice()
         self.assertEqual(hashlib.sha256(payload).hexdigest(), notice.sha256)
 
     def test_default_subtitle_font_is_one_of_the_registered_fonts(self) -> None:
-        registered = {
-            font.packaged_name for font in subtitle_font_assets.bundled_subtitle_fonts()
-        }
+        registered = {font.packaged_name for font in subtitle_font_assets.bundled_subtitle_fonts()}
         self.assertIn(default_subtitle_font_name(), registered)
 
 
@@ -443,16 +502,12 @@ class SubtitleFontPayloadVerificationTest(unittest.TestCase):
         )
 
     def test_font_without_a_copyright_notice_is_rejected(self) -> None:
-        with self.assertRaisesRegex(
-            subtitle_font_assets.SubtitleFontRightsError, "copyright"
-        ):
+        with self.assertRaisesRegex(subtitle_font_assets.SubtitleFontRightsError, "copyright"):
             subtitle_font_assets.font_copyright_notice(_synthetic_font(None))
 
     def test_payload_with_drifted_bytes_is_rejected(self) -> None:
         _, fonts, _ = _synthetic_bundle()
-        with self.assertRaisesRegex(
-            subtitle_font_assets.SubtitleFontUnavailable, "digest"
-        ):
+        with self.assertRaisesRegex(subtitle_font_assets.SubtitleFontUnavailable, "digest"):
             subtitle_font_assets.verify_font_payload(fonts[0], b"not the licensed font")
 
     def test_payload_whose_copyright_is_not_the_registered_one_is_rejected(
@@ -469,9 +524,7 @@ class SubtitleFontPayloadVerificationTest(unittest.TestCase):
             license="OFL-1.1",
             attribution="© 2026 Test Foundry.",
         )
-        with self.assertRaisesRegex(
-            subtitle_font_assets.SubtitleFontUnavailable, "copyright"
-        ):
+        with self.assertRaisesRegex(subtitle_font_assets.SubtitleFontUnavailable, "copyright"):
             subtitle_font_assets.verify_font_payload(font, payload)
 
 
@@ -616,9 +669,9 @@ class MaterialVideoWorkerBundledFontsTest(unittest.TestCase):
     def test_candidate_with_a_substituted_font_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             candidate = self._candidate(directory)
-            (
-                candidate / "_internal/upstream/resource/fonts" / self.default
-            ).write_bytes(b"not the licensed font")
+            (candidate / "_internal/upstream/resource/fonts" / self.default).write_bytes(
+                b"not the licensed font"
+            )
             with self.assertRaisesRegex(
                 build_candidate_module.MaterialVideoWorkerPackageError, self.default
             ):
@@ -641,9 +694,7 @@ class MaterialVideoWorkerBundledFontsTest(unittest.TestCase):
                     attribution=font.attribution,
                 ),
             ) + self.fonts[1:]
-            (
-                candidate / "_internal/upstream/resource/fonts" / self.default
-            ).write_bytes(impostor)
+            (candidate / "_internal/upstream/resource/fonts" / self.default).write_bytes(impostor)
             with self.assertRaisesRegex(
                 build_candidate_module.MaterialVideoWorkerPackageError, "版权"
             ):
@@ -652,11 +703,7 @@ class MaterialVideoWorkerBundledFontsTest(unittest.TestCase):
     def test_candidate_missing_the_font_licence_notice_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             candidate = self._candidate(directory)
-            (
-                candidate
-                / "_internal/upstream/resource/fonts"
-                / self.notice.packaged_name
-            ).unlink()
+            (candidate / "_internal/upstream/resource/fonts" / self.notice.packaged_name).unlink()
             with self.assertRaisesRegex(
                 build_candidate_module.MaterialVideoWorkerPackageError,
                 self.notice.packaged_name,
@@ -689,8 +736,7 @@ class MaterialVideoWorkerDefaultSubtitleFontTest(unittest.TestCase):
         )
         self.assertEqual(
             document,
-            '[app]\nvalue = 1\n\n[ui]\nfont_name = "NotoSansCJKsc-Bold.ttf"\n'
-            "hide_log = false\n",
+            '[app]\nvalue = 1\n\n[ui]\nfont_name = "NotoSansCJKsc-Bold.ttf"\nhide_log = false\n',
         )
 
     def test_private_config_refuses_upstream_configuration_without_a_webui_section(
@@ -724,13 +770,11 @@ class MaterialVideoWorkerSubtitleFallbackTest(unittest.TestCase):
     """
 
     def test_upstream_still_falls_back_to_a_downloaded_model(self) -> None:
-        task = (
-            ROOT / "vendor/moneyprinterturbo/app/services/task.py"
-        ).read_text(encoding="utf-8")
+        task = (ROOT / "vendor/moneyprinterturbo/app/services/task.py").read_text(encoding="utf-8")
         self.assertIn("fallback to whisper", task)
-        subtitle = (
-            ROOT / "vendor/moneyprinterturbo/app/services/subtitle.py"
-        ).read_text(encoding="utf-8")
+        subtitle = (ROOT / "vendor/moneyprinterturbo/app/services/subtitle.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("model_size_or_path=model_path", subtitle)
 
     def test_webui_child_cannot_start_a_hidden_model_download(self) -> None:
@@ -769,9 +813,7 @@ class MaterialVideoWorkerBackgroundMusicTest(unittest.TestCase):
 
     def test_release_ships_no_background_music_at_all(self) -> None:
         contract = build_candidate_module.load_contract()
-        self.assertIn(
-            "songs", build_candidate_module.excluded_upstream_resources(contract)
-        )
+        self.assertIn("songs", build_candidate_module.excluded_upstream_resources(contract))
 
     def test_upstream_still_uses_the_widget_keys_the_overlay_targets(self) -> None:
         source = (UPSTREAM_WEBUI / "Main.py").read_text(encoding="utf-8")
@@ -785,9 +827,7 @@ class MaterialVideoWorkerBackgroundMusicTest(unittest.TestCase):
     def test_private_project_states_that_this_release_has_no_background_music(
         self,
     ) -> None:
-        self.assertIn(
-            "当前版本不提供背景音乐素材，成片不会添加背景音乐。", self.stylesheet
-        )
+        self.assertIn("当前版本不提供背景音乐素材，成片不会添加背景音乐。", self.stylesheet)
 
     def test_private_project_keeps_every_upstream_rule(self) -> None:
         upstream = (UPSTREAM_WEBUI / "styles.css").read_text(encoding="utf-8")

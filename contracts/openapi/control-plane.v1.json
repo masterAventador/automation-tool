@@ -495,6 +495,48 @@
         "title": "EditingJobListResponse",
         "type": "object"
       },
+      "EditingJobReconcileRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedUpdatedAt": {
+            "format": "date-time",
+            "title": "Expectedupdatedat",
+            "type": "string"
+          },
+          "failureCode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditingJobFailureCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outputArtifactId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outputartifactid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/EditingJobStatus"
+          }
+        },
+        "required": [
+          "expectedUpdatedAt",
+          "status",
+          "failureCode",
+          "outputArtifactId"
+        ],
+        "title": "EditingJobReconcileRequest",
+        "type": "object"
+      },
       "EditingJobResponse": {
         "additionalProperties": false,
         "properties": {
@@ -3183,6 +3225,71 @@
           }
         ],
         "summary": "Get Editing Job",
+        "tags": [
+          "editing-jobs"
+        ]
+      },
+      "patch": {
+        "operationId": "reconcileEditingJob",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditingJobReconcileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Editing job transition conflicts with stored state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Reconcile Editing Job",
         "tags": [
           "editing-jobs"
         ]

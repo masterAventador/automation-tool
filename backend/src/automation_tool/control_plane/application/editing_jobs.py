@@ -40,13 +40,15 @@ from typing import Protocol
 
 from automation_tool.control_plane.domain import (
     EditingJob,
+    EditingJobFailureCode,
     EditingJobId,
     EditingJobStatus,
     EditingProjectId,
     InstallationId,
-    InvalidResourceId,
+    InvalidEditingJobTransition,
     Timeline,
 )
+from automation_tool.control_plane.domain.resource_ids import ArtifactId, InvalidResourceId
 
 _CURSOR_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
 
@@ -131,6 +133,12 @@ class EditingJobStale(_EditingJobPersistenceFailure):
     message = "Editing job was modified by someone else"
 
 
+class EditingJobTransitionConflict(_EditingJobPersistenceFailure):
+    """The requested Worker transition is not reachable from the stored state."""
+
+    message = "Editing job transition conflicts with stored state"
+
+
 class EditingJobDataRejected(_EditingJobPersistenceFailure):
     """The argument, or the row it would have written, was refused.
 
@@ -178,6 +186,12 @@ class EditingJobRepository(Protocol):
         job_id: EditingJobId,
         installation_id: InstallationId,
     ) -> EditingJob: ...
+
+    async def update(
+        self,
+        previous: EditingJob,
+        changed: EditingJob,
+    ) -> None: ...
 
     async def list_page_by_project(
         self,
@@ -320,6 +334,54 @@ class EditingJobService:
             installation_id,
         )
 
+    async def reconcile(
+        self,
+        *,
+        installation_id: InstallationId,
+        job_id: str,
+        expected_updated_at: datetime,
+        status: EditingJobStatus,
+        failure_code: EditingJobFailureCode | None,
+        output_artifact_id: str | None,
+    ) -> EditingJob:
+        """Apply one authenticated local scheduler transition with repository CAS."""
+
+        if (
+            not isinstance(installation_id, InstallationId)
+            or not isinstance(expected_updated_at, datetime)
+            or expected_updated_at.tzinfo is None
+            or expected_updated_at.utcoffset() != UTC.utcoffset(expected_updated_at)
+            or not isinstance(status, EditingJobStatus)
+        ):
+            raise InvalidEditingJobQuery
+        current = await self._repository.get(_parse_job_id(job_id), installation_id)
+        if current.updated_at != expected_updated_at:
+            raise EditingJobStale
+        now = self._clock()
+        try:
+            if status is EditingJobStatus.RUNNING:
+                if failure_code is not None or output_artifact_id is not None:
+                    raise InvalidEditingJobQuery
+                changed = current.start(now)
+            elif status is EditingJobStatus.SUCCEEDED:
+                if failure_code is not None or output_artifact_id is None:
+                    raise InvalidEditingJobQuery
+                changed = current.succeed(ArtifactId.parse(output_artifact_id), now)
+            elif status is EditingJobStatus.FAILED:
+                if failure_code is None or output_artifact_id is not None:
+                    raise InvalidEditingJobQuery
+                changed = current.fail(failure_code, now)
+            else:
+                raise InvalidEditingJobQuery
+        except InvalidResourceId:
+            raise InvalidEditingJobQuery from None
+        except InvalidEditingJobQuery:
+            raise
+        except InvalidEditingJobTransition:
+            raise EditingJobTransitionConflict from None
+        await self._repository.update(current, changed)
+        return changed
+
     async def list(
         self,
         *,
@@ -369,6 +431,7 @@ __all__ = [
     "EditingJobService",
     "EditingJobStale",
     "EditingJobTimelineRevisionMissing",
+    "EditingJobTransitionConflict",
     "EditingTimelineLookup",
     "InvalidEditingJobQuery",
 ]

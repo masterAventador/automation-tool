@@ -111,6 +111,46 @@ fn isolates_jobs_and_atomically_imports_a_content_addressed_artifact() {
 }
 
 #[test]
+fn imports_the_worker_authenticated_artifact_id_exactly_once() {
+    let root = TemporaryRoot::new();
+    let store = VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("workspace store");
+    let workspace = store
+        .create(job("123e4567-e89b-42d3-a456-426614174221"))
+        .expect("workspace");
+    let artifact_id = job("123e4567-e89b-42d3-a456-426614174222");
+    let output = store
+        .worker_output_directory(&workspace)
+        .expect("worker output")
+        .join("render.mp4");
+    fs::write(&output, b"authenticated-render").expect("worker output bytes");
+
+    let imported = store
+        .import_output_with_id(
+            &workspace,
+            artifact_id,
+            "render.mp4",
+            "video/mp4",
+            "rendered_video",
+        )
+        .expect("authenticated artifact import");
+
+    assert_eq!(imported.artifact_id(), artifact_id);
+    assert_eq!(
+        store
+            .import_output_with_id(
+                &workspace,
+                artifact_id,
+                "render.mp4",
+                "video/mp4",
+                "rendered_video",
+            )
+            .expect_err("authenticated artifact ID is immutable")
+            .code(),
+        VideoWorkspaceErrorCode::AlreadyExists,
+    );
+}
+
+#[test]
 fn checkpoint_survives_reopen_and_workspace_disposition_does_not_delete_artifacts() {
     let root = TemporaryRoot::new();
     let job_id = job("123e4567-e89b-42d3-a456-426614174203");

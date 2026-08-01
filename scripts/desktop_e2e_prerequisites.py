@@ -41,6 +41,7 @@ cleanup stops only a `Popen` handle this module's harness successfully started.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -392,7 +393,43 @@ _EXECUTOR_FIXED_INPUTS: Final = (
     "scripts/video_runtime_cache.py",
 )
 _EXECUTOR_CONTRACT_ROOTS: Final = ("contracts/protocol",)
-_EXECUTOR_SPEC_RESOURCE_PATTERN: Final = re.compile(r"""["']((?:contracts|vendor)/[^"']+)["']""")
+
+
+def _executor_spec_resources(source: str) -> tuple[str, ...]:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as error:
+        raise DesktopPrerequisiteRejected("the Executor spec cannot be parsed") from error
+    silero_contract: str | None = None
+    motion_resources: tuple[str, ...] | None = None
+    for statement in tree.body:
+        if not isinstance(statement, ast.Assign):
+            continue
+        names = {target.id for target in statement.targets if isinstance(target, ast.Name)}
+        if "silero_vad_contract_source" in names:
+            value = statement.value
+            if (
+                isinstance(value, ast.BinOp)
+                and isinstance(value.op, ast.Div)
+                and isinstance(value.right, ast.Constant)
+                and isinstance(value.right.value, str)
+            ):
+                silero_contract = value.right.value
+        if "motion_authoring_resources" in names and isinstance(
+            statement.value, (ast.List, ast.Tuple)
+        ):
+            resources = tuple(
+                item.value
+                for item in statement.value.elts
+                if isinstance(item, ast.Constant) and isinstance(item.value, str)
+            )
+            if len(resources) == len(statement.value.elts) and resources:
+                motion_resources = resources
+    if silero_contract is not None and motion_resources is not None:
+        return (silero_contract, *motion_resources)
+    raise DesktopPrerequisiteRejected("the Executor spec resource inventory is invalid")
+
+
 _IGNORED_EXECUTOR_SOURCE_PARTS: Final = frozenset({"__pycache__"})
 _IGNORED_EXECUTOR_SOURCE_SUFFIXES: Final = frozenset({".pyc", ".pyo"})
 
@@ -427,7 +464,7 @@ def _executor_input_paths(repository_root: Path) -> tuple[Path, ...]:
         inputs.update(path for path in contract_root.rglob("*") if path.is_file())
 
     spec_path = repository_root / _EXECUTOR_FIXED_INPUTS[0]
-    for relative in _EXECUTOR_SPEC_RESOURCE_PATTERN.findall(spec_path.read_text(encoding="utf-8")):
+    for relative in _executor_spec_resources(spec_path.read_text(encoding="utf-8")):
         resource = Path(relative)
         if resource.is_absolute() or ".." in resource.parts:
             raise DesktopPrerequisiteRejected(
@@ -701,6 +738,8 @@ def video_studio_startup_harness(
     *,
     environment: Mapping[str, str],
     resource_root: Path = DEBUG_APP_RESOURCE_ROOT,
+    demo_environment_id: str | None = None,
+    demo_bootstrap_public_key: str | None = None,
 ) -> Iterator[dict[str, str]]:
     """Yield the complete environment around one real video-studio App run.
 
@@ -739,6 +778,17 @@ def video_studio_startup_harness(
         database_port=database_port,
         development_database_port=development_database_port,
     )
+    if (demo_environment_id is None) != (demo_bootstrap_public_key is None):
+        raise DesktopPrerequisiteRejected(
+            "video-studio Demo environment and bootstrap key must be supplied together"
+        )
+    if demo_environment_id is not None and demo_bootstrap_public_key is not None:
+        prepared.update(
+            {
+                "AUTOMATION_TOOL_DEMO_ENVIRONMENT_ID": demo_environment_id,
+                "AUTOMATION_TOOL_DEMO_BOOTSTRAP_PUBLIC_KEY": demo_bootstrap_public_key,
+            }
+        )
     project_name = f"automation-tool-video-studio-{uuid4()}"
     compose = compose_command(project_name)
     server: subprocess.Popen[bytes] | None = None
