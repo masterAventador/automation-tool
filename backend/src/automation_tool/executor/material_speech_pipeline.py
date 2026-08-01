@@ -744,6 +744,7 @@ def _open_stable_pcm(
     try:
         flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
         flags |= getattr(os, "O_NOFOLLOW", 0)
+        flags |= getattr(os, "O_BINARY", 0)
         descriptor = os.open(path, flags)
         before = os.fstat(descriptor)
         current = path.lstat()

@@ -458,6 +458,30 @@ def test_windows_pcm_identity_uses_stable_birth_time(
     assert pipeline._same_pcm_file(descriptor, path)
 
 
+def test_pcm_reader_requests_binary_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pcm = tmp_path / "audio.pcm"
+    pcm.write_bytes(b"\x00\x1a\x00\x00")
+    approved = pcm.stat()
+    binary_flag = 0x8000
+    opened_with: list[int] = []
+    native_open = os.open
+
+    def open_without_test_flag(path: Path, flags: int) -> int:
+        opened_with.append(flags)
+        return native_open(path, flags & ~binary_flag)
+
+    monkeypatch.setattr(pipeline.os, "O_BINARY", binary_flag, raising=False)
+    monkeypatch.setattr(pipeline.os, "open", open_without_test_flag)
+
+    descriptor, _metadata = pipeline._open_stable_pcm(pcm, approved=approved)
+    os.close(descriptor)
+
+    assert opened_with[0] & binary_flag
+
+
 def test_output_at_the_exact_limit_is_accepted(tmp_path: Path) -> None:
     output = tmp_path / "audio.pcm"
     limit = pipeline._pcm_output_limit(1)
