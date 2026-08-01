@@ -24,6 +24,7 @@ pub mod executor_platform;
 pub mod executor_protocol;
 pub mod local_editing_job_ledger;
 pub mod local_editing_runtime;
+pub mod local_material_library;
 pub mod local_registration;
 pub mod local_video_orchestrator;
 mod managed_process_tree;
@@ -56,11 +57,24 @@ use local_registration::{
 };
 use tauri::Manager;
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+use tauri_plugin_dialog::{DialogExt, FilePath};
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use zeroize::Zeroizing;
 
 struct ControlPlaneCommandError {
     code: &'static str,
     retryable: bool,
+}
+
+struct LocalMaterialCommandError {
+    code: &'static str,
+    retryable: bool,
+}
+
+impl serde::Serialize for LocalMaterialCommandError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        command_error::serialize(&self.code, Some(self.retryable), serializer)
+    }
 }
 
 impl serde::Serialize for ControlPlaneCommandError {
@@ -2731,6 +2745,143 @@ async fn submit_editing_job(
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+fn map_local_material_error(
+    error: local_material_library::LocalMaterialLibraryError,
+) -> LocalMaterialCommandError {
+    use control_plane::ControlPlaneErrorCode as ControlPlane;
+    use local_material_library::LocalMaterialLibraryErrorCode as Library;
+    use local_video_orchestrator::VideoWorkerErrorCode as Worker;
+
+    let code = match error.code() {
+        Library::ConfigurationInvalid => "configuration_invalid",
+        Library::SourceChanged => "source_changed",
+        Library::CompensationFailed => "compensation_failed",
+        Library::RemapUncertain => "outcome_uncertain",
+        Library::WorkerRejected(code) => code.as_str(),
+        Library::WorkerLifecycle(Worker::AuthenticationRejected) => "authentication_rejected",
+        Library::WorkerLifecycle(Worker::ConfigurationInvalid) => "operation_in_progress",
+        Library::WorkerLifecycle(Worker::TimedOut) => "timed_out",
+        Library::WorkerLifecycle(Worker::VersionMismatch) => "version_mismatch",
+        Library::WorkerLifecycle(
+            Worker::AlreadyRunning
+            | Worker::NotRunning
+            | Worker::ProcessUnavailable
+            | Worker::RenderRejected,
+        ) => "worker_unavailable",
+        Library::ControlPlane(ControlPlane::CredentialMissing) => "credential_missing",
+        Library::ControlPlane(ControlPlane::InstallationAccessDenied) => {
+            "installation_access_denied"
+        }
+        Library::ControlPlane(ControlPlane::OutcomeUncertain) => "outcome_uncertain",
+        Library::ControlPlane(
+            ControlPlane::IdentityUnavailable | ControlPlane::StorageUnavailable,
+        ) => "storage_unavailable",
+        Library::ControlPlane(ControlPlane::TransportUnavailable) => "transport_unavailable",
+        Library::ControlPlane(
+            ControlPlane::ProtocolInvalid
+            | ControlPlane::RequestRejected
+            | ControlPlane::InstallationBusy
+            | ControlPlane::InstallationConflict
+            | ControlPlane::AuthenticationInvalid
+            | ControlPlane::RecoveryInvalid
+            | ControlPlane::AccountSessionInvalid
+            | ControlPlane::ResourceNotFound,
+        ) => "control_plane_rejected",
+    };
+    LocalMaterialCommandError {
+        code,
+        retryable: error.retryable(),
+    }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+fn parse_material_id(value: &str) -> Result<uuid::Uuid, LocalMaterialCommandError> {
+    let parsed = uuid::Uuid::parse_str(value).map_err(|_| LocalMaterialCommandError {
+        code: "configuration_invalid",
+        retryable: false,
+    })?;
+    if parsed.get_version_num() != 4
+        || parsed.get_variant() != uuid::Variant::RFC4122
+        || parsed.hyphenated().to_string() != value
+    {
+        return Err(LocalMaterialCommandError {
+            code: "configuration_invalid",
+            retryable: false,
+        });
+    }
+    Ok(parsed)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn import_editing_material(
+    app: tauri::AppHandle,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+    orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
+    coordinator: tauri::State<'_, local_material_library::LocalMaterialLibraryCoordinator>,
+) -> Result<Option<local_material_library::LocalMaterialImportOutcome>, LocalMaterialCommandError> {
+    let selected = app.dialog().file().blocking_pick_file();
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let FilePath::Path(source_path) = selected else {
+        return Err(LocalMaterialCommandError {
+            code: "configuration_invalid",
+            retryable: false,
+        });
+    };
+    let _operation = coordinator.acquire().await;
+    local_editing_runtime::ensure_worker(&app).map_err(|_| LocalMaterialCommandError {
+        code: "worker_unavailable",
+        retryable: true,
+    })?;
+    local_material_library::import_material(&orchestrator, &client, &vault, &source_path)
+        .await
+        .map(Some)
+        .map_err(map_local_material_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn get_local_editing_material_status(
+    material_id: String,
+    app: tauri::AppHandle,
+    orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
+    coordinator: tauri::State<'_, local_material_library::LocalMaterialLibraryCoordinator>,
+) -> Result<local_video_orchestrator::VideoWorkerLocalMaterialStatus, LocalMaterialCommandError> {
+    let material_id = parse_material_id(&material_id)?;
+    let _operation = coordinator.acquire().await;
+    local_editing_runtime::ensure_worker(&app).map_err(|_| LocalMaterialCommandError {
+        code: "worker_unavailable",
+        retryable: true,
+    })?;
+    local_material_library::material_status(&orchestrator, material_id)
+        .map_err(map_local_material_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn delete_editing_material(
+    material_id: String,
+    app: tauri::AppHandle,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+    orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
+    coordinator: tauri::State<'_, local_material_library::LocalMaterialLibraryCoordinator>,
+) -> Result<(), LocalMaterialCommandError> {
+    let material_id = parse_material_id(&material_id)?;
+    let _operation = coordinator.acquire().await;
+    local_editing_runtime::ensure_worker(&app).map_err(|_| LocalMaterialCommandError {
+        code: "worker_unavailable",
+        retryable: true,
+    })?;
+    local_material_library::delete_material(&orchestrator, &client, &vault, material_id)
+        .await
+        .map_err(map_local_material_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 #[tauri::command]
 async fn get_douyin_platform_session(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
@@ -4681,6 +4832,7 @@ pub fn run() {
     let update_configuration = app_update_coordinator::UpdateRuntimeConfiguration::load()
         .expect("desktop update configuration rejected");
     let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
             let app_data_root = app.path().app_data_dir()?;
@@ -4768,6 +4920,7 @@ pub fn run() {
                 local_video_orchestrator::DEFAULT_VIDEO_WORKER_REQUEST_TIMEOUT,
             )?);
             app.manage(local_editing_job_ledger::LocalEditingJobScheduler::new());
+            app.manage(local_material_library::LocalMaterialLibraryCoordinator::new());
             app.manage(local_editing_runtime::LocalEditingRuntime::new(
                 app_data_directory.clone(),
             )?);
@@ -4900,6 +5053,9 @@ pub fn run() {
         save_editing_project_timeline,
         list_editing_jobs,
         submit_editing_job,
+        import_editing_material,
+        get_local_editing_material_status,
+        delete_editing_material,
         open_douyin_login,
         recheck_douyin_login,
         logout_douyin_session,
@@ -4970,6 +5126,9 @@ pub fn run() {
         save_editing_project_timeline,
         list_editing_jobs,
         submit_editing_job,
+        import_editing_material,
+        get_local_editing_material_status,
+        delete_editing_material,
         open_douyin_login,
         recheck_douyin_login,
         logout_douyin_session,
@@ -5111,6 +5270,25 @@ mod tests {
             }),
             "the structured fields must survive unchanged and `message` must name the code"
         );
+    }
+
+    #[test]
+    fn a_local_material_command_error_is_path_free_and_structured() {
+        let wire = serde_json::to_value(LocalMaterialCommandError {
+            code: "compensation_failed",
+            retryable: true,
+        })
+        .expect("a command error must serialize");
+
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "code": "compensation_failed",
+                "message": "native command error: compensation_failed",
+                "retryable": true,
+            })
+        );
+        assert!(!wire.to_string().contains("sourcePath"));
     }
 
     /// PC-25：安全注销失败时，界面能说出的话取决于这个映射区分了几种失败。

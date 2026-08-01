@@ -11,7 +11,7 @@ use crate::local_editing_job_ledger::{
 };
 use crate::local_video_orchestrator::{
     LocalVideoOrchestrator, VideoWorkerKind, VideoWorkerLaunch, VideoWorkerLocalEditingJobRequest,
-    VideoWorkerMediaToolsConfiguration, VideoWorkerRestartPolicy,
+    VideoWorkerMediaToolsConfiguration, VideoWorkerRestartPolicy, VideoWorkerState,
 };
 use crate::material_video_studio::WORKER_VERSION;
 use crate::video_job_workspace::VideoJobWorkspaceStore;
@@ -163,6 +163,40 @@ fn worker_launch(
     )
     .and_then(|launch| launch.with_media_tools(media))
     .map_err(|_| runtime_unavailable())
+}
+
+pub(crate) fn ensure_worker<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<(), LocalEditingRuntimeError> {
+    let orchestrator = app
+        .try_state::<LocalVideoOrchestrator>()
+        .ok_or_else(runtime_unavailable)?;
+    let status = orchestrator
+        .status(VideoWorkerKind::Python)
+        .map_err(|_| runtime_unavailable())?;
+    if status.state() == VideoWorkerState::Running {
+        return orchestrator
+            .health(VideoWorkerKind::Python)
+            .map_err(|_| runtime_unavailable());
+    }
+    let runtime = app
+        .try_state::<LocalEditingRuntime>()
+        .ok_or_else(runtime_unavailable)?;
+    let resource_directory = app
+        .path()
+        .resource_dir()
+        .map_err(|_| runtime_unavailable())?;
+    let toolchain =
+        VideoMediaToolchain::load(&resource_directory).map_err(|_| runtime_unavailable())?;
+    let launch = worker_launch(
+        worker_executable(&resource_directory),
+        runtime.app_data_directory.clone(),
+        &toolchain,
+    )?;
+    orchestrator
+        .start(launch)
+        .map(|_| ())
+        .map_err(|_| runtime_unavailable())
 }
 
 fn parse_job_request(
@@ -434,9 +468,6 @@ pub async fn dispatch_submitted_job<R: Runtime>(
     let vault = app
         .try_state::<ProductionDeviceCredentialVault>()
         .ok_or_else(runtime_unavailable)?;
-    let runtime = app
-        .try_state::<LocalEditingRuntime>()
-        .ok_or_else(runtime_unavailable)?;
     let scheduler = app
         .try_state::<LocalEditingJobScheduler>()
         .ok_or_else(runtime_unavailable)?;
@@ -481,20 +512,11 @@ pub async fn dispatch_submitted_job<R: Runtime>(
     workspaces
         .save_checkpoint(&workspace, RENDER_REQUEST_CHECKPOINT, &payload)
         .map_err(|_| runtime_unavailable())?;
-    let resource_directory = app
-        .path()
-        .resource_dir()
-        .map_err(|_| runtime_unavailable())?;
-    let toolchain =
-        VideoMediaToolchain::load(&resource_directory).map_err(|_| runtime_unavailable())?;
-    let launch = worker_launch(
-        worker_executable(&resource_directory),
-        runtime.app_data_directory.clone(),
-        &toolchain,
-    )?;
-    orchestrator
-        .start(launch)
-        .map_err(|_| runtime_unavailable())?;
+    let coordinator = app
+        .try_state::<crate::local_material_library::LocalMaterialLibraryCoordinator>()
+        .ok_or_else(runtime_unavailable)?;
+    let _operation = coordinator.acquire().await;
+    ensure_worker(app)?;
     let running = match client
         .reconcile_editing_job(&vault, submitted, EditingJobStatus::Running, None, None)
         .await

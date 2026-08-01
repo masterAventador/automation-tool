@@ -354,6 +354,7 @@ enum ControlPlaneRequestTarget<'a> {
     },
     EditingProjectJobs(&'a str),
     EditingMaterial(&'a str),
+    EditingMaterialDigest(&'a str),
     EditingJob(&'a str),
 }
 
@@ -550,15 +551,15 @@ pub struct EditingProjectListPage {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EditingMaterialKind {
+pub(crate) enum EditingMaterialKind {
     Image,
     Video,
     Audio,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct EditingMaterialSnapshot {
+pub struct EditingMaterialSnapshot {
     material_id: String,
     kind: EditingMaterialKind,
     #[serde(deserialize_with = "deserialize_required_nullable")]
@@ -584,26 +585,25 @@ pub(crate) struct EditingMaterialSnapshot {
     described_at: Option<String>,
 }
 
-#[cfg(feature = "control-plane-e2e")]
-#[derive(Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EditingVideoMaterialAcceptanceRequest<'a> {
-    material_id: &'a str,
+pub(crate) struct EditingMaterialRegistrationRequest {
+    material_id: String,
     kind: EditingMaterialKind,
-    duration_ms: u64,
-    width: u16,
-    height: u16,
-    content_digest: &'a str,
+    duration_ms: Option<u64>,
+    width: Option<u16>,
+    height: Option<u16>,
+    content_digest: String,
     has_audio: bool,
     audio_loudness_lufs: Option<f64>,
     has_speech: bool,
     speech_segments_ms: Vec<(u64, u64)>,
-    speech_transcript: Option<&'a str>,
+    speech_transcript: Option<String>,
     shot_boundaries_ms: Vec<u64>,
-    ai_description: Option<&'a str>,
-    ai_tags: Vec<&'a str>,
+    ai_description: Option<String>,
+    ai_tags: Vec<String>,
     description_source: &'static str,
-    described_at: Option<&'a str>,
+    described_at: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -1379,6 +1379,113 @@ impl ControlPlaneClient {
         parse_editing_project_list(&body)
     }
 
+    pub(crate) async fn find_editing_material_by_digest<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        content_digest: &str,
+    ) -> Result<Option<EditingMaterialSnapshot>, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_content_digest(content_digest)?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response = self
+            .execute(
+                ControlPlaneOperation::FindEditingMaterialByDigest,
+                Some(session.token()),
+                None,
+                None,
+                Some(ControlPlaneRequestTarget::EditingMaterialDigest(
+                    content_digest,
+                )),
+            )
+            .await;
+        match response {
+            Ok(body) => {
+                let material: EditingMaterialSnapshot = parse_exact_json(&body)?;
+                material.validate()?;
+                if material.content_digest != content_digest {
+                    return Err(protocol_invalid());
+                }
+                Ok(Some(material))
+            }
+            Err(error) if error.code() == ControlPlaneErrorCode::ResourceNotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub(crate) async fn register_editing_material<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        request: &EditingMaterialRegistrationRequest,
+    ) -> Result<EditingMaterialSnapshot, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        request.validate()?;
+        let body = serde_json::to_value(request).map_err(|_| protocol_invalid())?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response = self
+            .execute(
+                ControlPlaneOperation::RegisterEditingMaterial,
+                Some(session.token()),
+                Some(&body),
+                None,
+                None,
+            )
+            .await?;
+        let material: EditingMaterialSnapshot = parse_exact_json(&response)?;
+        material.validate()?;
+        if material.material_id != request.material_id
+            || material.kind != request.kind
+            || material.duration_ms != request.duration_ms
+            || material.width != request.width
+            || material.height != request.height
+            || material.content_digest != request.content_digest
+            || material.has_audio != request.has_audio
+            || material.audio_loudness_lufs != request.audio_loudness_lufs
+            || material.has_speech
+            || !material.speech_segments_ms.is_empty()
+            || material.speech_transcript.is_some()
+            || !material.shot_boundaries_ms.is_empty()
+            || material.ai_description.is_some()
+            || !material.ai_tags.is_empty()
+            || material.description_source != "ai"
+            || material.described_at.is_some()
+        {
+            return Err(protocol_invalid());
+        }
+        Ok(material)
+    }
+
+    pub(crate) async fn delete_editing_material<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        material_id: &str,
+    ) -> Result<(), ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_canonical_uuid_v4(material_id)?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response = self
+            .execute(
+                ControlPlaneOperation::DeleteEditingMaterial,
+                Some(session.token()),
+                None,
+                None,
+                Some(ControlPlaneRequestTarget::EditingMaterial(material_id)),
+            )
+            .await?;
+        require_empty_response(&response)
+    }
+
     pub(crate) async fn get_editing_material<S>(
         &self,
         vault: &DeviceCredentialVault<S>,
@@ -1418,67 +1525,17 @@ impl ControlPlaneClient {
     where
         S: SecretStore,
     {
-        require_canonical_uuid_v4(material_id)?;
-        if content_digest.len() != 64
-            || !content_digest
-                .bytes()
-                .all(|value| value.is_ascii_digit() || (b'a'..=b'f').contains(&value))
-        {
-            return Err(protocol_invalid());
-        }
-        let request = EditingVideoMaterialAcceptanceRequest {
+        let request = EditingMaterialRegistrationRequest::new(
             material_id,
-            kind: EditingMaterialKind::Video,
-            duration_ms: 1_000,
-            width: 1_280,
-            height: 720,
+            EditingMaterialKind::Video,
+            Some(1_000),
+            Some(1_280),
+            Some(720),
             content_digest,
-            has_audio: false,
-            audio_loudness_lufs: None,
-            has_speech: false,
-            speech_segments_ms: Vec::new(),
-            speech_transcript: None,
-            shot_boundaries_ms: Vec::new(),
-            ai_description: None,
-            ai_tags: Vec::new(),
-            description_source: "ai",
-            described_at: None,
-        };
-        let body = serde_json::to_value(&request).map_err(|_| protocol_invalid())?;
-        let session = self
-            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
-            .await?;
-        let response = self
-            .execute(
-                ControlPlaneOperation::RegisterEditingMaterial,
-                Some(session.token()),
-                Some(&body),
-                None,
-                None,
-            )
-            .await?;
-        let material: EditingMaterialSnapshot = parse_exact_json(&response)?;
-        material.validate()?;
-        if material.material_id != material_id
-            || material.kind != EditingMaterialKind::Video
-            || material.duration_ms != Some(1_000)
-            || material.width != Some(1_280)
-            || material.height != Some(720)
-            || material.content_digest != content_digest
-            || material.has_audio
-            || material.audio_loudness_lufs.is_some()
-            || material.has_speech
-            || !material.speech_segments_ms.is_empty()
-            || material.speech_transcript.is_some()
-            || !material.shot_boundaries_ms.is_empty()
-            || material.ai_description.is_some()
-            || !material.ai_tags.is_empty()
-            || material.description_source != "ai"
-            || material.described_at.is_some()
-        {
-            return Err(protocol_invalid());
-        }
-        Ok(material)
+            false,
+            None,
+        )?;
+        self.register_editing_material(vault, &request).await
     }
 
     pub async fn create_editing_project<S>(
@@ -2459,6 +2516,15 @@ fn request_path(
             Ok(format!("/api/v1/editing-projects/{project_id}/jobs"))
         }
         (
+            ControlPlaneOperation::FindEditingMaterialByDigest,
+            Some(ControlPlaneRequestTarget::EditingMaterialDigest(content_digest)),
+        ) => {
+            require_content_digest(content_digest)?;
+            Ok(format!(
+                "/api/v1/editing-materials?contentDigest={content_digest}"
+            ))
+        }
+        (
             operation @ (ControlPlaneOperation::GetEditingMaterial
             | ControlPlaneOperation::DeleteEditingMaterial),
             Some(ControlPlaneRequestTarget::EditingMaterial(material_id)),
@@ -2584,6 +2650,7 @@ fn request_path(
             | ControlPlaneOperation::ListEditingJobs
             | ControlPlaneOperation::SubmitEditingJob
             | ControlPlaneOperation::GetEditingJob
+            | ControlPlaneOperation::FindEditingMaterialByDigest
             | ControlPlaneOperation::GetEditingMaterial
             | ControlPlaneOperation::DeleteEditingMaterial
             | ControlPlaneOperation::ReconcileEditingJob
@@ -2757,7 +2824,8 @@ fn validate_response_metadata(
         } else if metadata.status == 404
             && matches!(
                 operation,
-                ControlPlaneOperation::GetEditingMaterial
+                ControlPlaneOperation::FindEditingMaterialByDigest
+                    | ControlPlaneOperation::GetEditingMaterial
                     | ControlPlaneOperation::DeleteEditingMaterial
                     | ControlPlaneOperation::GetEditingProject
                     | ControlPlaneOperation::GetEditingProjectTimeline
@@ -4692,6 +4760,86 @@ impl EditingProjectListPage {
     }
 }
 
+impl EditingMaterialRegistrationRequest {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        material_id: &str,
+        kind: EditingMaterialKind,
+        duration_ms: Option<u64>,
+        width: Option<u16>,
+        height: Option<u16>,
+        content_digest: &str,
+        has_audio: bool,
+        audio_loudness_lufs: Option<f64>,
+    ) -> Result<Self, ControlPlaneError> {
+        let request = Self {
+            material_id: material_id.to_owned(),
+            kind,
+            duration_ms,
+            width,
+            height,
+            content_digest: content_digest.to_owned(),
+            has_audio,
+            audio_loudness_lufs,
+            has_speech: false,
+            speech_segments_ms: Vec::new(),
+            speech_transcript: None,
+            shot_boundaries_ms: Vec::new(),
+            ai_description: None,
+            ai_tags: Vec::new(),
+            description_source: "ai",
+            described_at: None,
+        };
+        request.validate()?;
+        Ok(request)
+    }
+
+    fn validate(&self) -> Result<(), ControlPlaneError> {
+        require_canonical_uuid_v4(&self.material_id)?;
+        let digest_is_valid = self.content_digest.len() == 64
+            && self
+                .content_digest
+                .bytes()
+                .all(|value| value.is_ascii_digit() || (b'a'..=b'f').contains(&value));
+        let duration_is_valid = match self.kind {
+            EditingMaterialKind::Image => self.duration_ms.is_none(),
+            EditingMaterialKind::Video | EditingMaterialKind::Audio => self
+                .duration_ms
+                .is_some_and(|value| (1..=MAX_EDITING_MATERIAL_DURATION_MS).contains(&value)),
+        };
+        let dimensions_are_valid = match self.kind {
+            EditingMaterialKind::Audio => {
+                self.width.is_none() && self.height.is_none() && self.has_audio
+            }
+            EditingMaterialKind::Image | EditingMaterialKind::Video => {
+                self.width.zip(self.height).is_some_and(|(width, height)| {
+                    (1..=8192).contains(&width) && (1..=8192).contains(&height)
+                })
+            }
+        };
+        let loudness_is_valid = self.audio_loudness_lufs.is_none_or(|value| {
+            self.has_audio && value.is_finite() && (-70.0..=0.0).contains(&value)
+        });
+        if !digest_is_valid
+            || !duration_is_valid
+            || !dimensions_are_valid
+            || !loudness_is_valid
+            || self.kind == EditingMaterialKind::Image && self.has_audio
+            || self.has_speech
+            || !self.speech_segments_ms.is_empty()
+            || self.speech_transcript.is_some()
+            || !self.shot_boundaries_ms.is_empty()
+            || self.ai_description.is_some()
+            || !self.ai_tags.is_empty()
+            || self.description_source != "ai"
+            || self.described_at.is_some()
+        {
+            return Err(protocol_invalid());
+        }
+        Ok(())
+    }
+}
+
 impl EditingMaterialSnapshot {
     fn validate(&self) -> Result<(), ControlPlaneError> {
         require_canonical_uuid_v4(&self.material_id)?;
@@ -4705,10 +4853,12 @@ impl EditingMaterialSnapshot {
                 .duration_ms
                 .is_some_and(|value| value == 0 || value > MAX_EDITING_MATERIAL_DURATION_MS)
             || self.width.is_some_and(|value| value == 0)
-            || self.height.is_some_and(|value| value == 0)
+            || self.width.is_some_and(|value| value > 8192)
+            || self.height.is_some_and(|value| value == 0 || value > 8192)
             || self
                 .audio_loudness_lufs
-                .is_some_and(|value| !value.is_finite())
+                .is_some_and(|value| !value.is_finite() || !(-70.0..=0.0).contains(&value))
+            || !self.has_audio && self.audio_loudness_lufs.is_some()
             || self.speech_segments_ms.len() > 4096
             || self.shot_boundaries_ms.len() > 4096
             || self
@@ -4774,6 +4924,10 @@ impl EditingMaterialSnapshot {
 
     pub(crate) const fn has_audio(&self) -> bool {
         self.has_audio
+    }
+
+    pub(crate) fn content_digest(&self) -> &str {
+        &self.content_digest
     }
 }
 
@@ -5104,6 +5258,17 @@ fn require_canonical_uuid_v4(value: &str) -> Result<(), ControlPlaneError> {
     Ok(())
 }
 
+fn require_content_digest(value: &str) -> Result<(), ControlPlaneError> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(protocol_invalid());
+    }
+    Ok(())
+}
+
 fn decode_canonical_base64url(
     value: &str,
     minimum_length: usize,
@@ -5326,16 +5491,28 @@ mod tests {
                     .headers
                     .get("x-request-id")
                     .expect("request ID header");
-                let response_body = serde_json::to_vec(&expected.response).expect("response JSON");
+                let response_body = if expected.status == 204 {
+                    Vec::new()
+                } else {
+                    serde_json::to_vec(&expected.response).expect("response JSON")
+                };
                 let status_text = match expected.status {
                     200 => "OK",
                     201 => "Created",
+                    204 => "No Content",
+                    404 => "Not Found",
                     status => panic!("unsupported test HTTP status {status}"),
                 };
+                let content_type = if expected.status == 204 {
+                    ""
+                } else {
+                    "content-type: application/json\r\n"
+                };
                 let response = format!(
-                    "HTTP/1.1 {} {}\r\ncontent-type: application/json\r\ncache-control: no-store\r\nx-request-id: {}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                    "HTTP/1.1 {} {}\r\n{}cache-control: no-store\r\nx-request-id: {}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
                     expected.status,
                     status_text,
+                    content_type,
                     request_id,
                     response_body.len()
                 );
@@ -6035,6 +6212,15 @@ mod tests {
 
     #[test]
     fn editing_query_targets_build_only_validated_fixed_paths() {
+        let digest = "cd".repeat(32);
+        assert_eq!(
+            request_path(
+                ControlPlaneOperation::FindEditingMaterialByDigest,
+                Some(ControlPlaneRequestTarget::EditingMaterialDigest(&digest)),
+            )
+            .expect("valid digest lookup"),
+            format!("/api/v1/editing-materials?contentDigest={digest}")
+        );
         assert_eq!(
             request_path(
                 ControlPlaneOperation::ListEditingProjects,
@@ -6075,6 +6261,14 @@ mod tests {
             format!("/api/v1/editing-projects/{IDENTIFIER}/jobs")
         );
         assert!(request_path(ControlPlaneOperation::ListEditingProjects, None).is_err());
+        assert!(request_path(
+            ControlPlaneOperation::FindEditingMaterialByDigest,
+            Some(ControlPlaneRequestTarget::EditingMaterialDigest(
+                "private-invalid"
+            )),
+        )
+        .is_err());
+        assert!(request_path(ControlPlaneOperation::FindEditingMaterialByDigest, None,).is_err());
         assert!(request_path(
             ControlPlaneOperation::SubmitEditingJob,
             Some(ControlPlaneRequestTarget::EditingTimeline(IDENTIFIER)),
@@ -6322,6 +6516,111 @@ mod tests {
                 .reconcile_editing_job(&vault, &loaded, EditingJobStatus::Running, None, None)
                 .await
                 .expect("reconcile job over HTTP");
+        });
+        server.join().expect("HTTP contract server");
+    }
+
+    #[test]
+    fn editing_material_client_finds_registers_and_deletes_exact_path_free_facts() {
+        let device_credential = opaque_bearer("atdc1");
+        let session_token = opaque_bearer("atds1");
+        let material_id = "623e4567-e89b-42d3-a456-426614174105";
+        let digest = "cd".repeat(32);
+        let material = serde_json::json!({
+            "materialId": material_id,
+            "kind": "video",
+            "durationMs": 1234,
+            "width": 720,
+            "height": 1280,
+            "contentDigest": digest,
+            "hasAudio": true,
+            "audioLoudnessLufs": -18.25,
+            "hasSpeech": false,
+            "speechSegmentsMs": [],
+            "speechTranscript": null,
+            "shotBoundariesMs": [],
+            "aiDescription": null,
+            "aiTags": [],
+            "descriptionSource": "ai",
+            "describedAt": null
+        });
+        let (origin, server) = spawn_http_contract_server(vec![
+            device_session_exchange(&device_credential, &session_token),
+            ExpectedHttpExchange {
+                method: "GET",
+                path: format!("/api/v1/editing-materials?contentDigest={digest}"),
+                authorization: format!("Bearer {session_token}"),
+                body: None,
+                status: 200,
+                response: material.clone(),
+            },
+            device_session_exchange(&device_credential, &session_token),
+            ExpectedHttpExchange {
+                method: "POST",
+                path: "/api/v1/editing-materials".to_owned(),
+                authorization: format!("Bearer {session_token}"),
+                body: Some(material.clone()),
+                status: 201,
+                response: material.clone(),
+            },
+            device_session_exchange(&device_credential, &session_token),
+            ExpectedHttpExchange {
+                method: "DELETE",
+                path: format!("/api/v1/editing-materials/{material_id}"),
+                authorization: format!("Bearer {session_token}"),
+                body: None,
+                status: 204,
+                response: serde_json::json!({}),
+            },
+            device_session_exchange(&device_credential, &session_token),
+            ExpectedHttpExchange {
+                method: "GET",
+                path: format!("/api/v1/editing-materials?contentDigest={digest}"),
+                authorization: format!("Bearer {session_token}"),
+                body: None,
+                status: 404,
+                response: serde_json::json!({"detail": "material_not_found"}),
+            },
+        ]);
+        let client = super::ControlPlaneClient::from_validated_origins(
+            validated_loopback_origin(&origin).expect("validated loopback origin"),
+        )
+        .expect("loopback control-plane client");
+        let vault =
+            DeviceCredentialVault::new(MemorySecretStore::with_value(device_credential.as_bytes()));
+        let request = super::EditingMaterialRegistrationRequest::new(
+            material_id,
+            super::EditingMaterialKind::Video,
+            Some(1234),
+            Some(720),
+            Some(1280),
+            &digest,
+            true,
+            Some(-18.25),
+        )
+        .expect("validated material registration");
+
+        tauri::async_runtime::block_on(async {
+            let found = client
+                .find_editing_material_by_digest(&vault, &digest)
+                .await
+                .expect("find material")
+                .expect("existing material");
+            assert_eq!(found.material_id(), material_id);
+            let registered = client
+                .register_editing_material(&vault, &request)
+                .await
+                .expect("register material");
+            assert_eq!(registered.material_id(), material_id);
+            client
+                .delete_editing_material(&vault, material_id)
+                .await
+                .expect("delete material");
+            assert!(client
+                .find_editing_material_by_digest(&vault, &digest)
+                .await
+                .expect("missing digest is not an error")
+                .is_none());
         });
         server.join().expect("HTTP contract server");
     }

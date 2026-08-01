@@ -452,7 +452,7 @@ pub enum VideoWorkerLocalMaterialFailureCode {
 }
 
 impl VideoWorkerLocalMaterialFailureCode {
-    fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Unreadable => "unreadable",
             Self::SourceNotAtRest => "source_not_at_rest",
