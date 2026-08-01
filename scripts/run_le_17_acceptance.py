@@ -11,10 +11,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
+from acceptance_postgres import WINDOWS_POSTGRES_ROOT_ENVIRONMENT
+from automation_tool.executor.material_probe import MaterialPathRegistry
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from desktop_e2e_prerequisites import (
     DEBUG_APP_RESOURCE_ROOT,
@@ -30,8 +33,6 @@ from run_t3_06_acceptance import base64url
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from automation_tool.executor.material_probe import MaterialPathRegistry
-
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
 TAURI_CONFIG = FRONTEND / "src-tauri/tauri.video-editing-e2e.conf.json"
@@ -39,6 +40,17 @@ APP_IDENTIFIER = "com.aventador.automationtool.le17acceptance"
 ENVIRONMENT_ID = "le17-acceptance"
 MATERIAL_ID = UUID("718cdcf5-0ff4-4f14-8259-30431a2447ce")
 DEFAULT_EVIDENCE = ROOT / ".local/local-video-editing/le17-evidence"
+
+
+def acceptance_environment(source: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Keep ambient tools but only the acceptance-owned product override."""
+    ambient = os.environ if source is None else source
+    return {
+        key: value
+        for key, value in ambient.items()
+        if not key.startswith("AUTOMATION_TOOL_")
+        or key == WINDOWS_POSTGRES_ROOT_ENVIRONMENT
+    }
 
 
 def app_data_directory() -> Path:
@@ -254,9 +266,7 @@ def main() -> int:
     ffprobe = (installed["media-toolchain"] / f"bin/ffprobe{suffix}").resolve(strict=True)
     webdriver_port = unused_loopback_port()
     token, public_key = signed_bootstrap()
-    environment = {
-        key: value for key, value in os.environ.items() if not key.startswith("AUTOMATION_TOOL_")
-    }
+    environment = acceptance_environment()
     environment["TAURI_WEBDRIVER_PORT"] = str(webdriver_port)
     worker_marker = os.fspath(installed["material-video-worker"])
     worker_baseline = process_ids_matching(worker_marker)
