@@ -22,6 +22,26 @@ sys.path.insert(0, str(backend_source_root))
 sys.path.insert(0, str(upstream_root))
 sys.path.insert(0, str(repository_root / "scripts"))
 
+contract_path = repository_root / "contracts/quality/material-video-worker-package.v1.json"
+contract = json.loads(contract_path.read_text(encoding="utf-8"))
+backend_project = tomllib.loads(
+    (repository_root / "backend/pyproject.toml").read_text(encoding="utf-8")
+)
+backend_version = backend_project["project"]["version"]
+backend_metadata = Path(workpath) / f"automation_tool-{backend_version}.dist-info"
+backend_metadata.mkdir(parents=True, exist_ok=False)
+(backend_metadata / "METADATA").write_text(
+    "Metadata-Version: 2.3\n"
+    "Name: automation-tool\n"
+    f"Version: {backend_version}\n",
+    encoding="utf-8",
+)
+# Importing any production automation_tool module resolves __version__ through
+# importlib.metadata. The Worker's locked Python 3.11 runtime cannot install the
+# Python-3.12 backend project, so expose the same synthetic metadata that is
+# frozen below before importing the shared caption registry.
+sys.path.insert(0, str(Path(workpath)))
+
 from subtitle_font_assets import (  # noqa: E402
     PACKAGED_FONT_DIRECTORY,
     bundled_subtitle_fonts,
@@ -40,20 +60,6 @@ from silero_vad_assets import (  # noqa: E402
     load_silero_vad_contract,
 )
 
-contract_path = repository_root / "contracts/quality/material-video-worker-package.v1.json"
-contract = json.loads(contract_path.read_text(encoding="utf-8"))
-backend_project = tomllib.loads(
-    (repository_root / "backend/pyproject.toml").read_text(encoding="utf-8")
-)
-backend_version = backend_project["project"]["version"]
-backend_metadata = Path(workpath) / f"automation_tool-{backend_version}.dist-info"
-backend_metadata.mkdir(parents=True, exist_ok=False)
-(backend_metadata / "METADATA").write_text(
-    "Metadata-Version: 2.3\n"
-    "Name: automation-tool\n"
-    f"Version: {backend_version}\n",
-    encoding="utf-8",
-)
 excluded_modules = list(contract["build"]["excludedModules"])
 excluded_upstream_resources = set(contract["build"]["excludedUpstreamResources"])
 # `excludedUpstreamResourceFiles` removes individual proprietary assets from a

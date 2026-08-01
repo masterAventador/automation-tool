@@ -993,6 +993,20 @@ class MaterialVideoWorkerProductDependenciesTest(unittest.TestCase):
             with self.subTest(required):
                 self.assertIn(required, spec)
 
+    def test_spec_exposes_backend_metadata_before_importing_product_fonts(self) -> None:
+        spec = (ROOT / "workers/material_montage/material-video-worker.spec").read_text(
+            encoding="utf-8"
+        )
+
+        metadata = spec.index("backend_metadata =")
+        metadata_path = spec.index("sys.path.insert(0, str(Path(workpath)))")
+        product_import = spec.index(
+            "from automation_tool.executor.captions.fonts import"
+        )
+
+        self.assertLess(metadata, metadata_path)
+        self.assertLess(metadata_path, product_import)
+
     def test_product_dependencies_must_be_part_of_the_probed_required_set(self) -> None:
         contract = build_candidate_module.load_contract()
         contract["dependencies"]["productRequired"]["fonttools"] = "0.0.0"
