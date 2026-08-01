@@ -54,6 +54,7 @@ from automation_tool.control_plane.infrastructure.database import (
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 CONTENT_DIGEST = "a1b2c3d4" * 8
+WINDOWS_CTRL_BREAK_EXIT_CODE = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,8 +78,9 @@ class RunningUvicorn:
 
 
 class FakeUvicornProcess:
-    def __init__(self) -> None:
+    def __init__(self, *, communicate_returncode: int = 0) -> None:
         self.returncode: int | None = None
+        self.communicate_returncode = communicate_returncode
         self.sent_signal: int | None = None
         self.terminated = False
         self.communicated = False
@@ -97,7 +99,7 @@ class FakeUvicornProcess:
 
     def communicate(self, *, timeout: float) -> tuple[bytes, bytes]:
         self.communicated = True
-        self.returncode = 0
+        self.returncode = self.communicate_returncode
         return b"", b""
 
 
@@ -270,8 +272,10 @@ def start_uvicorn(postgresql_url: str) -> RunningUvicorn:
 
 
 def stop_uvicorn(server: RunningUvicorn) -> None:
+    shutdown_requested = False
     if server.process.poll() is None:
         server.process.send_signal(uvicorn_shutdown_signal())
+        shutdown_requested = True
     try:
         stdout, stderr = server.process.communicate(timeout=10)
     except subprocess.TimeoutExpired:
@@ -280,7 +284,10 @@ def stop_uvicorn(server: RunningUvicorn) -> None:
         raise AssertionError(
             "The LE-06 Uvicorn process required SIGKILL: " + bounded_process_output(stdout, stderr)
         ) from None
-    assert server.process.returncode == 0, bounded_process_output(stdout, stderr)
+    expected_returncodes = {0}
+    if sys.platform == "win32" and shutdown_requested:
+        expected_returncodes.add(WINDOWS_CTRL_BREAK_EXIT_CODE)
+    assert server.process.returncode in expected_returncodes, bounded_process_output(stdout, stderr)
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline and not port_is_available(server.port):
         time.sleep(0.05)
@@ -300,7 +307,7 @@ def real_control_plane(postgresql_url: str) -> Iterator[RunningUvicorn]:
 def test_uvicorn_process_uses_the_windows_process_group_and_break_signal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    process = FakeUvicornProcess()
+    process = FakeUvicornProcess(communicate_returncode=3)
     popen_arguments: dict[str, Any] = {}
     windows_process_group = 512
     windows_break_signal = 21
@@ -362,6 +369,25 @@ def test_uvicorn_process_uses_the_windows_process_group_and_break_signal(
 
     assert popen_arguments["creationflags"] == windows_process_group
     assert process.sent_signal == windows_break_signal
+
+
+def test_windows_uvicorn_exit_three_requires_a_requested_break(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = FakeUvicornProcess(communicate_returncode=WINDOWS_CTRL_BREAK_EXIT_CODE)
+    process.returncode = WINDOWS_CTRL_BREAK_EXIT_CODE
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    with pytest.raises(AssertionError):
+        stop_uvicorn(
+            RunningUvicorn(
+                process=process,  # type: ignore[arg-type]
+                port=CONTROL_PLANE_PORT_RANGE.start,
+                process_marker="pre-exited-uvicorn",
+            )
+        )
+
+    assert process.sent_signal is None
 
 
 def test_uvicorn_startup_contract_failure_still_reaps_the_process(
