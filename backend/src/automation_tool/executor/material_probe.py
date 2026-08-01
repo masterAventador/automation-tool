@@ -1408,9 +1408,23 @@ class _FileIdentity:
     size_bytes: int
 
 
+def _stable_device_identity(device: int) -> int:
+    """Keep the Windows volume identity stable across CPython 3.11 and 3.12.
+
+    On Windows, CPython 3.11 reports the volume serial in the low 32 bits of
+    ``st_dev`` while 3.12 reports a widened value whose low 32 bits are that
+    same serial. The App's 3.12 Executor writes the registry and the frozen
+    3.11 Worker reads it, so comparing the raw interpreter-specific widths
+    falsely labels an unchanged file as replaced. POSIX device identifiers are
+    already stable and must not be truncated.
+    """
+
+    return device & 0xFFFFFFFF if os.name == "nt" else device
+
+
 def _identity_of(metadata: os.stat_result) -> _FileIdentity:
     return _FileIdentity(
-        device=metadata.st_dev,
+        device=_stable_device_identity(metadata.st_dev),
         inode=metadata.st_ino,
         modified_ns=metadata.st_mtime_ns,
         size_bytes=metadata.st_size,
@@ -1486,7 +1500,9 @@ def _parsed_entry(value: object) -> _RegisteredFile | None:
     return _RegisteredFile(
         path=path,
         identity=_FileIdentity(
-            device=device,
+            # Normalize documents written by the 3.12 Executor before this
+            # compatibility rule existed as well as newly registered files.
+            device=_stable_device_identity(device),
             inode=inode,
             modified_ns=modified_ns,
             size_bytes=size_bytes,

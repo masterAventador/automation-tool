@@ -4263,6 +4263,22 @@ class TestMaterialPathRegistryNoticesTheFileMoved:
     was registered is stored beside the path and checked again on the way out.
     """
 
+    def test_windows_device_identity_survives_python_311_to_312_stat_width_change(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The frozen 3.11 Worker and 3.12 Executor must identify one volume alike."""
+        common = {
+            "st_ino": 0x123456789ABC,
+            "st_mtime_ns": 1_785_568_000_000_000_000,
+            "st_size": 4096,
+        }
+        python_311 = SimpleNamespace(st_dev=0x89ABCDEF, **common)
+        python_312 = SimpleNamespace(st_dev=0x1234567889ABCDEF, **common)
+        monkeypatch.setattr(material_probe.os, "name", "nt")
+
+        assert material_probe._identity_of(python_311) == material_probe._identity_of(python_312)
+        assert material_probe._stable_device_identity(python_312.st_dev) == python_311.st_dev
+
     def test_a_deleted_file_is_reported_missing(self, tmp_path: Path) -> None:
         state = _state_directory(tmp_path)
         source = _source(tmp_path)
