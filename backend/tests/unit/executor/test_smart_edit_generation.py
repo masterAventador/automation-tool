@@ -356,8 +356,15 @@ def test_result_rejects_registration_for_audio_not_used_by_the_draft() -> None:
 
 
 class _RecordingPipeline:
-    def __init__(self, material: Material, *, score: int = 91) -> None:
+    def __init__(
+        self,
+        material: Material,
+        *,
+        score: int = 91,
+        expected_thinking: bool = False,
+    ) -> None:
         self.material = material
+        self.expected_thinking = expected_thinking
         self.script, self.voiceovers, self.matches, self.narration = _narrated_inputs(
             material,
             score=score,
@@ -368,8 +375,10 @@ class _RecordingPipeline:
         self,
         materials: tuple[Material, ...],
         *,
+        enable_thinking: bool,
         cancellation_requested: object,
     ) -> PreparedSmartEditMaterials:
+        assert enable_thinking is self.expected_thinking
         assert callable(cancellation_requested)
         self.calls.append("prepare")
         return PreparedSmartEditMaterials(
@@ -380,7 +389,7 @@ class _RecordingPipeline:
 
     def segment(self, prompt: str, *, enable_thinking: bool) -> ScriptSegmentationResult:
         assert prompt == "把发布会剪成一条产品亮点短片。"
-        assert enable_thinking is False
+        assert enable_thinking is self.expected_thinking
         self.calls.append("segment")
         return self.script
 
@@ -405,7 +414,7 @@ class _RecordingPipeline:
     ) -> SemanticMatchingResult:
         assert script is self.script
         assert materials == (self.material,)
-        assert enable_thinking is False
+        assert enable_thinking is self.expected_thinking
         assert callable(cancellation_requested)
         self.calls.append("match")
         return self.matches
@@ -465,6 +474,23 @@ def test_pipeline_reports_monotonic_real_stages_and_uses_existing_generator() ->
     assert outcome.narration_registrations[0].material_id == (pipeline.narration[0].material_id)
 
 
+def test_one_thinking_choice_reaches_every_model_stage() -> None:
+    silent = _material()
+    pipeline = _RecordingPipeline(silent, expected_thinking=True)
+
+    outcome = generate_smart_edit_timeline_draft(
+        cast(SmartEditGenerationPipeline, pipeline),
+        prompt="把发布会剪成一条产品亮点短片。",
+        materials=(silent,),
+        enable_thinking=True,
+        progress=lambda _stage, _per_mille: None,
+        cancellation_requested=lambda: False,
+    )
+
+    assert isinstance(outcome, SmartEditGenerationResult)
+    assert pipeline.calls == ["prepare", "segment", "synthesize", "match", "bind"]
+
+
 def test_pipeline_cancellation_stops_before_the_next_billable_stage() -> None:
     silent = _material()
     pipeline = _RecordingPipeline(silent)
@@ -516,8 +542,10 @@ def test_prepared_materials_are_bound_to_the_original_request_before_model_calls
             self,
             materials: tuple[Material, ...],
             *,
+            enable_thinking: bool,
             cancellation_requested: object,
         ) -> PreparedSmartEditMaterials:
+            assert enable_thinking is False
             assert callable(cancellation_requested)
             self.calls.append("prepare")
             if mode == "missing_evidence":
@@ -548,8 +576,10 @@ def test_analysis_update_must_exactly_describe_its_prepared_material() -> None:
             self,
             materials: tuple[Material, ...],
             *,
+            enable_thinking: bool,
             cancellation_requested: object,
         ) -> PreparedSmartEditMaterials:
+            assert enable_thinking is False
             assert callable(cancellation_requested)
             self.calls.append("prepare")
             mismatched = materials[0].with_user_description("另一份未参与匹配的描述")

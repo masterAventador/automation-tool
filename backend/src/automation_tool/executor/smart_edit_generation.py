@@ -310,6 +310,7 @@ class SmartEditGenerationPipeline(Protocol):
         self,
         materials: tuple[Material, ...],
         *,
+        enable_thinking: bool,
         cancellation_requested: CancellationProbe,
     ) -> PreparedSmartEditMaterials: ...
 
@@ -402,6 +403,7 @@ def generate_smart_edit_timeline_draft(
         _report_progress(progress, SmartEditGenerationStage.ANALYZING, 100)
         prepared = pipeline.prepare(
             validated_materials,
+            enable_thinking=enable_thinking,
             cancellation_requested=cancellation_requested,
         )
         if not isinstance(prepared, PreparedSmartEditMaterials):

@@ -29,6 +29,7 @@ from automation_tool.executor.material_probe import (
 from automation_tool.executor.material_speech_analysis import MaterialSpeechAnalysis
 from automation_tool.executor.material_understanding import (
     MaterialUnderstandingAdapter,
+    MaterialUnderstandingOptions,
     MaterialUnderstandingResult,
     MaterialUnderstandingShot,
 )
@@ -189,6 +190,9 @@ def test_prepare_proves_every_local_source_before_models_and_returns_updates(
 
     def understand(*_args: object, **_kwargs: object) -> MaterialUnderstandingResult:
         events.append("understand")
+        options = _kwargs["options"]
+        assert isinstance(options, MaterialUnderstandingOptions)
+        assert options.enable_thinking is True
         assert events.count("probe:" + protected.material_id.__str__() + ".mp4") == 1
         assert events.count("decode") == 3
         assert events.count("extract") == 2
@@ -221,6 +225,7 @@ def test_prepare_proves_every_local_source_before_models_and_returns_updates(
 
     result = _pipeline(tmp_path, registry, tools).prepare(
         (first, second, protected),
+        enable_thinking=True,
         cancellation_requested=lambda: False,
     )
 
@@ -327,6 +332,7 @@ def test_prepare_maps_decode_cancel_to_generation_cancel(
     with pytest.raises(SmartEditGenerationCancelled):
         _pipeline(tmp_path, registry, tools).prepare(
             (material,),
+            enable_thinking=False,
             cancellation_requested=lambda: True,
         )
 
@@ -358,6 +364,7 @@ def test_path_bearing_local_failure_is_closed_without_exception_chain(
     with pytest.raises(SmartEditGenerationRejected) as captured:
         _pipeline(tmp_path, registry, tools).prepare(
             (material,),
+            enable_thinking=False,
             cancellation_requested=lambda: False,
         )
 
@@ -413,7 +420,11 @@ def test_silent_source_never_constructs_the_audible_lower_funnel(
 
     pipeline.audible_speech_analyzer_factory = forbidden_factory
 
-    result = pipeline.prepare((material,), cancellation_requested=lambda: False)
+    result = pipeline.prepare(
+        (material,),
+        enable_thinking=False,
+        cancellation_requested=lambda: False,
+    )
 
     assert result.materials == (material,)
     assert calls == 0
@@ -468,6 +479,7 @@ def test_image_understanding_drops_synthetic_analysis_duration_and_shots(
 
     prepared = _pipeline(tmp_path, registry, tools).prepare(
         (material,),
+        enable_thinking=False,
         cancellation_requested=lambda: False,
     )
 

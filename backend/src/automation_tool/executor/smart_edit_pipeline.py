@@ -182,6 +182,7 @@ class LocalSmartEditGenerationPipeline:
         self,
         materials: tuple[Material, ...],
         *,
+        enable_thinking: bool,
         cancellation_requested: CancellationProbe,
     ) -> PreparedSmartEditMaterials:
         if (
@@ -189,6 +190,7 @@ class LocalSmartEditGenerationPipeline:
             or not isinstance(materials, tuple)
             or not materials
             or not all(isinstance(value, Material) for value in materials)
+            or type(enable_thinking) is not bool
             or not callable(cancellation_requested)
         ):
             _reject()
@@ -213,6 +215,7 @@ class LocalSmartEditGenerationPipeline:
                 current = self._understand_if_needed(
                     value,
                     understanding_input,
+                    enable_thinking=enable_thinking,
                     cancellation_requested=cancellation_requested,
                 )
                 current = self._analyze_speech_if_needed(
@@ -342,6 +345,7 @@ class LocalSmartEditGenerationPipeline:
         local: _LocalMaterial,
         prepared: _UnderstandingInput | None,
         *,
+        enable_thinking: bool,
         cancellation_requested: CancellationProbe,
     ) -> Material:
         material = local.material
@@ -362,7 +366,7 @@ class LocalSmartEditGenerationPipeline:
                 output_directory=prepared.workspace,
                 artifacts=prepared.artifacts,
                 duration_ms=prepared.duration_ms,
-                options=MaterialUnderstandingOptions(),
+                options=MaterialUnderstandingOptions(enable_thinking=enable_thinking),
             )
             require_source_unchanged(local.source, local.approved)
             _cancel(cancellation_requested)
