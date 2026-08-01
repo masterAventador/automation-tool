@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import signal
@@ -503,6 +504,36 @@ def test_bounded_process_stops_on_cancel_or_timeout(
         )
 
 
+def test_render_timeout_stops_the_real_child_before_returning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = subprocess.Popen
+    children: list[subprocess.Popen[bytes]] = []
+
+    def capture_child(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        child = original(*args, **kwargs)  # type: ignore[arg-type]
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(subprocess, "Popen", capture_child)
+
+    try:
+        with pytest.raises(execution._ProcessTimedOut):
+            execution._run_bounded_process(
+                (sys.executable, "-c", "import time; time.sleep(30)"),
+                timeout_seconds=0.0,
+                cancel_requested=None,
+            )
+
+        assert len(children) == 1
+        assert children[0].poll() is not None
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=5)
+
+
 def test_stop_process_is_a_noop_for_an_already_stopped_process() -> None:
     process = _StoppingProcess(already_stopped=True)
 
@@ -560,6 +591,23 @@ def test_source_changed_during_render_is_rejected_and_every_new_file_is_cleaned(
         return execution._ProcessResult(returncode=0, stdout=b"")
 
     monkeypatch.setattr(execution, "_run_bounded_process", run_process)
+
+    with pytest.raises(VisualRenderExecutionRejected) as raised:
+        execute_visual_render(tools, plan, sources, approvals, task)
+
+    assert raised.value.code is VisualRenderExecutionRejection.SOURCE_CHANGED
+    assert raised.value.__context__ is None
+    assert list(task.iterdir()) == []
+
+
+def test_source_disappears_before_render_is_source_changed_without_publication(
+    tmp_path: Path,
+) -> None:
+    tools = _tools(tmp_path)
+    task = tmp_path / "task"
+    task.mkdir()
+    plan, sources, approvals = _request(tmp_path)
+    sources[0].source_path.unlink()
 
     with pytest.raises(VisualRenderExecutionRejected) as raised:
         execute_visual_render(tools, plan, sources, approvals, task)
@@ -1257,6 +1305,37 @@ def test_workspace_allocation_failure_has_a_fixed_workspace_code(
         tempfile,
         "mkstemp",
         lambda **kwargs: (_ for _ in ()).throw(PermissionError("denied")),
+    )
+
+    with pytest.raises(VisualRenderExecutionRejected) as raised:
+        execute_visual_render(tools, plan, sources, approvals, task)
+
+    assert raised.value.code is VisualRenderExecutionRejection.WORKSPACE_UNUSABLE
+    assert raised.value.__context__ is None
+    assert list(task.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        OSError(errno.ENOSPC, "private disk detail"),
+        PermissionError(errno.EACCES, "private permission detail"),
+    ],
+    ids=("disk-full", "permission-denied"),
+)
+def test_disk_full_and_permission_denial_leave_no_partial_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: OSError,
+) -> None:
+    tools = _tools(tmp_path)
+    task = tmp_path / "task"
+    task.mkdir()
+    plan, sources, approvals = _request(tmp_path)
+    monkeypatch.setattr(
+        tempfile,
+        "mkstemp",
+        lambda **_kwargs: (_ for _ in ()).throw(failure),
     )
 
     with pytest.raises(VisualRenderExecutionRejected) as raised:
