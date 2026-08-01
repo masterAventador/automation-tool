@@ -9,6 +9,7 @@ import {
   type VideoEditingGateway,
 } from "./video-editing-gateway";
 import { VideoEditingWorkbench } from "./VideoEditingWorkbench";
+import type { MaterialLibraryGateway } from "./material-library-gateway";
 
 const MATERIAL_A = "9f48954d-2df1-4168-8f33-b62c5772845b";
 const MATERIAL_B = "af48954d-2df1-4168-8f33-b62c5772845c";
@@ -101,6 +102,39 @@ async function createProject(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("video editing workbench", () => {
+  it("embeds the formal material library when its production boundary is available", async () => {
+    const user = userEvent.setup();
+    const listMaterials = vi
+      .fn<MaterialLibraryGateway["listMaterials"]>()
+      .mockResolvedValue({ items: [], nextCursor: null });
+    const materialLibraryGateway: MaterialLibraryGateway = {
+      listMaterials,
+      async importMaterial() {
+        return null;
+      },
+      async getMaterialStatus() {
+        return "available";
+      },
+      async getMaterialPreviewUrl() {
+        throw new Error("unused");
+      },
+      async updateMaterialDescription() {
+        throw new Error("unused");
+      },
+      async deleteMaterial() {},
+    };
+    render(
+      <VideoEditingWorkbench
+        gateway={createLocalVideoEditingGateway(memoryStorage())}
+        materialLibraryGateway={materialLibraryGateway}
+      />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "素材库" }));
+    expect(await screen.findByText("还没有本机素材")).toBeVisible();
+    expect(listMaterials).toHaveBeenCalledWith(null);
+  });
+
   it("loads projects once when the production StrictMode replays effects", async () => {
     const listProjects = vi.fn<VideoEditingGateway["listProjects"]>().mockResolvedValue([]);
     const gateway: VideoEditingGateway = {

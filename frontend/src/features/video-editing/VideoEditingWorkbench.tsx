@@ -15,6 +15,8 @@ import {
   VideoEditingGatewayError,
   type VideoEditingGateway,
 } from "./video-editing-gateway";
+import type { MaterialLibraryGateway } from "./material-library-gateway";
+import { MaterialLibraryPage } from "./MaterialLibraryPage";
 
 const TRACK_KIND_LABELS: Record<TimelineTrackKind, string> = {
   visual: "画面轨道",
@@ -773,8 +775,10 @@ function JobsPage({
 
 export function VideoEditingWorkbench({
   gateway,
+  materialLibraryGateway,
 }: {
   readonly gateway: VideoEditingGateway;
+  readonly materialLibraryGateway?: MaterialLibraryGateway | undefined;
 }) {
   const [projects, setProjects] = useState<readonly EditingProjectSnapshot[]>([]);
   const [projectsLoaded, setProjectsLoaded] = useState(false);
@@ -1225,6 +1229,15 @@ export function VideoEditingWorkbench({
         activeKey={activeTab}
         onChange={setActiveTab}
         items={[
+          ...(materialLibraryGateway === undefined
+            ? []
+            : [
+                {
+                  key: "materials",
+                  label: "素材库",
+                  children: <MaterialLibraryPage gateway={materialLibraryGateway} />,
+                },
+              ]),
           {
             key: "projects",
             label: "剪辑项目",

@@ -354,6 +354,10 @@ enum ControlPlaneRequestTarget<'a> {
     },
     EditingProjectJobs(&'a str),
     EditingMaterial(&'a str),
+    EditingMaterialList {
+        cursor: Option<&'a str>,
+        limit: u16,
+    },
     EditingMaterialDigest(&'a str),
     EditingJob(&'a str),
 }
@@ -583,6 +587,27 @@ pub struct EditingMaterialSnapshot {
     description_source: String,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     described_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EditingMaterialListResponse {
+    items: Vec<EditingMaterialSnapshot>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    next_cursor: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditingMaterialListPage {
+    items: Vec<EditingMaterialSnapshot>,
+    next_cursor: Option<String>,
+}
+
+#[derive(Serialize)]
+struct EditingMaterialUserDescriptionRequest<'a> {
+    source: &'static str,
+    description: &'a str,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1416,6 +1441,31 @@ impl ControlPlaneClient {
         }
     }
 
+    pub async fn list_editing_materials<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<EditingMaterialListPage, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        validate_editing_page(cursor, limit)?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let body = self
+            .execute(
+                ControlPlaneOperation::ListEditingMaterials,
+                Some(session.token()),
+                None,
+                None,
+                Some(ControlPlaneRequestTarget::EditingMaterialList { cursor, limit }),
+            )
+            .await?;
+        parse_editing_material_list(&body)
+    }
+
     pub(crate) async fn register_editing_material<S>(
         &self,
         vault: &DeviceCredentialVault<S>,
@@ -1510,6 +1560,47 @@ impl ControlPlaneClient {
         let material: EditingMaterialSnapshot = parse_exact_json(&body)?;
         material.validate()?;
         if material.material_id != material_id {
+            return Err(protocol_invalid());
+        }
+        Ok(material)
+    }
+
+    pub async fn update_editing_material_description<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        material_id: &str,
+        description: &str,
+    ) -> Result<EditingMaterialSnapshot, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_canonical_uuid_v4(material_id)?;
+        validate_editing_material_description(description)?;
+        let request = EditingMaterialUserDescriptionRequest {
+            source: "user",
+            description,
+        };
+        let body = serde_json::to_value(request).map_err(|_| protocol_invalid())?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response = self
+            .execute(
+                ControlPlaneOperation::UpdateEditingMaterialDescription,
+                Some(session.token()),
+                Some(&body),
+                None,
+                Some(ControlPlaneRequestTarget::EditingMaterial(material_id)),
+            )
+            .await?;
+        let material: EditingMaterialSnapshot = parse_exact_json(&response)?;
+        material.validate()?;
+        if material.material_id != material_id
+            || material.description_source != "user"
+            || material.ai_description.as_deref() != Some(description)
+            || !material.ai_tags.is_empty()
+            || material.described_at.is_some()
+        {
             return Err(protocol_invalid());
         }
         Ok(material)
@@ -2471,6 +2562,18 @@ fn request_path(
 ) -> Result<String, ControlPlaneError> {
     match (operation, target) {
         (
+            ControlPlaneOperation::ListEditingMaterials,
+            Some(ControlPlaneRequestTarget::EditingMaterialList { cursor, limit }),
+        ) if (1..=100).contains(&limit) => {
+            let mut path = format!("/api/v1/editing-materials/library?limit={limit}");
+            if let Some(value) = cursor {
+                require_list_cursor(value)?;
+                path.push_str("&cursor=");
+                path.push_str(value);
+            }
+            Ok(path)
+        }
+        (
             ControlPlaneOperation::ListEditingProjects,
             Some(ControlPlaneRequestTarget::EditingProjectList { cursor, limit }),
         ) if (1..=100).contains(&limit) => {
@@ -2526,12 +2629,18 @@ fn request_path(
         }
         (
             operation @ (ControlPlaneOperation::GetEditingMaterial
-            | ControlPlaneOperation::DeleteEditingMaterial),
+            | ControlPlaneOperation::DeleteEditingMaterial
+            | ControlPlaneOperation::UpdateEditingMaterialDescription),
             Some(ControlPlaneRequestTarget::EditingMaterial(material_id)),
         ) => {
             require_canonical_uuid_v4(material_id)?;
-            let _ = operation;
-            Ok(format!("/api/v1/editing-materials/{material_id}"))
+            let suffix = match operation {
+                ControlPlaneOperation::UpdateEditingMaterialDescription => "/description",
+                ControlPlaneOperation::GetEditingMaterial
+                | ControlPlaneOperation::DeleteEditingMaterial => "",
+                _ => return Err(protocol_invalid()),
+            };
+            Ok(format!("/api/v1/editing-materials/{material_id}{suffix}"))
         }
         (
             operation @ (ControlPlaneOperation::GetEditingJob
@@ -2651,8 +2760,10 @@ fn request_path(
             | ControlPlaneOperation::SubmitEditingJob
             | ControlPlaneOperation::GetEditingJob
             | ControlPlaneOperation::FindEditingMaterialByDigest
+            | ControlPlaneOperation::ListEditingMaterials
             | ControlPlaneOperation::GetEditingMaterial
             | ControlPlaneOperation::DeleteEditingMaterial
+            | ControlPlaneOperation::UpdateEditingMaterialDescription
             | ControlPlaneOperation::ReconcileEditingJob
             | ControlPlaneOperation::GetTask
             | ControlPlaneOperation::GetTaskTargetResults
@@ -4689,6 +4800,17 @@ fn validate_editing_page(cursor: Option<&str>, limit: u16) -> Result<(), Control
     Ok(())
 }
 
+fn validate_editing_material_description(value: &str) -> Result<(), ControlPlaneError> {
+    if value.is_empty()
+        || value.trim() != value
+        || value.chars().count() > 2_000
+        || editing_text_has_forbidden_character(value, true)
+    {
+        return Err(protocol_invalid());
+    }
+    Ok(())
+}
+
 impl EditingOutputSpec {
     fn validate(&self) -> Result<(), ControlPlaneError> {
         if !(128..=4096).contains(&self.width)
@@ -4861,19 +4983,31 @@ impl EditingMaterialSnapshot {
             || !self.has_audio && self.audio_loudness_lufs.is_some()
             || self.speech_segments_ms.len() > 4096
             || self.shot_boundaries_ms.len() > 4096
-            || self
-                .speech_transcript
-                .as_ref()
-                .is_some_and(|value| value.is_empty() || value.chars().count() > 100_000)
-            || self
-                .ai_description
-                .as_ref()
-                .is_some_and(|value| value.is_empty() || value.chars().count() > 2_000)
+            || self.speech_transcript.as_ref().is_some_and(|value| {
+                value.is_empty()
+                    || value.trim() != value
+                    || value.chars().count() > 100_000
+                    || editing_text_has_forbidden_character(value, true)
+            })
+            || self.ai_description.as_ref().is_some_and(|value| {
+                value.is_empty()
+                    || value.trim() != value
+                    || value.chars().count() > 2_000
+                    || editing_text_has_forbidden_character(value, true)
+            })
             || self.ai_tags.len() > 32
+            || self.ai_tags.iter().any(|value| {
+                value.is_empty()
+                    || value.trim() != value
+                    || value.chars().count() > 32
+                    || editing_text_has_forbidden_character(value, true)
+            })
             || self
                 .ai_tags
                 .iter()
-                .any(|value| value.is_empty() || value.chars().count() > 32)
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                != self.ai_tags.len()
             || self
                 .described_at
                 .as_deref()
@@ -4902,6 +5036,8 @@ impl EditingMaterialSnapshot {
             || self.has_speech && !self.has_audio
             || (!self.has_speech
                 && (!self.speech_segments_ms.is_empty() || self.speech_transcript.is_some()))
+            || (self.has_speech
+                && (self.speech_segments_ms.is_empty() || self.speech_transcript.is_none()))
             || !matches!(self.description_source.as_str(), "ai" | "user")
             || (self.description_source == "user"
                 && (self.ai_description.is_none()
@@ -4914,6 +5050,28 @@ impl EditingMaterialSnapshot {
                 && self.described_at.is_none())
         {
             return Err(protocol_invalid());
+        }
+        let mut previous_speech_end = 0;
+        for &(start, end) in &self.speech_segments_ms {
+            if start < previous_speech_end
+                || end <= start
+                || self.duration_ms.is_some_and(|duration| end > duration)
+            {
+                return Err(protocol_invalid());
+            }
+            previous_speech_end = end;
+        }
+        if self.kind == EditingMaterialKind::Audio && !self.shot_boundaries_ms.is_empty() {
+            return Err(protocol_invalid());
+        }
+        let mut previous_boundary = None;
+        for &boundary in &self.shot_boundaries_ms {
+            if previous_boundary.is_some_and(|previous| boundary <= previous)
+                || self.duration_ms.is_none_or(|duration| boundary >= duration)
+            {
+                return Err(protocol_invalid());
+            }
+            previous_boundary = Some(boundary);
         }
         Ok(())
     }
@@ -4928,6 +5086,16 @@ impl EditingMaterialSnapshot {
 
     pub(crate) fn content_digest(&self) -> &str {
         &self.content_digest
+    }
+}
+
+impl EditingMaterialListPage {
+    pub fn items(&self) -> &[EditingMaterialSnapshot] {
+        &self.items
+    }
+
+    pub fn next_cursor(&self) -> Option<&str> {
+        self.next_cursor.as_deref()
     }
 }
 
@@ -5211,6 +5379,27 @@ fn parse_editing_project_list(body: &[u8]) -> Result<EditingProjectListPage, Con
     })
 }
 
+fn parse_editing_material_list(body: &[u8]) -> Result<EditingMaterialListPage, ControlPlaneError> {
+    let response: EditingMaterialListResponse = parse_exact_json(body)?;
+    if response.items.len() > 100 {
+        return Err(protocol_invalid());
+    }
+    let mut identifiers = std::collections::HashSet::with_capacity(response.items.len());
+    for material in &response.items {
+        material.validate()?;
+        if !identifiers.insert(material.material_id.as_str()) {
+            return Err(protocol_invalid());
+        }
+    }
+    if let Some(cursor) = response.next_cursor.as_deref() {
+        require_list_cursor(cursor)?;
+    }
+    Ok(EditingMaterialListPage {
+        items: response.items,
+        next_cursor: response.next_cursor,
+    })
+}
+
 fn parse_editing_timeline(body: &[u8]) -> Result<EditingTimelineSnapshot, ControlPlaneError> {
     let timeline: EditingTimelineSnapshot = parse_exact_json(body)?;
     timeline.validate()?;
@@ -5341,17 +5530,17 @@ mod tests {
     use super::{
         new_request_id, parse_account_device, parse_account_device_list, parse_account_session,
         parse_created_task, parse_device_session, parse_douyin_platform_session,
-        parse_douyin_platform_session_logout_prepare, parse_editing_job, parse_editing_project,
-        parse_editing_timeline, parse_health_response, parse_installation_access,
-        parse_installation_registration, parse_registration_challenge, parse_revoked_credential,
-        parse_rotated_credential, parse_sse_frame, parse_system_version_response,
-        parse_task_control, parse_task_discovery, parse_task_list, parse_task_snapshot_body,
-        parse_task_target_preview, parse_task_target_results, parse_workbench_metrics,
-        parse_workbench_status, request_path, require_idempotency_key, require_list_cursor,
-        require_preview_cursor, required_credential, sse_frame_end, transport_error,
-        validate_preview_command, validate_response_metadata, validated_demo_origin,
-        validated_loopback_origin, ControlPlaneErrorCode, ControlPlaneOperation,
-        ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
+        parse_douyin_platform_session_logout_prepare, parse_editing_job,
+        parse_editing_material_list, parse_editing_project, parse_editing_timeline,
+        parse_health_response, parse_installation_access, parse_installation_registration,
+        parse_registration_challenge, parse_revoked_credential, parse_rotated_credential,
+        parse_sse_frame, parse_system_version_response, parse_task_control, parse_task_discovery,
+        parse_task_list, parse_task_snapshot_body, parse_task_target_preview,
+        parse_task_target_results, parse_workbench_metrics, parse_workbench_status, request_path,
+        require_idempotency_key, require_list_cursor, require_preview_cursor, required_credential,
+        sse_frame_end, transport_error, validate_preview_command, validate_response_metadata,
+        validated_demo_origin, validated_loopback_origin, ControlPlaneErrorCode,
+        ControlPlaneOperation, ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
         DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition, EditingJobStatus,
         ResponseMetadata,
     };
@@ -6364,6 +6553,61 @@ mod tests {
     }
 
     #[test]
+    fn editing_material_library_paths_and_pages_are_closed_and_path_free() {
+        assert_eq!(
+            request_path(
+                ControlPlaneOperation::ListEditingMaterials,
+                Some(ControlPlaneRequestTarget::EditingMaterialList {
+                    cursor: Some("next_page"),
+                    limit: 50,
+                }),
+            )
+            .expect("valid material page"),
+            "/api/v1/editing-materials/library?limit=50&cursor=next_page"
+        );
+        assert_eq!(
+            request_path(
+                ControlPlaneOperation::UpdateEditingMaterialDescription,
+                Some(ControlPlaneRequestTarget::EditingMaterial(IDENTIFIER)),
+            )
+            .expect("valid material description target"),
+            format!("/api/v1/editing-materials/{IDENTIFIER}/description")
+        );
+
+        let material = serde_json::json!({
+            "materialId": IDENTIFIER,
+            "kind": "video",
+            "durationMs": 1234,
+            "width": 720,
+            "height": 1280,
+            "contentDigest": "cd".repeat(32),
+            "hasAudio": true,
+            "audioLoudnessLufs": -18.25,
+            "hasSpeech": true,
+            "speechSegmentsMs": [[100, 500]],
+            "speechTranscript": "发布会开场",
+            "shotBoundariesMs": [600],
+            "aiDescription": "发布会镜头",
+            "aiTags": ["发布会"],
+            "descriptionSource": "ai",
+            "describedAt": "2026-08-01T00:00:00Z"
+        });
+        let page = serde_json::json!({"items": [material], "nextCursor": "next_page"});
+        let parsed =
+            parse_editing_material_list(&serde_json::to_vec(&page).expect("material page JSON"))
+                .expect("closed material page");
+        assert_eq!(parsed.items().len(), 1);
+        assert_eq!(parsed.next_cursor(), Some("next_page"));
+
+        let mut expanded = page;
+        expanded["items"][0]["privatePath"] = serde_json::json!("/private/source.mp4");
+        assert!(parse_editing_material_list(
+            &serde_json::to_vec(&expanded).expect("expanded material page JSON")
+        )
+        .is_err());
+    }
+
+    #[test]
     fn editing_mutations_have_exact_status_and_uncertain_transport_semantics() {
         assert_eq!(
             ControlPlaneOperation::SaveEditingProjectTimeline.success_status(),
@@ -6544,6 +6788,9 @@ mod tests {
             "descriptionSource": "ai",
             "describedAt": null
         });
+        let mut described_material = material.clone();
+        described_material["aiDescription"] = serde_json::json!("人工挑选的开场镜头");
+        described_material["descriptionSource"] = serde_json::json!("user");
         let (origin, server) = spawn_http_contract_server(vec![
             device_session_exchange(&device_credential, &session_token),
             ExpectedHttpExchange {
@@ -6562,6 +6809,30 @@ mod tests {
                 body: Some(material.clone()),
                 status: 201,
                 response: material.clone(),
+            },
+            device_session_exchange(&device_credential, &session_token),
+            ExpectedHttpExchange {
+                method: "GET",
+                path: "/api/v1/editing-materials/library?limit=50&cursor=next_page".to_owned(),
+                authorization: format!("Bearer {session_token}"),
+                body: None,
+                status: 200,
+                response: serde_json::json!({
+                    "items": [material.clone()],
+                    "nextCursor": null
+                }),
+            },
+            device_session_exchange(&device_credential, &session_token),
+            ExpectedHttpExchange {
+                method: "PUT",
+                path: format!("/api/v1/editing-materials/{material_id}/description"),
+                authorization: format!("Bearer {session_token}"),
+                body: Some(serde_json::json!({
+                    "source": "user",
+                    "description": "人工挑选的开场镜头"
+                })),
+                status: 200,
+                response: described_material,
             },
             device_session_exchange(&device_credential, &session_token),
             ExpectedHttpExchange {
@@ -6612,6 +6883,17 @@ mod tests {
                 .await
                 .expect("register material");
             assert_eq!(registered.material_id(), material_id);
+            let page = client
+                .list_editing_materials(&vault, Some("next_page"), 50)
+                .await
+                .expect("list material page");
+            assert_eq!(page.items().len(), 1);
+            assert_eq!(page.next_cursor(), None);
+            let described = client
+                .update_editing_material_description(&vault, material_id, "人工挑选的开场镜头")
+                .await
+                .expect("update material description");
+            assert_eq!(described.material_id(), material_id);
             client
                 .delete_editing_material(&vault, material_id)
                 .await

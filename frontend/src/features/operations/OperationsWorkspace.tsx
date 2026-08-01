@@ -47,6 +47,7 @@ import { PublishWorkspace } from "../publishing/PublishWorkspace";
 import type { PublishWorkspaceGateway } from "../publishing/publish-workspace-gateway";
 import { VideoEditingWorkbench } from "../video-editing/VideoEditingWorkbench";
 import type { VideoEditingGateway } from "../video-editing/video-editing-gateway";
+import type { MaterialLibraryGateway } from "../video-editing/material-library-gateway";
 import { VideoStudio } from "../video-studio/VideoStudio";
 import type { MaterialVideoStudioGateway } from "../video-studio/material-video-studio-gateway";
 
@@ -503,10 +504,12 @@ function CreationMethodPanel({
 export function CreationHub({
   gateway,
   editingGateway,
+  materialLibraryGateway,
   onPublishArtifact,
 }: {
   readonly gateway: MaterialVideoStudioGateway;
   readonly editingGateway: VideoEditingGateway;
+  readonly materialLibraryGateway?: MaterialLibraryGateway | undefined;
   readonly onPublishArtifact: (video: SelectedVideo) => void;
 }) {
   const [section, setSection] = useState<CreationSection>("works");
@@ -588,7 +591,10 @@ export function CreationHub({
           <Text type="secondary" className="editing-scope-note">
             视频剪辑：把制作或导入的素材整理成时间轴，独立于视频制作管理剪辑项目与任务。
           </Text>
-          <VideoEditingWorkbench gateway={editingGateway} />
+          <VideoEditingWorkbench
+            gateway={editingGateway}
+            materialLibraryGateway={materialLibraryGateway}
+          />
         </div>
       ) : studioOpen ? (
         <div className="embedded-workbench embedded-workbench--focused">

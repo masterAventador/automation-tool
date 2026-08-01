@@ -2660,6 +2660,34 @@ async fn list_editing_projects(
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 #[tauri::command]
+async fn list_editing_materials(
+    cursor: Option<String>,
+    limit: u16,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::EditingMaterialListPage, ControlPlaneCommandError> {
+    client
+        .list_editing_materials(&vault, cursor.as_deref(), limit)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn update_editing_material_description(
+    material_id: String,
+    description: String,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::EditingMaterialSnapshot, ControlPlaneCommandError> {
+    client
+        .update_editing_material_description(&vault, &material_id, &description)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
 async fn create_editing_project(
     request: control_plane::EditingProjectCreateRequest,
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
@@ -5066,6 +5094,8 @@ pub fn run() {
         get_workbench_status,
         get_workbench_metrics,
         list_editing_projects,
+        list_editing_materials,
+        update_editing_material_description,
         create_editing_project,
         get_editing_project_timeline,
         save_editing_project_timeline,
@@ -5140,6 +5170,8 @@ pub fn run() {
         get_workbench_status,
         get_workbench_metrics,
         list_editing_projects,
+        list_editing_materials,
+        update_editing_material_description,
         create_editing_project,
         get_editing_project_timeline,
         save_editing_project_timeline,
