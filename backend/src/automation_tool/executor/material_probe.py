@@ -1648,6 +1648,27 @@ class MaterialPathRegistry:
         # visible to this process either, or a restart would appear to lose it.
         self._entries = entries
 
+    def forget(self, material_id: UUID) -> None:
+        """Forget one local path mapping without touching the user's file.
+
+        The operation is idempotent so cleanup can safely compensate for an
+        import whose Control Plane registration did not complete.  A present
+        mapping is removed through the same atomic whole-document replacement
+        as registration; in-memory state changes only after that replacement
+        succeeds.  The source is deliberately neither resolved nor inspected:
+        a missing or changed file must still be removable from the library.
+        """
+        self._require_its_directory()
+        identifier = _usable_identifier(material_id)
+        if identifier is None:
+            _reject_registry(MaterialPathRegistryRejection.UNUSABLE_IDENTIFIER)
+        if identifier not in self._entries:
+            return
+        entries = dict(self._entries)
+        del entries[identifier]
+        self._write(_serialized(entries))
+        self._entries = entries
+
     def resolve(self, material_id: UUID) -> tuple[Path, os.stat_result]:
         """The file this material was made from, if it is still that file.
 

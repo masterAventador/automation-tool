@@ -4162,6 +4162,82 @@ class TestMaterialPathRegistryRepeatRegistration:
         assert registry.resolve(right)[0] == source
 
 
+class TestMaterialPathRegistryForgetsAMapping:
+    """Removing a library item forgets only its private path mapping."""
+
+    def test_forgetting_one_mapping_is_durable_and_keeps_the_other(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        first = _source(tmp_path, "first.mp4")
+        second = _source(tmp_path, "second.mp4")
+        registry = MaterialPathRegistry(state_directory=state)
+        removed, kept = uuid.uuid4(), uuid.uuid4()
+        registry.register(removed, first)
+        registry.register(kept, second)
+
+        registry.forget(removed)
+
+        assert first.is_file()
+        assert registry.resolve(kept)[0] == second
+        restarted = MaterialPathRegistry(state_directory=state)
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            restarted.resolve(removed)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.NOT_REGISTERED
+        assert restarted.resolve(kept)[0] == second
+        assert os.fspath(first) not in _document(state).read_text(encoding="utf-8")
+
+    def test_forgetting_an_absent_mapping_is_an_idempotent_no_op(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+
+        registry.forget(uuid.uuid4())
+        registry.forget(uuid.uuid4())
+
+        assert list(state.iterdir()) == []
+
+    def test_a_missing_source_does_not_prevent_forgetting_its_mapping(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        source.unlink()
+
+        registry.forget(identifier)
+
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.resolve(identifier)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.NOT_REGISTERED
+
+    @pytest.mark.parametrize("identifier", ["not-a-uuid", 7, None, uuid.uuid1()])
+    def test_an_unusable_identifier_is_refused(self, tmp_path: Path, identifier: object) -> None:
+        registry = MaterialPathRegistry(state_directory=_state_directory(tmp_path))
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.forget(identifier)  # type: ignore[arg-type]
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.UNUSABLE_IDENTIFIER
+
+    def test_a_failed_write_keeps_the_mapping_in_memory_and_on_disk(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        state = _state_directory(tmp_path)
+        source = _source(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        identifier = uuid.uuid4()
+        registry.register(identifier, source)
+        before = _document(state).read_bytes()
+
+        def refuse(*_arguments: object, **_keywords: object) -> None:
+            raise OSError(13, "Permission denied")
+
+        monkeypatch.setattr(os, "replace", refuse)
+        with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+            registry.forget(identifier)
+        assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNWRITABLE
+        assert _document(state).read_bytes() == before
+        monkeypatch.undo()
+        assert registry.resolve(identifier)[0] == source
+        assert MaterialPathRegistry(state_directory=state).resolve(identifier)[0] == source
+
+
 class TestMaterialPathRegistryRejectsAnUnusableSource:
     """The same checks the probe made on the same file, raised the same way.
 
@@ -5928,7 +6004,7 @@ class TestMaterialPathRegistryRechecksItsDirectory:
     as long as the App stayed running.
     """
 
-    @pytest.mark.parametrize("operation", ["register", "resolve"])
+    @pytest.mark.parametrize("operation", ["register", "resolve", "forget"])
     def test_a_directory_relaxed_after_construction_is_refused(
         self, tmp_path: Path, operation: str
     ) -> None:
@@ -5942,8 +6018,10 @@ class TestMaterialPathRegistryRechecksItsDirectory:
             with pytest.raises(MaterialPathRegistryRejected) as excinfo:
                 if operation == "register":
                     registry.register(uuid.uuid4(), source)
-                else:
+                elif operation == "resolve":
                     registry.resolve(identifier)
+                else:
+                    registry.forget(identifier)
         finally:
             state.chmod(0o700)
         assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.REGISTRY_UNREADABLE
