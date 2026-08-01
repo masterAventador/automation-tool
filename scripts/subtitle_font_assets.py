@@ -36,6 +36,7 @@ has empty boxes where the Chinese should be.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import re
@@ -293,7 +294,11 @@ def committed_font_license_source(entry: dict, root: Path = REPOSITORY_ROOT) -> 
     if not isinstance(raw_path, str) or not raw_path or "\\" in raw_path:
         _reject(f"{identifier}: licensePath must be repository-relative")
     relative = PurePosixPath(raw_path)
-    if relative.is_absolute() or ".." in relative.parts or relative.as_posix() != raw_path:
+    if (
+        relative.is_absolute()
+        or ".." in relative.parts
+        or relative.as_posix() != raw_path
+    ):
         _reject(f"{identifier}: licensePath must be repository-relative")
     source = root / Path(*relative.parts)
     try:
@@ -314,7 +319,10 @@ def committed_font_license_source(entry: dict, root: Path = REPOSITORY_ROOT) -> 
     expected_digest = _digest(
         entry.get("licenseTextSha256"), f"{identifier}: licenseTextSha256"
     )
-    if len(payload) != expected_length or hashlib.sha256(payload).hexdigest() != expected_digest:
+    if (
+        len(payload) != expected_length
+        or hashlib.sha256(payload).hexdigest() != expected_digest
+    ):
         _reject(f"{identifier}: committed font licence bytes drifted")
     if OPEN_FONT_LICENSE_MARKER not in payload.decode("utf-8", errors="replace"):
         _reject(f"{identifier}: committed font licence is not OFL-1.1")
@@ -441,7 +449,9 @@ def bundled_font_families(
         )
         if re.fullmatch(r"[a-z][a-z0-9-]{0,63}", component_id) is None:
             _reject(f"{identifier}: noticeComponentId is malformed")
-        project_url = _nonempty_text(entry.get("projectUrl"), f"{identifier}: projectUrl")
+        project_url = _nonempty_text(
+            entry.get("projectUrl"), f"{identifier}: projectUrl"
+        )
         if not project_url.startswith("https://github.com/"):
             _reject(f"{identifier}: projectUrl must be an HTTPS GitHub repository")
         families.add(
@@ -622,6 +632,19 @@ def ensure_subtitle_fonts(
     )
 
 
+def main(argv: list[str] | None = None) -> int:
+    """Fetch and verify the locked font bundle for a build machine."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--root",
+        type=Path,
+        help="project build-cache root (defaults to the platform cache directory)",
+    )
+    arguments = parser.parse_args(argv)
+    print(ensure_subtitle_fonts(root=arguments.root))
+    return 0
+
+
 __all__ = [
     "ASSET_RIGHTS_PATH",
     "BUNDLE_TARGET",
@@ -650,3 +673,7 @@ __all__ = [
     "verify_font_payload",
     "verify_license_payload",
 ]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -31,7 +31,8 @@ PLANGOTHIC_FONTS = {
 
 def test_plangothic_release_assets_are_exactly_locked_in_the_rights_sbom() -> None:
     fonts = {
-        font.packaged_name: font for font in subtitle_font_assets.bundled_subtitle_fonts()
+        font.packaged_name: font
+        for font in subtitle_font_assets.bundled_subtitle_fonts()
     }
     assert set(PLANGOTHIC_FONTS) < set(fonts)
     for name, expected in PLANGOTHIC_FONTS.items():
@@ -121,11 +122,9 @@ def test_source_allowlist_refuses_a_floating_or_neighbouring_download() -> None:
         ),
     ):
         mutated = copy.deepcopy(rights)
-        next(
-            entry
-            for entry in mutated["entries"]
-            if entry["id"] == plangothic["id"]
-        )["sourceUrl"] = source_url
+        next(entry for entry in mutated["entries"] if entry["id"] == plangothic["id"])[
+            "sourceUrl"
+        ] = source_url
         try:
             subtitle_font_assets.bundled_subtitle_fonts(mutated)
         except subtitle_font_assets.SubtitleFontRightsError as error:
@@ -147,8 +146,29 @@ def test_coverage_contract_binds_the_reviewed_candidate_bytes() -> None:
     } == PLANGOTHIC_FONTS
 
 
+def test_asset_cli_fetches_into_the_requested_build_cache() -> None:
+    original = subtitle_font_assets.ensure_subtitle_fonts
+    calls: list[Path | None] = []
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+
+        def ensure(*, root: Path | None = None) -> Path:
+            calls.append(root)
+            return root / subtitle_font_assets.CACHE_NAME  # type: ignore[operator]
+
+        subtitle_font_assets.ensure_subtitle_fonts = ensure
+        try:
+            assert subtitle_font_assets.main(["--root", str(root)]) == 0
+        finally:
+            subtitle_font_assets.ensure_subtitle_fonts = original
+
+    assert calls == [root]
+
+
 def main() -> int:
-    tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
+    tests = [
+        value for name, value in sorted(globals().items()) if name.startswith("test_")
+    ]
     for test in tests:
         test()
     print("LE-20 caption font asset tests passed")
