@@ -24,6 +24,14 @@ from desktop_e2e_prerequisites import (
     terminate_app_process_tree,
     video_studio_startup_harness,
 )
+from le24_measurement import (
+    MATERIAL_COUNT_ENVIRONMENT,
+    MEASUREMENT_MARKER,
+    THINKING_ENVIRONMENT,
+    Le24Measurement,
+    parse_le24_measurement,
+    read_le24_measurement_request,
+)
 from prepare_video_runtime import install as install_video_runtime
 from prepare_video_runtime import prepare as prepare_video_runtime
 from process_inspection import process_ids_matching, terminate_matching_processes
@@ -125,7 +133,10 @@ def require_hidden_configuration() -> None:
         raise RuntimeError("LE-19 acceptance must use one isolated hidden App")
 
 
-def create_controlled_image(ffmpeg: Path, destination: Path) -> str:
+def create_controlled_image(ffmpeg: Path, destination: Path, variant: int) -> str:
+    if variant not in {0, 1, 2}:
+        raise RuntimeError("LE-24 controlled image variant is invalid")
+    filter_arguments = [] if variant == 0 else ["-vf", f"hue=h={variant * 47}"]
     completed = subprocess.run(
         [
             str(ffmpeg),
@@ -138,6 +149,7 @@ def create_controlled_image(ffmpeg: Path, destination: Path) -> str:
             "lavfi",
             "-i",
             "testsrc2=size=1280x720:rate=1",
+            *filter_arguments,
             "-frames:v",
             "1",
             str(destination),
@@ -329,13 +341,14 @@ def assert_no_private_evidence(output: str, api_key: str, source: Path) -> None:
 
 def main() -> int:
     require_hidden_configuration()
+    measurement_request = read_le24_measurement_request(os.environ)
     api_key = read_model_key()
     private_app_data = app_data_directory()
     if private_app_data.exists():
         raise RuntimeError("Refusing to reuse an existing LE-19 App data directory")
     platform = "windows" if sys.platform == "win32" else "macos"
     evidence = EVIDENCE_ROOT / platform
-    if evidence.exists():
+    if measurement_request is None and evidence.exists():
         shutil.rmtree(evidence)
 
     runtime_names = ("media-toolchain", "material-video-worker")
@@ -358,11 +371,19 @@ def main() -> int:
     worker_marker = os.fspath(installed["material-video-worker"])
     worker_baseline = process_ids_matching(worker_marker)
     app_process: subprocess.Popen[bytes] | None = None
+    measurement_observation: Le24Measurement | None = None
     restore_failed = False
 
     with tempfile.TemporaryDirectory(prefix="automation-tool-le19-") as temporary:
-        source = Path(temporary) / "controlled-test-pattern.png"
-        source_digest = create_controlled_image(ffmpeg, source)
+        material_count = 1 if measurement_request is None else measurement_request[1]
+        sources = [
+            Path(temporary) / f"controlled-test-pattern-{index + 1}.png"
+            for index in range(material_count)
+        ]
+        source_digests = [
+            create_controlled_image(ffmpeg, source, index)
+            for index, source in enumerate(sources)
+        ]
         try:
             with video_studio_startup_harness(
                 private_app_data,
@@ -379,11 +400,18 @@ def main() -> int:
                         "AUTOMATION_TOOL_LE18_BOOTSTRAP_TOKEN": token,
                         "AUTOMATION_TOOL_LE18_ENVIRONMENT_ID": ENVIRONMENT_ID,
                         "AUTOMATION_TOOL_LE18_ACCEPTANCE_PICKER": "1",
-                        "AUTOMATION_TOOL_LE18_PICK_1": str(source),
                         "AUTOMATION_TOOL_LE19_MODEL_KEY": api_key,
                         "TAURI_WEBDRIVER_PORT": str(webdriver_port),
                     }
                 )
+                for index, source in enumerate(sources, start=1):
+                    prepared[f"AUTOMATION_TOOL_LE18_PICK_{index}"] = str(source)
+                if measurement_request is not None:
+                    enable_thinking, requested_material_count = measurement_request
+                    prepared[THINKING_ENVIRONMENT] = (
+                        "enabled" if enable_thinking else "disabled"
+                    )
+                    prepared[MATERIAL_COUNT_ENVIRONMENT] = str(requested_material_count)
                 state = private_app_data / "local-executor" / "state"
                 state.mkdir(mode=0o700, parents=True)
                 if os.name != "nt":
@@ -400,7 +428,8 @@ def main() -> int:
                 build_output = (build.stdout + build.stderr).decode(
                     "utf-8", errors="replace"
                 )
-                assert_no_private_evidence(build_output, api_key, source)
+                for source in sources:
+                    assert_no_private_evidence(build_output, api_key, source)
                 if build.returncode != 0:
                     print(build_output, end="")
                     raise RuntimeError("LE-19 hidden App build failed")
@@ -426,7 +455,8 @@ def main() -> int:
                         "LE-19 hidden App journey did not finish"
                     ) from error
                 output = output_bytes.decode("utf-8", errors="replace")
-                assert_no_private_evidence(output, api_key, source)
+                for source in sources:
+                    assert_no_private_evidence(output, api_key, source)
                 print(output, end="")
                 if app_process.returncode != 0:
                     print(
@@ -439,20 +469,32 @@ def main() -> int:
                     )
                     raise RuntimeError("LE-19 hidden App smart-edit journey failed")
                 app_process = None
-                artifact_id = asyncio.run(
-                    assert_database_outcome(prepared["AUTOMATION_TOOL_DATABASE_URL"])
-                )
-                inspect_artifact(
-                    private_app_data=private_app_data,
-                    artifact_id=artifact_id,
-                    ffprobe=ffprobe,
-                    evidence=evidence,
-                )
-                if (
-                    not source.is_file()
-                    or hashlib.sha256(source.read_bytes()).hexdigest() != source_digest
-                ):
-                    raise RuntimeError("LE-19 changed the user's imported source")
+                if measurement_request is None:
+                    artifact_id = asyncio.run(
+                        assert_database_outcome(
+                            prepared["AUTOMATION_TOOL_DATABASE_URL"]
+                        )
+                    )
+                    inspect_artifact(
+                        private_app_data=private_app_data,
+                        artifact_id=artifact_id,
+                        ffprobe=ffprobe,
+                        evidence=evidence,
+                    )
+                else:
+                    enable_thinking, requested_material_count = measurement_request
+                    measurement_observation = parse_le24_measurement(
+                        output,
+                        expected_enable_thinking=enable_thinking,
+                        expected_material_count=requested_material_count,
+                    )
+                for source, source_digest in zip(sources, source_digests, strict=True):
+                    if (
+                        not source.is_file()
+                        or hashlib.sha256(source.read_bytes()).hexdigest()
+                        != source_digest
+                    ):
+                        raise RuntimeError("LE-19 changed a user's imported source")
                 require_port_closed(webdriver_port)
         finally:
             if app_process is not None:
@@ -477,6 +519,9 @@ def main() -> int:
             require_port_closed(webdriver_port)
     if restore_failed:
         raise RuntimeError("LE-19 failed to restore production Vite assets")
+    if measurement_observation is not None:
+        print(f"LE-24 single App measurement passed ({MEASUREMENT_MARKER})")
+        return 0
     print(f"LE-19 real App smart-edit acceptance passed; evidence: {evidence}")
     return 0
 
