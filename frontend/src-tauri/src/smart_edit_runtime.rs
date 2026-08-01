@@ -294,7 +294,10 @@ impl SmartEditRuntime {
             })
     }
 
-    pub fn cancel(&self, generation_id: &str) -> Result<(), SmartEditRuntimeError> {
+    pub fn cancel(
+        &self,
+        generation_id: &str,
+    ) -> Result<SmartEditGenerationSnapshot, SmartEditRuntimeError> {
         let identifier = parse_generation_id(generation_id)?;
         let mut generations = self.lock()?;
         let state = generations.get_mut(&identifier).ok_or_else(|| {
@@ -307,7 +310,7 @@ impl SmartEditRuntime {
         }
         state.cancel_requested = true;
         state.snapshot.status = SmartEditGenerationStatus::Cancelling;
-        Ok(())
+        Ok(state.snapshot.clone())
     }
 
     fn cancel_requested(&self, generation_id: Uuid) -> bool {

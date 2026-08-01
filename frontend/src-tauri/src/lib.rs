@@ -72,6 +72,12 @@ struct LocalMaterialCommandError {
     retryable: bool,
 }
 
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+struct SmartEditCommandError {
+    code: &'static str,
+    retryable: bool,
+}
+
 #[cfg(feature = "control-plane-e2e")]
 static MATERIAL_ACCEPTANCE_PICK_INDEX: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(1);
@@ -88,6 +94,13 @@ impl serde::Serialize for LocalMaterialCommandError {
 }
 
 impl serde::Serialize for ControlPlaneCommandError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        command_error::serialize(&self.code, Some(self.retryable), serializer)
+    }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+impl serde::Serialize for SmartEditCommandError {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         command_error::serialize(&self.code, Some(self.retryable), serializer)
     }
@@ -2783,6 +2796,51 @@ async fn submit_editing_job(
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+fn map_smart_edit_error(error: smart_edit_runtime::SmartEditRuntimeError) -> SmartEditCommandError {
+    use smart_edit_runtime::SmartEditRuntimeErrorCode;
+
+    SmartEditCommandError {
+        code: match error.code() {
+            SmartEditRuntimeErrorCode::InvalidRequest => "invalid_request",
+            SmartEditRuntimeErrorCode::GenerationNotFound => "generation_not_found",
+            SmartEditRuntimeErrorCode::GenerationNotCancellable => "generation_not_cancellable",
+            SmartEditRuntimeErrorCode::StorageUnavailable => "storage_unavailable",
+        },
+        retryable: false,
+    }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+fn start_smart_edit_generation(
+    request: smart_edit_runtime::SmartEditGenerationRequest,
+    app: tauri::AppHandle,
+    runtime: tauri::State<'_, smart_edit_runtime::SmartEditRuntime>,
+) -> Result<smart_edit_runtime::SmartEditGenerationSnapshot, SmartEditCommandError> {
+    runtime.start(&app, request).map_err(map_smart_edit_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+fn get_smart_edit_generation(
+    generation_id: String,
+    runtime: tauri::State<'_, smart_edit_runtime::SmartEditRuntime>,
+) -> Result<smart_edit_runtime::SmartEditGenerationSnapshot, SmartEditCommandError> {
+    runtime
+        .snapshot(&generation_id)
+        .map_err(map_smart_edit_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+fn cancel_smart_edit_generation(
+    generation_id: String,
+    runtime: tauri::State<'_, smart_edit_runtime::SmartEditRuntime>,
+) -> Result<smart_edit_runtime::SmartEditGenerationSnapshot, SmartEditCommandError> {
+    runtime.cancel(&generation_id).map_err(map_smart_edit_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 fn map_local_material_error(
     error: local_material_library::LocalMaterialLibraryError,
 ) -> LocalMaterialCommandError {
@@ -5266,6 +5324,9 @@ pub fn run() {
         save_editing_project_timeline,
         list_editing_jobs,
         submit_editing_job,
+        start_smart_edit_generation,
+        get_smart_edit_generation,
+        cancel_smart_edit_generation,
         import_editing_material,
         get_local_editing_material_status,
         get_local_editing_material_preview_url,
@@ -5342,6 +5403,9 @@ pub fn run() {
         save_editing_project_timeline,
         list_editing_jobs,
         submit_editing_job,
+        start_smart_edit_generation,
+        get_smart_edit_generation,
+        cancel_smart_edit_generation,
         import_editing_material,
         get_local_editing_material_status,
         get_local_editing_material_preview_url,
@@ -5466,6 +5530,34 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+    #[test]
+    fn smart_edit_command_errors_are_fixed_and_path_free() {
+        let runtime = smart_edit_runtime::SmartEditRuntime::new();
+        for (generation_id, expected_code) in [
+            ("private-invalid-id", "invalid_request"),
+            (
+                "3d594650-b5f4-4498-8e38-0cf85d6dfa72",
+                "generation_not_found",
+            ),
+        ] {
+            let error = runtime
+                .snapshot(generation_id)
+                .expect_err("invalid or unknown generation must fail closed");
+            let wire = serde_json::to_value(map_smart_edit_error(error))
+                .expect("smart-edit command error must serialize");
+            assert_eq!(
+                wire,
+                serde_json::json!({
+                    "code": expected_code,
+                    "message": format!("native command error: {expected_code}"),
+                    "retryable": false,
+                })
+            );
+            assert!(!wire.to_string().contains(generation_id));
+        }
+    }
 
     /// The JavaScript side of every Tauri command rejection reads `error.message`
     /// before it falls back to `String(error)`, and `String()` of a plain JSON
