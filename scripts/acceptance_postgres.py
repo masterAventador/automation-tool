@@ -58,7 +58,10 @@ def _windows_postgres_root(
     if not root.is_absolute():
         raise RuntimeError("Windows PostgreSQL acceptance root must be absolute")
     try:
-        root.mkdir(mode=0o700)
+        # Let Windows inherit the current user's native ACL. Python's special
+        # handling of mode=0o700 creates a DACL that the PostgreSQL child tools
+        # cannot traverse to read the short-lived pwfile.
+        root.mkdir()
     except OSError as error:
         raise RuntimeError(
             "Windows PostgreSQL acceptance root is unavailable"
