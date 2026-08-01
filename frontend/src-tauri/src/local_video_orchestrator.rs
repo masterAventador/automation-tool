@@ -338,6 +338,198 @@ pub enum VideoWorkerLocalEditingEvent {
     Cancelled,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoWorkerLocalMaterialKind {
+    Video,
+    Image,
+    Audio,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VideoWorkerLocalMaterialFacts {
+    audio_loudness_lufs: Option<f64>,
+    content_digest: String,
+    duration_ms: Option<u32>,
+    has_audio: bool,
+    height: Option<u32>,
+    kind: VideoWorkerLocalMaterialKind,
+    width: Option<u32>,
+}
+
+impl VideoWorkerLocalMaterialFacts {
+    pub const fn kind(&self) -> VideoWorkerLocalMaterialKind {
+        self.kind
+    }
+
+    pub const fn duration_ms(&self) -> Option<u32> {
+        self.duration_ms
+    }
+
+    pub const fn width(&self) -> Option<u32> {
+        self.width
+    }
+
+    pub const fn height(&self) -> Option<u32> {
+        self.height
+    }
+
+    pub fn content_digest(&self) -> &str {
+        &self.content_digest
+    }
+
+    pub const fn has_audio(&self) -> bool {
+        self.has_audio
+    }
+
+    pub const fn audio_loudness_lufs(&self) -> Option<f64> {
+        self.audio_loudness_lufs
+    }
+
+    fn is_valid(&self) -> bool {
+        let duration_valid = match self.kind {
+            VideoWorkerLocalMaterialKind::Image => self.duration_ms.is_none(),
+            VideoWorkerLocalMaterialKind::Video | VideoWorkerLocalMaterialKind::Audio => self
+                .duration_ms
+                .is_some_and(|duration| (1..=4 * 60 * 60 * 1000).contains(&duration)),
+        };
+        let dimensions_valid = match self.kind {
+            VideoWorkerLocalMaterialKind::Audio => {
+                self.width.is_none() && self.height.is_none() && self.has_audio
+            }
+            VideoWorkerLocalMaterialKind::Video | VideoWorkerLocalMaterialKind::Image => {
+                self.width.zip(self.height).is_some_and(|(width, height)| {
+                    (1..=8192).contains(&width) && (1..=8192).contains(&height)
+                })
+            }
+        };
+        let loudness_valid = self.audio_loudness_lufs.is_none_or(|loudness| {
+            self.has_audio && loudness.is_finite() && (-70.0..=0.0).contains(&loudness)
+        });
+        duration_valid
+            && dimensions_valid
+            && loudness_valid
+            && !(self.kind == VideoWorkerLocalMaterialKind::Image && self.has_audio)
+            && self.content_digest.len() == 64
+            && self
+                .content_digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+    }
+
+    fn canonical_json(&self) -> Result<String, VideoWorkerError> {
+        let document = serde_json::to_value(self).map_err(|_| process_unavailable())?;
+        serde_json::to_string(&document).map_err(|_| process_unavailable())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoWorkerLocalMaterialFailureCode {
+    Unreadable,
+    SourceNotAtRest,
+    UnsafePath,
+    Undecodable,
+    NoUsableStream,
+    UnusableDuration,
+    TooLong,
+    UnusableFrameSize,
+    FrameTooLarge,
+    FileTooLarge,
+    SilentAudio,
+    ProbeCrashed,
+    ProbeFailed,
+    WorkspaceUnusable,
+    UnusableIdentifier,
+    NotRegistered,
+    FileMissing,
+    FileUnreadable,
+    FileChanged,
+    RegistryUnreadable,
+    RegistryUnwritable,
+    RegistryFull,
+}
+
+impl VideoWorkerLocalMaterialFailureCode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Unreadable => "unreadable",
+            Self::SourceNotAtRest => "source_not_at_rest",
+            Self::UnsafePath => "unsafe_path",
+            Self::Undecodable => "undecodable",
+            Self::NoUsableStream => "no_usable_stream",
+            Self::UnusableDuration => "unusable_duration",
+            Self::TooLong => "too_long",
+            Self::UnusableFrameSize => "unusable_frame_size",
+            Self::FrameTooLarge => "frame_too_large",
+            Self::FileTooLarge => "file_too_large",
+            Self::SilentAudio => "silent_audio",
+            Self::ProbeCrashed => "probe_crashed",
+            Self::ProbeFailed => "probe_failed",
+            Self::WorkspaceUnusable => "workspace_unusable",
+            Self::UnusableIdentifier => "unusable_identifier",
+            Self::NotRegistered => "not_registered",
+            Self::FileMissing => "file_missing",
+            Self::FileUnreadable => "file_unreadable",
+            Self::FileChanged => "file_changed",
+            Self::RegistryUnreadable => "registry_unreadable",
+            Self::RegistryUnwritable => "registry_unwritable",
+            Self::RegistryFull => "registry_full",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoWorkerLocalMaterialStatus {
+    Available,
+    UnusableIdentifier,
+    NotRegistered,
+    FileMissing,
+    FileUnreadable,
+    FileChanged,
+    RegistryUnreadable,
+    RegistryUnwritable,
+    RegistryFull,
+}
+
+impl VideoWorkerLocalMaterialStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::UnusableIdentifier => "unusable_identifier",
+            Self::NotRegistered => "not_registered",
+            Self::FileMissing => "file_missing",
+            Self::FileUnreadable => "file_unreadable",
+            Self::FileChanged => "file_changed",
+            Self::RegistryUnreadable => "registry_unreadable",
+            Self::RegistryUnwritable => "registry_unwritable",
+            Self::RegistryFull => "registry_full",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VideoWorkerLocalMaterialError {
+    Lifecycle(VideoWorkerErrorCode),
+    Rejected(VideoWorkerLocalMaterialFailureCode),
+}
+
+impl fmt::Display for VideoWorkerLocalMaterialError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("Local material Worker operation is unavailable")
+    }
+}
+
+impl std::error::Error for VideoWorkerLocalMaterialError {}
+
+impl From<VideoWorkerError> for VideoWorkerLocalMaterialError {
+    fn from(error: VideoWorkerError) -> Self {
+        Self::Lifecycle(error.code())
+    }
+}
+
 /// The single, already-verified embedded Chromium the render Worker may
 /// launch. No other browser source exists: the Worker never downloads,
 /// discovers a system browser or consults a cache fallback.
@@ -988,6 +1180,195 @@ impl LocalVideoOrchestrator {
             return Err(process_unavailable());
         }
         verify_health(running, self.request_timeout)
+    }
+
+    pub fn import_local_material(
+        &self,
+        material_id: Uuid,
+        source_path: &Path,
+    ) -> Result<VideoWorkerLocalMaterialFacts, VideoWorkerLocalMaterialError> {
+        let source_path = valid_local_material_source_path(source_path).ok_or(
+            VideoWorkerLocalMaterialError::Lifecycle(VideoWorkerErrorCode::ConfigurationInvalid),
+        )?;
+        let material_id = valid_local_material_id(material_id)?;
+        let mut workers = self
+            .lock_workers()
+            .map_err(VideoWorkerLocalMaterialError::from)?;
+        let running = local_material_worker(&mut workers)?;
+        let authentication_proof = running
+            .token
+            .command_proof_with_detail(
+                VideoWorkerKind::Python,
+                "worker.material.import",
+                &material_id,
+                Some(source_path),
+            )
+            .map_err(VideoWorkerLocalMaterialError::from)?;
+        let command = VideoWorkerLocalMaterialImportCommandDocument {
+            authentication_proof: &authentication_proof,
+            command: "worker.material.import",
+            material_id: &material_id,
+            protocol_version: WORKER_PROTOCOL_VERSION,
+            source_path,
+            worker_kind: VideoWorkerKind::Python.as_str(),
+        };
+        write_command(&mut running.stdin, &command).map_err(VideoWorkerLocalMaterialError::from)?;
+        let line = receive_line(&running.events, self.request_timeout)
+            .map_err(VideoWorkerLocalMaterialError::from)?;
+        if let Ok(event) = serde_json::from_str::<VideoWorkerLocalMaterialImportedEvent>(&line) {
+            if !event.facts.is_valid() {
+                return Err(VideoWorkerLocalMaterialError::Lifecycle(
+                    VideoWorkerErrorCode::AuthenticationRejected,
+                ));
+            }
+            let canonical = event.facts.canonical_json().map_err(|_| {
+                VideoWorkerLocalMaterialError::Lifecycle(
+                    VideoWorkerErrorCode::AuthenticationRejected,
+                )
+            })?;
+            let detail = format!("{material_id}\0{canonical}");
+            if !valid_local_material_event(
+                running,
+                "worker.material.imported",
+                &material_id,
+                &detail,
+                &event.authentication(),
+            ) {
+                return Err(VideoWorkerLocalMaterialError::Lifecycle(
+                    VideoWorkerErrorCode::AuthenticationRejected,
+                ));
+            }
+            return Ok(event.facts);
+        }
+        let event: VideoWorkerLocalMaterialFailedEvent =
+            serde_json::from_str(&line).map_err(|_| {
+                VideoWorkerLocalMaterialError::Lifecycle(
+                    VideoWorkerErrorCode::AuthenticationRejected,
+                )
+            })?;
+        let detail = format!("{material_id}\0{}", event.failure_code.as_str());
+        if !valid_local_material_event(
+            running,
+            "worker.material.import_failed",
+            &material_id,
+            &detail,
+            &event.authentication(),
+        ) {
+            return Err(VideoWorkerLocalMaterialError::Lifecycle(
+                VideoWorkerErrorCode::AuthenticationRejected,
+            ));
+        }
+        Err(VideoWorkerLocalMaterialError::Rejected(event.failure_code))
+    }
+
+    pub fn forget_local_material(
+        &self,
+        material_id: Uuid,
+    ) -> Result<(), VideoWorkerLocalMaterialError> {
+        let material_id = valid_local_material_id(material_id)?;
+        let mut workers = self
+            .lock_workers()
+            .map_err(VideoWorkerLocalMaterialError::from)?;
+        let running = local_material_worker(&mut workers)?;
+        let authentication_proof = running
+            .token
+            .command_proof(
+                VideoWorkerKind::Python,
+                "worker.material.forget",
+                &material_id,
+            )
+            .map_err(VideoWorkerLocalMaterialError::from)?;
+        let command = VideoWorkerLocalMaterialCommandDocument {
+            authentication_proof: &authentication_proof,
+            command: "worker.material.forget",
+            material_id: &material_id,
+            protocol_version: WORKER_PROTOCOL_VERSION,
+            worker_kind: VideoWorkerKind::Python.as_str(),
+        };
+        write_command(&mut running.stdin, &command).map_err(VideoWorkerLocalMaterialError::from)?;
+        let line = receive_line(&running.events, self.request_timeout)
+            .map_err(VideoWorkerLocalMaterialError::from)?;
+        if let Ok(event) = serde_json::from_str::<VideoWorkerLocalMaterialForgottenEvent>(&line) {
+            if valid_local_material_event(
+                running,
+                "worker.material.forgotten",
+                &material_id,
+                &material_id,
+                &event.authentication(),
+            ) {
+                return Ok(());
+            }
+            return Err(VideoWorkerLocalMaterialError::Lifecycle(
+                VideoWorkerErrorCode::AuthenticationRejected,
+            ));
+        }
+        let event: VideoWorkerLocalMaterialFailedEvent =
+            serde_json::from_str(&line).map_err(|_| {
+                VideoWorkerLocalMaterialError::Lifecycle(
+                    VideoWorkerErrorCode::AuthenticationRejected,
+                )
+            })?;
+        let detail = format!("{material_id}\0{}", event.failure_code.as_str());
+        if !valid_local_material_event(
+            running,
+            "worker.material.forget_failed",
+            &material_id,
+            &detail,
+            &event.authentication(),
+        ) {
+            return Err(VideoWorkerLocalMaterialError::Lifecycle(
+                VideoWorkerErrorCode::AuthenticationRejected,
+            ));
+        }
+        Err(VideoWorkerLocalMaterialError::Rejected(event.failure_code))
+    }
+
+    pub fn local_material_status(
+        &self,
+        material_id: Uuid,
+    ) -> Result<VideoWorkerLocalMaterialStatus, VideoWorkerLocalMaterialError> {
+        let material_id = valid_local_material_id(material_id)?;
+        let mut workers = self
+            .lock_workers()
+            .map_err(VideoWorkerLocalMaterialError::from)?;
+        let running = local_material_worker(&mut workers)?;
+        let authentication_proof = running
+            .token
+            .command_proof(
+                VideoWorkerKind::Python,
+                "worker.material.status",
+                &material_id,
+            )
+            .map_err(VideoWorkerLocalMaterialError::from)?;
+        let command = VideoWorkerLocalMaterialCommandDocument {
+            authentication_proof: &authentication_proof,
+            command: "worker.material.status",
+            material_id: &material_id,
+            protocol_version: WORKER_PROTOCOL_VERSION,
+            worker_kind: VideoWorkerKind::Python.as_str(),
+        };
+        write_command(&mut running.stdin, &command).map_err(VideoWorkerLocalMaterialError::from)?;
+        let line = receive_line(&running.events, self.request_timeout)
+            .map_err(VideoWorkerLocalMaterialError::from)?;
+        let event: VideoWorkerLocalMaterialStatusEvent =
+            serde_json::from_str(&line).map_err(|_| {
+                VideoWorkerLocalMaterialError::Lifecycle(
+                    VideoWorkerErrorCode::AuthenticationRejected,
+                )
+            })?;
+        let detail = format!("{material_id}\0{}", event.status.as_str());
+        if !valid_local_material_event(
+            running,
+            "worker.material.status",
+            &material_id,
+            &detail,
+            &event.authentication(),
+        ) {
+            return Err(VideoWorkerLocalMaterialError::Lifecycle(
+                VideoWorkerErrorCode::AuthenticationRejected,
+            ));
+        }
+        Ok(event.status)
     }
 
     pub fn cancel(&self, kind: VideoWorkerKind, job_id: Uuid) -> Result<(), VideoWorkerError> {
@@ -1676,6 +2057,27 @@ struct VideoWorkerLocalEditingStartCommandDocument<'a> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct VideoWorkerLocalMaterialImportCommandDocument<'a> {
+    authentication_proof: &'a str,
+    command: &'static str,
+    material_id: &'a str,
+    protocol_version: &'static str,
+    source_path: &'a str,
+    worker_kind: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VideoWorkerLocalMaterialCommandDocument<'a> {
+    authentication_proof: &'a str,
+    command: &'static str,
+    material_id: &'a str,
+    protocol_version: &'static str,
+    worker_kind: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct VideoWorkerSandboxCommandDocument<'a> {
     authentication_proof: &'a str,
     command: &'static str,
@@ -1812,6 +2214,184 @@ struct VideoWorkerLocalEditingCancelledEvent {
     protocol_version: String,
     worker_kind: String,
     worker_version: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoWorkerLocalMaterialImportedEvent {
+    authentication_proof: String,
+    event: String,
+    facts: VideoWorkerLocalMaterialFacts,
+    material_id: String,
+    protocol_version: String,
+    worker_kind: String,
+    worker_version: String,
+}
+
+impl VideoWorkerLocalMaterialImportedEvent {
+    fn authentication(&self) -> VideoWorkerLocalMaterialEventAuthentication<'_> {
+        VideoWorkerLocalMaterialEventAuthentication {
+            authentication_proof: &self.authentication_proof,
+            event: &self.event,
+            material_id: &self.material_id,
+            protocol_version: &self.protocol_version,
+            worker_kind: &self.worker_kind,
+            worker_version: &self.worker_version,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoWorkerLocalMaterialFailedEvent {
+    authentication_proof: String,
+    event: String,
+    failure_code: VideoWorkerLocalMaterialFailureCode,
+    material_id: String,
+    protocol_version: String,
+    worker_kind: String,
+    worker_version: String,
+}
+
+impl VideoWorkerLocalMaterialFailedEvent {
+    fn authentication(&self) -> VideoWorkerLocalMaterialEventAuthentication<'_> {
+        VideoWorkerLocalMaterialEventAuthentication {
+            authentication_proof: &self.authentication_proof,
+            event: &self.event,
+            material_id: &self.material_id,
+            protocol_version: &self.protocol_version,
+            worker_kind: &self.worker_kind,
+            worker_version: &self.worker_version,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoWorkerLocalMaterialForgottenEvent {
+    authentication_proof: String,
+    event: String,
+    material_id: String,
+    protocol_version: String,
+    worker_kind: String,
+    worker_version: String,
+}
+
+impl VideoWorkerLocalMaterialForgottenEvent {
+    fn authentication(&self) -> VideoWorkerLocalMaterialEventAuthentication<'_> {
+        VideoWorkerLocalMaterialEventAuthentication {
+            authentication_proof: &self.authentication_proof,
+            event: &self.event,
+            material_id: &self.material_id,
+            protocol_version: &self.protocol_version,
+            worker_kind: &self.worker_kind,
+            worker_version: &self.worker_version,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VideoWorkerLocalMaterialStatusEvent {
+    authentication_proof: String,
+    event: String,
+    material_id: String,
+    protocol_version: String,
+    status: VideoWorkerLocalMaterialStatus,
+    worker_kind: String,
+    worker_version: String,
+}
+
+impl VideoWorkerLocalMaterialStatusEvent {
+    fn authentication(&self) -> VideoWorkerLocalMaterialEventAuthentication<'_> {
+        VideoWorkerLocalMaterialEventAuthentication {
+            authentication_proof: &self.authentication_proof,
+            event: &self.event,
+            material_id: &self.material_id,
+            protocol_version: &self.protocol_version,
+            worker_kind: &self.worker_kind,
+            worker_version: &self.worker_version,
+        }
+    }
+}
+
+struct VideoWorkerLocalMaterialEventAuthentication<'a> {
+    authentication_proof: &'a str,
+    event: &'a str,
+    material_id: &'a str,
+    protocol_version: &'a str,
+    worker_kind: &'a str,
+    worker_version: &'a str,
+}
+
+fn valid_local_material_id(material_id: Uuid) -> Result<String, VideoWorkerLocalMaterialError> {
+    if !valid_uuid_v4(material_id) {
+        return Err(VideoWorkerLocalMaterialError::Lifecycle(
+            VideoWorkerErrorCode::ConfigurationInvalid,
+        ));
+    }
+    Ok(material_id.hyphenated().to_string())
+}
+
+fn valid_local_material_source_path(source_path: &Path) -> Option<&str> {
+    let value = source_path.to_str()?;
+    if !source_path.is_absolute()
+        || value.is_empty()
+        || value.len() > MAX_PATH_BYTES
+        || value.chars().any(|character| {
+            character.is_control() || matches!(character as u32, 0x202a..=0x202e | 0x2066..=0x2069)
+        })
+    {
+        return None;
+    }
+    Some(value)
+}
+
+fn local_material_worker(
+    workers: &mut BTreeMap<VideoWorkerKind, RunningVideoWorker>,
+) -> Result<&mut RunningVideoWorker, VideoWorkerLocalMaterialError> {
+    let running = workers.get_mut(&VideoWorkerKind::Python).ok_or(
+        VideoWorkerLocalMaterialError::Lifecycle(VideoWorkerErrorCode::NotRunning),
+    )?;
+    if running.launch.media_tools.is_none() || running.editing_job.is_some() {
+        return Err(VideoWorkerLocalMaterialError::Lifecycle(
+            VideoWorkerErrorCode::ConfigurationInvalid,
+        ));
+    }
+    if running
+        .child
+        .try_wait()
+        .map_err(|_| {
+            VideoWorkerLocalMaterialError::Lifecycle(VideoWorkerErrorCode::ProcessUnavailable)
+        })?
+        .is_some()
+    {
+        return Err(VideoWorkerLocalMaterialError::Lifecycle(
+            VideoWorkerErrorCode::ProcessUnavailable,
+        ));
+    }
+    Ok(running)
+}
+
+fn valid_local_material_event(
+    running: &RunningVideoWorker,
+    expected_event: &str,
+    expected_material_id: &str,
+    detail: &str,
+    authentication: &VideoWorkerLocalMaterialEventAuthentication<'_>,
+) -> bool {
+    authentication.event == expected_event
+        && authentication.material_id == expected_material_id
+        && authentication.protocol_version == WORKER_PROTOCOL_VERSION
+        && authentication.worker_kind == VideoWorkerKind::Python.as_str()
+        && authentication.worker_version == running.launch.expected_version
+        && running.token.verify_event_proof(
+            expected_event,
+            VideoWorkerKind::Python,
+            authentication.worker_version,
+            detail,
+            authentication.authentication_proof,
+        )
 }
 
 fn write_command(stdin: &mut ChildStdin, command: &impl Serialize) -> Result<(), VideoWorkerError> {

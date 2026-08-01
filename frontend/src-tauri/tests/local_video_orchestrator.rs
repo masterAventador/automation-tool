@@ -13,10 +13,12 @@ use automation_tool_desktop_lib::local_editing_job_ledger::{
 use automation_tool_desktop_lib::local_video_orchestrator::{
     LocalVideoOrchestrator, VideoWorkerErrorCode, VideoWorkerKind, VideoWorkerLaunch,
     VideoWorkerLocalEditingEvent, VideoWorkerLocalEditingFailureCode,
-    VideoWorkerLocalEditingJobRequest, VideoWorkerLocalEditingPhase,
-    VideoWorkerMediaToolsConfiguration, VideoWorkerRenderBrowserConfiguration,
-    VideoWorkerRenderCanvas, VideoWorkerRenderSandboxRequest, VideoWorkerRestartPolicy,
-    VideoWorkerSourceWindow, VideoWorkerState,
+    VideoWorkerLocalEditingJobRequest, VideoWorkerLocalEditingPhase, VideoWorkerLocalMaterialError,
+    VideoWorkerLocalMaterialFailureCode, VideoWorkerLocalMaterialKind,
+    VideoWorkerLocalMaterialStatus, VideoWorkerMediaToolsConfiguration,
+    VideoWorkerRenderBrowserConfiguration, VideoWorkerRenderCanvas,
+    VideoWorkerRenderSandboxRequest, VideoWorkerRestartPolicy, VideoWorkerSourceWindow,
+    VideoWorkerState,
 };
 use automation_tool_desktop_lib::motion_video_studio::{
     cancel_marker_file_name, TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR, TEMPLATE_CANVAS_HEIGHT,
@@ -367,6 +369,91 @@ server.close()
     )
 }
 
+fn material_worker(outcome: &str) -> String {
+    let prefix = HEALTHY_WORKER
+        .split_once("for line in sys.stdin:")
+        .expect("healthy Worker command loop")
+        .0;
+    format!(
+        r#"{prefix}
+def command_proof(command, material_id, detail=None):
+    parts = [command, kind, protocol, material_id]
+    if detail is not None:
+        parts.append(detail)
+    digest = hmac.digest(
+        key,
+        b"automation-tool.video-worker-command.v1\0" + b"\0".join(
+            value.encode() for value in parts
+        ),
+        hashlib.sha256,
+    )
+    return "atvwc1." + base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+def material_event(event, material_id, detail, **values):
+    body = {{
+        "authenticationProof": proof(event, detail),
+        "event": event,
+        "materialId": material_id,
+        "protocolVersion": protocol,
+        "workerKind": kind,
+        "workerVersion": version,
+    }}
+    if outcome == "forged":
+        body["authenticationProof"] = "atvwp1.forged"
+    body.update(values)
+    print(json.dumps(body, separators=(",", ":")), flush=True)
+
+outcome = {outcome:?}
+facts = {{
+    "audioLoudnessLufs": -18.25,
+    "contentDigest": "cd" * 32,
+    "durationMs": 1234,
+    "hasAudio": True,
+    "height": 1280,
+    "kind": "video",
+    "width": 720,
+}}
+if outcome == "oversized":
+    facts["width"] = 8193
+if outcome == "extra":
+    facts["sourcePath"] = "/operator/private/source.mp4"
+for line in sys.stdin:
+    command = json.loads(line)
+    material_id = command.get("materialId", "")
+    name = command.get("command")
+    detail = command.get("sourcePath") if name == "worker.material.import" else None
+    if not hmac.compare_digest(
+        command.get("authenticationProof", ""),
+        command_proof(name, material_id, detail),
+    ):
+        continue
+    if name == "worker.material.import":
+        if outcome == "rejected":
+            material_event(
+                "worker.material.import_failed", material_id,
+                material_id + "\0source_not_at_rest", failureCode="source_not_at_rest",
+            )
+        else:
+            canonical = json.dumps(facts, separators=(",", ":"), sort_keys=True)
+            material_event(
+                "worker.material.imported", material_id,
+                material_id + "\0" + canonical, facts=facts,
+            )
+    elif name == "worker.material.status":
+        status = "file_changed" if outcome == "changed" else "available"
+        material_event(
+            "worker.material.status", material_id,
+            material_id + "\0" + status, status=status,
+        )
+    elif name == "worker.material.forget":
+        material_event("worker.material.forgotten", material_id, material_id)
+
+stopping = True
+server.close()
+"#
+    )
+}
+
 fn editing_launch(fixture: &TemporaryWorker) -> VideoWorkerLaunch {
     let ffmpeg = executable_fixture(&fixture.root, "ffmpeg");
     let ffprobe = executable_fixture(&fixture.root, "ffprobe");
@@ -376,6 +463,151 @@ fn editing_launch(fixture: &TemporaryWorker) -> VideoWorkerLaunch {
             VideoWorkerMediaToolsConfiguration::new(ffmpeg, ffprobe).expect("verified media tools"),
         )
         .expect("editing Worker launch")
+}
+
+#[test]
+fn local_material_import_status_and_forget_are_authenticated_and_path_free() {
+    let fixture = TemporaryWorker::new(&material_worker("success"));
+    let private_source = fixture.root.join("operator private source.mp4");
+    fs::write(&private_source, b"private source").expect("source fixture");
+    let material_id = Uuid::parse_str("623e4567-e89b-42d3-a456-426614174105").expect("material ID");
+    let orchestrator = orchestrator();
+    orchestrator
+        .start(editing_launch(&fixture))
+        .expect("start material Worker");
+
+    let facts = orchestrator
+        .import_local_material(material_id, &private_source)
+        .expect("authenticated material facts");
+
+    assert_eq!(facts.kind(), VideoWorkerLocalMaterialKind::Video);
+    assert_eq!(facts.duration_ms(), Some(1234));
+    assert_eq!(facts.width(), Some(720));
+    assert_eq!(facts.height(), Some(1280));
+    assert_eq!(facts.content_digest(), &"cd".repeat(32));
+    assert!(facts.has_audio());
+    assert_eq!(facts.audio_loudness_lufs(), Some(-18.25));
+    assert!(!format!("{facts:?}").contains(private_source.to_string_lossy().as_ref()));
+    assert_eq!(
+        orchestrator
+            .local_material_status(material_id)
+            .expect("authenticated status"),
+        VideoWorkerLocalMaterialStatus::Available,
+    );
+    orchestrator
+        .forget_local_material(material_id)
+        .expect("authenticated idempotent forget");
+}
+
+#[test]
+fn local_material_worker_rejection_preserves_only_the_closed_code() {
+    let fixture = TemporaryWorker::new(&material_worker("rejected"));
+    let private_source = fixture.root.join("operator private source.mp4");
+    fs::write(&private_source, b"private source").expect("source fixture");
+    let material_id = Uuid::parse_str("623e4567-e89b-42d3-a456-426614174105").expect("material ID");
+    let orchestrator = orchestrator();
+    orchestrator
+        .start(editing_launch(&fixture))
+        .expect("start material Worker");
+
+    let error = orchestrator
+        .import_local_material(material_id, &private_source)
+        .expect_err("probe rejection must remain closed");
+
+    assert_eq!(
+        error,
+        VideoWorkerLocalMaterialError::Rejected(
+            VideoWorkerLocalMaterialFailureCode::SourceNotAtRest,
+        ),
+    );
+    assert!(!format!("{error:?}").contains(private_source.to_string_lossy().as_ref()));
+}
+
+#[test]
+fn local_material_forged_event_fails_closed() {
+    let fixture = TemporaryWorker::new(&material_worker("forged"));
+    let private_source = fixture.root.join("operator private source.mp4");
+    fs::write(&private_source, b"private source").expect("source fixture");
+    let material_id = Uuid::parse_str("623e4567-e89b-42d3-a456-426614174105").expect("material ID");
+    let orchestrator = orchestrator();
+    orchestrator
+        .start(editing_launch(&fixture))
+        .expect("start material Worker");
+
+    let error = orchestrator
+        .import_local_material(material_id, &private_source)
+        .expect_err("forged Worker event must fail closed");
+
+    assert_eq!(
+        error,
+        VideoWorkerLocalMaterialError::Lifecycle(VideoWorkerErrorCode::AuthenticationRejected),
+    );
+}
+
+#[test]
+fn local_material_facts_reject_unknown_fields_and_values_over_the_closed_limits() {
+    for outcome in ["oversized", "extra"] {
+        let fixture = TemporaryWorker::new(&material_worker(outcome));
+        let private_source = fixture.root.join("operator private source.mp4");
+        fs::write(&private_source, b"private source").expect("source fixture");
+        let material_id =
+            Uuid::parse_str("623e4567-e89b-42d3-a456-426614174105").expect("material ID");
+        let orchestrator = orchestrator();
+        orchestrator
+            .start(editing_launch(&fixture))
+            .expect("start material Worker");
+
+        assert_eq!(
+            orchestrator
+                .import_local_material(material_id, &private_source)
+                .expect_err("untrusted facts must fail closed"),
+            VideoWorkerLocalMaterialError::Lifecycle(VideoWorkerErrorCode::AuthenticationRejected,),
+        );
+    }
+}
+
+#[test]
+fn local_material_status_exposes_the_closed_unavailable_reason() {
+    let fixture = TemporaryWorker::new(&material_worker("changed"));
+    let material_id = Uuid::parse_str("623e4567-e89b-42d3-a456-426614174105").expect("material ID");
+    let orchestrator = orchestrator();
+    orchestrator
+        .start(editing_launch(&fixture))
+        .expect("start material Worker");
+
+    assert_eq!(
+        orchestrator
+            .local_material_status(material_id)
+            .expect("authenticated unavailable status"),
+        VideoWorkerLocalMaterialStatus::FileChanged,
+    );
+}
+
+#[test]
+fn local_material_input_and_editing_ownership_fail_closed() {
+    let material_id = Uuid::parse_str("623e4567-e89b-42d3-a456-426614174105").expect("material ID");
+    assert_eq!(
+        orchestrator()
+            .import_local_material(material_id, Path::new("relative.mp4"))
+            .expect_err("WebView-relative paths are not material capabilities"),
+        VideoWorkerLocalMaterialError::Lifecycle(VideoWorkerErrorCode::ConfigurationInvalid),
+    );
+
+    let fixture = TemporaryWorker::new(&editing_worker("success"));
+    let orchestrator = orchestrator();
+    orchestrator
+        .start(editing_launch(&fixture))
+        .expect("start editing Worker");
+    orchestrator
+        .start_local_editing_job(editing_job_id(), &editing_request())
+        .expect("dispatch editing job");
+
+    assert_eq!(
+        orchestrator
+            .local_material_status(material_id)
+            .expect_err("material operations cannot race a render"),
+        VideoWorkerLocalMaterialError::Lifecycle(VideoWorkerErrorCode::ConfigurationInvalid),
+    );
 }
 
 fn editing_request() -> VideoWorkerLocalEditingJobRequest {
