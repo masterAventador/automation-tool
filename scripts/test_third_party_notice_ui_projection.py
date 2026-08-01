@@ -227,6 +227,7 @@ def main() -> int:
         "onnxruntime",
         "silero-vad-model",
         "subtitle-fonts",
+        "plangothic-fonts",
     }, "every redistributed runtime component is disclosed"
 
     for component in components:
@@ -284,28 +285,30 @@ def main() -> int:
     # out of the font binary itself rather than retyped.
     sys.path.insert(0, str(ROOT / "scripts"))
     from subtitle_font_assets import (
-        bundled_subtitle_fonts,
-        packaged_license_notice,
+        bundled_font_families,
+        packaged_license_notices,
     )
 
-    fonts = bundled_subtitle_fonts()
-    subtitle_fonts = by_id["subtitle-fonts"]
-    assert subtitle_fonts["license"] == "OFL-1.1"
-    assert subtitle_fonts["copyleft"] is False
-    assert subtitle_fonts["licenseTextId"] == "ofl-1.1"
+    families = {family.component_id: family for family in bundled_font_families()}
+    for component_id, family in families.items():
+        component = by_id[component_id]
+        assert component["license"] == "OFL-1.1"
+        assert component["copyleft"] is False
+        assert component["licenseTextId"] == "ofl-1.1"
+        assert component["version"] == family.version
+        assert component["upstreamSourceUrl"] == family.project_url
+        assert component["copyright"] == family.attribution, (
+            "the published font copyright is not the registered attribution"
+        )
+        assert component["packagedNoticePath"].endswith(
+            family.packaged_license_name
+        ), "the notice does not point at the licence text shipped beside the fonts"
     # The fonts themselves are fetched at build time, so this page stays offline
     # and publishes the register's attribution. That value is not free text: the
     # fetch step and the frozen-candidate audit both reject a font whose own
     # `name` table carries a different notice.
-    assert subtitle_fonts["copyright"] == fonts[0].attribution, (
-        "the published font copyright is not the registered attribution"
-    )
-    assert len({font.attribution for font in fonts}) == 1
-    assert subtitle_fonts["packagedNoticePath"].endswith(packaged_license_notice().packaged_name), (
-        "the notice does not point at the licence text shipped beside the fonts"
-    )
     for component in components:
-        if component["id"] != "subtitle-fonts":
+        if component["id"] not in families:
             assert component["copyright"] is None, (
                 f"{component['id']}: publishes a copyright the projection cannot derive"
             )
@@ -376,7 +379,12 @@ def main() -> int:
     # The OFL text the App carries must be the very file that travels with the
     # fonts inside the package, not a second copy that can drift from it.
     ofl = LICENSE_TEXT_ROOT / "ofl-1.1.txt"
-    assert digest(ofl) == packaged_license_notice().sha256, (
+    noto_license = next(
+        notice
+        for notice in packaged_license_notices()
+        if notice.packaged_name == "NotoSansCJK-LICENSE.txt"
+    )
+    assert digest(ofl) == noto_license.sha256, (
         "the App's OFL text is not the licence text the package fetches and ships"
     )
     assert "SIL OPEN FONT LICENSE Version 1.1" in ofl.read_text(encoding="utf-8")

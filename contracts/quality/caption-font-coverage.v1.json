@@ -42,7 +42,19 @@
     "version": "V2.9.5795",
     "releaseUrl": "https://github.com/Fitzgerald-Porthmouth-Koenigsegg/Plangothic_Project/releases/tag/V2.9.5795",
     "projectCoverageClaim": "CJK Unified Ideographs Extensions B through J",
-    "license": "OFL-1.1"
+    "license": "OFL-1.1",
+    "assets": [
+      {
+        "packagedName": "PlangothicP1-Regular.ttf",
+        "bytes": 20410664,
+        "sha256": "550b5d0775b15405946b18f4843df439a51e69508d7e6778d94c1f7a53dc5ad6"
+      },
+      {
+        "packagedName": "PlangothicP2-Regular.ttf",
+        "bytes": 12459248,
+        "sha256": "681933370adfe0fc7253f77735275a82fea09fe4f8adba907bdeb46c110daf8f"
+      }
+    ]
   },
   "acceptance": {
     "requiredFallbackBlocks": [

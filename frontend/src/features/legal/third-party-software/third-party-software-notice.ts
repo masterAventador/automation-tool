@@ -234,6 +234,11 @@ export const DISTRIBUTED_COMPONENT_PRESENTATION: Readonly<
     noticeHint:
       "它按 SIL 开放字体许可证授权，许可证要求随字体附带版权声明与许可证正文：正文已收录在本页下方，安装包内也在字体旁边放了一份，路径见下。",
   },
+  "plangothic-fonts": {
+    role: "随安装包分发的开源生僻汉字补充字体，与思源/Noto 字体组成字幕 fallback，覆盖 Unicode 扩展 B 至 J。",
+    noticeHint:
+      "它按 SIL 开放字体许可证授权；版权声明来自实际字体元数据，原项目的许可证正文也随字体放入安装包。",
+  },
 };
 
 /** Chinese names for the rights categories the policy denies by default. */

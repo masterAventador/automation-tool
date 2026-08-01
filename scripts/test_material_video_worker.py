@@ -1134,7 +1134,7 @@ class SubtitleFontRightsTest(unittest.TestCase):
             self.assertEqual(font.license, "OFL-1.1")
             self.assertTrue(font.packaged_name.endswith((".ttf", ".ttc")))
             self.assertTrue(
-                font.source_url.startswith(subtitle_font_assets.FONT_SOURCE_URL_PREFIX)
+                font.source_url.startswith(subtitle_font_assets.LOCKED_SOURCE_URL_PREFIXES)
             )
             self.assertRegex(font.sha256, r"^[0-9a-f]{64}$")
             self.assertGreater(font.bytes, 0)

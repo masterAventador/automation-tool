@@ -61,16 +61,10 @@ LICENSE_TEXT_SPDX: dict[str, str] = {
 GPL_3_0_SHA256 = "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
 LICENSE_TEXT_BY_SPDX: dict[str, str] = {"MIT": "mit", "Apache-2.0": "apache-2.0"}
 
-# The subtitle fonts the installer redistributes in place of the four
-# proprietary Windows/macOS system faces the upstream project bundled. They are
-# one disclosure entry rather than one per face: a user reads about a licence and
-# a copyright holder, and both are identical across the faces — the register and
-# the candidate audit are where the per-file digests live.
-SUBTITLE_FONT_COMPONENT_ID = "subtitle-fonts"
-SUBTITLE_FONT_COMPONENT_NAME = "Noto Sans CJK SC"
+# The two font families share the standard OFL terms, while their upstream
+# copyright notices and packaged licence files remain separate and are derived
+# from the rights register.
 SUBTITLE_FONT_LICENSE_TEXT_ID = "ofl-1.1"
-SUBTITLE_FONT_VERSION = "Sans2.004"
-SUBTITLE_FONT_SOURCE_URL = "https://github.com/notofonts/noto-cjk"
 MATERIAL_WORKER_INTERNAL_PREFIX = "material-video-worker/package/_internal"
 LOCAL_EXECUTOR_INTERNAL_PREFIX = "local-executor/package/_internal"
 
@@ -226,24 +220,20 @@ def _media_toolchain_path(layout: dict, key: str) -> str:
     return f"{root}/{_text(layout.get(key), f'package_layout.{key}')}"
 
 
-def subtitle_font_license_path() -> str:
+def subtitle_font_license_path(packaged_name: str) -> str:
     """Where the font licence text lands inside the installed package.
 
     Derived from the asset rights register and the packaging layout the Worker
     spec uses, so a renamed licence file cannot leave this page pointing at
     something the installer never writes.
     """
-    try:
-        notice = subtitle_font_assets.packaged_license_notice()
-    except subtitle_font_assets.SubtitleFontRightsError as error:
-        raise ProjectionError(f"the subtitle fonts are not cleared: {error}") from error
     return (
         f"{MATERIAL_WORKER_INTERNAL_PREFIX}/"
-        f"{subtitle_font_assets.PACKAGED_FONT_DIRECTORY}/{notice.packaged_name}"
+        f"{subtitle_font_assets.PACKAGED_FONT_DIRECTORY}/{packaged_name}"
     )
 
 
-def _subtitle_font_component() -> dict:
+def _subtitle_font_components() -> list[dict]:
     """Disclose the open fonts that replaced the proprietary system faces.
 
     The SIL Open Font License is unlike the other licences on this page: its text
@@ -253,25 +243,27 @@ def _subtitle_font_component() -> dict:
     the licence itself says that notice may live.
     """
     try:
-        fonts = subtitle_font_assets.bundled_subtitle_fonts()
+        families = subtitle_font_assets.bundled_font_families()
     except subtitle_font_assets.SubtitleFontRightsError as error:
         raise ProjectionError(f"the subtitle fonts are not cleared: {error}") from error
-    notices = {font.attribution for font in fonts}
-    if len(notices) != 1:
-        raise ProjectionError("the shipped fonts disagree on their copyright notice")
-    return {
-        "id": SUBTITLE_FONT_COMPONENT_ID,
-        "name": SUBTITLE_FONT_COMPONENT_NAME,
-        "version": SUBTITLE_FONT_VERSION,
-        "license": subtitle_font_assets.OPEN_FONT_LICENSE,
-        "copyleft": False,
-        "copyright": notices.pop(),
-        "licenseTextId": SUBTITLE_FONT_LICENSE_TEXT_ID,
-        "packagedNoticePath": subtitle_font_license_path(),
-        "noticeChannelId": None,
-        "packagedSourcePaths": [],
-        "upstreamSourceUrl": SUBTITLE_FONT_SOURCE_URL,
-    }
+    return [
+        {
+            "id": family.component_id,
+            "name": family.display_name,
+            "version": family.version,
+            "license": subtitle_font_assets.OPEN_FONT_LICENSE,
+            "copyleft": False,
+            "copyright": family.attribution,
+            "licenseTextId": family.license_text_id,
+            "packagedNoticePath": subtitle_font_license_path(
+                family.packaged_license_name
+            ),
+            "noticeChannelId": None,
+            "packagedSourcePaths": [],
+            "upstreamSourceUrl": family.project_url,
+        }
+        for family in families
+    ]
 
 
 def _local_executor_internal_path(value: object, field: str) -> str:
@@ -436,7 +428,7 @@ def _distributed_components(
             "upstreamSourceUrl": None,
         },
         *_silero_vad_components(silero_vad_runtime),
-        _subtitle_font_component(),
+        *_subtitle_font_components(),
     ]
 
 

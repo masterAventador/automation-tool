@@ -124,6 +124,19 @@
       "upstreamSourceUrl": null
     },
     {
+      "id": "plangothic-fonts",
+      "name": "Plangothic P1/P2",
+      "version": "V2.9.5795",
+      "license": "OFL-1.1",
+      "copyleft": false,
+      "copyright": "Copyright (c) 2024 by Fitzgerald P. Köeingsegg. All rights reserved.",
+      "licenseTextId": "ofl-1.1",
+      "packagedNoticePath": "material-video-worker/package/_internal/upstream/resource/fonts/Plangothic-LICENSE-OFL.txt",
+      "noticeChannelId": null,
+      "packagedSourcePaths": [],
+      "upstreamSourceUrl": "https://github.com/Fitzgerald-Porthmouth-Koenigsegg/Plangothic_Project"
+    },
+    {
       "id": "subtitle-fonts",
       "name": "Noto Sans CJK SC",
       "version": "Sans2.004",
@@ -166,7 +179,7 @@
   "assetRights": {
     "deniedByDefault": true,
     "sharedRequiredFieldCount": 12,
-    "registeredEntryCount": 5,
+    "registeredEntryCount": 7,
     "categories": [
       {
         "id": "codec_binary",

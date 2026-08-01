@@ -38,7 +38,7 @@ from build_third_party_notice_ui_projection import (
     subtitle_font_license_path,
 )
 from release_assembly import RELEASE_PACKAGE_RESOURCES
-from subtitle_font_assets import OPEN_FONT_LICENSE
+from subtitle_font_assets import OPEN_FONT_LICENSE, packaged_license_notices
 
 # Field names and values that exist only for the internal rights review.
 INTERNAL_REVIEW_MARKERS = (
@@ -150,7 +150,10 @@ def _contract_declared_paths() -> frozenset[str]:
     # register names the packaged file and the Worker spec installs it from that
     # register, so the page and the installer read one fact.
     try:
-        paths.add(subtitle_font_license_path())
+        paths.update(
+            subtitle_font_license_path(notice.packaged_name)
+            for notice in packaged_license_notices()
+        )
     except ProjectionError as error:
         raise CheckError(f"cannot derive the packaged font licence path: {error}") from error
     try:
