@@ -69,6 +69,7 @@ import {
   type VideoEditingGateway,
 } from "../features/video-editing/video-editing-gateway";
 import type { MaterialLibraryGateway } from "../features/video-editing/material-library-gateway";
+import type { SmartEditGateway } from "../features/video-editing/smart-edit-gateway";
 import {
   AccountPlatformOverview,
   AiAssistantHome,
@@ -456,6 +457,7 @@ interface WorkbenchShellProps {
   readonly materialVideoStudioGateway?: MaterialVideoStudioGateway | undefined;
   readonly videoEditingGateway?: VideoEditingGateway | undefined;
   readonly materialLibraryGateway?: MaterialLibraryGateway | undefined;
+  readonly smartEditGateway?: SmartEditGateway | undefined;
   readonly publishWorkspaceGateway?: PublishWorkspaceGateway | undefined;
   /**
    * The video the publishing page starts with, if one is already chosen.
@@ -482,6 +484,7 @@ export function WorkbenchShell({
   materialVideoStudioGateway = shellMaterialVideoStudioGateway,
   videoEditingGateway = shellVideoEditingGateway,
   materialLibraryGateway,
+  smartEditGateway,
   publishWorkspaceGateway = shellPublishWorkspaceGateway,
   selectedVideo: initialSelectedVideo,
 }: WorkbenchShellProps) {
@@ -692,6 +695,7 @@ export function WorkbenchShell({
                 gateway={materialVideoStudioGateway}
                 editingGateway={videoEditingGateway}
                 materialLibraryGateway={materialLibraryGateway}
+                smartEditGateway={smartEditGateway}
                 onPublishArtifact={publishSelectedVideo}
               />
             ) : activePage === "publishing" ? (

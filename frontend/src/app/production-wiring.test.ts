@@ -27,11 +27,13 @@ import { describe, expect, it } from "vitest";
 // jsdom 环境下 `import.meta.url` 不是 file: scheme，只能从 vitest 的工作目录解析。
 const MAIN = resolve("src/main.tsx");
 const source = readFileSync(MAIN, "utf8");
+const app = readFileSync(resolve("src/app/App.tsx"), "utf8");
 const shell = readFileSync(resolve("src/app/WorkbenchShell.tsx"), "utf8");
 const operations = readFileSync(
   resolve("src/features/operations/OperationsWorkspace.tsx"),
   "utf8",
 );
+const harness = readFileSync(resolve("src/test-harness/main.tsx"), "utf8");
 
 /** `const x = new TauriFoo(...)` → x ↦ TauriFoo */
 function tauriBindings(text: string): ReadonlyMap<string, string> {
@@ -83,6 +85,7 @@ const REQUIRED_TAURI_PROPS = [
   "materialVideoStudioGateway",
   "publishWorkspaceGateway",
   "videoEditingGateway",
+  "smartEditGateway",
 ] as const;
 
 function requireRealTauriGateway(prop: string): void {
@@ -98,6 +101,17 @@ function requireRealTauriGateway(prop: string): void {
 describe("production wiring", () => {
   it.each(REQUIRED_TAURI_PROPS)("%s is handed a real Tauri gateway", (prop) => {
     requireRealTauriGateway(prop);
+  });
+
+  it("carries the real smart-edit gateway through every production layer", () => {
+    expect(app).toMatch(/<WorkbenchShell[\s\S]*smartEditGateway=\{smartEditGateway\}/u);
+    expect(shell).toMatch(/<CreationHub[\s\S]*smartEditGateway=\{smartEditGateway\}/u);
+    expect(operations).toMatch(
+      /<VideoEditingWorkbench[\s\S]*smartEditGateway=\{smartEditGateway\}/u,
+    );
+    expect(harness).toMatch(
+      /const smartEditGateway = new TestHarnessSmartEditGateway\(\)/u,
+    );
   });
 
   /**

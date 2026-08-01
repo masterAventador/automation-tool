@@ -48,6 +48,7 @@ import type { PublishWorkspaceGateway } from "../publishing/publish-workspace-ga
 import { VideoEditingWorkbench } from "../video-editing/VideoEditingWorkbench";
 import type { VideoEditingGateway } from "../video-editing/video-editing-gateway";
 import type { MaterialLibraryGateway } from "../video-editing/material-library-gateway";
+import type { SmartEditGateway } from "../video-editing/smart-edit-gateway";
 import { VideoStudio } from "../video-studio/VideoStudio";
 import type { MaterialVideoStudioGateway } from "../video-studio/material-video-studio-gateway";
 
@@ -505,11 +506,13 @@ export function CreationHub({
   gateway,
   editingGateway,
   materialLibraryGateway,
+  smartEditGateway,
   onPublishArtifact,
 }: {
   readonly gateway: MaterialVideoStudioGateway;
   readonly editingGateway: VideoEditingGateway;
   readonly materialLibraryGateway?: MaterialLibraryGateway | undefined;
+  readonly smartEditGateway?: SmartEditGateway | undefined;
   readonly onPublishArtifact: (video: SelectedVideo) => void;
 }) {
   const [section, setSection] = useState<CreationSection>("works");
@@ -594,6 +597,7 @@ export function CreationHub({
           <VideoEditingWorkbench
             gateway={editingGateway}
             materialLibraryGateway={materialLibraryGateway}
+            smartEditGateway={smartEditGateway}
           />
         </div>
       ) : studioOpen ? (

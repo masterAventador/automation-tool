@@ -29,9 +29,9 @@ test("IM-02 freezes platform-specific Python distributions and Windows cleanup",
   const dependencies = contract.dependencies;
 
   assert.deepEqual(dependencies.expectedInstalledDistributionCountByTarget, {
-    "macos-arm64": 114,
-    "macos-x86_64": 114,
-    "windows-x86_64": 117,
+    "macos-arm64": 116,
+    "macos-x86_64": 116,
+    "windows-x86_64": 119,
   });
   assert.deepEqual(dependencies.platformRequired["windows-x86_64"], {
     colorama: "0.4.6",

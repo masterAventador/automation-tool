@@ -158,6 +158,7 @@ export class TauriSmartEditGateway implements SmartEditGateway {
         throw pollingCancelled();
       }
       const snapshot = await this.get(identifier);
+      options.onSnapshot?.(snapshot);
       if (isTerminal(snapshot)) {
         return snapshot;
       }

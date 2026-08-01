@@ -1117,7 +1117,12 @@ body {
    `e2e/video-editing-tabs.spec.ts`. */
 .video-editing-projects,
 .video-editing-jobs,
+.video-editing-smart-edit,
 .material-library-page {
+  width: 100%;
+}
+
+.video-editing-smart-edit__progress {
   width: 100%;
 }
 

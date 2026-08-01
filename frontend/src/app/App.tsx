@@ -25,6 +25,7 @@ import { ModelServiceSettings } from "../features/settings/ModelServiceSettings"
 import type { MaterialVideoStudioGateway } from "../features/video-studio/material-video-studio-gateway";
 import type { VideoEditingGateway } from "../features/video-editing/video-editing-gateway";
 import type { MaterialLibraryGateway } from "../features/video-editing/material-library-gateway";
+import type { SmartEditGateway } from "../features/video-editing/smart-edit-gateway";
 import type { SelectedVideo } from "../features/publishing/PublishWorkspace";
 import type { PublishWorkspaceGateway } from "../features/publishing/publish-workspace-gateway";
 
@@ -46,6 +47,7 @@ interface AppProps {
   materialVideoStudioGateway?: MaterialVideoStudioGateway;
   videoEditingGateway?: VideoEditingGateway;
   materialLibraryGateway?: MaterialLibraryGateway;
+  smartEditGateway?: SmartEditGateway;
   publishWorkspaceGateway?: PublishWorkspaceGateway | undefined;
   selectedVideo?: SelectedVideo | undefined;
 }
@@ -68,6 +70,7 @@ export function App({
   materialVideoStudioGateway,
   videoEditingGateway,
   materialLibraryGateway,
+  smartEditGateway,
   publishWorkspaceGateway,
   selectedVideo,
 }: AppProps) {
@@ -87,6 +90,7 @@ export function App({
       materialVideoStudioGateway={materialVideoStudioGateway}
       videoEditingGateway={videoEditingGateway}
       materialLibraryGateway={materialLibraryGateway}
+      smartEditGateway={smartEditGateway}
       publishWorkspaceGateway={publishWorkspaceGateway}
       selectedVideo={selectedVideo}
     />

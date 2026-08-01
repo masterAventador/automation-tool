@@ -97,10 +97,14 @@ describe("Tauri smart-edit gateway", () => {
   it("polls with a bound and stops at the first terminal snapshot", async () => {
     vi.useFakeTimers();
     invoke.mockResolvedValueOnce(running()).mockResolvedValueOnce(succeeded());
-    const pending = new TauriSmartEditGateway().waitForTerminal(GENERATION_ID);
+    const onSnapshot = vi.fn();
+    const pending = new TauriSmartEditGateway().waitForTerminal(GENERATION_ID, {
+      onSnapshot,
+    });
     await vi.advanceTimersByTimeAsync(250);
     await expect(pending).resolves.toEqual(succeeded());
     expect(invoke).toHaveBeenCalledTimes(2);
+    expect(onSnapshot.mock.calls).toEqual([[running()], [succeeded()]]);
   });
 
   it("honors AbortSignal before polling and rejects invalid input before invoke", async () => {

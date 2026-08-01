@@ -46,6 +46,26 @@ export const smartEditFailureCodeSchema = z.enum([
 ]);
 export type SmartEditFailureCode = z.infer<typeof smartEditFailureCodeSchema>;
 
+const SMART_EDIT_FAILURE_TEXT: Readonly<Record<SmartEditFailureCode, string>> = {
+  configuration_missing:
+    "智能剪辑尚未配置完成，请先到设置中完成服务配置后重试。",
+  insufficient_materials: "可用素材不足，请先导入更多素材后重试。",
+  source_too_short: "现有素材时长太短，请导入更长的素材后重试。",
+  no_relevant_material: "没有找到与描述相符的素材，请调整描述或导入相关素材后重试。",
+  material_unavailable: "部分素材当前不可用，请在素材库恢复或重新导入后重试。",
+  material_snapshot_conflict: "生成期间素材发生了变化，请确认素材库内容后重新生成。",
+  timeline_revision_conflict: "时间轴已被更新，请刷新当前时间轴后重新生成。",
+  upstream_rejected: "暂时无法完成内容生成，请稍后重试或缩短描述。",
+  workspace_unusable: "本机暂存空间不可用，请释放磁盘空间并确认目录可写后重试。",
+  commit_failed: "草稿未能安全保存，请刷新时间轴确认当前内容后重新生成。",
+  render_failed: "草稿已生成但成片失败，请检查时间轴后重新提交剪辑任务。",
+  operation_unavailable: "智能剪辑当前不可用，请确认本机服务正在运行后重试。",
+};
+
+export function smartEditFailureText(code: SmartEditFailureCode): string {
+  return SMART_EDIT_FAILURE_TEXT[code];
+}
+
 const smartEditPromptSchema = z
   .string()
   .min(1)
@@ -156,6 +176,7 @@ export class SmartEditGatewayError extends Error {
 
 export interface SmartEditPollOptions {
   readonly signal?: AbortSignal;
+  readonly onSnapshot?: (snapshot: SmartEditGenerationSnapshot) => void;
 }
 
 export interface SmartEditGateway {

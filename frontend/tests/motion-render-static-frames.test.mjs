@@ -1,14 +1,13 @@
 // A render that never moves must fail loudly instead of shipping a still image.
 //
-// The observed defect: the packaged authoring reference
+// The original defect: the packaged authoring reference
 // (`vendor/hyperframes/.../minimal-composition.md`) demonstrates the animation
 // runtime as a CDN `<script src="https://...gsap...">`. The render sandbox is
 // offline by construction, so that tag resolves to nothing, `gsap` stays
 // undefined, and the inline setup throws before it can register
-// `window.__timelines`. The Worker then finds no seekable timeline, skips the
-// per-frame seek entirely (`if (seekableDuration > 0)`), screenshots the same
-// untouched first paint `frameCount` times and reports `status: "complete"`.
-// Every gate is green and the deliverable is a static picture.
+// `window.__timelines`. The Worker must now reject that declared-but-missing
+// timeline during bounded warm-up instead of capturing an untouched first paint
+// and reporting `status: "complete"`.
 //
 // These tests drive the real `workers/motion_composition/worker.mjs` through
 // its real stdin protocol against a real Chromium, because the whole point is
@@ -262,8 +261,8 @@ test("a composition whose animation runtime never loads fails instead of shippin
   const event = await renderPage(FROZEN_PAGE, executable, major);
   assert.equal(
     event.reasonCode,
-    "render_static_frames",
-    `a render where every frame is identical must be reported as a failure, got ${JSON.stringify(event)}`,
+    "render_timeout",
+    `a document that declares but never registers its timeline must time out, got ${JSON.stringify(event)}`,
   );
   assert.equal(event.event, "worker.render.failed");
 });

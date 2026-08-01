@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Alert, Button, Card, Empty, Input, Space, Tabs, Tag, Typography } from "antd";
+import {
+  Alert,
+  Button,
+  Card,
+  Empty,
+  Input,
+  Progress,
+  Space,
+  Switch,
+  Tabs,
+  Tag,
+  Typography,
+} from "antd";
 
 import type {
   EditingJobSnapshot,
@@ -17,6 +29,14 @@ import {
 } from "./video-editing-gateway";
 import type { MaterialLibraryGateway } from "./material-library-gateway";
 import { MaterialLibraryPage } from "./MaterialLibraryPage";
+import {
+  SmartEditGatewayError,
+  smartEditFailureText,
+  type SmartEditGateway,
+  type SmartEditGenerationMode,
+  type SmartEditGenerationSnapshot,
+  type SmartEditGenerationStage,
+} from "./smart-edit-gateway";
 
 const TRACK_KIND_LABELS: Record<TimelineTrackKind, string> = {
   visual: "画面轨道",
@@ -65,6 +85,17 @@ const INVALID_TIMELINE_TEXT =
   "时间轴还不完整：请确认每个画面或音频片段已填写素材引用、字幕片段已填写文字，并且时长为有效的毫秒数。";
 const OUTCOME_UNCERTAIN_TEXT =
   "提交结果暂时无法确认。请刷新任务列表确认最终结果，在确认前不要再次提交。";
+
+const SMART_EDIT_STAGE_LABELS: Readonly<Record<SmartEditGenerationStage, string>> = {
+  preparing: "准备",
+  analyzing: "理解素材",
+  scripting: "整理文案",
+  synthesizing: "生成旁白",
+  matching: "匹配画面",
+  selecting: "选择片段",
+  publishing: "保存结果",
+  completed: "完成生成",
+};
 
 interface ClipForm {
   readonly formId: string;
@@ -206,6 +237,164 @@ function MessageAlert({ message }: { readonly message: Message | null }) {
     return null;
   }
   return <Alert type={message.type} showIcon title={message.text} />;
+}
+
+function smartEditGatewayErrorText(error: unknown): string {
+  if (!(error instanceof SmartEditGatewayError)) {
+    return "智能剪辑当前不可用，请确认本机服务正在运行后重试。";
+  }
+  const messages: Readonly<Record<SmartEditGatewayError["code"], string>> = {
+    invalid_request: "请填写有效的一句话描述后重试。",
+    generation_not_found: "本次生成记录已失效，请重新开始生成。",
+    generation_not_cancellable: "本次生成已经结束，请刷新时间轴或任务列表确认结果。",
+    storage_unavailable: "本机无法保存生成状态，请确认磁盘空间和目录权限后重试。",
+    operation_unavailable: "智能剪辑当前不可用，请确认本机服务正在运行后重试。",
+    polling_cancelled: "已停止等待生成结果，可以重新开始生成。",
+    polling_exhausted: "等待生成结果超时，请稍后刷新并确认结果后再重试。",
+  };
+  return messages[error.code];
+}
+
+function smartEditProgressText(
+  snapshot: SmartEditGenerationSnapshot | null,
+): string | null {
+  if (snapshot === null || snapshot.stage === null) {
+    return null;
+  }
+  const stage = SMART_EDIT_STAGE_LABELS[snapshot.stage];
+  let state: string;
+  if (snapshot.status === "succeeded") {
+    state = "生成完成";
+  } else if (snapshot.status === "failed") {
+    state = "在" + stage + "阶段失败";
+  } else if (snapshot.status === "cancelled") {
+    state = "已在" + stage + "阶段取消";
+  } else {
+    state = "正在" + stage;
+  }
+  return state + " · " + String(Math.floor(snapshot.progressPermille / 10)) + "%";
+}
+
+function SmartEditPage({
+  project,
+  prompt,
+  enableThinking,
+  snapshot,
+  busy,
+  message,
+  onPromptChange,
+  onThinkingChange,
+  onStart,
+  onCancel,
+}: {
+  readonly project: EditingProjectSnapshot | null;
+  readonly prompt: string;
+  readonly enableThinking: boolean;
+  readonly snapshot: SmartEditGenerationSnapshot | null;
+  readonly busy: boolean;
+  readonly message: Message | null;
+  readonly onPromptChange: (prompt: string) => void;
+  readonly onThinkingChange: (enabled: boolean) => void;
+  readonly onStart: (mode: SmartEditGenerationMode) => void;
+  readonly onCancel: () => void;
+}) {
+  const cancellable =
+    snapshot?.status === "running" || snapshot?.status === "cancelling";
+  const progressText = smartEditProgressText(snapshot);
+  const actionsDisabled = project === null || prompt.trim() === "" || busy;
+
+  return (
+    <Space orientation="vertical" size="middle" className="video-editing-smart-edit">
+      <Card className="video-editing-panel" title="一句话智能剪辑">
+        <Space orientation="vertical" size="middle">
+          <Typography.Text type="secondary">
+            选择一个剪辑项目，用一句话说明想要的内容。生成草稿后仍可在原时间轴继续调整。
+          </Typography.Text>
+          {project === null ? (
+            <Alert
+              type="info"
+              showIcon
+              title="请先在剪辑项目中打开一个项目，再开始智能剪辑。"
+            />
+          ) : (
+            <Typography.Text strong>当前项目：{project.title}</Typography.Text>
+          )}
+          <Input.TextArea
+            aria-label="一句话描述成片"
+            placeholder="例如：把发布会开场剪成一条节奏明快的 30 秒短片"
+            value={prompt}
+            maxLength={4_000}
+            rows={3}
+            disabled={busy}
+            onChange={(event) => onPromptChange(event.target.value)}
+          />
+          <Space size="small">
+            <Switch
+              aria-label="深度思考"
+              checked={enableThinking}
+              disabled={busy}
+              onChange={onThinkingChange}
+            />
+            <Typography.Text>深度思考</Typography.Text>
+            <Typography.Text type="secondary">
+              {enableThinking ? "已开启" : "默认关闭"}
+            </Typography.Text>
+          </Space>
+          <Space size="small" wrap>
+            <Button
+              type="primary"
+              aria-label="生成草稿"
+              disabled={actionsDisabled}
+              loading={busy && snapshot === null}
+              onClick={() => onStart("draft")}
+            >
+              生成草稿
+            </Button>
+            <Button
+              aria-label="一键直出片"
+              disabled={actionsDisabled}
+              loading={busy && snapshot === null}
+              onClick={() => onStart("render")}
+            >
+              一键直出片
+            </Button>
+            {cancellable ? (
+              <Button
+                danger
+                aria-label="取消生成"
+                disabled={snapshot.status === "cancelling"}
+                onClick={onCancel}
+              >
+                取消生成
+              </Button>
+            ) : null}
+          </Space>
+          {snapshot === null || progressText === null ? null : (
+            <div className="video-editing-smart-edit__progress" aria-live="polite">
+              <Typography.Text>{progressText}</Typography.Text>
+              <Progress
+                percent={snapshot.progressPermille / 10}
+                status={
+                  snapshot.status === "failed"
+                    ? "exception"
+                    : snapshot.status === "succeeded"
+                      ? "success"
+                      : snapshot.status === "cancelled"
+                        ? "normal"
+                      : "active"
+                }
+                showInfo={false}
+              />
+            </div>
+          )}
+          {snapshot?.status === "cancelling" ? (
+            <Typography.Text aria-live="polite">正在取消，请稍候…</Typography.Text>
+          ) : null}
+          <MessageAlert message={message} />
+        </Space>
+      </Card>
+    </Space>
+  );
 }
 
 function ProjectsPage({
@@ -685,6 +874,7 @@ function JobsPage({
   jobs,
   loading,
   submitting,
+  submissionBlocked,
   submissionNeedsConfirmation,
   message,
   onSubmit,
@@ -694,6 +884,7 @@ function JobsPage({
   readonly jobs: readonly EditingJobSnapshot[];
   readonly loading: boolean;
   readonly submitting: boolean;
+  readonly submissionBlocked: boolean;
   readonly submissionNeedsConfirmation: boolean;
   readonly message: Message | null;
   readonly onSubmit: () => void;
@@ -711,7 +902,12 @@ function JobsPage({
               <Button
                 type="primary"
                 aria-label="提交剪辑任务"
-                disabled={project === null || submitting || submissionNeedsConfirmation}
+                disabled={
+                  project === null ||
+                  submitting ||
+                  submissionBlocked ||
+                  submissionNeedsConfirmation
+                }
                 loading={submitting}
                 onClick={onSubmit}
               >
@@ -776,9 +972,11 @@ function JobsPage({
 export function VideoEditingWorkbench({
   gateway,
   materialLibraryGateway,
+  smartEditGateway,
 }: {
   readonly gateway: VideoEditingGateway;
   readonly materialLibraryGateway?: MaterialLibraryGateway | undefined;
+  readonly smartEditGateway?: SmartEditGateway | undefined;
 }) {
   const [projects, setProjects] = useState<readonly EditingProjectSnapshot[]>([]);
   const [projectsLoaded, setProjectsLoaded] = useState(false);
@@ -798,6 +996,12 @@ export function VideoEditingWorkbench({
   const [submitMessage, setSubmitMessage] = useState<Message | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submissionNeedsConfirmation, setSubmissionNeedsConfirmation] = useState(false);
+  const [smartPrompt, setSmartPrompt] = useState("");
+  const [smartThinking, setSmartThinking] = useState(false);
+  const [smartStarting, setSmartStarting] = useState(false);
+  const [smartSnapshot, setSmartSnapshot] =
+    useState<SmartEditGenerationSnapshot | null>(null);
+  const [smartMessage, setSmartMessage] = useState<Message | null>(null);
 
   const mountedRef = useRef(true);
   const selectedProjectIdRef = useRef<string | null>(null);
@@ -811,6 +1015,12 @@ export function VideoEditingWorkbench({
   const submitOperationRef = useRef(0);
   const tracksVersionRef = useRef(0);
   const autoLoadedGatewayRef = useRef<VideoEditingGateway | null>(null);
+  const smartStartingRef = useRef(false);
+  const smartOperationRef = useRef(0);
+  const activeGenerationRef = useRef<string | null>(null);
+  const smartAbortControllerRef = useRef<AbortController | null>(null);
+  const smartCancelRequestedRef = useRef(false);
+  const activeSmartEditGatewayRef = useRef<SmartEditGateway | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -821,6 +1031,18 @@ export function VideoEditingWorkbench({
       jobsRequestRef.current += 1;
       saveOperationRef.current += 1;
       submitOperationRef.current += 1;
+      smartOperationRef.current += 1;
+      smartAbortControllerRef.current?.abort();
+      const generationId = activeGenerationRef.current;
+      if (
+        generationId !== null &&
+        !smartCancelRequestedRef.current &&
+        activeSmartEditGatewayRef.current !== null
+      ) {
+        void Promise.resolve(activeSmartEditGatewayRef.current.cancel(generationId)).catch(
+          () => undefined,
+        );
+      }
     };
   }, []);
 
@@ -998,6 +1220,14 @@ export function VideoEditingWorkbench({
   const openProject = useCallback(
     (project: EditingProjectSnapshot) => {
       const reset = selectedProjectIdRef.current !== project.projectId;
+      if (smartStartingRef.current || activeGenerationRef.current !== null) {
+        setSmartMessage({
+          type: "warning",
+          text: "请先取消当前生成，再切换到其他剪辑项目。",
+        });
+        setActiveTab("smart-edit");
+        return;
+      }
       if (reset) {
         saveOperationRef.current += 1;
         savingRef.current = false;
@@ -1007,6 +1237,8 @@ export function VideoEditingWorkbench({
         submittingRef.current = false;
         setSubmitting(false);
         setSubmissionNeedsConfirmation(false);
+        setSmartSnapshot(null);
+        setSmartMessage(null);
       }
       selectedProjectIdRef.current = project.projectId;
       setSelectedProjectId(project.projectId);
@@ -1155,7 +1387,12 @@ export function VideoEditingWorkbench({
   };
 
   const submitJob = () => {
-    if (selectedProject === null || submittingRef.current) {
+    if (
+      selectedProject === null ||
+      submittingRef.current ||
+      smartStartingRef.current ||
+      activeGenerationRef.current !== null
+    ) {
       return;
     }
     const projectId = selectedProject.projectId;
@@ -1223,6 +1460,182 @@ export function VideoEditingWorkbench({
     })();
   };
 
+  const startSmartEdit = (mode: SmartEditGenerationMode) => {
+    const prompt = smartPrompt.trim();
+    if (
+      smartEditGateway === undefined ||
+      selectedProject === null ||
+      prompt === "" ||
+      smartStartingRef.current ||
+      activeGenerationRef.current !== null
+    ) {
+      return;
+    }
+    const projectId = selectedProject.projectId;
+    const operation = ++smartOperationRef.current;
+    smartStartingRef.current = true;
+    setSmartStarting(true);
+    setSmartSnapshot(null);
+    setSmartMessage(null);
+
+    void (async () => {
+      try {
+        const initial = await smartEditGateway.start({
+          projectId,
+          prompt,
+          enableThinking: smartThinking,
+          mode,
+        });
+        if (
+          !mountedRef.current ||
+          operation !== smartOperationRef.current ||
+          selectedProjectIdRef.current !== projectId
+        ) {
+          await Promise.resolve(smartEditGateway.cancel(initial.generationId)).catch(
+            () => undefined,
+          );
+          return;
+        }
+
+        smartStartingRef.current = false;
+        setSmartStarting(false);
+        activeGenerationRef.current = initial.generationId;
+        activeSmartEditGatewayRef.current = smartEditGateway;
+        smartCancelRequestedRef.current = false;
+        const controller = new AbortController();
+        smartAbortControllerRef.current = controller;
+        setSmartSnapshot(initial);
+
+        const terminal = await smartEditGateway.waitForTerminal(initial.generationId, {
+          signal: controller.signal,
+          onSnapshot: (snapshot) => {
+            if (
+              mountedRef.current &&
+              operation === smartOperationRef.current &&
+              selectedProjectIdRef.current === projectId &&
+              snapshot.generationId === initial.generationId
+            ) {
+              setSmartSnapshot(snapshot);
+            }
+          },
+        });
+        if (
+          !mountedRef.current ||
+          operation !== smartOperationRef.current ||
+          selectedProjectIdRef.current !== projectId ||
+          terminal.generationId !== initial.generationId
+        ) {
+          return;
+        }
+
+        setSmartSnapshot(terminal);
+        if (terminal.timeline !== null) {
+          timelineRequestRef.current += 1;
+          setSavedTimeline(terminal.timeline);
+          tracksVersionRef.current += 1;
+          setTracks(hydrateForm(terminal.timeline));
+          setSaveNeedsConfirmation(false);
+        }
+        if (terminal.status === "succeeded") {
+          const renderJob = terminal.renderJob;
+          if (renderJob === null) {
+            setSmartMessage({
+              type: "success",
+              text: "草稿已生成并放入时间轴，可以继续调整和保存。",
+            });
+            setActiveTab("timeline");
+          } else {
+            jobsRequestRef.current += 1;
+            setJobs((current) => [
+              renderJob,
+              ...current.filter((job) => job.jobId !== renderJob.jobId),
+            ]);
+            setSubmissionNeedsConfirmation(false);
+            setSmartMessage({
+              type: "success",
+              text: "草稿已生成，成片任务正在排队。",
+            });
+            setActiveTab("jobs");
+          }
+        } else if (terminal.status === "failed") {
+          setSmartMessage({
+            type: "error",
+            text:
+              terminal.failureCode === null
+                ? "本次生成未完成，请调整描述后重试。"
+                : smartEditFailureText(terminal.failureCode),
+          });
+        } else {
+          setSmartMessage({
+            type: "warning",
+            text: "已取消本次生成，可以修改描述后重试。",
+          });
+        }
+      } catch (error: unknown) {
+        if (
+          mountedRef.current &&
+          operation === smartOperationRef.current &&
+          selectedProjectIdRef.current === projectId
+        ) {
+          setSmartMessage({ type: "error", text: smartEditGatewayErrorText(error) });
+        }
+      } finally {
+        if (operation === smartOperationRef.current) {
+          smartStartingRef.current = false;
+          activeGenerationRef.current = null;
+          activeSmartEditGatewayRef.current = null;
+          smartAbortControllerRef.current = null;
+          smartCancelRequestedRef.current = false;
+        }
+        if (
+          mountedRef.current &&
+          operation === smartOperationRef.current &&
+          selectedProjectIdRef.current === projectId
+        ) {
+          setSmartStarting(false);
+        }
+      }
+    })();
+  };
+
+  const cancelSmartEdit = () => {
+    const generationId = activeGenerationRef.current;
+    const activeGateway = activeSmartEditGatewayRef.current;
+    if (
+      activeGateway === null ||
+      generationId === null ||
+      smartCancelRequestedRef.current
+    ) {
+      return;
+    }
+    smartCancelRequestedRef.current = true;
+    setSmartMessage(null);
+    void activeGateway
+      .cancel(generationId)
+      .then((snapshot) => {
+        if (
+          mountedRef.current &&
+          activeGenerationRef.current === generationId
+        ) {
+          setSmartSnapshot(snapshot);
+        }
+      })
+      .catch((error: unknown) => {
+        if (
+          mountedRef.current &&
+          activeGenerationRef.current === generationId
+        ) {
+          smartCancelRequestedRef.current = false;
+          setSmartMessage({ type: "error", text: smartEditGatewayErrorText(error) });
+        }
+      });
+  };
+
+  const smartBusy =
+    smartStarting ||
+    smartSnapshot?.status === "running" ||
+    smartSnapshot?.status === "cancelling";
+
   return (
     <section className="video-editing" aria-label="视频剪辑工作区">
       <Tabs
@@ -1262,6 +1675,28 @@ export function VideoEditingWorkbench({
               />
             ),
           },
+          ...(smartEditGateway === undefined
+            ? []
+            : [
+                {
+                  key: "smart-edit",
+                  label: "智能剪辑",
+                  children: (
+                    <SmartEditPage
+                      project={selectedProject}
+                      prompt={smartPrompt}
+                      enableThinking={smartThinking}
+                      snapshot={smartSnapshot}
+                      busy={smartBusy}
+                      message={smartMessage}
+                      onPromptChange={setSmartPrompt}
+                      onThinkingChange={setSmartThinking}
+                      onStart={startSmartEdit}
+                      onCancel={cancelSmartEdit}
+                    />
+                  ),
+                },
+              ]),
           {
             key: "timeline",
             label: "时间轴编辑",
@@ -1312,6 +1747,7 @@ export function VideoEditingWorkbench({
                 jobs={jobs}
                 loading={jobsLoading}
                 submitting={submitting}
+                submissionBlocked={smartBusy}
                 submissionNeedsConfirmation={submissionNeedsConfirmation}
                 message={submitMessage}
                 onSubmit={submitJob}
