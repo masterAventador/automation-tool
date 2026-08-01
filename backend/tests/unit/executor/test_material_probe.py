@@ -5509,7 +5509,7 @@ class TestMaterialPathRegistryOnAPlatformWithoutTheseFlags:
         source = _source(tmp_path)
         identifier = uuid.uuid4()
         MaterialPathRegistry(state_directory=state).register(identifier, source)
-        monkeypatch.delattr(os, flag, raising=True)
+        monkeypatch.delattr(os, flag, raising=False)
         assert not hasattr(os, flag)
         assert MaterialPathRegistry(state_directory=state).resolve(identifier)[0] == source
 
@@ -5518,7 +5518,7 @@ class TestMaterialPathRegistryOnAPlatformWithoutTheseFlags:
     ) -> None:
         """The same omission one function over, found by the same question."""
         source = _source(tmp_path, payload=_positional_bytes(4096))
-        monkeypatch.delattr(os, "O_NONBLOCK", raising=True)
+        monkeypatch.delattr(os, "O_NONBLOCK", raising=False)
         assert not hasattr(os, "O_NONBLOCK")
         assert read_content_digest(source) == hashlib.sha256(source.read_bytes()).hexdigest()
 
@@ -5529,6 +5529,7 @@ class TestMaterialPathRegistryOnAPlatformWithoutTheseFlags:
 
         source = _source(tmp_path, payload=b"before\x1aafter")
         binary_flag = 1 << 29
+        native_binary_flag = getattr(os, "O_BINARY", 0)
         real_open = os.open
         opened_with: list[int] = []
 
@@ -5536,7 +5537,7 @@ class TestMaterialPathRegistryOnAPlatformWithoutTheseFlags:
             path: str | bytes | os.PathLike[str] | os.PathLike[bytes], flags: int
         ) -> int:
             opened_with.append(flags)
-            return real_open(path, flags & ~binary_flag)
+            return real_open(path, (flags & ~binary_flag) | native_binary_flag)
 
         monkeypatch.setattr(os, "O_BINARY", binary_flag, raising=False)
         monkeypatch.setattr(os, "open", record_open)
