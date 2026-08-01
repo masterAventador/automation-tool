@@ -17,7 +17,6 @@ from pathlib import Path
 from uuid import UUID
 
 from acceptance_postgres import WINDOWS_POSTGRES_ROOT_ENVIRONMENT
-from automation_tool.executor.material_probe import MaterialPathRegistry
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from desktop_e2e_prerequisites import (
     DEBUG_APP_RESOURCE_ROOT,
@@ -32,6 +31,8 @@ from run_i2_13_acceptance import require_port_closed, unused_loopback_port
 from run_t3_06_acceptance import base64url
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+
+from automation_tool.executor.material_probe import MaterialPathRegistry
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
@@ -48,8 +49,7 @@ def acceptance_environment(source: Mapping[str, str] | None = None) -> dict[str,
     return {
         key: value
         for key, value in ambient.items()
-        if not key.startswith("AUTOMATION_TOOL_")
-        or key == WINDOWS_POSTGRES_ROOT_ENVIRONMENT
+        if not key.startswith("AUTOMATION_TOOL_") or key == WINDOWS_POSTGRES_ROOT_ENVIRONMENT
     }
 
 
@@ -323,7 +323,8 @@ def main() -> int:
                     start_new_session=sys.platform != "win32",
                 )
                 try:
-                    output_bytes, _ = app_process.communicate(timeout=420)
+                    # Includes the cold Windows package verification plus the render journey.
+                    output_bytes, _ = app_process.communicate(timeout=780)
                 except subprocess.TimeoutExpired as error:
                     raise RuntimeError("LE-17 hidden App journey did not finish") from error
                 output = output_bytes.decode("utf-8", errors="replace")

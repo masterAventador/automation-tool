@@ -10,10 +10,12 @@ interface VideoEditingPreparation {
 
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+// A cold Windows install verifies roughly 519 MB of packaged Executor/browser bytes.
+const startupTimeout = process.platform === "win32" ? 360_000 : 120_000;
 
 describe("LE-17 production App local-video editing acceptance", () => {
   it("creates, saves and renders a controlled material into a real Artifact", async () => {
-    await waitForStartup();
+    await waitForStartup({ timeout: startupTimeout });
     const preparation = (await browser.tauri.execute(({ core }) =>
       core.invoke("prepare_video_editing_for_acceptance"),
     )) as VideoEditingPreparation;
