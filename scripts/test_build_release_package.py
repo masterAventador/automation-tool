@@ -7,19 +7,320 @@ notarises, signs or builds a bundle — those need Apple and forty minutes.
 
 from __future__ import annotations
 
+import argparse
 import os
+import plistlib
 import subprocess
 import sys
 import tempfile
 import tokenize
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import build_release_package  # noqa: E402
 from build_release_package import attach_command  # noqa: E402
+from build_release_package import embed_release_identity  # noqa: E402
+from release_identity import SourceFacts  # noqa: E402
+
+
+class SignedReleaseIdentityTests(unittest.TestCase):
+    def test_pre_set_snapshot_environment_cannot_bypass_materialization(self) -> None:
+        source_facts = SourceFacts(git_commit="a" * 40, tree_sha256="b" * 64)
+        environment = {
+            build_release_package.SOURCE_SNAPSHOT_ENVIRONMENT: os.fspath(ROOT),
+            build_release_package.SOURCE_SNAPSHOT_IDENTITY_ENVIRONMENT: source_facts.tree_sha256,
+        }
+        with (
+            mock.patch.dict(os.environ, environment, clear=False),
+            mock.patch.object(
+                build_release_package,
+                "repository_source_facts",
+                return_value=source_facts,
+            ),
+        ):
+            os.environ.pop(
+                "AUTOMATION_TOOL_RELEASE_SOURCE_CAPABILITY_FD",
+                None,
+            )
+            with self.assertRaisesRegex(
+                build_release_package.ReleaseFailed,
+                "capability",
+            ):
+                build_release_package.require_materialized_source_snapshot(
+                    ROOT / ".local" / "release-work"
+                )
+
+    def test_snapshot_capability_is_parent_bound_and_consumed_once(self) -> None:
+        source_facts = SourceFacts(git_commit="a" * 40, tree_sha256="b" * 64)
+        capability_name = "AUTOMATION_TOOL_RELEASE_SOURCE_CAPABILITY_FD"
+        read_descriptor, write_descriptor = os.pipe()
+        payload = b"\0".join(
+            (
+                b"automation-tool.release-source-snapshot.v1",
+                str(os.getppid()).encode("ascii"),
+                os.fsencode(ROOT),
+                source_facts.tree_sha256.encode("ascii") + b"\n",
+            )
+        )
+        os.write(write_descriptor, payload)
+        os.close(write_descriptor)
+        try:
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {capability_name: str(read_descriptor)},
+                    clear=False,
+                ),
+                mock.patch.object(
+                    build_release_package,
+                    "repository_source_facts",
+                    return_value=source_facts,
+                ),
+            ):
+                os.environ.pop(build_release_package.SOURCE_SNAPSHOT_ENVIRONMENT, None)
+                os.environ.pop(
+                    build_release_package.SOURCE_SNAPSHOT_IDENTITY_ENVIRONMENT,
+                    None,
+                )
+                with mock.patch.object(
+                    build_release_package,
+                    "require_snapshot_repository_layout",
+                ):
+                    build_release_package.require_materialized_source_snapshot(
+                        ROOT / ".local" / "release-work"
+                    )
+                self.assertNotIn(capability_name, os.environ)
+            with self.assertRaises(OSError):
+                os.fstat(read_descriptor)
+        finally:
+            try:
+                os.close(read_descriptor)
+            except OSError:
+                pass
+
+    def test_snapshot_capability_cannot_bless_the_ordinary_checkout(self) -> None:
+        source_facts = build_release_package.repository_source_facts(ROOT)
+        capability_name = build_release_package.SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT
+        read_descriptor, write_descriptor = os.pipe()
+        payload = b"\0".join(
+            (
+                build_release_package.SOURCE_SNAPSHOT_CAPABILITY_MAGIC,
+                str(os.getppid()).encode("ascii"),
+                os.fsencode(ROOT),
+                source_facts.tree_sha256.encode("ascii") + b"\n",
+            )
+        )
+        os.write(write_descriptor, payload)
+        os.close(write_descriptor)
+        try:
+            with mock.patch.dict(
+                os.environ,
+                {capability_name: str(read_descriptor)},
+                clear=False,
+            ):
+                with self.assertRaisesRegex(
+                    build_release_package.ReleaseFailed,
+                    "snapshot layout",
+                ):
+                    build_release_package.require_materialized_source_snapshot(
+                        ROOT / ".local" / "release-work"
+                    )
+        finally:
+            try:
+                os.close(read_descriptor)
+            except OSError:
+                pass
+
+    def test_snapshot_restart_preserves_the_callers_relative_path_base(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            caller = base / "frontend"
+            caller.mkdir()
+            work_directory = base / "release-work"
+            source_facts = SourceFacts(git_commit="a" * 40, tree_sha256="b" * 64)
+            child: subprocess.CompletedProcess[str] = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+            )
+
+            with (
+                mock.patch.object(Path, "cwd", return_value=caller),
+                mock.patch.object(
+                    build_release_package,
+                    "require_source_stable_work_directory",
+                    return_value=work_directory,
+                ),
+                mock.patch.object(
+                    build_release_package,
+                    "repository_source_facts",
+                    return_value=source_facts,
+                ),
+                mock.patch.object(
+                    build_release_package,
+                    "materialize_repository_snapshot",
+                ),
+                mock.patch.object(
+                    build_release_package,
+                    "_link_snapshot_build_dependency",
+                ),
+                mock.patch.object(
+                    build_release_package.subprocess,
+                    "run",
+                    return_value=child,
+                ) as run,
+                mock.patch.object(sys, "argv", ["build_release_package.py", "--work-dir", "../out"]),
+            ):
+                result = build_release_package.run_from_materialized_source_snapshot(
+                    argparse.Namespace(work_dir=work_directory)
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(run.call_args.kwargs["cwd"], caller.resolve())
+
+    def test_linked_build_dependency_does_not_change_snapshot_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "root"
+            snapshot = base / "snapshot"
+            root.mkdir()
+            subprocess.run(["git", "init", "-q", root], check=True)
+            (root / ".gitignore").write_text(".local/\n", encoding="utf-8")
+            (root / "tracked.txt").write_text("reviewed\n", encoding="utf-8")
+            subprocess.run(["git", "-C", root, "add", "."], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    root,
+                    "-c",
+                    "user.name=Release Test",
+                    "-c",
+                    "user.email=release@example.invalid",
+                    "commit",
+                    "-qm",
+                    "snapshot fixture",
+                ],
+                check=True,
+            )
+            dependency = root / ".local"
+            dependency.mkdir()
+            (dependency / "cache.bin").write_bytes(b"build-only")
+            subprocess.run(
+                ["git", "clone", "--quiet", os.fspath(root), os.fspath(snapshot)],
+                check=True,
+            )
+            expected = build_release_package.repository_source_facts(root)
+
+            with mock.patch.object(build_release_package, "REPOSITORY_ROOT", root):
+                build_release_package._link_snapshot_build_dependency(
+                    snapshot,
+                    Path(".local"),
+                )
+
+            self.assertEqual(
+                build_release_package.repository_source_facts(snapshot),
+                expected,
+            )
+
+    def test_release_rejects_a_repository_work_directory_that_changes_the_source_snapshot(
+        self,
+    ) -> None:
+        unsafe = ROOT / "frontend" / "release-work"
+        safe = ROOT / ".local" / "release-work"
+
+        with self.assertRaises(build_release_package.ReleaseFailed):
+            build_release_package.require_source_stable_work_directory(unsafe)
+        self.assertEqual(
+            build_release_package.require_source_stable_work_directory(safe),
+            safe.resolve(),
+        )
+
+        source = Path(build_release_package.__file__).read_text(encoding="utf-8")
+        start = source.index("def build_macos_release")
+        work_directory_gate = source.index("require_source_stable_work_directory(", start)
+        source_snapshot = source.index("repository_source_facts(REPOSITORY_ROOT)", start)
+        self.assertLess(work_directory_gate, source_snapshot)
+
+    def test_release_reuses_the_locked_third_party_source_gate_before_identity(self) -> None:
+        source = Path(build_release_package.__file__).read_text(encoding="utf-8")
+        start = source.index("def build_macos_release")
+        gate = source.index("check_third_party_sources.py", start)
+        identity = source.index("repository_source_facts(REPOSITORY_ROOT)", start)
+        self.assertLess(gate, identity)
+
+    def test_release_entry_restarts_the_build_from_the_materialized_snapshot(self) -> None:
+        source = Path(build_release_package.__file__).read_text(encoding="utf-8")
+        main = source.index("def main()")
+        snapshot = source.index("run_from_materialized_source_snapshot(", main)
+        build = source.index("build_macos_release(", main)
+        self.assertLess(snapshot, build)
+
+    def test_release_identity_is_embedded_before_the_outer_app_seal(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory) / "Product.app"
+            contents = app / "Contents"
+            contents.mkdir(parents=True)
+            plist_path = contents / "Info.plist"
+            with plist_path.open("wb") as target:
+                plistlib.dump(
+                    {
+                        "CFBundleIdentifier": "com.aventador.automationtool",
+                        "CFBundleShortVersionString": "0.1.0",
+                    },
+                    target,
+                )
+            plist_path.chmod(0o644)
+
+            real_chmod = os.chmod
+
+            def windows_312_chmod(
+                path: str | os.PathLike[str],
+                mode: int,
+                **options: object,
+            ) -> None:
+                if "follow_symlinks" in options:
+                    raise NotImplementedError(
+                        "follow_symlinks is unavailable on Windows 3.12"
+                    )
+                real_chmod(path, mode)
+
+            with mock.patch.object(os, "chmod", side_effect=windows_312_chmod):
+                embed_release_identity(
+                    application=app,
+                    source=SourceFacts(git_commit="a" * 40, tree_sha256="b" * 64),
+                    build_id="eb11-current",
+                    target_id="macos-arm64",
+                    architecture="aarch64",
+                    deployment_profile_id="demo-xuanbai",
+                )
+
+            with plist_path.open("rb") as plist_source:
+                identity = plistlib.load(plist_source)["AutomationToolReleaseIdentity"]
+            self.assertEqual(plist_path.stat().st_mode & 0o777, 0o644)
+            self.assertEqual(
+                identity,
+                {
+                    "architecture": "aarch64",
+                    "buildId": "eb11-current",
+                    "deploymentProfileId": "demo-xuanbai",
+                    "schema": "automation-tool.release-identity.v1",
+                    "sourceGitCommit": "a" * 40,
+                    "sourceTreeSha256": "b" * 64,
+                    "target": "macos-arm64",
+                },
+            )
+
+        source_code = Path(build_release_package.__file__).read_text(encoding="utf-8")
+        embedded = source_code.index(
+            "embed_release_identity(",
+            source_code.index("def build_macos_release"),
+        )
+        sealed = source_code.index("install_runtime_resources_and_sign(", embedded)
+        self.assertLess(embedded, sealed)
 
 
 class TheAppIsNotCopiedByHdiutil(unittest.TestCase):

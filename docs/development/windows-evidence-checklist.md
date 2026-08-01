@@ -374,15 +374,17 @@ CPU 秒，那是任何宿主都到不了的死约束，现在直接被拒。
 链路与包内容负面检查；跨机确定性比对；低配机与休眠恢复注入。通过后更新
 `docs/development/BM-16.md` 遗留项并评估 BM-05/07/08/15/16 五项 `🔍 待验收` 闭合。
 
-### 11. EB-11 登录与 Session Windows 验收（✅ 2026-07-25 已完成）
+### 11. EB-11 登录与 Session Windows 验收（staged ✅；正式 App 待补）
 
 EB-11 已在 macOS 用 staged 内置 Chromium + 全新 0o700 私有 Profile 完成登录整链
 （QR 状态机与人工接管、会话四态探测、重启复用、注销清理）与正式命令面
 （douyin.login.open/recheck/logout）验收，入口
 `cd backend && uv run pytest tests/integration/test_douyin_login_embedded_browser.py`。
-Windows 侧待补：同套测试在 Windows staged 内置 Chromium（EB-04 缓存）上重跑，
-Profile 权限语义按 Windows ACL 等价校验。真实扫码另标 🔍 待真实账号，不属 Windows
-会话职责。通过后更新 `docs/development/EB-11.md` 遗留项。
+Windows staged 内置 Chromium（EB-04 缓存）与 Windows ACL 等价校验已于
+2026-07-25 重跑通过；该结果只闭合 staged 集成链，不是用户可操作的正式 App 证据。
+Windows 正式 App 仍须从“账号与平台”正常入口补做登录状态复查、安全注销、真实扫码、
+手机确认、退出零残留与重启复用；不得再把真实扫码排除在 Windows 正式 App 会话职责外。
+通过后更新 `docs/development/EB-11.md` 遗留项。
 
 ### 12. EB-12 搜索/浏览/候选提取迁移 Windows 验收（✅ 2026-07-25 已完成）
 
