@@ -482,7 +482,7 @@ export function MaterialLibraryPage({
                   <Input.TextArea
                     aria-label={`素材说明 ${suffix}`}
                     value={drafts[id] ?? ""}
-                    autoSize={{ minRows: 2, maxRows: 5 }}
+                    rows={3}
                     onChange={(event) =>
                       setDrafts((current) => ({
                         ...current,
