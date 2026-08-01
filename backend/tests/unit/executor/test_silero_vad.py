@@ -27,13 +27,20 @@ FIXTURE_LICENSE = (
 MODEL_RELATIVE = "speech/silero-vad/silero_vad_16k_op15.onnx"
 LICENSE_RELATIVE = "speech/silero-vad/SILERO-VAD-LICENSE.txt"
 CONTRACT_RELATIVE = "contracts/quality/silero-vad-runtime.v1.json"
-ONNXRUNTIME_LICENSE_BYTES = 1_073
-ONNXRUNTIME_LICENSE_SHA256 = "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
-
 assert isinstance(onnxruntime.__file__, str)
 ONNXRUNTIME_LICENSE = Path(onnxruntime.__file__).with_name("LICENSE").read_bytes()
-assert len(ONNXRUNTIME_LICENSE) == ONNXRUNTIME_LICENSE_BYTES
-assert hashlib.sha256(ONNXRUNTIME_LICENSE).hexdigest() == ONNXRUNTIME_LICENSE_SHA256
+LF_ONNXRUNTIME_LICENSE = ONNXRUNTIME_LICENSE.replace(b"\r\n", b"\n")
+WINDOWS_ONNXRUNTIME_LICENSE = LF_ONNXRUNTIME_LICENSE.replace(b"\n", b"\r\n")
+assert len(LF_ONNXRUNTIME_LICENSE) == 1_073
+assert (
+    hashlib.sha256(LF_ONNXRUNTIME_LICENSE).hexdigest()
+    == "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+)
+assert len(WINDOWS_ONNXRUNTIME_LICENSE) == 1_094
+assert (
+    hashlib.sha256(WINDOWS_ONNXRUNTIME_LICENSE).hexdigest()
+    == "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674"
+)
 
 
 def _sha256(payload: bytes) -> str:
@@ -44,6 +51,38 @@ def test_source_runtime_resolves_the_repository_contract() -> None:
     repository = silero_vad_module._repository_root()
 
     assert (repository / CONTRACT_RELATIVE).is_file()
+
+
+def test_locked_asset_reader_requests_binary_mode_when_the_platform_defines_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = b"header\r\n\x1abinary\r\ntail"
+    asset = tmp_path / "locked.onnx"
+    asset.write_bytes(payload)
+    binary_flag = 1 << 28
+    real_open = os.open
+    observed_flags: list[int] = []
+
+    def recording_open(
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        flags: int,
+        mode: int = 0o777,
+    ) -> int:
+        observed_flags.append(flags)
+        return real_open(path, flags & ~binary_flag, mode)
+
+    monkeypatch.setattr(os, "O_BINARY", binary_flag, raising=False)
+    monkeypatch.setattr(os, "open", recording_open)
+
+    assert (
+        silero_vad_module._read_stable_regular_file(
+            asset,
+            maximum_bytes=len(payload),
+            exact_bytes=len(payload),
+        )
+        == payload
+    )
+    assert observed_flags and observed_flags[0] & binary_flag
 
 
 def _contract() -> dict[str, object]:
@@ -90,8 +129,16 @@ def _contract() -> dict[str, object]:
             "provider": "CPUExecutionProvider",
             "licenseSpdx": "MIT",
             "packagedLicensePath": "onnxruntime/LICENSE",
-            "licenseBytes": ONNXRUNTIME_LICENSE_BYTES,
-            "licenseSha256": ONNXRUNTIME_LICENSE_SHA256,
+            "licenseArtifacts": {
+                "lf": {
+                    "bytes": 1_073,
+                    "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+                },
+                "crlf": {
+                    "bytes": 1_094,
+                    "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674",
+                },
+            },
         },
     }
 
@@ -371,6 +418,15 @@ def test_candidate_gate_accepts_the_complete_digest_locked_runtime(
     tmp_path: Path,
 ) -> None:
     bundle = _write_candidate(tmp_path)
+
+    audit_packaged_silero_vad_runtime(bundle)
+
+
+def test_candidate_gate_accepts_the_locked_windows_wheel_license(
+    tmp_path: Path,
+) -> None:
+    bundle = _write_candidate(tmp_path)
+    (bundle / "_internal/onnxruntime/LICENSE").write_bytes(WINDOWS_ONNXRUNTIME_LICENSE)
 
     audit_packaged_silero_vad_runtime(bundle)
 

@@ -50,7 +50,15 @@
     "provider": "CPUExecutionProvider",
     "licenseSpdx": "MIT",
     "packagedLicensePath": "onnxruntime/LICENSE",
-    "licenseBytes": 1073,
-    "licenseSha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+    "licenseArtifacts": {
+      "lf": {
+        "bytes": 1073,
+        "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+      },
+      "crlf": {
+        "bytes": 1094,
+        "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674"
+      }
+    }
   }
 }

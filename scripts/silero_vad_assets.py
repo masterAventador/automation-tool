@@ -168,15 +168,23 @@ def load_silero_vad_contract(
     ):
         _reject("the Silero VAD license is not MIT")
     runtime = _object(root.get("runtime"), "runtime")
+    expected_runtime_licenses = {
+        "lf": {
+            "bytes": 1_073,
+            "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+        },
+        "crlf": {
+            "bytes": 1_094,
+            "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674",
+        },
+    }
     if (
         runtime.get("distribution") != "onnxruntime"
         or runtime.get("version") != "1.23.2"
         or runtime.get("provider") != "CPUExecutionProvider"
         or runtime.get("licenseSpdx") != "MIT"
         or runtime.get("packagedLicensePath") != "onnxruntime/LICENSE"
-        or runtime.get("licenseBytes") != 1_073
-        or runtime.get("licenseSha256")
-        != "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+        or runtime.get("licenseArtifacts") != expected_runtime_licenses
     ):
         _reject("the Silero VAD runtime is not locked to CPU ONNX Runtime")
     model = _locked_asset(

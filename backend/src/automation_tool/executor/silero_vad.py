@@ -37,9 +37,17 @@ ONNXRUNTIME_VERSION: Final = "1.23.2"
 MAXIMUM_CONTRACT_BYTES: Final = 64 * 1024
 _READ_CHUNK_BYTES: Final = 1024 * 1024
 ONNXRUNTIME_LICENSE_RELATIVE_PATH: Final = PurePosixPath("onnxruntime/LICENSE")
-ONNXRUNTIME_LICENSE_BYTES: Final = 1_073
-ONNXRUNTIME_LICENSE_SHA256: Final = (
-    "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+ONNXRUNTIME_LICENSE_ARTIFACTS: Final = (
+    (
+        "lf",
+        1_073,
+        "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+    ),
+    (
+        "crlf",
+        1_094,
+        "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674",
+    ),
 )
 
 
@@ -65,7 +73,7 @@ class _LockedFile:
 class _RuntimeContract:
     model: _LockedFile
     license: _LockedFile
-    onnxruntime_license: _LockedFile
+    onnxruntime_licenses: tuple[_LockedFile, ...]
 
 
 def _repository_root() -> Path:
@@ -140,7 +148,7 @@ def _read_stable_regular_file(
     """Read only the ordinary non-link file held by the checked descriptor."""
     descriptor: int | None = None
     try:
-        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0)
         flags |= getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(path, flags)
         before = os.fstat(descriptor)
@@ -223,10 +231,30 @@ def _load_contract(path: Path) -> _RuntimeContract:
         or runtime.get("provider") != CPU_PROVIDER
         or runtime.get("licenseSpdx") != "MIT"
         or runtime.get("packagedLicensePath") != ONNXRUNTIME_LICENSE_RELATIVE_PATH.as_posix()
-        or runtime.get("licenseBytes") != ONNXRUNTIME_LICENSE_BYTES
-        or runtime.get("licenseSha256") != ONNXRUNTIME_LICENSE_SHA256
     ):
         _reject()
+    license_artifacts = runtime.get("licenseArtifacts")
+    if not isinstance(license_artifacts, dict) or set(license_artifacts) != {
+        name for name, _bytes, _sha256 in ONNXRUNTIME_LICENSE_ARTIFACTS
+    }:
+        _reject()
+    onnxruntime_licenses: list[_LockedFile] = []
+    for name, expected_bytes, expected_sha256 in ONNXRUNTIME_LICENSE_ARTIFACTS:
+        record = license_artifacts.get(name)
+        if (
+            not isinstance(record, dict)
+            or set(record) != {"bytes", "sha256"}
+            or record.get("bytes") != expected_bytes
+            or record.get("sha256") != expected_sha256
+        ):
+            _reject()
+        onnxruntime_licenses.append(
+            _LockedFile(
+                relative_path=ONNXRUNTIME_LICENSE_RELATIVE_PATH,
+                bytes=expected_bytes,
+                sha256=expected_sha256,
+            )
+        )
     license_record = document.get("license")
     if (
         not isinstance(license_record, dict)
@@ -239,11 +267,7 @@ def _load_contract(path: Path) -> _RuntimeContract:
     return _RuntimeContract(
         model=_locked_file(model, expected_path=MODEL_RELATIVE_PATH),
         license=_locked_file(license_record, expected_path=LICENSE_RELATIVE_PATH),
-        onnxruntime_license=_LockedFile(
-            relative_path=ONNXRUNTIME_LICENSE_RELATIVE_PATH,
-            bytes=ONNXRUNTIME_LICENSE_BYTES,
-            sha256=ONNXRUNTIME_LICENSE_SHA256,
-        ),
+        onnxruntime_licenses=tuple(onnxruntime_licenses),
     )
 
 
@@ -256,6 +280,19 @@ def _verified_regular_file_bytes(path: Path, locked: _LockedFile) -> bytes:
     if payload is None or hashlib.sha256(payload).hexdigest() != locked.sha256:
         _reject()
     return payload
+
+
+def _verified_one_of_regular_file_bytes(path: Path, locked_files: tuple[_LockedFile, ...]) -> bytes:
+    for locked in locked_files:
+        payload = _read_stable_regular_file(
+            path,
+            maximum_bytes=locked.bytes,
+            exact_bytes=locked.bytes,
+        )
+        if payload is not None and hashlib.sha256(payload).hexdigest() == locked.sha256:
+            return payload
+    _reject()
+    raise AssertionError("unreachable")
 
 
 def _resolved_assets(package_root: Path | None) -> tuple[bytes, _RuntimeContract]:
@@ -286,8 +323,8 @@ def audit_packaged_silero_vad_runtime(bundle_directory: Path) -> None:
 
     package_root = Path(bundle_directory) / "_internal"
     _model_payload, contract = _resolved_assets(package_root)
-    runtime_license = package_root.joinpath(*contract.onnxruntime_license.relative_path.parts)
-    _verified_regular_file_bytes(runtime_license, contract.onnxruntime_license)
+    runtime_license = package_root.joinpath(*contract.onnxruntime_licenses[0].relative_path.parts)
+    _verified_one_of_regular_file_bytes(runtime_license, contract.onnxruntime_licenses)
     capi = package_root / "onnxruntime/capi"
     try:
         metadata = capi.lstat()
