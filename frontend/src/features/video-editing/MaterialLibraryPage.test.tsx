@@ -278,7 +278,13 @@ describe("material library page", () => {
       );
     const deleteMaterial = vi
       .fn<MaterialLibraryGateway["deleteMaterial"]>()
-      .mockRejectedValueOnce(new MaterialLibraryGatewayError("material_service_unavailable", false))
+      .mockRejectedValueOnce(
+        Object.assign(new Error("cross-realm native error"), {
+          name: "MaterialLibraryGatewayError",
+          code: "compensation_failed",
+          retryable: true,
+        }),
+      )
       .mockResolvedValueOnce();
     const user = userEvent.setup();
     render(
@@ -304,7 +310,9 @@ describe("material library page", () => {
     await user.click(screen.getByRole("button", { name: `删除素材 ${VIDEO_ID.slice(0, 8)}` }));
     expect(deleteMaterial).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: `确认删除素材 ${VIDEO_ID.slice(0, 8)}` }));
-    expect(await screen.findByText("暂时不能删除这个素材；它可能仍被剪辑项目使用，请调整后重试。")).toBeVisible();
+    expect(
+      await screen.findByText("素材已从库中移除，但本机记录还未清理；请再次点击确认清理。"),
+    ).toBeVisible();
     expect(screen.getByText(`素材 ${VIDEO_ID.slice(0, 8)}`)).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: `确认删除素材 ${VIDEO_ID.slice(0, 8)}` }));

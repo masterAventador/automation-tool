@@ -61,6 +61,7 @@ from automation_tool.control_plane.application.editing_jobs import (
 from automation_tool.control_plane.domain import (
     ArtifactId,
     CaptionStyle,
+    DescriptionSource,
     EditingJob,
     EditingJobFailureCode,
     EditingJobId,
@@ -70,7 +71,9 @@ from automation_tool.control_plane.domain import (
     EditingProjectId,
     InstallationId,
     InvalidEditingJobModel,
+    Material,
     MaterialId,
+    MaterialKind,
     OutputSpec,
     Timeline,
     TimelineClip,
@@ -84,6 +87,7 @@ from automation_tool.control_plane.infrastructure.database import (
     editing_project_timelines,
     editing_projects,
     installations,
+    materials,
     timelines,
 )
 from automation_tool.control_plane.infrastructure.database.editing_job_repository import (
@@ -91,6 +95,9 @@ from automation_tool.control_plane.infrastructure.database.editing_job_repositor
 )
 from automation_tool.control_plane.infrastructure.database.editing_project_repository import (
     SqlAlchemyEditingProjectRepository,
+)
+from automation_tool.control_plane.infrastructure.database.material_repository import (
+    SqlAlchemyMaterialRepository,
 )
 from automation_tool.control_plane.infrastructure.database.timeline_repository import (
     SqlAlchemyTimelineRepository,
@@ -101,6 +108,7 @@ CREATED_AT = datetime(2026, 7, 30, 4, 15, 30, 123_456, tzinfo=UTC)
 UPDATED_AT = CREATED_AT + timedelta(seconds=90)
 OWNER = InstallationId.parse("00000000-0000-4000-8000-000000000001")
 FOREIGN_OWNER = InstallationId.parse("00000000-0000-4000-8000-000000000002")
+SCENE_MATERIAL = MaterialId.parse("00000000-0000-4000-8000-000000000010")
 
 TIMELINE_DURATION_MS = 6_000
 REVISION = 3
@@ -227,7 +235,7 @@ def make_timeline(timeline_id: TimelineId, project_id: EditingProjectId, revisio
                         clip_id="v-one",
                         start_ms=0,
                         duration_ms=TIMELINE_DURATION_MS,
-                        source_material_id=MaterialId.new(),
+                        source_material_id=SCENE_MATERIAL,
                         source_in_ms=None,
                         source_out_ms=None,
                         text=None,
@@ -272,6 +280,7 @@ async def reset_data(database: Database) -> None:
         await session.execute(delete(timelines))
         await session.execute(delete(editing_project_timelines))
         await session.execute(delete(editing_projects))
+        await session.execute(delete(materials))
 
 
 async def store_installation(
@@ -317,10 +326,39 @@ async def store_timeline(
     )
 
 
+async def store_scene_material(database: Database) -> None:
+    repository = SqlAlchemyMaterialRepository(database)
+    digest = SCENE_MATERIAL.uuid.hex * 2
+    if await repository.find_by_digest(digest, OWNER) is not None:
+        return
+    await repository.save(
+        Material(
+            material_id=SCENE_MATERIAL,
+            kind=MaterialKind.VIDEO,
+            duration_ms=TIMELINE_DURATION_MS,
+            width=1280,
+            height=720,
+            content_digest=digest,
+            has_audio=False,
+            audio_loudness_lufs=None,
+            has_speech=False,
+            speech_segments_ms=(),
+            speech_transcript=None,
+            shot_boundaries_ms=(0,),
+            ai_description="剪辑任务仓储测试素材",
+            ai_tags=("测试",),
+            description_source=DescriptionSource.AI,
+            described_at=CREATED_AT,
+        ),
+        OWNER,
+    )
+
+
 async def store_scene(
     database: Database, project_id: EditingProjectId, timeline_id: TimelineId
 ) -> None:
     await store_project(database, project_id)
+    await store_scene_material(database)
     await store_timeline(database, timeline_id, project_id)
 
 

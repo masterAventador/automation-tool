@@ -3,7 +3,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Button, Card, Empty, Input, Space, Tag, Typography } from "antd";
 
 import {
-  MaterialLibraryGatewayError,
   type EditingMaterialSnapshot,
   type LocalMaterialStatus,
   type MaterialLibraryErrorCode,
@@ -50,11 +49,23 @@ const IMPORT_ERROR_TEXT: Partial<Record<MaterialLibraryErrorCode, string>> = {
   registry_full: "本机素材记录空间已满，请先清理后再试。",
 };
 
-function importErrorMessage(error: unknown): string {
-  if (error instanceof MaterialLibraryGatewayError) {
-    return IMPORT_ERROR_TEXT[error.code] ?? "素材导入没有完成，请稍后重试。";
+function materialLibraryErrorCode(error: unknown): MaterialLibraryErrorCode | null {
+  if (
+    error === null ||
+    typeof error !== "object" ||
+    !("name" in error) ||
+    error.name !== "MaterialLibraryGatewayError" ||
+    !("code" in error) ||
+    typeof error.code !== "string"
+  ) {
+    return null;
   }
-  return "素材导入没有完成，请稍后重试。";
+  return error.code as MaterialLibraryErrorCode;
+}
+
+function importErrorMessage(error: unknown): string {
+  const code = materialLibraryErrorCode(error);
+  return (code === null ? undefined : IMPORT_ERROR_TEXT[code]) ?? "素材导入没有完成，请稍后重试。";
 }
 
 function shortId(materialId: string): string {
@@ -355,12 +366,19 @@ export function MaterialLibraryPage({
         });
         setMessage({ type: "success", text: "素材已从素材库删除。" });
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (mountedRef.current) {
-          setMessage({
-            type: "error",
-            text: "暂时不能删除这个素材；它可能仍被剪辑项目使用，请调整后重试。",
-          });
+          setMessage(
+            materialLibraryErrorCode(error) === "compensation_failed"
+              ? {
+                  type: "warning",
+                  text: "素材已从库中移除，但本机记录还未清理；请再次点击确认清理。",
+                }
+              : {
+                  type: "error",
+                  text: "暂时不能删除这个素材；它可能仍被剪辑项目使用，请调整后重试。",
+                },
+          );
         }
       })
       .finally(() => {

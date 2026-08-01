@@ -71,6 +71,15 @@ struct LocalMaterialCommandError {
     retryable: bool,
 }
 
+#[cfg(feature = "control-plane-e2e")]
+static MATERIAL_ACCEPTANCE_PICK_INDEX: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(1);
+
+#[cfg(feature = "control-plane-e2e")]
+static MATERIAL_ACCEPTANCE_SOURCES: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<uuid::Uuid, std::path::PathBuf>>,
+> = std::sync::OnceLock::new();
+
 impl serde::Serialize for LocalMaterialCommandError {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         command_error::serialize(&self.code, Some(self.retryable), serializer)
@@ -2841,6 +2850,42 @@ fn parse_material_id(value: &str) -> Result<uuid::Uuid, LocalMaterialCommandErro
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+fn pick_editing_material(app: &tauri::AppHandle) -> Option<FilePath> {
+    #[cfg(feature = "control-plane-e2e")]
+    if std::env::var("AUTOMATION_TOOL_LE18_ACCEPTANCE_PICKER").as_deref() == Ok("1") {
+        use std::sync::atomic::Ordering;
+
+        let index = MATERIAL_ACCEPTANCE_PICK_INDEX.fetch_add(1, Ordering::SeqCst);
+        return std::env::var(format!("AUTOMATION_TOOL_LE18_PICK_{index}"))
+            .ok()
+            .map(std::path::PathBuf::from)
+            .map(FilePath::Path);
+    }
+    app.dialog().file().blocking_pick_file()
+}
+
+#[cfg(feature = "control-plane-e2e")]
+fn remember_material_acceptance_source(
+    outcome: &local_material_library::LocalMaterialImportOutcome,
+    source_path: &std::path::Path,
+) -> Result<(), LocalMaterialCommandError> {
+    if std::env::var("AUTOMATION_TOOL_LE18_ACCEPTANCE_PICKER").as_deref() != Ok("1") {
+        return Ok(());
+    }
+    let material_id = parse_material_id(outcome.material().material_id())?;
+    let sources = MATERIAL_ACCEPTANCE_SOURCES
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    sources
+        .lock()
+        .map_err(|_| LocalMaterialCommandError {
+            code: "worker_unavailable",
+            retryable: true,
+        })?
+        .insert(material_id, source_path.to_path_buf());
+    Ok(())
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 #[tauri::command]
 async fn import_editing_material(
     app: tauri::AppHandle,
@@ -2849,7 +2894,7 @@ async fn import_editing_material(
     orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
     coordinator: tauri::State<'_, local_material_library::LocalMaterialLibraryCoordinator>,
 ) -> Result<Option<local_material_library::LocalMaterialImportOutcome>, LocalMaterialCommandError> {
-    let selected = app.dialog().file().blocking_pick_file();
+    let selected = pick_editing_material(&app);
     let Some(selected) = selected else {
         return Ok(None);
     };
@@ -2864,10 +2909,13 @@ async fn import_editing_material(
         code: "worker_unavailable",
         retryable: true,
     })?;
-    local_material_library::import_material(&orchestrator, &client, &vault, &source_path)
-        .await
-        .map(Some)
-        .map_err(map_local_material_error)
+    let outcome =
+        local_material_library::import_material(&orchestrator, &client, &vault, &source_path)
+            .await
+            .map_err(map_local_material_error)?;
+    #[cfg(feature = "control-plane-e2e")]
+    remember_material_acceptance_source(&outcome, &source_path)?;
+    Ok(Some(outcome))
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -3592,6 +3640,22 @@ struct VideoEditingAcceptancePreparation {
 #[cfg(feature = "control-plane-e2e")]
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+struct MaterialLibraryAcceptancePreparation {
+    installation_id: String,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum MaterialAcceptanceSourceAction {
+    Missing,
+    Unreadable,
+    Changed,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TaskRunAcceptancePreparation {
     installation_id: String,
     controlled_task_id: String,
@@ -4251,6 +4315,105 @@ async fn prepare_video_editing_for_acceptance(
         installation_id: registration.installation_id().to_owned(),
         material_id: material.material_id().to_owned(),
     })
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+async fn prepare_material_library_for_acceptance(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<MaterialLibraryAcceptancePreparation, ControlPlaneCommandError> {
+    use std::sync::atomic::Ordering;
+
+    let token = std::env::var("AUTOMATION_TOOL_LE18_BOOTSTRAP_TOKEN").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let environment_id = std::env::var("AUTOMATION_TOOL_LE18_ENVIRONMENT_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    if std::env::var("AUTOMATION_TOOL_LE18_ACCEPTANCE_PICKER").as_deref() != Ok("1") {
+        return Err(ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        });
+    }
+    let bootstrap = control_plane::DemoBootstrap::new(token, environment_id)
+        .map_err(map_control_plane_error)?;
+    let registration = client
+        .register_installation(&bootstrap, &identity, &vault)
+        .await
+        .map_err(map_control_plane_error)?;
+    MATERIAL_ACCEPTANCE_PICK_INDEX.store(1, Ordering::SeqCst);
+    MATERIAL_ACCEPTANCE_SOURCES
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+        .lock()
+        .map_err(|_| ControlPlaneCommandError {
+            code: "acceptance_state_unavailable",
+            retryable: false,
+        })?
+        .clear();
+    Ok(MaterialLibraryAcceptancePreparation {
+        installation_id: registration.installation_id().to_owned(),
+    })
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+fn set_material_source_state_for_acceptance(
+    material_id: String,
+    action: MaterialAcceptanceSourceAction,
+) -> Result<(), LocalMaterialCommandError> {
+    use std::io::Write;
+
+    if std::env::var("AUTOMATION_TOOL_LE18_ACCEPTANCE_PICKER").as_deref() != Ok("1") {
+        return Err(LocalMaterialCommandError {
+            code: "configuration_invalid",
+            retryable: false,
+        });
+    }
+    let material_id = parse_material_id(&material_id)?;
+    let source_path = MATERIAL_ACCEPTANCE_SOURCES
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+        .lock()
+        .map_err(|_| LocalMaterialCommandError {
+            code: "worker_unavailable",
+            retryable: true,
+        })?
+        .get(&material_id)
+        .cloned()
+        .ok_or(LocalMaterialCommandError {
+            code: "configuration_invalid",
+            retryable: false,
+        })?;
+    let state_error = || LocalMaterialCommandError {
+        code: "worker_unavailable",
+        retryable: false,
+    };
+    match action {
+        MaterialAcceptanceSourceAction::Missing => {
+            std::fs::remove_file(source_path).map_err(|_| state_error())?;
+        }
+        MaterialAcceptanceSourceAction::Unreadable => {
+            std::fs::remove_file(&source_path).map_err(|_| state_error())?;
+            std::fs::create_dir(source_path).map_err(|_| state_error())?;
+        }
+        MaterialAcceptanceSourceAction::Changed => {
+            let mut source = std::fs::OpenOptions::new()
+                .append(true)
+                .open(source_path)
+                .map_err(|_| state_error())?;
+            source.write_all(&[0]).map_err(|_| state_error())?;
+            source.sync_all().map_err(|_| state_error())?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(feature = "control-plane-e2e")]
@@ -5205,6 +5368,8 @@ pub fn run() {
         prepare_task_projection_for_acceptance,
         prepare_task_create_form_for_acceptance,
         prepare_video_editing_for_acceptance,
+        prepare_material_library_for_acceptance,
+        set_material_source_state_for_acceptance,
         prepare_task_run_for_acceptance,
         prepare_task_lifecycle_for_acceptance,
         prepare_executor_lifecycle_for_acceptance,
