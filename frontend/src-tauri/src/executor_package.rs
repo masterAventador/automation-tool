@@ -550,6 +550,25 @@ fn ensure_safe_package_root(package_root: &Path) -> Result<(), ExecutorPackageEr
     Ok(())
 }
 
+#[cfg(all(test, windows))]
+mod windows_ancestor_tests {
+    use super::*;
+
+    #[test]
+    fn verbatim_absolute_paths_do_not_treat_the_drive_prefix_as_an_ancestor() {
+        let current = std::env::current_dir().expect("current directory");
+        let rendered = current.to_str().expect("ASCII test checkout");
+        let verbatim = if rendered.starts_with(r"\\?\") {
+            current
+        } else {
+            PathBuf::from(format!(r"\\?\{rendered}"))
+        };
+
+        ensure_no_symlink_ancestors(&verbatim)
+            .expect("a normal directory stays safe through its verbatim absolute path");
+    }
+}
+
 pub(crate) fn ensure_no_symlink_ancestors(path: &Path) -> Result<(), ExecutorPackageError> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
