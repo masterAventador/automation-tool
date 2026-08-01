@@ -177,20 +177,26 @@ def stamped_motion_worker(staging: Path) -> Path:
 
 
 class WindowsMediaToolchainShell(unittest.TestCase):
-    def test_windows_resolves_git_bash_absolutely_instead_of_the_system32_wsl_stub(
+    def test_windows_resolves_msys2_bash_absolutely_instead_of_the_system32_wsl_stub(
         self,
     ) -> None:
         with TemporaryDirectory(prefix="automation-tool-git-bash-") as directory:
-            git_root = Path(directory) / "Git"
-            git = git_root / "cmd" / "git.exe"
-            bash = git_root / "bin" / "bash.exe"
-            git.parent.mkdir(parents=True)
+            msys2_root = Path(directory) / "msys64"
+            bash = msys2_root / "usr" / "bin" / "bash.exe"
+            pacman = msys2_root / "usr" / "bin" / "pacman.exe"
             bash.parent.mkdir(parents=True)
-            git.write_bytes(b"git")
             bash.write_bytes(b"bash")
+            pacman.write_bytes(b"pacman")
 
-            with mock.patch.object(
-                prepare_video_runtime.shutil, "which", return_value=str(git)
+            with (
+                mock.patch.object(
+                    prepare_video_runtime, "WINDOWS_MSYS2_ROOT", msys2_root, create=True
+                ),
+                mock.patch.object(
+                    prepare_video_runtime.shutil,
+                    "which",
+                    return_value=r"C:\Windows\System32\bash.exe",
+                ),
             ):
                 resolved = prepare_video_runtime.media_toolchain_bash(
                     platform="windows"
@@ -199,15 +205,58 @@ class WindowsMediaToolchainShell(unittest.TestCase):
             self.assertEqual(bash, Path(resolved))
             self.assertNotEqual("bash", resolved)
 
-    def test_windows_fails_closed_when_git_bash_is_not_installed(self) -> None:
+    def test_windows_fails_closed_when_msys2_is_not_installed(self) -> None:
         with (
+            TemporaryDirectory(prefix="automation-tool-no-msys2-") as directory,
+            mock.patch.object(
+                prepare_video_runtime,
+                "WINDOWS_MSYS2_ROOT",
+                Path(directory) / "missing",
+                create=True,
+            ),
             mock.patch.object(prepare_video_runtime.shutil, "which", return_value=None),
             self.assertRaisesRegex(
                 prepare_video_runtime.VideoRuntimeUnavailable,
-                r"^Git Bash is required to build the Windows media toolchain$",
+                r"^MSYS2 MINGW64 is required to build the Windows media toolchain$",
             ),
         ):
             prepare_video_runtime.media_toolchain_bash(platform="windows")
+
+    def test_windows_launches_the_builder_in_a_mingw64_environment(self) -> None:
+        with TemporaryDirectory(prefix="automation-tool-msys2-env-") as directory:
+            msys2_root = Path(directory) / "msys64"
+            bash = msys2_root / "usr" / "bin" / "bash.exe"
+            pacman = msys2_root / "usr" / "bin" / "pacman.exe"
+            bash.parent.mkdir(parents=True)
+            bash.write_bytes(b"bash")
+            pacman.write_bytes(b"pacman")
+            completed = subprocess.CompletedProcess([], 0, "", "")
+
+            with (
+                mock.patch.object(
+                    prepare_video_runtime, "WINDOWS_MSYS2_ROOT", msys2_root, create=True
+                ),
+                mock.patch.object(prepare_video_runtime.shutil, "which", return_value=None),
+                mock.patch.object(
+                    prepare_video_runtime.subprocess,
+                    "run",
+                    return_value=completed,
+                ) as run,
+            ):
+                prepare_video_runtime._build_media_toolchain(
+                    Path(directory) / "output", platform="windows"
+                )
+
+            command = run.call_args.args[0]
+            environment = run.call_args.kwargs["env"]
+            self.assertEqual(str(bash), command[0])
+            self.assertEqual("MINGW64", environment["MSYSTEM"])
+            self.assertEqual("1", environment["CHERE_INVOKING"])
+            self.assertTrue(
+                environment["PATH"].startswith(
+                    f"{msys2_root / 'mingw64' / 'bin'};{msys2_root / 'usr' / 'bin'};"
+                )
+            )
 
 
 def run_prepare(*arguments: str) -> subprocess.CompletedProcess[str]:

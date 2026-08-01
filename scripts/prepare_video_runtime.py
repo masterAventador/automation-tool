@@ -32,6 +32,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -65,6 +66,7 @@ MATERIAL_WORKER_SOURCE = ROOT / "workers/material_montage"
 BACKEND_PACKAGE_SOURCE = ROOT / "backend/src/automation_tool"
 BACKEND_PROJECT = ROOT / "backend/pyproject.toml"
 SUBTITLE_FONT_ASSETS = ROOT / "scripts/subtitle_font_assets.py"
+WINDOWS_MSYS2_ROOT = Path("C:/msys64")
 
 # What each artifact is made of, in full. A cache key is a promise that nothing
 # outside this list can change the bytes, and the promise is only as good as the
@@ -156,22 +158,38 @@ def media_toolchain_bash(*, platform: str) -> str:
     if platform != "windows":
         return "bash"
 
-    git_executable = shutil.which("git")
-    if git_executable is not None:
-        candidate = Path(git_executable).parent.parent / "bin" / "bash.exe"
-        if candidate.is_file():
+    discovered = shutil.which("bash")
+    candidates = [WINDOWS_MSYS2_ROOT / "usr" / "bin" / "bash.exe"]
+    if discovered is not None:
+        candidates.insert(0, Path(discovered))
+    for candidate in candidates:
+        if candidate.is_file() and (candidate.parent / "pacman.exe").is_file():
             return str(candidate)
     raise VideoRuntimeUnavailable(
-        "Git Bash is required to build the Windows media toolchain"
+        "MSYS2 MINGW64 is required to build the Windows media toolchain"
     )
 
 
 def _build_media_toolchain(destination: Path, *, platform: str) -> None:
     target = MEDIA_TOOLCHAIN_TARGETS[platform]
+    bash = media_toolchain_bash(platform=platform)
+    environment = None
+    if platform == "windows":
+        msys2_root = Path(bash).parents[2]
+        environment = os.environ.copy()
+        environment["MSYSTEM"] = "MINGW64"
+        environment["CHERE_INVOKING"] = "1"
+        environment["PATH"] = ";".join(
+            (
+                str(msys2_root / "mingw64" / "bin"),
+                str(msys2_root / "usr" / "bin"),
+                environment.get("PATH", ""),
+            )
+        )
     # The builder creates the directory itself and refuses to reuse one.
     completed = subprocess.run(
         [
-            media_toolchain_bash(platform=platform),
+            bash,
             str(MEDIA_TOOLCHAIN_BUILDER),
             target,
             str(destination),
@@ -180,6 +198,7 @@ def _build_media_toolchain(destination: Path, *, platform: str) -> None:
         capture_output=True,
         text=True,
         check=False,
+        env=environment,
     )
     if completed.returncode != 0:
         # Not `splitlines()[-8:]` on one stream. That is how the Windows
