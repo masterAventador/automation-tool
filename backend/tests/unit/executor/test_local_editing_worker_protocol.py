@@ -23,7 +23,9 @@ from automation_tool.executor.local_editing_worker import (
     LocalEditingWorkerProtocol,
     LocalMaterialForgetCommand,
     LocalMaterialImportCommand,
+    LocalMaterialStatusCommand,
     LocalMaterialWorkerFailureCode,
+    LocalMaterialWorkerStatus,
 )
 from automation_tool.executor.material_probe import (
     MaterialFacts,
@@ -135,6 +137,20 @@ def _forget_document() -> dict[str, object]:
             ["worker.material.forget", "python", "1.0", str(MATERIAL_ID)],
         ),
         "command": "worker.material.forget",
+        "materialId": str(MATERIAL_ID),
+        "protocolVersion": "1.0",
+        "workerKind": "python",
+    }
+
+
+def _status_document() -> dict[str, object]:
+    return {
+        "authenticationProof": _proof(
+            COMMAND_DOMAIN,
+            "atvwc1.",
+            ["worker.material.status", "python", "1.0", str(MATERIAL_ID)],
+        ),
+        "command": "worker.material.status",
         "materialId": str(MATERIAL_ID),
         "protocolVersion": "1.0",
         "workerKind": "python",
@@ -467,6 +483,30 @@ def test_material_forget_is_authenticated_idempotent_compensation(
     _assert_event_proof(failed, f"{MATERIAL_ID}\0registry_unwritable")
 
 
+def test_material_status_is_authenticated_path_free_and_closed(tmp_path: Path) -> None:
+    protocol = LocalEditingWorkerProtocol(_bootstrap(tmp_path), "2.0.0")
+
+    command = protocol.accept_command(_line(_status_document()))
+
+    assert command == LocalMaterialStatusCommand(MATERIAL_ID)
+    assert repr(command) == "LocalMaterialStatusCommand(<redacted>)"
+    event = _event(protocol.material_status(MATERIAL_ID, LocalMaterialWorkerStatus.AVAILABLE))
+    assert event["event"] == "worker.material.status"
+    assert event["status"] == "available"
+    _assert_event_proof(event, f"{MATERIAL_ID}\0available")
+
+    protocol.accept_command(_line(_status_document()))
+    missing = _event(protocol.material_status(MATERIAL_ID, LocalMaterialWorkerStatus.FILE_MISSING))
+    assert missing["status"] == "file_missing"
+    _assert_event_proof(missing, f"{MATERIAL_ID}\0file_missing")
+
+
+def test_material_status_vocabulary_is_available_plus_registry_reasons() -> None:
+    assert {item.value for item in LocalMaterialWorkerStatus} == {"available"} | {
+        item.value for item in MaterialPathRegistryRejection
+    }
+
+
 @pytest.mark.parametrize(
     "factory, mutation",
     [
@@ -479,6 +519,8 @@ def test_material_forget_is_authenticated_idempotent_compensation(
         (_import_document, lambda document: document.update(sourcePath="/" + "a" * 4097)),
         (_forget_document, lambda document: document.update(extra=True)),
         (_forget_document, lambda document: document.update(authenticationProof="atvwc1.forged")),
+        (_status_document, lambda document: document.update(extra=True)),
+        (_status_document, lambda document: document.update(authenticationProof="atvwc1.forged")),
     ],
 )
 def test_material_commands_fail_closed(

@@ -151,7 +151,9 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
             LocalEditingWorkerProtocol,
             LocalMaterialForgetCommand,
             LocalMaterialImportCommand,
+            LocalMaterialStatusCommand,
             LocalMaterialWorkerFailureCode,
+            LocalMaterialWorkerStatus,
             parse_local_editing_worker_bootstrap,
         )
         from automation_tool.executor.local_editing_worker_process import (
@@ -161,6 +163,7 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
             execute_local_editing_job,
             execute_local_material_forget,
             execute_local_material_import,
+            execute_local_material_status,
         )
 
         bootstrap_line = line.encode()
@@ -330,6 +333,23 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
                     )
                 emit(failed)
 
+    def material_status(command: LocalMaterialStatusCommand) -> None:
+        if editing_bootstrap is None or editing_protocol is None:
+            return
+        try:
+            status = execute_local_material_status(editing_bootstrap, command)
+            with editing_protocol_lock:
+                event = editing_protocol.material_status(command.material_id, status)
+            emit(event)
+        except Exception:
+            with suppress(Exception):
+                with editing_protocol_lock:
+                    event = editing_protocol.material_status(
+                        command.material_id,
+                        LocalMaterialWorkerStatus.REGISTRY_UNREADABLE,
+                    )
+                emit(event)
+
     try:
         for command_line in stream:
             if editing_protocol is None:
@@ -394,6 +414,13 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
                     target=forget_material,
                     args=(command,),
                     name="local-material-forget",
+                )
+                material_thread.start()
+            elif isinstance(command, LocalMaterialStatusCommand):
+                material_thread = threading.Thread(
+                    target=material_status,
+                    args=(command,),
+                    name="local-material-status",
                 )
                 material_thread.start()
     finally:

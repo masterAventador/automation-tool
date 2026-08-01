@@ -19,6 +19,7 @@ from automation_tool.executor.material_probe import (
     MAX_MATERIAL_DURATION_MS,
     MAX_PATH_CHARACTERS,
     MaterialFacts,
+    MaterialPathRegistryRejection,
     MaterialProbeRejected,
     PackagedMediaTools,
     ProbedMaterialKind,
@@ -79,6 +80,7 @@ _MATERIAL_FORGET_COMMAND_KEYS = frozenset(
         "workerKind",
     }
 )
+_MATERIAL_STATUS_COMMAND_KEYS = _MATERIAL_FORGET_COMMAND_KEYS
 _EDITING_KEYS = frozenset({"projectId", "timelineId", "timelineRevision"})
 _COMMAND_AUTHENTICATION_DOMAIN = b"automation-tool.video-worker-command.v1\0"
 _EVENT_AUTHENTICATION_DOMAIN = b"automation-tool.video-worker-event.v1\0"
@@ -300,6 +302,14 @@ class LocalMaterialForgetCommand:
         return "LocalMaterialForgetCommand(<redacted>)"
 
 
+@dataclass(frozen=True, slots=True, repr=False)
+class LocalMaterialStatusCommand:
+    material_id: UUID
+
+    def __repr__(self) -> str:
+        return "LocalMaterialStatusCommand(<redacted>)"
+
+
 class LocalEditingWorkerPhase(StrEnum):
     PREPARING = "preparing"
     RENDERING = "rendering"
@@ -342,6 +352,20 @@ class LocalMaterialWorkerFailureCode(StrEnum):
     REGISTRY_UNREADABLE = "registry_unreadable"
     REGISTRY_UNWRITABLE = "registry_unwritable"
     REGISTRY_FULL = "registry_full"
+
+
+class LocalMaterialWorkerStatus(StrEnum):
+    """Path-free availability plus the registry's exact closed reasons."""
+
+    AVAILABLE = "available"
+    UNUSABLE_IDENTIFIER = MaterialPathRegistryRejection.UNUSABLE_IDENTIFIER.value
+    NOT_REGISTERED = MaterialPathRegistryRejection.NOT_REGISTERED.value
+    FILE_MISSING = MaterialPathRegistryRejection.FILE_MISSING.value
+    FILE_UNREADABLE = MaterialPathRegistryRejection.FILE_UNREADABLE.value
+    FILE_CHANGED = MaterialPathRegistryRejection.FILE_CHANGED.value
+    REGISTRY_UNREADABLE = MaterialPathRegistryRejection.REGISTRY_UNREADABLE.value
+    REGISTRY_UNWRITABLE = MaterialPathRegistryRejection.REGISTRY_UNWRITABLE.value
+    REGISTRY_FULL = MaterialPathRegistryRejection.REGISTRY_FULL.value
 
 
 @dataclass(slots=True)
@@ -390,6 +414,7 @@ class LocalEditingWorkerProtocol:
         | LocalEditingCancelCommand
         | LocalMaterialImportCommand
         | LocalMaterialForgetCommand
+        | LocalMaterialStatusCommand
     ):
         document = _line_object(payload)
         command = document.get("command")
@@ -401,6 +426,8 @@ class LocalEditingWorkerProtocol:
             return self._accept_material_import(document)
         if command == "worker.material.forget":
             return self._accept_material_forget(document)
+        if command == "worker.material.status":
+            return self._accept_material_status(document)
         _reject()
 
     def _accept_start(self, document: dict[str, object]) -> LocalEditingStartCommand:
@@ -523,6 +550,32 @@ class LocalEditingWorkerProtocol:
             _reject()
         self._active = _ActiveMaterialOperation(material_id, "forget")
         return LocalMaterialForgetCommand(material_id)
+
+    def _accept_material_status(self, document: dict[str, object]) -> LocalMaterialStatusCommand:
+        if (
+            set(document) != _MATERIAL_STATUS_COMMAND_KEYS
+            or document.get("protocolVersion") != _PROTOCOL_VERSION
+            or document.get("workerKind") != _WORKER_KIND
+            or self._active is not None
+        ):
+            _reject()
+        material_id = _uuid_v4(document.get("materialId"))
+        expected = _authentication_proof(
+            self._token,
+            _COMMAND_AUTHENTICATION_DOMAIN,
+            _COMMAND_PROOF_PREFIX,
+            (
+                "worker.material.status",
+                _WORKER_KIND,
+                _PROTOCOL_VERSION,
+                str(material_id),
+            ),
+        )
+        supplied = document.get("authenticationProof")
+        if not isinstance(supplied, str) or not hmac.compare_digest(supplied, expected):
+            _reject()
+        self._active = _ActiveMaterialOperation(material_id, "status")
+        return LocalMaterialStatusCommand(material_id)
 
     def progress(
         self,
@@ -657,6 +710,23 @@ class LocalEditingWorkerProtocol:
         self._active = None
         return payload
 
+    def material_status(
+        self,
+        material_id: UUID,
+        status: LocalMaterialWorkerStatus,
+    ) -> bytes:
+        self._require_material_active(material_id, "status")
+        if not isinstance(status, LocalMaterialWorkerStatus):
+            _reject()
+        payload = self._material_event(
+            "worker.material.status",
+            material_id,
+            f"{material_id}\0{status.value}",
+            status=status.value,
+        )
+        self._active = None
+        return payload
+
     def _require_active(self, job_id: UUID) -> _ActiveJob:
         if (
             not isinstance(job_id, UUID)
@@ -766,6 +836,8 @@ __all__ = [
     "LocalEditingWorkerProtocol",
     "LocalMaterialForgetCommand",
     "LocalMaterialImportCommand",
+    "LocalMaterialStatusCommand",
     "LocalMaterialWorkerFailureCode",
+    "LocalMaterialWorkerStatus",
     "parse_local_editing_worker_bootstrap",
 ]

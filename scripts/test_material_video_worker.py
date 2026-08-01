@@ -45,6 +45,7 @@ from webui_runtime import (  # noqa: E402
 from automation_tool.executor.local_editing_worker import (  # noqa: E402
     LocalEditingWorkerFailureCode,
     LocalMaterialWorkerFailureCode,
+    LocalMaterialWorkerStatus,
 )
 from automation_tool.executor.local_editing_worker_process import (  # noqa: E402
     LocalEditingRenderDiagnosticCode,
@@ -270,6 +271,80 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
             self.assertEqual(str(imported_command.material_id), material_id)
             self.assertEqual(imported_command.source_path, source)
             self.assertNotIn(str(source), repr(imported_command))
+
+    def test_gateway_dispatches_authenticated_material_status_without_echoing_path(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="material-video-status-", dir=ROOT / ".local"
+        ) as directory:
+            root = Path(directory)
+            asset_root = root / "assets"
+            asset_root.mkdir(mode=0o700)
+            ffmpeg = root / "ffmpeg"
+            ffprobe = root / "ffprobe"
+            for tool in (ffmpeg, ffprobe):
+                tool.write_bytes(b"controlled executable")
+                tool.chmod(0o700)
+            token = bytes.fromhex("a2" * 32)
+            material_id = str(uuid4())
+            bootstrap = {
+                "assetRoot": str(asset_root),
+                "bootstrapVersion": "1",
+                "enableWebUi": False,
+                "localSessionToken": token.hex(),
+                "mediaTools": {
+                    "ffmpegPath": str(ffmpeg),
+                    "ffprobePath": str(ffprobe),
+                },
+                "protocolVersion": "1.0",
+                "renderBrowser": None,
+                "scriptModel": None,
+                "workerKind": "python",
+            }
+            message = b"automation-tool.video-worker-command.v1\0" + b"\0".join(
+                part.encode()
+                for part in (
+                    "worker.material.status",
+                    "python",
+                    "1.0",
+                    material_id,
+                )
+            )
+            proof = (
+                "atvwc1."
+                + base64.urlsafe_b64encode(hmac.digest(token, message, hashlib.sha256))
+                .rstrip(b"=")
+                .decode()
+            )
+            command = {
+                "authenticationProof": proof,
+                "command": "worker.material.status",
+                "materialId": material_id,
+                "protocolVersion": "1.0",
+                "workerKind": "python",
+            }
+            stream = io.StringIO(
+                json.dumps(bootstrap, separators=(",", ":"))
+                + "\n"
+                + json.dumps(command, separators=(",", ":"))
+                + "\n"
+            )
+            output = io.StringIO()
+
+            with mock.patch(
+                "automation_tool.executor.local_editing_worker_process.execute_local_material_status",
+                return_value=LocalMaterialWorkerStatus.FILE_CHANGED,
+            ) as execute:
+                result = worker_main._gateway_process(stream, output)
+
+            self.assertEqual(result, 0)
+            events = [json.loads(line) for line in output.getvalue().splitlines()]
+            self.assertEqual(
+                [(item["event"], item.get("status")) for item in events],
+                [("worker.ready", None), ("worker.material.status", "file_changed")],
+            )
+            self.assertEqual(str(execute.call_args.args[1].material_id), material_id)
 
     @unittest.skipUnless(sys.platform == "win32", "Windows extended-path boundary")
     def test_webui_normalizes_canonical_windows_paths_before_upstream_use(self) -> None:

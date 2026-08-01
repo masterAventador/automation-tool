@@ -41,7 +41,9 @@ from automation_tool.executor.local_editing_worker import (
     LocalEditingWorkerFailureCode,
     LocalMaterialForgetCommand,
     LocalMaterialImportCommand,
+    LocalMaterialStatusCommand,
     LocalMaterialWorkerFailureCode,
+    LocalMaterialWorkerStatus,
 )
 from automation_tool.executor.material_probe import (
     MATERIAL_PATH_REGISTRY_FILE_NAME,
@@ -445,6 +447,25 @@ def execute_local_material_forget(
         _reject_material(LocalMaterialWorkerFailureCode(error.rejection.value))
 
 
+def execute_local_material_status(
+    bootstrap: LocalEditingWorkerBootstrap,
+    command: LocalMaterialStatusCommand,
+) -> LocalMaterialWorkerStatus:
+    """Resolve a mapping into one path-free, closed availability status."""
+
+    if not isinstance(bootstrap, LocalEditingWorkerBootstrap) or not isinstance(
+        command, LocalMaterialStatusCommand
+    ):
+        return LocalMaterialWorkerStatus.UNUSABLE_IDENTIFIER
+    try:
+        _material_registry(bootstrap).resolve(command.material_id)
+    except LocalMaterialOperationRejected as error:
+        return LocalMaterialWorkerStatus(error.code.value)
+    except MaterialPathRegistryRejected as error:
+        return LocalMaterialWorkerStatus(error.rejection.value)
+    return LocalMaterialWorkerStatus.AVAILABLE
+
+
 def execute_local_editing_job(
     bootstrap: LocalEditingWorkerBootstrap,
     command: LocalEditingStartCommand,
@@ -566,4 +587,5 @@ __all__ = [
     "execute_local_editing_job",
     "execute_local_material_forget",
     "execute_local_material_import",
+    "execute_local_material_status",
 ]

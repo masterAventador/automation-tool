@@ -14,12 +14,15 @@ from automation_tool.executor.local_editing_worker import (
     LocalEditingWorkerBootstrap,
     LocalMaterialForgetCommand,
     LocalMaterialImportCommand,
+    LocalMaterialStatusCommand,
     LocalMaterialWorkerFailureCode,
+    LocalMaterialWorkerStatus,
 )
 from automation_tool.executor.local_editing_worker_process import (
     LocalMaterialOperationRejected,
     execute_local_material_forget,
     execute_local_material_import,
+    execute_local_material_status,
 )
 from automation_tool.executor.material_probe import (
     MaterialFacts,
@@ -284,3 +287,60 @@ def test_existing_non_private_state_directory_is_rejected_not_repaired(tmp_path:
 
     assert rejected.value.code is LocalMaterialWorkerFailureCode.REGISTRY_UNREADABLE
     assert state.stat().st_mode & 0o777 == 0o755
+
+
+def test_status_resolves_only_availability_and_discards_the_private_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asset_root = tmp_path / "app-data"
+    asset_root.mkdir(mode=0o700)
+    private_source = (tmp_path / "operator private source.mp4").resolve()
+    approved = private_source.stat() if private_source.exists() else os.stat_result((0,) * 10)
+    events: list[object] = []
+
+    class Registry:
+        def __init__(self, *, state_directory: Path) -> None:
+            events.append(("registry", state_directory))
+
+        def resolve(self, material_id: UUID) -> tuple[Path, os.stat_result]:
+            events.append(("resolve", material_id))
+            return private_source, approved
+
+    monkeypatch.setattr(process_module, "MaterialPathRegistry", Registry)
+
+    status = execute_local_material_status(
+        _bootstrap(asset_root), LocalMaterialStatusCommand(MATERIAL_ID)
+    )
+
+    assert status is LocalMaterialWorkerStatus.AVAILABLE
+    assert str(private_source) not in repr(status)
+    assert events == [
+        ("registry", asset_root / "local-executor" / "state"),
+        ("resolve", MATERIAL_ID),
+    ]
+
+
+@pytest.mark.parametrize(
+    "rejection",
+    list(MaterialPathRegistryRejection),
+)
+def test_status_returns_each_closed_registry_reason(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    rejection: MaterialPathRegistryRejection,
+) -> None:
+    asset_root = tmp_path / "app-data"
+    asset_root.mkdir(mode=0o700)
+
+    class Registry:
+        def __init__(self, *, state_directory: Path) -> None:
+            pass
+
+        def resolve(self, material_id: UUID) -> tuple[Path, os.stat_result]:
+            raise MaterialPathRegistryRejected(rejection)
+
+    monkeypatch.setattr(process_module, "MaterialPathRegistry", Registry)
+
+    assert execute_local_material_status(
+        _bootstrap(asset_root), LocalMaterialStatusCommand(MATERIAL_ID)
+    ) is LocalMaterialWorkerStatus(rejection.value)
