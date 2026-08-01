@@ -41,6 +41,12 @@ pub(crate) enum DesktopLogEvent {
     StartupAppDataCheckCompleted,
     StartupBrowserCheckCompleted,
     StartupExecutorCheckStarted,
+    StartupExecutorConfigurationReady,
+    StartupExecutorConfigurationRejected,
+    StartupExecutorManagerStatusReady,
+    StartupExecutorManagerStatusRejected,
+    StartupExecutorPackageReady,
+    StartupExecutorPackageRejected,
     StartupExecutorCheckCompleted,
     StartupLocalCheckCompleted,
     StartupLocalCheckRejected,
@@ -115,6 +121,18 @@ impl DesktopLogEvent {
             Self::StartupAppDataCheckCompleted => "startup.local.app_data.completed",
             Self::StartupBrowserCheckCompleted => "startup.local.browser.completed",
             Self::StartupExecutorCheckStarted => "startup.local.executor.started",
+            Self::StartupExecutorConfigurationReady => "startup.local.executor.configuration.ready",
+            Self::StartupExecutorConfigurationRejected => {
+                "startup.local.executor.configuration.rejected"
+            }
+            Self::StartupExecutorManagerStatusReady => {
+                "startup.local.executor.manager_status.ready"
+            }
+            Self::StartupExecutorManagerStatusRejected => {
+                "startup.local.executor.manager_status.rejected"
+            }
+            Self::StartupExecutorPackageReady => "startup.local.executor.package.ready",
+            Self::StartupExecutorPackageRejected => "startup.local.executor.package.rejected",
             Self::StartupExecutorCheckCompleted => "startup.local.executor.completed",
             Self::StartupLocalCheckCompleted => "startup.local.completed",
             Self::StartupLocalCheckRejected => "startup.local.rejected",
@@ -778,6 +796,30 @@ mod tests {
             (
                 DesktopLogEvent::StartupExecutorCheckCompleted,
                 "startup.local.executor.completed",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorConfigurationReady,
+                "startup.local.executor.configuration.ready",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorConfigurationRejected,
+                "startup.local.executor.configuration.rejected",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorManagerStatusReady,
+                "startup.local.executor.manager_status.ready",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorManagerStatusRejected,
+                "startup.local.executor.manager_status.rejected",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorPackageReady,
+                "startup.local.executor.package.ready",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorPackageRejected,
+                "startup.local.executor.package.rejected",
             ),
             (
                 DesktopLogEvent::StartupLocalCheckCompleted,

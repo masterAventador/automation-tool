@@ -58,6 +58,17 @@ test("H8-16E composes every startup component through one path-free native aggre
     assert.match(entry, new RegExp(`DesktopLogEvent::${event}`, "u"));
     assert.match(appLogging, new RegExp(`Self::${event}`, "u"));
   }
+  for (const event of [
+    "StartupExecutorConfigurationReady",
+    "StartupExecutorConfigurationRejected",
+    "StartupExecutorManagerStatusReady",
+    "StartupExecutorManagerStatusRejected",
+    "StartupExecutorPackageReady",
+    "StartupExecutorPackageRejected",
+  ]) {
+    assert.match(platform, new RegExp(`DesktopLogEvent::${event}`, "u"));
+    assert.match(appLogging, new RegExp(`Self::${event}`, "u"));
+  }
   assert.doesNotMatch(gateway, /path|directory|profile|token|secret|credential/iu);
   assert.doesNotMatch(nativeStartup, /#\[tauri::command\]/u);
 });

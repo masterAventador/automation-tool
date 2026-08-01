@@ -464,15 +464,41 @@ impl ExecutorPlatformService {
 
     pub fn startup_environment_state(&self) -> ExecutorStartupState {
         match ExecutorActionRuntimeInput::from_compile_time_configuration() {
-            Ok(Some(_)) => {}
-            Ok(None) => return ExecutorStartupState::ConfigurationRequired,
-            Err(_) => return ExecutorStartupState::Unavailable,
+            Ok(Some(_)) => crate::app_logging::record(
+                crate::app_logging::DesktopLogEvent::StartupExecutorConfigurationReady,
+            ),
+            Ok(None) => {
+                crate::app_logging::record(
+                    crate::app_logging::DesktopLogEvent::StartupExecutorConfigurationRejected,
+                );
+                return ExecutorStartupState::ConfigurationRequired;
+            }
+            Err(_) => {
+                crate::app_logging::record(
+                    crate::app_logging::DesktopLogEvent::StartupExecutorConfigurationRejected,
+                );
+                return ExecutorStartupState::Unavailable;
+            }
         }
-        if self.manager.status().is_err() || self.manager.validate_installed_package().is_err() {
-            ExecutorStartupState::Unavailable
-        } else {
-            ExecutorStartupState::Ready
+        if self.manager.status().is_err() {
+            crate::app_logging::record(
+                crate::app_logging::DesktopLogEvent::StartupExecutorManagerStatusRejected,
+            );
+            return ExecutorStartupState::Unavailable;
         }
+        crate::app_logging::record(
+            crate::app_logging::DesktopLogEvent::StartupExecutorManagerStatusReady,
+        );
+        if self.manager.validate_installed_package().is_err() {
+            crate::app_logging::record(
+                crate::app_logging::DesktopLogEvent::StartupExecutorPackageRejected,
+            );
+            return ExecutorStartupState::Unavailable;
+        }
+        crate::app_logging::record(
+            crate::app_logging::DesktopLogEvent::StartupExecutorPackageReady,
+        );
+        ExecutorStartupState::Ready
     }
 
     /// The verified Executor entrypoint, for a one-shot run of that binary.
