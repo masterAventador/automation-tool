@@ -31,17 +31,14 @@ test("LE-17 owns one real App editing journey with an isolated production runtim
   assert.match(spec, /提交结果暂时无法确认/u);
   assert.match(spec, /includes\("尚未保存"\)/u);
   assert.match(spec, /getValue\(\)/u);
-  assert.match(
-    spec,
-    /const startupTimeout = process\.platform === "win32" \? 360_000 : 120_000/u,
-  );
-  assert.match(spec, /waitForStartup\(\{ timeout: startupTimeout \}\)/u);
+  assert.match(spec, /await waitForStartup\(\);/u);
+  assert.doesNotMatch(spec, /startupTimeout/u);
   assert.doesNotMatch(spec, /云端剪辑功能尚未开通|sessionStorage|localStorage/u);
   assert.doesNotMatch(spec, /mock|stub|setItem\(/iu);
 
   assert.match(wdio, /specs:\s*\["\.\/e2e-tauri\/video-editing\.spec\.ts"\]/u);
   assert.match(wdio, /driverProvider:\s*"embedded"/u);
-  assert.match(wdio, /mochaOpts:\s*\{ ui: "bdd", timeout: 720_000 \}/u);
+  assert.match(wdio, /mochaOpts:\s*\{ ui: "bdd", timeout: 300_000 \}/u);
   assert.doesNotMatch(wdio, /video-studio\.spec\.ts|motion-video-native\.spec\.ts/u);
   assert.equal(configuration.identifier, "com.aventador.automationtool.le17acceptance");
   assert.equal(configuration.app.windows.length, 1);
@@ -73,7 +70,7 @@ test("LE-17 owns one real App editing journey with an isolated production runtim
   }
   assert.match(runner, /state\.mkdir\(mode=0o700, parents=True\)/u);
   assert.match(runner, /if os\.name != "nt":\s+state\.chmod\(0o700\)/u);
-  assert.match(runner, /app_process\.communicate\(timeout=780\)/u);
+  assert.match(runner, /app_process\.communicate\(timeout=420\)/u);
   assert.match(
     runner,
     /video_studio_startup_harness\([\s\S]*demo_environment_id=ENVIRONMENT_ID,[\s\S]*demo_bootstrap_public_key=public_key,/u,

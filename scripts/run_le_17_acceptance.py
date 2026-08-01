@@ -323,8 +323,7 @@ def main() -> int:
                     start_new_session=sys.platform != "win32",
                 )
                 try:
-                    # Includes the cold Windows package verification plus the render journey.
-                    output_bytes, _ = app_process.communicate(timeout=780)
+                    output_bytes, _ = app_process.communicate(timeout=420)
                 except subprocess.TimeoutExpired as error:
                     raise RuntimeError("LE-17 hidden App journey did not finish") from error
                 output = output_bytes.decode("utf-8", errors="replace")
