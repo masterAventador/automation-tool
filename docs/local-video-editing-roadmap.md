@@ -84,29 +84,29 @@
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| LE-20 | 中文字体扩充与装配 | **本任务的前提已被 LE-09 调研推翻，开工前必须先重估必要性**：设计文档 §6.1 称「Noto Sans SC 覆盖约 3 万字、扩展 B 以上是豆腐块」，但生产在册的中文字体其实是 `contracts/quality/asset-rights-policy.v1.json` 锁的 **Noto Sans CJK SC**（静态 OTF，`Sans2.004`，由 `scripts/subtitle_font_assets.py` 按 SHA-256 取到构建缓存），LE-09 实测 `𠮷`（U+20BB7，扩展 B）在其 cmap 中映射到真实字形 `cid59625`。已实测确认缺口并引入锁版本/SHA/许可证/SBOM 的遍黑体 P1/P2，完成生产注册表、装配、出厂门禁、用户选择和 Windows 真机专项；完整 macOS/Windows PyInstaller 实包、总尺寸复测及 LE 级 integration 仍待获准执行，证据见 `docs/development/LE-20.md` | LE-09 | 🔍 待验收 |
+| LE-20 | 中文字体扩充与装配 | **本任务的前提已被 LE-09 调研推翻，开工前必须先重估必要性**：设计文档 §6.1 称「Noto Sans SC 覆盖约 3 万字、扩展 B 以上是豆腐块」，但生产在册的中文字体其实是 `contracts/quality/asset-rights-policy.v1.json` 锁的 **Noto Sans CJK SC**（静态 OTF，`Sans2.004`，由 `scripts/subtitle_font_assets.py` 按 SHA-256 取到构建缓存），LE-09 实测 `𠮷`（U+20BB7，扩展 B）在其 cmap 中映射到真实字形 `cid59625`。已实测确认缺口并引入锁版本/SHA/许可证/SBOM 的遍黑体 P1/P2，完成生产注册表、装配、出厂门禁和用户选择；macOS/Windows 真实素材 Worker 与正式安装包均从安装后目录通过同一 5 面字体/3 份许可证门禁，完成双平台包体复测、专项 Review 与 LE 级 integration 收口，证据见 `docs/development/LE-20.md` | LE-09 | ✅ 已完成 |
 
 ### 3.8 验收（3 项）
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
 | LE-21 | 失败矩阵联合验收 | 设计文档 §8 全部场景；素材消失、磁盘满、权限拒绝、渲染超时、进程被杀、取消竞争、App 退出恢复均有测试；七场景机器可读矩阵、Executor 精确注入、Rust ledger 与真实 Worker 生命周期已在 macOS/Windows 执行，Windows LE 收口集成 `459 passed, 29 skipped`（LE20 PyInstaller 候选构建单项不冒充 LE21 证据），逐项 Review 与功能验收均闭环，证据见 `docs/development/LE-21.md` | LE-12,LE-19 | ✅ 已完成 |
-| LE-22 | macOS 正式包纵向验收 | 从全新安装的正式 App 正常入口导入本地素材 → 一句话生成草稿 → 出片 → 成片入库并可播放；素材含至少一条有人声素材，核对它走的是原声而非 TTS；证据含 ffprobe 读数与产物尺寸。T1 旅程/证据契约与 T2 生产装配、DMG 隔离安装、回拷复核和真实资源清理编排均已完成并通过专项 Review；PyInstaller 实包与外部模型纵向执行仍受当前授权约束，不能用 debug 自动化壳冒充，证据见 `docs/development/LE-22.md` | LE-20,LE-21 | 🔍 待验收 |
-| LE-23 | Windows 正式包纵向验收 | 同 LE-22，在 Windows 正式包上独立完成；核对随包 ffmpeg、VAD/ASR 运行时与字体在 Windows 包内真实存在。正式页面旅程、生产资源装配、current-user NSIS 安装/回读/卸载、数据库/ffprobe/原声相关性及字体证据编排已完成并通过专项 Review；Windows 真机环境已确认可达，但 PyInstaller 实包与外部模型纵向执行仍受当前授权约束，证据见 `docs/development/LE-23.md` | LE-22 | 🔍 待验收 |
+| LE-22 | macOS 正式包纵向验收 | 从全新安装的正式 App 正常入口导入本地素材 → 一句话生成草稿 → 出片 → 成片入库并可播放；素材含至少一条有人声素材，核对它走的是原声而非 TTS；证据含 ffprobe 读数与产物尺寸。T1 旅程/证据契约已完成；T2 已在 macOS 真机生成 Developer ID 签名 App 与 DMG，从镜像隔离回拷后重新通过浏览器、三项视频运行时、134 项动效、字体/Worker 和签名门禁。外部模型纵向执行与 notarization 尚未完成，不能用本地包阶段冒充顶格验收，证据见 `docs/development/LE-22.md` | LE-20,LE-21 | 🔍 待验收 |
+| LE-23 | Windows 正式包纵向验收 | 同 LE-22，在 Windows 正式包上独立完成；核对随包 ffmpeg、VAD/ASR 运行时与字体在 Windows 包内真实存在。T1 旅程与证据编排已完成；T2 已在 Windows 真机以非提升用户生成并安装 current-user NSIS，安装后重新通过浏览器、三项视频运行时、134 项动效、字体/Worker 门禁，随后卸载并清理注册表/端口。外部模型纵向执行与 Authenticode 发布签名尚未完成，不能用本地包阶段冒充顶格验收，证据见 `docs/development/LE-23.md` | LE-22 | 🔍 待验收 |
 
 ## 4. 进度
 
 任务总数与各状态计数由 `scripts/check_local_editing_roadmap_counts.py` 守护，只在此处记录一次：
 
 - 任务总数：24
-- ✅ 已完成：12
-- 🔍 待验收：12
+- ✅ 已完成：13
+- 🔍 待验收：11
 - 🧪 RED / 🚧 实现中：0
 - ⬜ 未开始：0
 
 ## 5. 历史进度与当前下一步
 
-**24 项任务均已有实现；LE-19/LE-24 待真实外部验收，LE-20/LE-22/LE-23 待双平台实包或真实模型验收，当前继续回填所有不依赖这两项授权的验收证据。** 下文保留 LE-10～LE-18 的推进背景，
+**24 项任务均已有实现；LE-20 已完成双平台实包与字体装配收口，LE-19/LE-24 待真实外部验收，LE-22/LE-23 待真实模型纵向验收与发布签名条件，当前继续回填所有不依赖外发授权的验收证据。** 下文保留 LE-10～LE-18 的推进背景，
 不再把其中“下一步进入 LE-17”的历史句子解释为当前状态。
 
 **LE-12 T1～T5 已完成；下一步进入 LE-17 工作台接真实网关。** LE-10 已交付从真实领域投影、绝对
