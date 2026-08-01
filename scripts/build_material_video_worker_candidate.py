@@ -95,7 +95,9 @@ def required_dependencies(contract: dict[str, object]) -> dict[str, str]:
         reject("依赖契约缺失")
     common = dependencies.get("required")
     by_target = dependencies.get("platformRequired")
-    platform_required = by_target.get(current_target_id()) if isinstance(by_target, dict) else None
+    platform_required = (
+        by_target.get(current_target_id()) if isinstance(by_target, dict) else None
+    )
     if not isinstance(common, dict) or not isinstance(platform_required, dict):
         reject("平台依赖版本契约缺失")
     combined = {str(name).lower(): str(version) for name, version in common.items()}
@@ -134,7 +136,9 @@ def excluded_modules(contract: dict[str, object]) -> tuple[str, ...]:
     return tuple(str(name) for name in names)
 
 
-def assert_excluded_modules_absent(candidate: Path, contract: dict[str, object]) -> None:
+def assert_excluded_modules_absent(
+    candidate: Path, contract: dict[str, object]
+) -> None:
     """Fail closed when the frozen candidate still carries an excluded module."""
     internal = candidate / "_internal"
     present = sorted(
@@ -162,11 +166,15 @@ def excluded_upstream_resources(contract: dict[str, object]) -> tuple[str, ...]:
     return tuple(str(name) for name in names)
 
 
-def assert_excluded_upstream_resources_absent(candidate: Path, contract: dict[str, object]) -> None:
+def assert_excluded_upstream_resources_absent(
+    candidate: Path, contract: dict[str, object]
+) -> None:
     """Fail closed when the frozen candidate still carries an excluded asset tree."""
     resource_root = candidate / "_internal/upstream/resource"
     present = sorted(
-        name for name in excluded_upstream_resources(contract) if (resource_root / name).exists()
+        name
+        for name in excluded_upstream_resources(contract)
+        if (resource_root / name).exists()
     )
     if present:
         reject(f"候选仍包含产品不再分发的上游资源：{','.join(present)}")
@@ -228,7 +236,9 @@ def assert_bundled_subtitle_fonts_present(
         if notice is None:
             notice = subtitle_font_assets.packaged_license_notice()
         if default_font_name is None:
-            default_font_name = subtitle_font_assets.default_subtitle_font_name(contract)
+            default_font_name = subtitle_font_assets.default_subtitle_font_name(
+                contract
+            )
     except subtitle_font_assets.SubtitleFontRightsError as error:
         reject(f"字幕字体权利登记无效：{error}")
     missing: list[str] = []
@@ -255,7 +265,9 @@ def assert_bundled_subtitle_fonts_present(
     if drifted:
         reject(f"候选中的字幕字体与登记字节不一致：{','.join(sorted(drifted))}")
     if misattributed:
-        reject(f"候选中的字幕字体自带的版权声明与权利登记不一致：{','.join(sorted(misattributed))}")
+        reject(
+            f"候选中的字幕字体自带的版权声明与权利登记不一致：{','.join(sorted(misattributed))}"
+        )
     if not (font_root / default_font_name).is_file():
         reject(f"候选缺少默认字幕字体：{default_font_name}")
 
@@ -501,7 +513,9 @@ def audit_candidate(
     build = contract.get("build")
     dependencies = contract.get("dependencies")
     probe_contract = contract.get("probe")
-    if not all(isinstance(value, dict) for value in (build, dependencies, probe_contract)):
+    if not all(
+        isinstance(value, dict) for value in (build, dependencies, probe_contract)
+    ):
         reject("候选审计契约缺失")
     assert isinstance(build, dict)
     assert isinstance(dependencies, dict)
@@ -524,18 +538,25 @@ def audit_candidate(
             reject("候选包含特殊文件")
         files += 1
         package_bytes += metadata.st_size
-    if files > build.get("maximumFiles", 0) or package_bytes > build.get("maximumBytes", 0):
+    if files > build.get("maximumFiles", 0) or package_bytes > build.get(
+        "maximumBytes", 0
+    ):
         reject("候选文件数或包体超过上限")
     executable = candidate / (f"{ENTRYPOINT}.exe" if os.name == "nt" else ENTRYPOINT)
     if not executable.is_file() or not os.access(executable, os.X_OK):
         reject("候选缺少独立可执行入口")
-    if any(path.name.startswith("automation-tool-executor") for path in candidate.rglob("*")):
+    if any(
+        path.name.startswith("automation-tool-executor")
+        for path in candidate.rglob("*")
+    ):
         reject("候选错误混入 RPA Executor")
     assert_excluded_modules_absent(candidate, contract)
     assert_excluded_upstream_resources_absent(candidate, contract)
     assert_excluded_upstream_resource_files_absent(candidate, contract)
     assert_bundled_subtitle_fonts_present(candidate, contract)
-    inventory_path = candidate / "_internal/licenses/material-video-worker-dependencies.json"
+    inventory_path = (
+        candidate / "_internal/licenses/material-video-worker-dependencies.json"
+    )
     if not inventory_path.is_file():
         reject("候选缺少依赖许可证清单")
     inventory = json.loads(inventory_path.read_text(encoding="utf-8"))

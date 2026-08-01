@@ -72,9 +72,9 @@ def check_the_startup_gate_environment_supplies_every_compile_time_input() -> No
     ), "the action authorization public key is missing"
     assert prepared["AUTOMATION_TOOL_LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS"].isdigit()
     assert prepared["AUTOMATION_TOOL_LOCAL_ACTION_TASK_LIMIT"].isdigit()
-    assert prepared["AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN"] == "http://127.0.0.1:19001", (
-        "the compiled-in origin must name the port this run actually serves"
-    )
+    assert (
+        prepared["AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN"] == "http://127.0.0.1:19001"
+    ), "the compiled-in origin must name the port this run actually serves"
     assert prepared["PATH"] == "/usr/bin", "caller isolation values must survive"
 
 
@@ -118,7 +118,8 @@ def check_reserved_control_plane_ports_stay_inside_the_project_range() -> None:
         f"{port} is outside the automation-tool range {CONTROL_PLANE_PORT_RANGE}"
     )
     assert reserve_control_plane_port() == port, (
-        "one process runs one Control Plane; drivers that import each other must agree on its port"
+        "one process runs one Control Plane; drivers that import each other "
+        "must agree on its port"
     )
     with socket.socket() as probe:
         probe.settimeout(0.2)
@@ -137,7 +138,9 @@ def check_every_control_plane_driver_goes_through_the_shared_preparation() -> No
     assert len(drivers) >= 30, f"only {len(drivers)} drivers were derived"
 
     unwired = sorted(
-        path.name for path in drivers if SHARED_MODULE not in path.read_text(encoding="utf-8")
+        path.name
+        for path in drivers
+        if SHARED_MODULE not in path.read_text(encoding="utf-8")
     )
     assert not unwired, (
         "these drivers build a control-plane-e2e App without the shared startup "
@@ -152,7 +155,9 @@ def check_no_control_plane_driver_hardcodes_the_shared_port() -> None:
         for path in control_plane_e2e_drivers()
         if re.search(r"\b8765\b", path.read_text(encoding="utf-8"))
     )
-    assert not offenders, f"these drivers still pin the Control Plane port: {', '.join(offenders)}"
+    assert not offenders, (
+        f"these drivers still pin the Control Plane port: {', '.join(offenders)}"
+    )
 
 
 def check_staging_rejects_a_browser_tree_that_fails_verification() -> None:
@@ -224,7 +229,9 @@ def check_the_resource_root_is_where_the_acceptance_app_actually_runs() -> None:
 
 def check_the_derived_driver_set_matches_the_packaged_builds() -> None:
     """The driver set must come from package.json, not from a hand-kept list."""
-    scripts = json.loads((ROOT / "frontend/package.json").read_text(encoding="utf-8"))["scripts"]
+    scripts = json.loads((ROOT / "frontend/package.json").read_text(encoding="utf-8"))[
+        "scripts"
+    ]
     builds = {
         name
         for name, command in scripts.items()
@@ -252,7 +259,9 @@ def check_every_driver_names_the_operations_profile_root_the_app_writes() -> Non
     root passes its App phases and then fails on its own post-conditions, which
     reads exactly like a product regression.
     """
-    source = (ROOT / "frontend/src-tauri/src/browser_profiles.rs").read_text(encoding="utf-8")
+    source = (ROOT / "frontend/src-tauri/src/browser_profiles.rs").read_text(
+        encoding="utf-8"
+    )
     declared = re.search(r'const PROFILE_ROOT_DIRECTORY: &str = "([a-z-]+)";', source)
     assert declared is not None, "the Rust Profile root constant moved"
     assert declared.group(1) == OPERATIONS_PROFILE_ROOT, (
@@ -332,8 +341,12 @@ def check_every_driver_stops_the_whole_app_process_tree() -> None:
     stale = sorted(
         path.name
         for path in control_plane_e2e_drivers()
-        if "app_process = subprocess.Popen(" in (source := path.read_text(encoding="utf-8"))
-        and (SHARED_PROCESS_TREE_TERMINATOR not in source or "start_new_session" not in source)
+        if "app_process = subprocess.Popen("
+        in (source := path.read_text(encoding="utf-8"))
+        and (
+            SHARED_PROCESS_TREE_TERMINATOR not in source
+            or "start_new_session" not in source
+        )
     )
     assert not stale, (
         "these drivers spawn an acceptance App without starting it in its own session "
@@ -415,7 +428,9 @@ def check_executor_cache_key_tracks_real_source_inputs() -> None:
             build_ids.append(build_id)
             package = workspace / "dist/automation-tool-executor"
             package.mkdir(parents=True, exist_ok=True)
-            (package / prerequisites.EXECUTOR_MANIFEST_NAME).write_text("{}", encoding="utf-8")
+            (package / prerequisites.EXECUTOR_MANIFEST_NAME).write_text(
+                "{}", encoding="utf-8"
+            )
             (package / prerequisites.EXECUTOR_MANIFEST_SIGNATURE_NAME).write_text(
                 "test", encoding="utf-8"
             )
@@ -427,7 +442,9 @@ def check_executor_cache_key_tracks_real_source_inputs() -> None:
             stack.enter_context(
                 patch.dict(sys.modules, {"run_e4_07_acceptance": fake_builder_module})
             )
-            stack.enter_context(patch.object(prerequisites, "REPOSITORY_ROOT", repository_root))
+            stack.enter_context(
+                patch.object(prerequisites, "REPOSITORY_ROOT", repository_root)
+            )
             stack.enter_context(
                 patch.object(prerequisites, "BACKEND_ROOT", backend_root, create=True)
             )
@@ -491,7 +508,10 @@ def check_executor_cache_key_tracks_real_source_inputs() -> None:
                 }
             )
             == 5
-        ), "source, spec, contract and model asset builder must each select a new package"
+        ), (
+            "source, spec, contract and model asset builder must each select "
+            "a new package"
+        )
         assert unchanged_package == first_package, (
             "unchanged Executor inputs must keep reusing the same cached package"
         )
@@ -506,10 +526,12 @@ def check_executor_spec_resource_discovery_ignores_destination_directories() -> 
 
     assert inputs
     assert (
-        prerequisites.REPOSITORY_ROOT / "contracts/quality/silero-vad-runtime.v1.json" in inputs
+        prerequisites.REPOSITORY_ROOT / "contracts/quality/silero-vad-runtime.v1.json"
+        in inputs
     ), "the frozen Silero VAD contract must remain part of the Executor cache key"
     assert all(path.is_file() for path in inputs), (
-        "Executor cache inputs must contain source files, not PyInstaller destination directories"
+        "Executor cache inputs must contain source files, not PyInstaller "
+        "destination directories"
     )
 
 
@@ -562,7 +584,9 @@ def check_every_declared_check_is_registered() -> None:
     before (T51, T62).
     """
     declared = {
-        name for name, value in globals().items() if name.startswith("check_") and callable(value)
+        name
+        for name, value in globals().items()
+        if name.startswith("check_") and callable(value)
     }
     registered = {check.__name__ for check in CHECKS}
     missing = sorted(declared - registered)

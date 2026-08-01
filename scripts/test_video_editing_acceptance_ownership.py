@@ -42,7 +42,8 @@ class VideoEditingAcceptanceOwnershipTests(unittest.TestCase):
                             "--config src-tauri/tauri.video-editing-e2e.conf.json"
                         ),
                         "test:le17-video-editing-app": (
-                            "../backend/.venv/bin/python ../scripts/run_le_17_acceptance.py"
+                            "../backend/.venv/bin/python "
+                            "../scripts/run_le_17_acceptance.py"
                         ),
                     }
                 }

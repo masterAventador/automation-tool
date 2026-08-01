@@ -42,23 +42,27 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from process_diagnostics import builder_diagnostic
-from release_assembly import (
+from process_diagnostics import builder_diagnostic  # noqa: E402
+from release_assembly import (  # noqa: E402
     MOTION_CATALOG_RESOURCES,
     VIDEO_RUNTIME_RESOURCES,
     _VideoResource,
 )
-from subtitle_font_assets import ensure_subtitle_fonts
-from video_runtime_cache import cache_root, ensure_cached
+from subtitle_font_assets import ensure_subtitle_fonts  # noqa: E402
+from video_runtime_cache import cache_root, ensure_cached  # noqa: E402
 
 ASSET_RIGHTS_CONTRACT = ROOT / "contracts/quality/asset-rights-policy.v1.json"
 MEDIA_TOOLCHAIN_CONTRACT = ROOT / "contracts/video/ffmpeg-toolchain.v1.json"
 MOTION_WORKER_CONTRACT = ROOT / "contracts/quality/motion-video-worker-package.v1.json"
-MATERIAL_WORKER_CONTRACT = ROOT / "contracts/quality/material-video-worker-package.v1.json"
+MATERIAL_WORKER_CONTRACT = (
+    ROOT / "contracts/quality/material-video-worker-package.v1.json"
+)
 OFFLINE_MOTION_LOCK = ROOT / "contracts/video/offline-motion-dependencies.v1.json"
 THIRD_PARTY_SOURCES_CONTRACT = ROOT / "contracts/quality/third-party-sources.v1.json"
 MEDIA_TOOLCHAIN_BUILDER = ROOT / "scripts/build_video_media_toolchain.sh"
-MEDIA_TOOLCHAIN_MANIFEST_WRITER = ROOT / "scripts/write_video_media_toolchain_manifest.py"
+MEDIA_TOOLCHAIN_MANIFEST_WRITER = (
+    ROOT / "scripts/write_video_media_toolchain_manifest.py"
+)
 MOTION_WORKER_BUILDER = ROOT / "scripts/build_motion_video_worker_candidate.py"
 MOTION_WORKER_SOURCE = ROOT / "workers/motion_composition/worker.mjs"
 MATERIAL_WORKER_BUILDER = ROOT / "scripts/build_material_video_worker_candidate.py"
@@ -275,7 +279,9 @@ def prepare(
         ensure_cached(
             name="media-toolchain",
             contracts=MEDIA_TOOLCHAIN_INPUTS,
-            build=lambda destination: _build_media_toolchain(destination, platform=resolved),
+            build=lambda destination: _build_media_toolchain(
+                destination, platform=resolved
+            ),
             root=staging,
         )
     if "motion-video-worker" in wanted:
@@ -372,7 +378,10 @@ def main() -> int:
         "--only",
         action="append",
         metavar="RESOURCE",
-        help=("restrict to one resource; repeatable. One of: " + ", ".join(INSTALLABLE_NAMES)),
+        help=(
+            "restrict to one resource; repeatable. One of: "
+            + ", ".join(INSTALLABLE_NAMES)
+        ),
     )
     parser.add_argument(
         "--install-into",
@@ -385,7 +394,9 @@ def main() -> int:
         ),
     )
     arguments = parser.parse_args()
-    staging = prepare(platform=arguments.platform, root=arguments.root, only=arguments.only)
+    staging = prepare(
+        platform=arguments.platform, root=arguments.root, only=arguments.only
+    )
     if arguments.install_into is not None:
         installed = install(
             staging=staging,

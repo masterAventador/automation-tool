@@ -17,6 +17,7 @@ from pathlib import Path
 from uuid import UUID
 
 from acceptance_postgres import WINDOWS_POSTGRES_ROOT_ENVIRONMENT
+from automation_tool.executor.material_probe import MaterialPathRegistry
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from desktop_e2e_prerequisites import (
     DEBUG_APP_RESOURCE_ROOT,
@@ -31,8 +32,6 @@ from run_i2_13_acceptance import require_port_closed, unused_loopback_port
 from run_t3_06_acceptance import base64url
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
-
-from automation_tool.executor.material_probe import MaterialPathRegistry
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
@@ -98,7 +97,8 @@ def acceptance_environment(source: Mapping[str, str] | None = None) -> dict[str,
     return {
         key: value
         for key, value in ambient.items()
-        if not key.startswith("AUTOMATION_TOOL_") or key == WINDOWS_POSTGRES_ROOT_ENVIRONMENT
+        if not key.startswith("AUTOMATION_TOOL_")
+        or key == WINDOWS_POSTGRES_ROOT_ENVIRONMENT
     }
 
 
@@ -194,7 +194,9 @@ async def terminal_job(database_url: str) -> tuple[str, str]:
         raise RuntimeError(f"LE-17 expected one EditingJob, found {len(rows)}")
     status, failure_code, artifact_id = rows[0]
     if status != "succeeded" or failure_code is not None or artifact_id is None:
-        raise RuntimeError("LE-17 EditingJob did not converge to succeeded with an Artifact")
+        raise RuntimeError(
+            "LE-17 EditingJob did not converge to succeeded with an Artifact"
+        )
     return status, str(artifact_id)
 
 
@@ -225,7 +227,9 @@ def local_runtime_diagnostics(private_app_data: Path) -> str:
     jobs = private_app_data / "video-workspaces-v1" / "jobs"
     workspaces = [candidate for candidate in jobs.iterdir()] if jobs.is_dir() else []
     checkpoint_count = sum(
-        (candidate / "checkpoints" / "local-editing-render-request.checkpoint").is_file()
+        (
+            candidate / "checkpoints" / "local-editing-render-request.checkpoint"
+        ).is_file()
         for candidate in workspaces
     )
     output_count = sum(
@@ -233,7 +237,10 @@ def local_runtime_diagnostics(private_app_data: Path) -> str:
         for candidate in workspaces
         if (candidate / "outputs").is_dir()
     )
-    return f"workspaces={len(workspaces)} checkpoints={checkpoint_count} outputs={output_count}"
+    return (
+        f"workspaces={len(workspaces)} checkpoints={checkpoint_count} "
+        f"outputs={output_count}"
+    )
 
 
 def desktop_event_diagnostics(private_app_data: Path) -> str:
@@ -254,7 +261,10 @@ def desktop_event_diagnostics(private_app_data: Path) -> str:
                 record = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if not isinstance(record, dict) or set(record) != {"timestampUnixMs", "event"}:
+            if not isinstance(record, dict) or set(record) != {
+                "timestampUnixMs",
+                "event",
+            }:
                 continue
             event = record.get("event")
             timestamp = record.get("timestampUnixMs")
@@ -275,7 +285,9 @@ def inspect_artifact(
     evidence: Path,
 ) -> None:
     UUID(artifact_id)
-    artifact = private_app_data / "video-workspaces-v1" / "artifacts" / artifact_id / "payload"
+    artifact = (
+        private_app_data / "video-workspaces-v1" / "artifacts" / artifact_id / "payload"
+    )
     if not artifact.is_file() or artifact.stat().st_size < 1_000:
         raise RuntimeError("LE-17 succeeded job has no real local Artifact payload")
     completed = subprocess.run(
@@ -311,7 +323,9 @@ def inspect_artifact(
         or int(stream.get("nb_read_frames", 0)) != 20
         or not 0.95 <= duration <= 1.05
     ):
-        raise RuntimeError("LE-17 Artifact video stream drifted from the saved output contract")
+        raise RuntimeError(
+            "LE-17 Artifact video stream drifted from the saved output contract"
+        )
     evidence.mkdir(parents=True, exist_ok=True)
     shutil.copy2(artifact, evidence / "le17-real-editing.mp4")
     (evidence / "ffprobe.json").write_text(
@@ -343,7 +357,9 @@ def main() -> int:
     )
     suffix = ".exe" if os.name == "nt" else ""
     ffmpeg = (installed["media-toolchain"] / f"bin/ffmpeg{suffix}").resolve(strict=True)
-    ffprobe = (installed["media-toolchain"] / f"bin/ffprobe{suffix}").resolve(strict=True)
+    ffprobe = (installed["media-toolchain"] / f"bin/ffprobe{suffix}").resolve(
+        strict=True
+    )
     webdriver_port = unused_loopback_port()
     token, public_key = signed_bootstrap()
     environment = acceptance_environment()
@@ -378,7 +394,9 @@ def main() -> int:
                 state.mkdir(mode=0o700, parents=True)
                 if os.name != "nt":
                     state.chmod(0o700)
-                MaterialPathRegistry(state_directory=state).register(MATERIAL_ID, source)
+                MaterialPathRegistry(state_directory=state).register(
+                    MATERIAL_ID, source
+                )
 
                 subprocess.run(
                     [pnpm_executable(), "build:tauri:video-editing-test"],
@@ -405,12 +423,16 @@ def main() -> int:
                 try:
                     output_bytes, _ = app_process.communicate(timeout=420)
                 except subprocess.TimeoutExpired as error:
-                    raise RuntimeError("LE-17 hidden App journey did not finish") from error
+                    raise RuntimeError(
+                        "LE-17 hidden App journey did not finish"
+                    ) from error
                 output = output_bytes.decode("utf-8", errors="replace")
                 print(output, end="")
                 if app_process.returncode != 0:
                     diagnostics = asyncio.run(
-                        editing_job_diagnostics(prepared["AUTOMATION_TOOL_DATABASE_URL"])
+                        editing_job_diagnostics(
+                            prepared["AUTOMATION_TOOL_DATABASE_URL"]
+                        )
                     )
                     print(f"LE-17 editing-job diagnostics: {diagnostics}")
                     print(
@@ -423,7 +445,9 @@ def main() -> int:
                     )
                     raise RuntimeError("LE-17 hidden App editing journey failed")
                 app_process = None
-                _, artifact_id = asyncio.run(terminal_job(prepared["AUTOMATION_TOOL_DATABASE_URL"]))
+                _, artifact_id = asyncio.run(
+                    terminal_job(prepared["AUTOMATION_TOOL_DATABASE_URL"])
+                )
                 inspect_artifact(
                     private_app_data=private_app_data,
                     artifact_id=artifact_id,
@@ -434,9 +458,13 @@ def main() -> int:
         finally:
             if app_process is not None:
                 terminate_app_process_tree(app_process)
-            remaining = terminate_matching_processes(worker_marker, baseline=worker_baseline)
+            remaining = terminate_matching_processes(
+                worker_marker, baseline=worker_baseline
+            )
             if remaining:
-                raise RuntimeError(f"LE-17 Worker cleanup left process IDs: {sorted(remaining)}")
+                raise RuntimeError(
+                    f"LE-17 Worker cleanup left process IDs: {sorted(remaining)}"
+                )
             restore = subprocess.run(
                 [pnpm_executable(), "build"],
                 cwd=FRONTEND,

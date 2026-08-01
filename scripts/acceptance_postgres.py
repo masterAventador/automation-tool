@@ -37,7 +37,9 @@ def _run_captured_postgres_command(
             text=True,
         )
     except subprocess.CalledProcessError as error:
-        diagnostic = (error.stderr or error.stdout or "no PostgreSQL diagnostic").strip()
+        diagnostic = (
+            error.stderr or error.stdout or "no PostgreSQL diagnostic"
+        ).strip()
         name = Path(command[0]).stem.lower()
         raise RuntimeError(f"{name} failed: {diagnostic}") from error
 

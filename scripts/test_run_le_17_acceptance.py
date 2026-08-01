@@ -17,7 +17,9 @@ import run_le_17_acceptance  # noqa: E402
 
 
 class Le17AcceptanceEnvironmentTest(unittest.TestCase):
-    def test_only_the_owned_postgres_root_crosses_the_product_config_filter(self) -> None:
+    def test_only_the_owned_postgres_root_crosses_the_product_config_filter(
+        self,
+    ) -> None:
         postgres_root = acceptance_postgres.WINDOWS_POSTGRES_ROOT_ENVIRONMENT
 
         prepared = run_le_17_acceptance.acceptance_environment(

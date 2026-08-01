@@ -478,16 +478,15 @@ where
 /// to the blocking pool; the work looks the services up itself instead.
 /// `try_state` rather than `state` because a service that was never managed has
 /// to come back as this command's own error, not as a panic on a pool thread.
+type MotionRenderServices<'a> = (
+    tauri::State<'a, embedded_browser_authority::EmbeddedBrowserAuthority>,
+    tauri::State<'a, local_video_orchestrator::LocalVideoOrchestrator>,
+    tauri::State<'a, video_job_workspace::VideoJobWorkspaceStore>,
+);
+
 fn motion_render_services(
     app: &tauri::AppHandle,
-) -> Result<
-    (
-        tauri::State<'_, embedded_browser_authority::EmbeddedBrowserAuthority>,
-        tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
-        tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
-    ),
-    motion_video_studio::MotionVideoStudioError,
-> {
+) -> Result<MotionRenderServices<'_>, motion_video_studio::MotionVideoStudioError> {
     let authority = app
         .try_state::<embedded_browser_authority::EmbeddedBrowserAuthority>()
         .ok_or_else(motion_video_studio::render_unavailable)?;
@@ -672,13 +671,9 @@ pub fn run_motion_authoring(
         return Err(error);
     }
     let deadline = std::time::Instant::now() + budget;
-    let mut exited_cleanly = false;
-    loop {
+    let exited_cleanly = loop {
         match child.try_wait() {
-            Ok(Some(status)) => {
-                exited_cleanly = status.success();
-                break;
-            }
+            Ok(Some(status)) => break status.success(),
             Ok(None) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(std::time::Duration::from_millis(200));
             }
@@ -695,7 +690,7 @@ pub fn run_motion_authoring(
                 return Err(motion_video_studio::authoring_crashed());
             }
         }
-    }
+    };
     // Stdout is read whichever way the child exited. On the failure path it is
     // the only thing that separates "the agent completed the protocol and said
     // no" from every way the run can fail without anything having read the

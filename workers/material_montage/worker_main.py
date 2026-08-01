@@ -62,7 +62,10 @@ def runtime_probe() -> dict[str, object]:
     return {
         "protocolVersion": RUNTIME_PROBE_PROTOCOL_VERSION,
         "status": "ready",
-        "python": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+        "python": (
+            f"{sys.version_info.major}.{sys.version_info.minor}."
+            f"{sys.version_info.micro}"
+        ),
         "dependencies": versions,
         "capabilities": [
             "video_composition",
@@ -88,7 +91,9 @@ def dependency_probe(name: str) -> dict[str, object]:
     return {"dependency": name, "status": "ready"}
 
 
-def _report_local_editing_rejection(error: object, output: TextIO | None = None) -> None:
+def _report_local_editing_rejection(
+    error: object, output: TextIO | None = None
+) -> None:
     """Emit one closed operational reason without paths, exceptions or user data."""
     from automation_tool.executor.local_editing_worker_process import (
         LocalEditingRenderRejected,
@@ -145,7 +150,9 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
             else None
         )
         webui = (
-            start_webui(bootstrap.asset_root, bootstrap.script_model) if bootstrap.web_ui else None
+            start_webui(bootstrap.asset_root, bootstrap.script_model)
+            if bootstrap.web_ui
+            else None
         )
         server = create_gateway(bootstrap)
     except Exception:
@@ -154,7 +161,9 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
         print("Material video worker bootstrap is rejected", file=sys.stderr)
         return 65
     port = int(server.server_address[1])
-    thread = threading.Thread(target=server.serve_forever, name="material-video-gateway")
+    thread = threading.Thread(
+        target=server.serve_forever, name="material-video-gateway"
+    )
     thread.start()
     ready = {
         "authenticationProof": event_proof(bootstrap, "worker.ready", str(port)),
@@ -245,7 +254,9 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
                     continue
                 emit(
                     {
-                        "authenticationProof": event_proof(bootstrap, "worker.cancelled", job_id),
+                        "authenticationProof": event_proof(
+                            bootstrap, "worker.cancelled", job_id
+                        ),
                         "event": "worker.cancelled",
                         "jobId": job_id,
                         "protocolVersion": PROTOCOL_VERSION,
@@ -265,7 +276,9 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
                 except (GatewayRejected, UnicodeEncodeError):
                     continue
                 cancelled = {
-                    "authenticationProof": event_proof(bootstrap, "worker.cancelled", job_id),
+                    "authenticationProof": event_proof(
+                        bootstrap, "worker.cancelled", job_id
+                    ),
                     "event": "worker.cancelled",
                     "jobId": job_id,
                     "protocolVersion": PROTOCOL_VERSION,
@@ -299,7 +312,9 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
 REQUEST_SHUTDOWN_TIMEOUT_SECONDS: Final = 5
 
 
-def main(arguments: list[str] | None = None, bootstrap_stream: TextIO | None = None) -> int:
+def main(
+    arguments: list[str] | None = None, bootstrap_stream: TextIO | None = None
+) -> int:
     values = sys.argv[1:] if arguments is None else arguments
     if len(values) == 5 and values[0] == "--serve-webui":
         try:
@@ -335,11 +350,17 @@ def main(arguments: list[str] | None = None, bootstrap_stream: TextIO | None = N
         except Exception:
             print("Material video worker dependency is unavailable", file=sys.stderr)
             return 70
-        print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        print(
+            json.dumps(
+                payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+        )
         return 0
     if values != ["--probe"]:
         if not values:
-            return _gateway_process(sys.stdin if bootstrap_stream is None else bootstrap_stream)
+            return _gateway_process(
+                sys.stdin if bootstrap_stream is None else bootstrap_stream
+            )
         print("Material video worker command is required", file=sys.stderr)
         return 64
     try:
@@ -347,7 +368,9 @@ def main(arguments: list[str] | None = None, bootstrap_stream: TextIO | None = N
     except Exception:
         print("Material video worker startup is unavailable", file=sys.stderr)
         return 70
-    print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    print(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    )
     return 0
 
 

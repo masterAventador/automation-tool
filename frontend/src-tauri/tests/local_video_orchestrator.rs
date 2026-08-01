@@ -1277,8 +1277,7 @@ fn rejects_invalid_render_browser_configurations() {
     ];
     for (path, major, timeout) in invalid {
         let error = VideoWorkerRenderBrowserConfiguration::new(path, major, timeout)
-            .err()
-            .expect("invalid render browser configuration must be rejected");
+            .expect_err("invalid render browser configuration must be rejected");
         assert_eq!(error.code(), VideoWorkerErrorCode::ConfigurationInvalid);
     }
     render_configuration(&executable);
@@ -1389,7 +1388,8 @@ fn render_verify_without_a_configured_browser_is_rejected_without_ipc() {
 #[test]
 fn render_sandbox_rejects_invalid_requests() {
     let root = std::env::temp_dir();
-    let invalid: [(&str, Vec<&str>, u32, u32, u32, u32, u64); 8] = [
+    type InvalidSandboxRequest<'a> = (&'a str, Vec<&'a str>, u32, u32, u32, u32, u64);
+    let invalid: [InvalidSandboxRequest<'_>; 8] = [
         (
             "entry.html",
             vec!["assets/style.css"],
@@ -1476,8 +1476,7 @@ fn render_sandbox_rejects_invalid_requests() {
             memory,
             output,
         )
-        .err()
-        .expect("invalid sandbox request must be rejected");
+        .expect_err("invalid sandbox request must be rejected");
         assert_eq!(error.code(), VideoWorkerErrorCode::ConfigurationInvalid);
     }
     // A relative workspace is also rejected.
@@ -1501,8 +1500,7 @@ fn render_sandbox_rejects_invalid_requests() {
         1024,
         50_000_000,
     )
-    .err()
-    .expect("relative workspace must be rejected");
+    .expect_err("relative workspace must be rejected");
     assert_eq!(error.code(), VideoWorkerErrorCode::ConfigurationInvalid);
 }
 

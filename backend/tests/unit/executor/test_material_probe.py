@@ -19,7 +19,7 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -4274,9 +4274,11 @@ class TestMaterialPathRegistryNoticesTheFileMoved:
         }
         python_311 = SimpleNamespace(st_dev=0x89ABCDEF, **common)
         python_312 = SimpleNamespace(st_dev=0x1234567889ABCDEF, **common)
-        monkeypatch.setattr(material_probe.os, "name", "nt")
+        monkeypatch.setattr(os, "name", "nt")
 
-        assert material_probe._identity_of(python_311) == material_probe._identity_of(python_312)
+        assert material_probe._identity_of(
+            cast(os.stat_result, python_311)
+        ) == material_probe._identity_of(cast(os.stat_result, python_312))
         assert material_probe._stable_device_identity(python_312.st_dev) == python_311.st_dev
 
     def test_a_deleted_file_is_reported_missing(self, tmp_path: Path) -> None:

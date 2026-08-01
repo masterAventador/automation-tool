@@ -168,8 +168,12 @@ def startup_gate_environment(
     prepared = dict(environment)
     prepared.update(
         {
-            "AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN": control_plane_origin(control_plane_port),
-            "AUTOMATION_TOOL_ACTION_AUTHORIZATION_PUBLIC_KEY": (ACTION_AUTHORIZATION_PUBLIC_KEY),
+            "AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN": control_plane_origin(
+                control_plane_port
+            ),
+            "AUTOMATION_TOOL_ACTION_AUTHORIZATION_PUBLIC_KEY": (
+                ACTION_AUTHORIZATION_PUBLIC_KEY
+            ),
             "AUTOMATION_TOOL_LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS": (
                 LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS
             ),
@@ -372,7 +376,9 @@ def stage_embedded_browser(
     return destination
 
 
-def remove_staged_embedded_browser(*, resource_root: Path = DEBUG_APP_RESOURCE_ROOT) -> None:
+def remove_staged_embedded_browser(
+    *, resource_root: Path = DEBUG_APP_RESOURCE_ROOT
+) -> None:
     """Leave the resource root without a browser component, on purpose.
 
     H8-16E asserts the blocked diagnostics page, so it needs the component
@@ -401,13 +407,17 @@ def _executor_spec_resources(source: str) -> tuple[str, ...]:
     try:
         tree = ast.parse(source)
     except SyntaxError as error:
-        raise DesktopPrerequisiteRejected("the Executor spec cannot be parsed") from error
+        raise DesktopPrerequisiteRejected(
+            "the Executor spec cannot be parsed"
+        ) from error
     silero_contract: str | None = None
     motion_resources: tuple[str, ...] | None = None
     for statement in tree.body:
         if not isinstance(statement, ast.Assign):
             continue
-        names = {target.id for target in statement.targets if isinstance(target, ast.Name)}
+        names = {
+            target.id for target in statement.targets if isinstance(target, ast.Name)
+        }
         if "silero_vad_contract_source" in names:
             value = statement.value
             if (
@@ -440,12 +450,16 @@ def _executor_input_paths(repository_root: Path) -> tuple[Path, ...]:
     """Return every repository file whose bytes can change the frozen Executor."""
     source_root = repository_root / "backend/src"
     if not source_root.is_dir():
-        raise DesktopPrerequisiteRejected(f"the Executor source tree is missing ({source_root})")
+        raise DesktopPrerequisiteRejected(
+            f"the Executor source tree is missing ({source_root})"
+        )
     inputs = {
         path
         for path in source_root.rglob("*")
         if path.is_file()
-        and not _IGNORED_EXECUTOR_SOURCE_PARTS.intersection(path.relative_to(source_root).parts)
+        and not _IGNORED_EXECUTOR_SOURCE_PARTS.intersection(
+            path.relative_to(source_root).parts
+        )
         and path.suffix not in _IGNORED_EXECUTOR_SOURCE_SUFFIXES
     }
     if not inputs:
@@ -456,13 +470,17 @@ def _executor_input_paths(repository_root: Path) -> tuple[Path, ...]:
     for relative in _EXECUTOR_FIXED_INPUTS:
         path = repository_root / relative
         if not path.is_file():
-            raise DesktopPrerequisiteRejected(f"the Executor package input is missing ({relative})")
+            raise DesktopPrerequisiteRejected(
+                f"the Executor package input is missing ({relative})"
+            )
         inputs.add(path)
 
     for relative in _EXECUTOR_CONTRACT_ROOTS:
         contract_root = repository_root / relative
         if not contract_root.is_dir():
-            raise DesktopPrerequisiteRejected(f"the Executor contract tree is missing ({relative})")
+            raise DesktopPrerequisiteRejected(
+                f"the Executor contract tree is missing ({relative})"
+            )
         inputs.update(path for path in contract_root.rglob("*") if path.is_file())
 
     spec_path = repository_root / _EXECUTOR_FIXED_INPUTS[0]
@@ -479,7 +497,9 @@ def _executor_input_paths(repository_root: Path) -> tuple[Path, ...]:
             )
         inputs.add(path)
 
-    return tuple(sorted(inputs, key=lambda path: path.relative_to(repository_root).as_posix()))
+    return tuple(
+        sorted(inputs, key=lambda path: path.relative_to(repository_root).as_posix())
+    )
 
 
 def executor_package_input_digest(repository_root: Path | None = None) -> str:
@@ -502,7 +522,8 @@ def executor_package_cache_key(
     repository_root: Path | None = None,
 ) -> str:
     """Name a cached package by its semantic build id and exact frozen inputs."""
-    return f"{build_id}-inputs-v1-{executor_package_input_digest(repository_root=repository_root)}"
+    digest = executor_package_input_digest(repository_root=repository_root)
+    return f"{build_id}-inputs-v1-{digest}"
 
 
 def ensure_signed_executor_package(build_id: str = SHARED_EXECUTOR_BUILD_ID) -> Path:
@@ -677,7 +698,9 @@ def desktop_e2e_startup_harness(
             "occupied; stop its owner instead of reusing or terminating it"
         )
     prepare_startup_gate(private_app_data, resource_root=resource_root)
-    prepared = startup_gate_environment(environment, control_plane_port=PRODUCT_CONTROL_PLANE_PORT)
+    prepared = startup_gate_environment(
+        environment, control_plane_port=PRODUCT_CONTROL_PLANE_PORT
+    )
     server = _start_health_control_plane(port=PRODUCT_CONTROL_PLANE_PORT)
     try:
         yield prepared
@@ -698,7 +721,8 @@ def _video_studio_environment(
     prepared = {
         key: value
         for key, value in environment.items()
-        if not key.startswith("AUTOMATION_TOOL_") or key in VIDEO_STUDIO_DRIVER_ENVIRONMENT_NAMES
+        if not key.startswith("AUTOMATION_TOOL_")
+        or key in VIDEO_STUDIO_DRIVER_ENVIRONMENT_NAMES
     }
     prepared.update(
         {

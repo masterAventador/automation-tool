@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import cast
 from uuid import UUID
 
 import pytest
 
 from automation_tool.executor.local_editing_worker import (
     LocalEditingStartCommand,
+    LocalEditingWorkerBootstrap,
     LocalEditingWorkerFailureCode,
     parse_local_editing_worker_bootstrap,
 )
@@ -24,6 +26,8 @@ from automation_tool.executor.material_probe import (
     MaterialPathRegistry,
 )
 from automation_tool.executor.visual_render_execution import VisualRenderReceipt
+from automation_tool.executor.visual_rendering import VisualRenderSourceBinding
+from automation_tool.protocol.local_rendering import LocalEditingVisualRenderPlan
 
 JOB_ID = UUID("00000000-0000-4000-8000-000000000001")
 PROJECT_ID = UUID("00000000-0000-4000-8000-000000000002")
@@ -39,7 +43,7 @@ def private_directory(path: Path) -> Path:
     return path
 
 
-def bootstrap(app_data: Path):
+def bootstrap(app_data: Path) -> LocalEditingWorkerBootstrap:
     tools = private_directory(app_data / "tools")
     ffmpeg = tools / "ffmpeg"
     ffprobe = tools / "ffprobe"
@@ -139,7 +143,14 @@ def test_job_bundle_builds_existing_render_plan_and_uses_registered_source(
     app_data, source = prepare_job(tmp_path)
     observed: dict[str, object] = {}
 
-    def render(tools, plan, sources, approvals, task_directory, **options):
+    def render(
+        tools: object,
+        plan: object,
+        sources: object,
+        approvals: object,
+        task_directory: Path,
+        **options: object,
+    ) -> VisualRenderReceipt:
         observed.update(
             {
                 "tools": tools,
@@ -174,9 +185,11 @@ def test_job_bundle_builds_existing_render_plan_and_uses_registered_source(
     )
 
     assert artifact_id == ARTIFACT_ID
-    assert observed["plan"].project_id == PROJECT_ID  # type: ignore[union-attr]
-    assert observed["plan"].timeline_id == TIMELINE_ID  # type: ignore[union-attr]
-    assert observed["sources"][0].source_path == source.resolve()  # type: ignore[index,union-attr]
+    plan = cast("LocalEditingVisualRenderPlan", observed["plan"])
+    sources = cast("tuple[VisualRenderSourceBinding, ...]", observed["sources"])
+    assert plan.project_id == PROJECT_ID
+    assert plan.timeline_id == TIMELINE_ID
+    assert sources[0].source_path == source.resolve()
     assert observed["taskDirectory"] == (
         app_data / "video-workspaces-v1" / "jobs" / str(JOB_ID) / "outputs"
     )

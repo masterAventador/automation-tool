@@ -58,7 +58,9 @@ def audit_repository(repository_root: Path) -> list[str]:
     if not owners:
         errors.append("video-editing.spec.ts has no WDIO owner")
     elif len(owners) > 1:
-        errors.append("video-editing.spec.ts has duplicate WDIO owners: " + ",".join(owners))
+        errors.append(
+            "video-editing.spec.ts has duplicate WDIO owners: " + ",".join(owners)
+        )
     elif owners != [OWNER_NAME]:
         errors.append(f"video-editing.spec.ts owner must be {OWNER_NAME}")
 
@@ -96,7 +98,9 @@ def audit_repository(repository_root: Path) -> list[str]:
 
     acceptance = scripts.get(ACCEPTANCE_SCRIPT)
     try:
-        acceptance_tokens = shlex.split(acceptance) if isinstance(acceptance, str) else []
+        acceptance_tokens = (
+            shlex.split(acceptance) if isinstance(acceptance, str) else []
+        )
     except ValueError:
         acceptance_tokens = []
     if ACCEPTANCE_DRIVER not in acceptance_tokens:

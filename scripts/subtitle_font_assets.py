@@ -319,7 +319,9 @@ def bundled_subtitle_fonts(
             if entry.get(permission) is not True:
                 _reject(f"{identifier}: rights entry does not clear {permission}")
         if entry.get("license") != OPEN_FONT_LICENSE:
-            _reject(f"{identifier}: only {OPEN_FONT_LICENSE} fonts may be redistributed")
+            _reject(
+                f"{identifier}: only {OPEN_FONT_LICENSE} fonts may be redistributed"
+            )
         packaged_name = _packaged_file_name(
             entry.get("packagedName"), f"{identifier}: packagedName"
         )

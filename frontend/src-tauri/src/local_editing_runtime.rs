@@ -228,6 +228,37 @@ async fn fail_current_job(
     Ok(())
 }
 
+fn cancel_reconciliation_required(
+    status: EditingJobStatus,
+) -> Result<bool, LocalEditingRuntimeError> {
+    match status {
+        EditingJobStatus::Cancelling => Ok(true),
+        EditingJobStatus::Cancelled => Ok(false),
+        EditingJobStatus::Queued
+        | EditingJobStatus::Running
+        | EditingJobStatus::Succeeded
+        | EditingJobStatus::Failed => Err(runtime_unavailable()),
+    }
+}
+
+async fn cancel_current_job(
+    client: &ControlPlaneClient,
+    vault: &ProductionDeviceCredentialVault,
+    job_id: &str,
+) -> Result<(), LocalEditingRuntimeError> {
+    let current = client
+        .get_editing_job(vault, job_id)
+        .await
+        .map_err(|_| runtime_unavailable())?;
+    if cancel_reconciliation_required(current.status())? {
+        client
+            .reconcile_editing_job(vault, &current, EditingJobStatus::Cancelled, None, None)
+            .await
+            .map_err(|_| runtime_unavailable())?;
+    }
+    Ok(())
+}
+
 async fn succeed_current_job(
     client: &ControlPlaneClient,
     vault: &ProductionDeviceCredentialVault,
@@ -379,13 +410,7 @@ async fn monitor<R: Runtime>(app: tauri::AppHandle<R>, job_id: Uuid) {
                     fail_current_job(&client, &vault, &job_id.hyphenated().to_string(), code).await;
             }
             LocalEditingJobStatus::Cancelled => {
-                let _ = fail_current_job(
-                    &client,
-                    &vault,
-                    &job_id.hyphenated().to_string(),
-                    EditingJobFailureCode::WorkerLost,
-                )
-                .await;
+                let _ = cancel_current_job(&client, &vault, &job_id.hyphenated().to_string()).await;
             }
             _ => {}
         }
@@ -509,4 +534,32 @@ pub async fn fail_submitted_job<R: Runtime>(
         EditingJobFailureCode::WorkerLost,
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_worker_cancel_only_confirms_a_control_plane_cancellation() {
+        assert_eq!(
+            cancel_reconciliation_required(EditingJobStatus::Cancelling),
+            Ok(true)
+        );
+        assert_eq!(
+            cancel_reconciliation_required(EditingJobStatus::Cancelled),
+            Ok(false)
+        );
+        for status in [
+            EditingJobStatus::Queued,
+            EditingJobStatus::Running,
+            EditingJobStatus::Succeeded,
+            EditingJobStatus::Failed,
+        ] {
+            assert_eq!(
+                cancel_reconciliation_required(status),
+                Err(runtime_unavailable())
+            );
+        }
+    }
 }
