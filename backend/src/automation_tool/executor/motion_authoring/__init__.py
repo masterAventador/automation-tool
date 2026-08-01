@@ -1,21 +1,27 @@
 """One-sentence brand-motion authoring, hosted by the Local Executor.
 
-The agent turns a typed sentence into a composition and a submittable RenderJob;
-the entry is the short-lived process boundary the App calls it through.
+The public entry symbols stay lazy on purpose.  Lightweight consumers such as
+the smart-edit worker import authoring workspace helpers from this package, and
+must not pay for (or freeze) the browser-backed motion authoring agent unless a
+motion-authoring entry point is actually requested.
 """
 
-from automation_tool.executor.motion_authoring.entry import (
-    MAX_REQUEST_BYTES,
-    MotionAuthoringEntryRejected,
-    SCHEMA_VERSION,
-    run_motion_authoring_entry,
-    serve_one_motion_authoring_request,
-)
+from __future__ import annotations
+
+from importlib import import_module
+from typing import Any
 
 __all__ = [
     "MAX_REQUEST_BYTES",
-    "MotionAuthoringEntryRejected",
     "SCHEMA_VERSION",
+    "MotionAuthoringEntryRejected",
     "run_motion_authoring_entry",
     "serve_one_motion_authoring_request",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    if name not in __all__:
+        raise AttributeError(name)
+    entry = import_module("automation_tool.executor.motion_authoring.entry")
+    return getattr(entry, name)

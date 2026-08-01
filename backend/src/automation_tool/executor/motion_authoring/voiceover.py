@@ -49,7 +49,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
-from automation_tool.executor.motion_authoring.agent import AuthoringWorkspace
+from automation_tool.executor.motion_authoring.authoring_workspace import (
+    AuthoringWorkspace,
+)
 
 # A minute of 24 kHz mono PCM is about 2.9 MB; the observed 14 s clip was
 # 672 KB. This bounds a single beat, not the film, and exists so a wrong answer
@@ -253,9 +255,7 @@ def measure_audio_seconds(path: Path, *, ffprobe: Path) -> float:
     return seconds
 
 
-def load_voiceover_config(
-    *, catalog_path: Path, secret_path: Path
-) -> VoiceoverConfig | None:
+def load_voiceover_config(*, catalog_path: Path, secret_path: Path) -> VoiceoverConfig | None:
     """Build the config from the catalog and the secret, or None when unset.
 
     The purpose carries its own `base_url` and `api_mode` because TTS is not on
@@ -280,9 +280,7 @@ def load_voiceover_config(
     return voiceover_config_from_catalog(catalog_path=catalog_path, api_key=api_key)
 
 
-def voiceover_config_from_catalog(
-    *, catalog_path: Path, api_key: str
-) -> VoiceoverConfig:
+def voiceover_config_from_catalog(*, catalog_path: Path, api_key: str) -> VoiceoverConfig:
     """The config from the packaged catalog contract and a key already in hand.
 
     The Executor's authoring child has no secret file — the key arrives on

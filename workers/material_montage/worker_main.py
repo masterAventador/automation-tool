@@ -32,7 +32,9 @@ if TYPE_CHECKING:
         LocalEditingStartCommand,
         LocalMaterialForgetCommand,
         LocalMaterialImportCommand,
+        LocalSmartEditStartCommand,
     )
+    from automation_tool.executor.smart_edit_generation import SmartEditGenerationStage
 
 RUNTIME_PROBE_PROTOCOL_VERSION: Final = 1
 SAFE_MODULE_NAME: Final = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
@@ -53,6 +55,8 @@ RUNTIME_MODULES: Final[dict[str, str | None]] = {
     "google-genai": None,
     "brotli": "brotli",
     "fonttools": "fontTools",
+    "numpy": "numpy",
+    "onnxruntime": "onnxruntime",
 }
 
 
@@ -72,14 +76,14 @@ def runtime_probe() -> dict[str, object]:
         "protocolVersion": RUNTIME_PROBE_PROTOCOL_VERSION,
         "status": "ready",
         "python": (
-            f"{sys.version_info.major}.{sys.version_info.minor}."
-            f"{sys.version_info.micro}"
+            f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
         ),
         "dependencies": versions,
         "capabilities": [
             "video_composition",
             "speech_synthesis",
             "subtitle_transcription",
+            "smart_edit_generation",
             "web_ui",
         ],
     }
@@ -93,12 +97,23 @@ def dependency_probe(name: str) -> dict[str, object]:
         importlib.import_module("automation_tool.executor.local_editing_worker")
         importlib.import_module("automation_tool.executor.local_editing_worker_process")
         importlib.import_module("automation_tool.executor.local_material_preview")
+        importlib.import_module("automation_tool.executor.smart_edit_worker_process")
         return {"dependency": name, "status": "ready"}
     module = RUNTIME_MODULES.get(name)
     if module is None:
         raise ValueError("dependency is not part of the startup set")
     importlib.import_module(module)
     return {"dependency": name, "status": "ready"}
+
+
+def smart_edit_runtime_probe() -> None:
+    """Audit the frozen model, license and native CPU runtime in place."""
+
+    from automation_tool.executor.silero_vad import (
+        audit_packaged_silero_vad_runtime,
+    )
+
+    audit_packaged_silero_vad_runtime(Path(sys.executable).resolve().parent)
 
 
 def _report_local_editing_rejection(
@@ -156,6 +171,10 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
             LocalMaterialStatusCommand,
             LocalMaterialWorkerFailureCode,
             LocalMaterialWorkerStatus,
+            LocalSmartEditAbortCommand,
+            LocalSmartEditCommitCommand,
+            LocalSmartEditFailureCode,
+            LocalSmartEditStartCommand,
             parse_local_editing_worker_bootstrap,
         )
         from automation_tool.executor.local_editing_worker_process import (
@@ -169,6 +188,15 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
         )
         from automation_tool.executor.local_material_preview import (
             LocalMaterialPreviewSource,
+        )
+        from automation_tool.executor.smart_edit_worker_process import (
+            LocalSmartEditStagedJob,
+            LocalSmartEditWorkerCancelled,
+            LocalSmartEditWorkerRejected,
+            abort_smart_edit_job,
+            commit_smart_edit_job,
+            create_local_smart_edit_pipeline,
+            prepare_smart_edit_job,
         )
 
         bootstrap_line = line.encode()
@@ -220,7 +248,7 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
         if material_preview is not None
         else None
     )
-    ready = {
+    ready: dict[str, object] = {
         "authenticationProof": event_proof(bootstrap, "worker.ready", str(port)),
         "event": "worker.ready",
         "materialPreviewAuthenticationProof": (
@@ -265,6 +293,10 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
     render_thread: threading.Thread | None = None
     material_thread: threading.Thread | None = None
     cancel_requested = threading.Event()
+    smart_state_lock = threading.Lock()
+    smart_staged: LocalSmartEditStagedJob | None = None
+    smart_commit_timer: threading.Timer | None = None
+    smart_cleanup_pending: list[LocalSmartEditStagedJob] = []
 
     def render(command: LocalEditingStartCommand) -> None:
         if editing_bootstrap is None or editing_protocol is None:
@@ -307,9 +339,179 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
             with suppress(Exception):
                 with editing_protocol_lock:
                     failed = editing_protocol.fail(
-                        command.job_id, LocalEditingWorkerFailureCode.RENDER_FAILED
+                        command.job_id,
+                        LocalEditingWorkerFailureCode.RENDER_FAILED,
                     )
                 emit(failed)
+
+    def smart_edit(command: LocalSmartEditStartCommand) -> None:
+        nonlocal smart_commit_timer, smart_staged
+        if editing_bootstrap is None or editing_protocol is None:
+            return
+        prepared_job: LocalSmartEditStagedJob | None = None
+
+        def report_progress(stage: SmartEditGenerationStage, value: int) -> None:
+            with editing_protocol_lock:
+                payload = editing_protocol.smart_edit_progress(
+                    command.job_id,
+                    stage,
+                    value,
+                )
+            emit(payload)
+
+        try:
+            staged = prepare_smart_edit_job(
+                editing_bootstrap,
+                command,
+                pipeline_factory=lambda workspace: create_local_smart_edit_pipeline(
+                    editing_bootstrap,
+                    workspace,
+                ),
+                cancel_requested=cancel_requested.is_set,
+                progress=report_progress,
+            )
+            prepared_job = staged
+            if cancel_requested.is_set():
+                abort_smart_edit_job(staged)
+                with editing_protocol_lock:
+                    cancelled = editing_protocol.smart_edit_cancelled(command.job_id)
+                emit(cancelled)
+                return
+            with smart_state_lock:
+                if smart_staged is not None:
+                    raise RuntimeError("smart edit staging slot unavailable")
+                smart_staged = staged
+                with editing_protocol_lock:
+                    prepared = editing_protocol.smart_edit_prepared(
+                        command.job_id,
+                        staged.result_digest,
+                    )
+                timer = threading.Timer(
+                    SMART_EDIT_COMMIT_TIMEOUT_SECONDS,
+                    expire_smart_edit,
+                    args=(command.job_id,),
+                )
+                timer.daemon = True
+                smart_commit_timer = timer
+                timer.start()
+            emit(prepared)
+        except LocalSmartEditWorkerCancelled:
+            with suppress(Exception):
+                with editing_protocol_lock:
+                    cancelled = editing_protocol.smart_edit_cancelled(command.job_id)
+                emit(cancelled)
+        except LocalSmartEditWorkerRejected as error:
+            if prepared_job is not None and not prepared_job.finalized:
+                try:
+                    abort_smart_edit_job(prepared_job)
+                except Exception:
+                    smart_cleanup_pending.append(prepared_job)
+            with suppress(Exception):
+                with editing_protocol_lock:
+                    failed = editing_protocol.smart_edit_failed(
+                        command.job_id, error.code
+                    )
+                emit(failed)
+        except Exception:
+            with smart_state_lock:
+                if smart_commit_timer is not None:
+                    smart_commit_timer.cancel()
+                    smart_commit_timer = None
+                published = smart_staged
+                if published is not None and published.job_id == command.job_id:
+                    if not published.finalized:
+                        try:
+                            abort_smart_edit_job(published)
+                        except Exception:
+                            smart_cleanup_pending.append(published)
+                    smart_staged = None
+                elif prepared_job is not None and not prepared_job.finalized:
+                    try:
+                        abort_smart_edit_job(prepared_job)
+                    except Exception:
+                        smart_cleanup_pending.append(prepared_job)
+            with suppress(Exception):
+                with editing_protocol_lock:
+                    failed = editing_protocol.smart_edit_failed(
+                        command.job_id,
+                        LocalSmartEditFailureCode.LOCAL_FAILED,
+                    )
+                emit(failed)
+
+    def expire_smart_edit(job_id: object) -> None:
+        nonlocal smart_commit_timer, smart_staged
+        failed: bytes | None = None
+        with smart_state_lock:
+            staged = smart_staged
+            if staged is None or staged.job_id != job_id:
+                return
+            smart_commit_timer = None
+            try:
+                abort_smart_edit_job(staged)
+            except Exception:
+                smart_cleanup_pending.append(staged)
+            smart_staged = None
+            with suppress(Exception):
+                with editing_protocol_lock:
+                    failed = editing_protocol.smart_edit_failed(
+                        staged.job_id,
+                        LocalSmartEditFailureCode.COMMIT_FAILED,
+                    )
+        if failed is not None:
+            emit(failed)
+
+    def finalize_smart_edit(
+        command: LocalSmartEditCommitCommand | LocalSmartEditAbortCommand,
+    ) -> None:
+        nonlocal smart_commit_timer, smart_staged
+        if editing_bootstrap is None or editing_protocol is None:
+            return
+        terminal: bytes | None = None
+        with smart_state_lock:
+            staged = smart_staged
+            if staged is None or staged.job_id != command.job_id:
+                return
+            if smart_commit_timer is not None:
+                smart_commit_timer.cancel()
+                smart_commit_timer = None
+            if isinstance(command, LocalSmartEditAbortCommand):
+                try:
+                    abort_smart_edit_job(staged)
+                    with editing_protocol_lock:
+                        terminal = editing_protocol.smart_edit_aborted(command.job_id)
+                except Exception:
+                    if not staged.finalized:
+                        smart_cleanup_pending.append(staged)
+                    with suppress(Exception):
+                        with editing_protocol_lock:
+                            terminal = editing_protocol.smart_edit_failed(
+                                command.job_id,
+                                LocalSmartEditFailureCode.LOCAL_FAILED,
+                            )
+                smart_staged = None
+            else:
+                try:
+                    commit_smart_edit_job(editing_bootstrap, staged)
+                    with editing_protocol_lock:
+                        terminal = editing_protocol.smart_edit_succeeded(
+                            command.job_id,
+                            staged.result_digest,
+                        )
+                except Exception:
+                    if not staged.finalized:
+                        try:
+                            abort_smart_edit_job(staged)
+                        except Exception:
+                            smart_cleanup_pending.append(staged)
+                    with suppress(Exception):
+                        with editing_protocol_lock:
+                            terminal = editing_protocol.smart_edit_failed(
+                                command.job_id,
+                                LocalSmartEditFailureCode.COMMIT_FAILED,
+                            )
+                smart_staged = None
+        if terminal is not None:
+            emit(terminal)
 
     def import_material(command: LocalMaterialImportCommand) -> None:
         if editing_bootstrap is None or editing_protocol is None:
@@ -400,12 +602,21 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
                     }
                 )
                 continue
+            allow_legacy_cancel = False
             try:
                 with editing_protocol_lock:
-                    command = editing_protocol.accept_command(command_line.encode())
+                    try:
+                        command = editing_protocol.accept_command(command_line.encode())
+                    except Exception:
+                        allow_legacy_cancel = (
+                            not editing_protocol.has_active_operation()
+                        )
+                        raise
             except Exception:
                 # Preserve the material-studio cancellation vocabulary for a
                 # WebUI-only session that has no active editing job.
+                if not allow_legacy_cancel:
+                    continue
                 try:
                     job_id = parse_cancel_command(bootstrap, command_line.encode())
                 except (GatewayRejected, UnicodeEncodeError):
@@ -430,8 +641,21 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
                     name="local-editing-render",
                 )
                 render_thread.start()
+            elif isinstance(command, LocalSmartEditStartCommand):
+                cancel_requested.clear()
+                render_thread = threading.Thread(
+                    target=smart_edit,
+                    args=(command,),
+                    name="local-smart-edit-generation",
+                )
+                render_thread.start()
             elif isinstance(command, LocalEditingCancelCommand):
                 cancel_requested.set()
+            elif isinstance(
+                command,
+                (LocalSmartEditCommitCommand, LocalSmartEditAbortCommand),
+            ):
+                finalize_smart_edit(command)
             elif isinstance(command, LocalMaterialImportCommand):
                 material_thread = threading.Thread(
                     target=import_material,
@@ -459,6 +683,17 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
             render_thread.join(timeout=REQUEST_SHUTDOWN_TIMEOUT_SECONDS)
         if material_thread is not None:
             material_thread.join(timeout=REQUEST_SHUTDOWN_TIMEOUT_SECONDS)
+        with smart_state_lock:
+            if smart_commit_timer is not None:
+                smart_commit_timer.cancel()
+                smart_commit_timer = None
+            if smart_staged is not None:
+                smart_cleanup_pending.append(smart_staged)
+                smart_staged = None
+        for staged in smart_cleanup_pending:
+            if not staged.finalized:
+                with suppress(Exception):
+                    abort_smart_edit_job(staged)
         server.shutdown()
         server.server_close()
         thread.join(timeout=REQUEST_SHUTDOWN_TIMEOUT_SECONDS)
@@ -468,12 +703,30 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
 
 
 REQUEST_SHUTDOWN_TIMEOUT_SECONDS: Final = 5
+SMART_EDIT_COMMIT_TIMEOUT_SECONDS: Final = 120
 
 
 def main(
     arguments: list[str] | None = None, bootstrap_stream: TextIO | None = None
 ) -> int:
     values = sys.argv[1:] if arguments is None else arguments
+    if values == ["--probe-smart-edit-runtime"]:
+        try:
+            smart_edit_runtime_probe()
+        except Exception:
+            print(
+                "Material video worker smart-edit runtime is unavailable",
+                file=sys.stderr,
+            )
+            return 70
+        print(
+            json.dumps(
+                {"runtime": "smart_edit", "status": "ready"},
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        return 0
     if len(values) == 5 and values[0] == "--serve-webui":
         try:
             return serve_webui(

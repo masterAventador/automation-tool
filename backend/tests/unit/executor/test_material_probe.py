@@ -4120,6 +4120,65 @@ class TestMaterialPathRegistryHoldsTheMapping:
         assert stat.S_IMODE(_document(state).stat().st_mode) == 0o600
 
 
+class TestMaterialPathRegistryRegistersOneAtomicBatch:
+    def test_the_whole_batch_is_durable_after_one_registration(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        first = _source(tmp_path, "generated-1.wav")
+        second = _source(tmp_path, "generated-2.wav")
+        first_id, second_id = uuid.uuid4(), uuid.uuid4()
+
+        MaterialPathRegistry(state_directory=state).register_many(
+            ((first_id, first), (second_id, second))
+        )
+
+        restarted = MaterialPathRegistry(state_directory=state)
+        assert restarted.resolve(first_id)[0] == first
+        assert restarted.resolve(second_id)[0] == second
+
+    def test_a_rejected_source_exposes_none_of_the_batch(self, tmp_path: Path) -> None:
+        state = _state_directory(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        first = _source(tmp_path, "generated-1.wav")
+        first_id, missing_id = uuid.uuid4(), uuid.uuid4()
+
+        with pytest.raises(MaterialProbeRejected):
+            registry.register_many(((first_id, first), (missing_id, tmp_path / "missing.wav")))
+
+        for identifier in (first_id, missing_id):
+            with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+                registry.resolve(identifier)
+            assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.NOT_REGISTERED
+
+    def test_a_failed_document_replace_keeps_the_previous_registry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        state = _state_directory(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        kept = uuid.uuid4()
+        kept_source = _source(tmp_path, "kept.wav")
+        registry.register(kept, kept_source)
+        first_id, second_id = uuid.uuid4(), uuid.uuid4()
+
+        def refuse(*_arguments: object, **_keywords: object) -> None:
+            raise OSError(13, "Permission denied")
+
+        monkeypatch.setattr(os, "replace", refuse)
+        with pytest.raises(MaterialPathRegistryRejected):
+            registry.register_many(
+                (
+                    (first_id, _source(tmp_path, "generated-1.wav")),
+                    (second_id, _source(tmp_path, "generated-2.wav")),
+                )
+            )
+        monkeypatch.undo()
+
+        assert registry.resolve(kept)[0] == kept_source
+        for identifier in (first_id, second_id):
+            with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+                registry.resolve(identifier)
+            assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.NOT_REGISTERED
+
+
 class TestMaterialPathRegistryRepeatRegistration:
     """Registering again is how a moved material is found again, so it must work."""
 

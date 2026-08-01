@@ -41,7 +41,9 @@ from automation_tool.executor.material_understanding import (
     MaterialUnderstandingOptions,
     understand_material_artifacts,
 )
-from automation_tool.executor.motion_authoring.agent import AuthoringWorkspace
+from automation_tool.executor.motion_authoring.authoring_workspace import (
+    AuthoringWorkspace,
+)
 from automation_tool.executor.motion_authoring.voiceover import VoiceoverConfig
 from automation_tool.executor.script_segmentation import (
     ScriptSegmentationAdapter,

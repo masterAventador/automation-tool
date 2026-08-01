@@ -24,10 +24,17 @@ from automation_tool.executor.material_probe import (
     PackagedMediaTools,
     ProbedMaterialKind,
 )
+from automation_tool.executor.smart_edit_generation import SmartEditGenerationStage
 from automation_tool.protocol.safe_text import contains_control_or_bidi
 
 MAX_LOCAL_EDITING_WORKER_BOOTSTRAP_BYTES = 16 * 1024
 _TOKEN_PATTERN = re.compile(r"^[0-9a-f]{64}\Z")
+_API_KEY_PATTERN = re.compile(r"^sk-[A-Za-z0-9._-]{17,253}\Z")
+_SCRIPT_MODEL_KEYS = frozenset(
+    {"apiKey", "baseUrl", "modelId", "sourceProvider", "upstreamProvider"}
+)
+_SCRIPT_MODEL_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+_SCRIPT_MODEL_IDS = frozenset({"deepseek-v4-pro", "glm-5.2", "qwen3.7-max-2026-06-08"})
 _ROOT_KEYS = frozenset(
     {
         "assetRoot",
@@ -81,6 +88,7 @@ _MATERIAL_FORGET_COMMAND_KEYS = frozenset(
     }
 )
 _MATERIAL_STATUS_COMMAND_KEYS = _MATERIAL_FORGET_COMMAND_KEYS
+_SMART_EDIT_COMMAND_KEYS = _CANCEL_COMMAND_KEYS
 _EDITING_KEYS = frozenset({"projectId", "timelineId", "timelineRevision"})
 _COMMAND_AUTHENTICATION_DOMAIN = b"automation-tool.video-worker-command.v1\0"
 _EVENT_AUTHENTICATION_DOMAIN = b"automation-tool.video-worker-event.v1\0"
@@ -157,6 +165,43 @@ def _media_tools(value: object) -> PackagedMediaTools:
         )
     except MaterialProbeRejected:
         _reject()
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class LocalEditingScriptModelConfiguration:
+    base_url: str
+    model_id: str
+    api_key: str = field(repr=False)
+
+    def __repr__(self) -> str:
+        return (
+            "LocalEditingScriptModelConfiguration("
+            f"base_url={self.base_url!r}, model_id={self.model_id!r}, api_key=<redacted>)"
+        )
+
+
+def _script_model(value: object) -> LocalEditingScriptModelConfiguration | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != _SCRIPT_MODEL_KEYS:
+        _reject()
+    api_key = value.get("apiKey")
+    model_id = value.get("modelId")
+    if (
+        value.get("sourceProvider") != "bailian"
+        or value.get("upstreamProvider") != "openai"
+        or value.get("baseUrl") != _SCRIPT_MODEL_BASE_URL
+        or type(model_id) is not str
+        or model_id not in _SCRIPT_MODEL_IDS
+        or type(api_key) is not str
+        or _API_KEY_PATTERN.fullmatch(api_key) is None
+    ):
+        _reject()
+    return LocalEditingScriptModelConfiguration(
+        base_url=_SCRIPT_MODEL_BASE_URL,
+        model_id=model_id,
+        api_key=api_key,
+    )
 
 
 def _uuid_v4(value: object) -> UUID:
@@ -256,6 +301,10 @@ class LocalEditingWorkerBootstrap:
     asset_root: Path = field(repr=False)
     media_tools: PackagedMediaTools = field(repr=False)
     _session_token: bytes = field(repr=False)
+    script_model: LocalEditingScriptModelConfiguration | None = field(
+        default=None,
+        repr=False,
+    )
 
     def session_token_bytes(self) -> bytes:
         return self._session_token
@@ -281,6 +330,30 @@ class LocalEditingCancelCommand:
 
     def __repr__(self) -> str:
         return "LocalEditingCancelCommand(<redacted>)"
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class LocalSmartEditStartCommand:
+    job_id: UUID
+
+    def __repr__(self) -> str:
+        return "LocalSmartEditStartCommand(<redacted>)"
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class LocalSmartEditCommitCommand:
+    job_id: UUID
+
+    def __repr__(self) -> str:
+        return "LocalSmartEditCommitCommand(<redacted>)"
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class LocalSmartEditAbortCommand:
+    job_id: UUID
+
+    def __repr__(self) -> str:
+        return "LocalSmartEditAbortCommand(<redacted>)"
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -327,6 +400,18 @@ class LocalEditingWorkerFailureCode(StrEnum):
     WORKSPACE_UNUSABLE = "workspace_unusable"
 
 
+class LocalSmartEditFailureCode(StrEnum):
+    INSUFFICIENT_MATERIALS = "insufficient_materials"
+    SOURCE_TOO_SHORT = "source_too_short"
+    NO_RELEVANT_MATERIAL = "no_relevant_material"
+    CONFIGURATION_MISSING = "configuration_missing"
+    UPSTREAM_REJECTED = "upstream_rejected"
+    MATERIAL_UNAVAILABLE = "material_unavailable"
+    LOCAL_FAILED = "local_failed"
+    WORKSPACE_UNUSABLE = "workspace_unusable"
+    COMMIT_FAILED = "commit_failed"
+
+
 class LocalMaterialWorkerFailureCode(StrEnum):
     """Closed union of probe and path-registry rejection vocabularies."""
 
@@ -371,9 +456,14 @@ class LocalMaterialWorkerStatus(StrEnum):
 @dataclass(slots=True)
 class _ActiveJob:
     job_id: UUID
+    operation: str = "editing"
     phase: LocalEditingWorkerPhase | None = None
     progress_per_mille: int = -1
     cancelling: bool = False
+    smart_stage: SmartEditGenerationStage | None = None
+    result_digest: str | None = None
+    awaiting_commit: bool = False
+    finalizing: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -406,6 +496,11 @@ class LocalEditingWorkerProtocol:
     def __repr__(self) -> str:
         return "LocalEditingWorkerProtocol(<redacted>)"
 
+    def has_active_operation(self) -> bool:
+        """Whether a rejected command must stay rejected instead of using legacy fallback."""
+
+        return self._active is not None
+
     def accept_command(
         self,
         payload: bytes,
@@ -415,6 +510,9 @@ class LocalEditingWorkerProtocol:
         | LocalMaterialImportCommand
         | LocalMaterialForgetCommand
         | LocalMaterialStatusCommand
+        | LocalSmartEditStartCommand
+        | LocalSmartEditCommitCommand
+        | LocalSmartEditAbortCommand
     ):
         document = _line_object(payload)
         command = document.get("command")
@@ -428,7 +526,73 @@ class LocalEditingWorkerProtocol:
             return self._accept_material_forget(document)
         if command == "worker.material.status":
             return self._accept_material_status(document)
+        if command == "worker.smart_edit.start":
+            return self._accept_smart_edit_start(document)
+        if command == "worker.smart_edit.commit":
+            return self._accept_smart_edit_finalize(document, "commit")
+        if command == "worker.smart_edit.abort":
+            return self._accept_smart_edit_finalize(document, "abort")
         _reject()
+
+    def _accept_smart_edit_start(
+        self,
+        document: dict[str, object],
+    ) -> LocalSmartEditStartCommand:
+        if (
+            set(document) != _SMART_EDIT_COMMAND_KEYS
+            or document.get("protocolVersion") != _PROTOCOL_VERSION
+            or document.get("workerKind") != _WORKER_KIND
+            or self._active is not None
+        ):
+            _reject()
+        job_id = _uuid_v4(document.get("jobId"))
+        self._require_command_proof(document, "worker.smart_edit.start", job_id)
+        self._active = _ActiveJob(job_id, operation="smart_edit")
+        return LocalSmartEditStartCommand(job_id)
+
+    def _accept_smart_edit_finalize(
+        self,
+        document: dict[str, object],
+        action: str,
+    ) -> LocalSmartEditCommitCommand | LocalSmartEditAbortCommand:
+        command_name = f"worker.smart_edit.{action}"
+        if (
+            action not in {"commit", "abort"}
+            or set(document) != _SMART_EDIT_COMMAND_KEYS
+            or document.get("protocolVersion") != _PROTOCOL_VERSION
+            or document.get("workerKind") != _WORKER_KIND
+        ):
+            _reject()
+        job_id = _uuid_v4(document.get("jobId"))
+        active = self._require_active(job_id, operation="smart_edit")
+        if (
+            not active.awaiting_commit
+            or active.result_digest is None
+            or active.finalizing is not None
+            or active.cancelling
+        ):
+            _reject()
+        self._require_command_proof(document, command_name, job_id)
+        active.finalizing = action
+        if action == "commit":
+            return LocalSmartEditCommitCommand(job_id)
+        return LocalSmartEditAbortCommand(job_id)
+
+    def _require_command_proof(
+        self,
+        document: dict[str, object],
+        command: str,
+        job_id: UUID,
+    ) -> None:
+        expected = _authentication_proof(
+            self._token,
+            _COMMAND_AUTHENTICATION_DOMAIN,
+            _COMMAND_PROOF_PREFIX,
+            (command, _WORKER_KIND, _PROTOCOL_VERSION, str(job_id)),
+        )
+        supplied = document.get("authenticationProof")
+        if not isinstance(supplied, str) or not hmac.compare_digest(supplied, expected):
+            _reject()
 
     def _accept_start(self, document: dict[str, object]) -> LocalEditingStartCommand:
         if (
@@ -483,7 +647,13 @@ class LocalEditingWorkerProtocol:
             _reject()
         job_id = _uuid_v4(document.get("jobId"))
         active = self._active
-        if not isinstance(active, _ActiveJob) or active.job_id != job_id or active.cancelling:
+        if (
+            not isinstance(active, _ActiveJob)
+            or active.job_id != job_id
+            or active.cancelling
+            or active.awaiting_commit
+            or active.finalizing is not None
+        ):
             _reject()
         expected = _authentication_proof(
             self._token,
@@ -583,7 +753,7 @@ class LocalEditingWorkerProtocol:
         phase: LocalEditingWorkerPhase,
         progress_per_mille: int,
     ) -> bytes:
-        active = self._require_active(job_id)
+        active = self._require_active(job_id, operation="editing")
         if (
             not isinstance(phase, LocalEditingWorkerPhase)
             or type(progress_per_mille) is not int
@@ -611,7 +781,7 @@ class LocalEditingWorkerProtocol:
         )
 
     def succeed(self, job_id: UUID, output_artifact_id: UUID) -> bytes:
-        active = self._require_active(job_id)
+        active = self._require_active(job_id, operation="editing")
         artifact = _uuid_v4(str(output_artifact_id))
         if (
             active.phase is not LocalEditingWorkerPhase.PUBLISHING
@@ -628,7 +798,7 @@ class LocalEditingWorkerProtocol:
         return payload
 
     def fail(self, job_id: UUID, failure_code: LocalEditingWorkerFailureCode) -> bytes:
-        self._require_active(job_id)
+        self._require_active(job_id, operation="editing")
         if not isinstance(failure_code, LocalEditingWorkerFailureCode):
             _reject()
         payload = self._event(
@@ -641,10 +811,115 @@ class LocalEditingWorkerProtocol:
         return payload
 
     def cancelled(self, job_id: UUID) -> bytes:
-        active = self._require_active(job_id)
+        active = self._require_active(job_id, operation="editing")
         if not active.cancelling:
             _reject()
         payload = self._event("worker.editing.cancelled", job_id, str(job_id))
+        self._active = None
+        return payload
+
+    def smart_edit_progress(
+        self,
+        job_id: UUID,
+        stage: SmartEditGenerationStage,
+        progress_per_mille: int,
+    ) -> bytes:
+        active = self._require_active(job_id, operation="smart_edit")
+        if (
+            not isinstance(stage, SmartEditGenerationStage)
+            or type(progress_per_mille) is not int
+            or not 0 <= progress_per_mille <= 1_000
+            or active.awaiting_commit
+            or active.finalizing is not None
+        ):
+            _reject()
+        order = {value: index for index, value in enumerate(SmartEditGenerationStage)}
+        if active.smart_stage is None:
+            if stage is not SmartEditGenerationStage.PREPARING or progress_per_mille != 0:
+                _reject()
+        elif (
+            order[stage] < order[active.smart_stage]
+            or progress_per_mille < active.progress_per_mille
+        ):
+            _reject()
+        active.smart_stage = stage
+        active.progress_per_mille = progress_per_mille
+        return self._event(
+            "worker.smart_edit.progress",
+            job_id,
+            f"{job_id}\0{stage.value}\0{progress_per_mille}",
+            stage=stage.value,
+            progressPermille=progress_per_mille,
+        )
+
+    def smart_edit_prepared(self, job_id: UUID, result_digest: str) -> bytes:
+        active = self._require_active(job_id, operation="smart_edit")
+        if (
+            active.smart_stage is not SmartEditGenerationStage.COMPLETED
+            or active.progress_per_mille != 1_000
+            or active.cancelling
+            or active.awaiting_commit
+            or type(result_digest) is not str
+            or _TOKEN_PATTERN.fullmatch(result_digest) is None
+        ):
+            _reject()
+        active.result_digest = result_digest
+        active.awaiting_commit = True
+        return self._event(
+            "worker.smart_edit.prepared",
+            job_id,
+            f"{job_id}\0{result_digest}",
+            resultDigest=result_digest,
+        )
+
+    def smart_edit_succeeded(self, job_id: UUID, result_digest: str) -> bytes:
+        active = self._require_active(job_id, operation="smart_edit")
+        if (
+            active.finalizing != "commit"
+            or active.result_digest != result_digest
+            or type(result_digest) is not str
+            or _TOKEN_PATTERN.fullmatch(result_digest) is None
+        ):
+            _reject()
+        payload = self._event(
+            "worker.smart_edit.succeeded",
+            job_id,
+            f"{job_id}\0{result_digest}",
+            resultDigest=result_digest,
+        )
+        self._active = None
+        return payload
+
+    def smart_edit_failed(
+        self,
+        job_id: UUID,
+        failure_code: LocalSmartEditFailureCode,
+    ) -> bytes:
+        self._require_active(job_id, operation="smart_edit")
+        if not isinstance(failure_code, LocalSmartEditFailureCode):
+            _reject()
+        payload = self._event(
+            "worker.smart_edit.failed",
+            job_id,
+            f"{job_id}\0{failure_code.value}",
+            failureCode=failure_code.value,
+        )
+        self._active = None
+        return payload
+
+    def smart_edit_cancelled(self, job_id: UUID) -> bytes:
+        active = self._require_active(job_id, operation="smart_edit")
+        if not active.cancelling or active.awaiting_commit:
+            _reject()
+        payload = self._event("worker.smart_edit.cancelled", job_id, str(job_id))
+        self._active = None
+        return payload
+
+    def smart_edit_aborted(self, job_id: UUID) -> bytes:
+        active = self._require_active(job_id, operation="smart_edit")
+        if active.finalizing != "abort":
+            _reject()
+        payload = self._event("worker.smart_edit.aborted", job_id, str(job_id))
         self._active = None
         return payload
 
@@ -727,13 +1002,14 @@ class LocalEditingWorkerProtocol:
         self._active = None
         return payload
 
-    def _require_active(self, job_id: UUID) -> _ActiveJob:
+    def _require_active(self, job_id: UUID, *, operation: str) -> _ActiveJob:
         if (
             not isinstance(job_id, UUID)
             or job_id.version != 4
             or job_id.variant != RFC_4122
             or not isinstance(self._active, _ActiveJob)
             or self._active.job_id != job_id
+            or self._active.operation != operation
         ):
             _reject()
         return self._active
@@ -813,7 +1089,6 @@ def parse_local_editing_worker_bootstrap(
         or document.get("workerKind") != "python"
         or document.get("enableWebUi") is not False
         or document.get("renderBrowser") is not None
-        or document.get("scriptModel") is not None
         or not isinstance(token, str)
         or _TOKEN_PATTERN.fullmatch(token) is None
     ):
@@ -822,12 +1097,14 @@ def parse_local_editing_worker_bootstrap(
         asset_root=_asset_root(document.get("assetRoot")),
         media_tools=_media_tools(document.get("mediaTools")),
         _session_token=bytes.fromhex(token),
+        script_model=_script_model(document.get("scriptModel")),
     )
 
 
 __all__ = [
     "MAX_LOCAL_EDITING_WORKER_BOOTSTRAP_BYTES",
     "LocalEditingCancelCommand",
+    "LocalEditingScriptModelConfiguration",
     "LocalEditingStartCommand",
     "LocalEditingWorkerBootstrap",
     "LocalEditingWorkerBootstrapRejected",
@@ -839,5 +1116,9 @@ __all__ = [
     "LocalMaterialStatusCommand",
     "LocalMaterialWorkerFailureCode",
     "LocalMaterialWorkerStatus",
+    "LocalSmartEditAbortCommand",
+    "LocalSmartEditCommitCommand",
+    "LocalSmartEditFailureCode",
+    "LocalSmartEditStartCommand",
     "parse_local_editing_worker_bootstrap",
 ]

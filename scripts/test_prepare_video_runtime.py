@@ -121,6 +121,7 @@ BUILD_DRIVERS: dict[str, tuple[Path, ...]] = {
         ROOT / "scripts/build_material_video_worker_candidate.py",
         ROOT / "workers/material_montage/material-video-worker.spec",
         ROOT / "scripts/subtitle_font_assets.py",
+        ROOT / "scripts/silero_vad_assets.py",
     ),
 }
 

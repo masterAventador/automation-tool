@@ -22,6 +22,7 @@ from typing import NoReturn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import silero_vad_assets
 import subtitle_font_assets
 from frozen_artifact_environment import frozen_artifact_environment
 
@@ -377,8 +378,14 @@ def build_candidate(output: Path) -> MaterialVideoWorkerAudit:
     # immediately and with the reason, instead of after the whole freeze.
     try:
         subtitle_font_assets.ensure_subtitle_fonts()
+        silero_vad_assets.ensure_silero_vad_assets()
     except subtitle_font_assets.SubtitleFontRightsError as error:
         reject(f"开源字幕字体不可用：{error}")
+    except (
+        silero_vad_assets.SileroVadAssetContractRejected,
+        silero_vad_assets.SileroVadAssetUnavailable,
+    ) as error:
+        reject(f"智能剪辑语音检测模型不可用：{error}")
     output = output.resolve(strict=False)
     if output.exists():
         reject("输出目录已存在，拒绝覆盖")
@@ -446,8 +453,12 @@ def build_candidate(output: Path) -> MaterialVideoWorkerAudit:
         dependencies = contract.get("dependencies")
         if not isinstance(dependencies, dict):
             reject("依赖契约缺失")
-        if inventory.get("distributionCount") != expected_dependency_count(contract):
-            reject("锁定环境的依赖数量漂移")
+        expected_count = expected_dependency_count(contract)
+        actual_count = inventory.get("distributionCount")
+        if actual_count != expected_count:
+            reject(
+                f"锁定环境的依赖数量漂移：期望 {expected_count}，实际 {actual_count}"
+            )
         installed = {
             str(item["name"]).lower(): str(item["version"])
             for item in inventory.get("distributions", [])
@@ -564,6 +575,18 @@ def audit_candidate(
     if dependency_count != expected_dependency_count(contract):
         reject("候选许可证清单数量漂移")
 
+    smart_runtime_probe = subprocess.run(
+        [str(executable), "--probe-smart-edit-runtime"],
+        cwd=candidate,
+        env=probe_environment(),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    if smart_runtime_probe.returncode != 0:
+        reject("候选缺少锁定的智能剪辑语音检测运行时")
+
     started = time.perf_counter()
     probe = subprocess.run(
         [str(executable), "--probe"],
@@ -612,7 +635,9 @@ def audit_candidate(
                         unavailable.append(name)
                     else:
                         missing = detail.get("missingModule")
-                        unavailable.append(f"{name}({missing})" if missing else name)
+                        failure_type = detail.get("failureType")
+                        reason = missing or failure_type
+                        unavailable.append(f"{name}({reason})" if reason else name)
         reject(
             "候选启动依赖不可用"
             + (f"：{','.join(unavailable)}" if unavailable else "：组合初始化失败")

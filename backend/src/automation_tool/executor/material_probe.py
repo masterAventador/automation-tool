@@ -1656,6 +1656,37 @@ class MaterialPathRegistry:
         # visible to this process either, or a restart would appear to lose it.
         self._entries = entries
 
+    def register_many(self, mappings: tuple[tuple[UUID, Path], ...]) -> None:
+        """Atomically record one bounded generated-material batch.
+
+        Every identifier and source is validated before the registry document is
+        replaced once. A failed validation or write therefore exposes neither a
+        partial in-memory batch nor a partial durable batch.
+        """
+
+        self._require_its_directory()
+        if (
+            not isinstance(mappings, tuple)
+            or not 1 <= len(mappings) <= 128
+            or not all(isinstance(mapping, tuple) and len(mapping) == 2 for mapping in mappings)
+        ):
+            _reject_registry(MaterialPathRegistryRejection.UNUSABLE_IDENTIFIER)
+        prepared: list[tuple[UUID, _RegisteredFile]] = []
+        for material_id, source in mappings:
+            identifier = _usable_identifier(material_id)
+            if identifier is None or not isinstance(source, Path):
+                _reject_registry(MaterialPathRegistryRejection.UNUSABLE_IDENTIFIER)
+            path, metadata = _require_source_file(source)
+            prepared.append(
+                (identifier, _RegisteredFile(path=path, identity=_identity_of(metadata)))
+            )
+        if len({identifier for identifier, _entry in prepared}) != len(prepared):
+            _reject_registry(MaterialPathRegistryRejection.UNUSABLE_IDENTIFIER)
+        entries = dict(self._entries)
+        entries.update(prepared)
+        self._write(_serialized(entries))
+        self._entries = entries
+
     def forget(self, material_id: UUID) -> None:
         """Forget one local path mapping without touching the user's file.
 

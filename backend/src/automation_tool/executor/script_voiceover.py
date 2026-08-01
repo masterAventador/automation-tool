@@ -17,7 +17,9 @@ from automation_tool.executor.material_probe import (
     ProbedMaterialKind,
     read_stream_facts,
 )
-from automation_tool.executor.motion_authoring.agent import AuthoringWorkspace
+from automation_tool.executor.motion_authoring.authoring_workspace import (
+    AuthoringWorkspace,
+)
 from automation_tool.executor.motion_authoring.voiceover import (
     MAX_VOICEOVER_BYTES,
     SynthesizedVoiceover,
