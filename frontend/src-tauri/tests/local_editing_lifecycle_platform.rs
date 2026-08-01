@@ -386,21 +386,22 @@ fn native_process_crash_recovers_with_a_new_generation() {
 fn native_process_running_job_recovers_after_app_components_restart() {
     let app_data = TemporaryAppData::new();
     let store = workspace_store(&app_data.path);
-    let first_orchestrator = orchestrator_service();
-    let first_scheduler = LocalEditingJobScheduler::new();
-    let first = first_orchestrator
-        .start(launch(&app_data.path))
-        .expect("start first App Worker");
-    let first_process_id = first.process_id().expect("first App process ID");
-    first_scheduler
-        .create(&store, job_id(), &request(10))
-        .expect("persist App-restart job");
-    first_scheduler
-        .dispatch(&store, &first_orchestrator, job_id())
-        .expect("dispatch App-restart job");
-    next_snapshot(&first_scheduler, &store, &first_orchestrator);
-    drop(first_orchestrator);
-    drop(first_scheduler);
+    let first_process_id = {
+        let first_orchestrator = orchestrator_service();
+        let first_scheduler = LocalEditingJobScheduler::new();
+        let first = first_orchestrator
+            .start(launch(&app_data.path))
+            .expect("start first App Worker");
+        let first_process_id = first.process_id().expect("first App process ID");
+        first_scheduler
+            .create(&store, job_id(), &request(10))
+            .expect("persist App-restart job");
+        first_scheduler
+            .dispatch(&store, &first_orchestrator, job_id())
+            .expect("dispatch App-restart job");
+        next_snapshot(&first_scheduler, &store, &first_orchestrator);
+        first_process_id
+    };
     wait_until_stopped(first_process_id);
 
     let restarted_orchestrator = orchestrator_service();

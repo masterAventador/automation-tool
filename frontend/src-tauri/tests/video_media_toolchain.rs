@@ -1,6 +1,7 @@
 use automation_tool_desktop_lib::video_media_toolchain::VideoMediaToolchain;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+#[cfg(unix)]
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -198,6 +199,7 @@ fn source_is_not_exposed_as_a_webview_command_or_system_path_fallback() {
 /// throughout. Both upstream video engines fall back to the user's own FFmpeg
 /// when their variable is absent, and only the child's environment can tell
 /// the two situations apart.
+#[cfg(unix)]
 const ENVIRONMENT_PROBE_WORKER: &str = r#"#!/usr/bin/python3
 import base64, hashlib, hmac, json, os, socket, sys, threading
 

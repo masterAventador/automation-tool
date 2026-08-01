@@ -320,10 +320,9 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{
-        open_private_secret_file, safe_secret_metadata, AppDataSecretStore, SecretStore,
-        SecureStoreError,
-    };
+    #[cfg(unix)]
+    use super::{open_private_secret_file, safe_secret_metadata};
+    use super::{AppDataSecretStore, SecretStore, SecureStoreError};
 
     struct TemporaryAppData {
         path: std::path::PathBuf,
