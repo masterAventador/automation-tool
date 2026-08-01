@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   smartEditFailureText,
@@ -24,6 +24,34 @@ function deferred<T>() {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
+}
+
+function installLocalStorage(): void {
+  const values = new Map<string, string>();
+  const storage: Storage = {
+    get length() {
+      return values.size;
+    },
+    clear() {
+      values.clear();
+    },
+    getItem(key) {
+      return values.get(key) ?? null;
+    },
+    key(index) {
+      return [...values.keys()][index] ?? null;
+    },
+    removeItem(key) {
+      values.delete(key);
+    },
+    setItem(key, value) {
+      values.set(key, value);
+    },
+  };
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: storage,
+  });
 }
 
 function timeline() {
@@ -150,6 +178,10 @@ async function openSmartEdit(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("video editing smart-edit entry", () => {
+  beforeEach(() => {
+    installLocalStorage();
+  });
+
   it("offers the injected smart-edit workflow inside the existing workbench", async () => {
     render(
       <VideoEditingWorkbench
@@ -159,6 +191,43 @@ describe("video editing smart-edit entry", () => {
     );
 
     expect(await screen.findByRole("tab", { name: "智能剪辑" })).toBeVisible();
+  });
+
+  it("persists the advanced thinking preference across workbench sessions", async () => {
+    const user = userEvent.setup();
+    const first = render(
+      <VideoEditingWorkbench
+        gateway={editingGateway()}
+        smartEditGateway={smartEditGateway()}
+      />,
+    );
+
+    await openSmartEdit(user);
+    expect(screen.getByText("高级选项")).toBeVisible();
+    expect(screen.getByRole("switch", { name: "深度思考" })).not.toBeChecked();
+    await user.click(screen.getByRole("switch", { name: "深度思考" }));
+    expect(screen.getByRole("switch", { name: "深度思考" })).toBeChecked();
+    first.unmount();
+
+    const second = render(
+      <VideoEditingWorkbench
+        gateway={editingGateway()}
+        smartEditGateway={smartEditGateway()}
+      />,
+    );
+    await openSmartEdit(user);
+    expect(screen.getByRole("switch", { name: "深度思考" })).toBeChecked();
+    await user.click(screen.getByRole("switch", { name: "深度思考" }));
+    second.unmount();
+
+    render(
+      <VideoEditingWorkbench
+        gateway={editingGateway()}
+        smartEditGateway={smartEditGateway()}
+      />,
+    );
+    await openSmartEdit(user);
+    expect(screen.getByRole("switch", { name: "深度思考" })).not.toBeChecked();
   });
 
   it("lands a generated draft in the existing editable timeline with live progress", async () => {

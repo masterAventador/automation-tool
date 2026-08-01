@@ -87,6 +87,28 @@ const JOB_STATUS_LABELS: Record<EditingJobStatus, string> = {
 
 const SERVICE_UNAVAILABLE_TEXT =
   "本机剪辑服务暂时不可用，请确认本机服务正在运行后再试。";
+const SMART_EDIT_THINKING_PREFERENCE_KEY =
+  "automation-tool.smart-edit.thinking-enabled.v1";
+
+function loadSmartEditThinkingPreference(): boolean {
+  try {
+    return window.localStorage.getItem(SMART_EDIT_THINKING_PREFERENCE_KEY) === "enabled";
+  } catch {
+    return false;
+  }
+}
+
+function saveSmartEditThinkingPreference(enabled: boolean): void {
+  try {
+    window.localStorage.setItem(
+      SMART_EDIT_THINKING_PREFERENCE_KEY,
+      enabled ? "enabled" : "disabled",
+    );
+  } catch {
+    // The generation request still uses the in-memory choice when storage is unavailable.
+  }
+}
+
 const INVALID_TIMELINE_TEXT =
   "时间轴还不完整：请确认每个画面或音频片段已填写素材引用、字幕片段已填写文字，并且时长为有效的毫秒数。";
 const OUTCOME_UNCERTAIN_TEXT =
@@ -334,18 +356,20 @@ function SmartEditPage({
             disabled={busy}
             onChange={(event) => onPromptChange(event.target.value)}
           />
-          <Space size="small">
-            <Switch
-              aria-label="深度思考"
-              checked={enableThinking}
-              disabled={busy}
-              onChange={onThinkingChange}
-            />
-            <Typography.Text>深度思考</Typography.Text>
-            <Typography.Text type="secondary">
-              {enableThinking ? "已开启" : "默认关闭"}
-            </Typography.Text>
-          </Space>
+          <Card size="small" title="高级选项">
+            <Space size="small">
+              <Switch
+                aria-label="深度思考"
+                checked={enableThinking}
+                disabled={busy}
+                onChange={onThinkingChange}
+              />
+              <Typography.Text>深度思考</Typography.Text>
+              <Typography.Text type="secondary">
+                {enableThinking ? "已开启" : "默认关闭"}
+              </Typography.Text>
+            </Space>
+          </Card>
           <Space size="small" wrap>
             <Button
               type="primary"
@@ -1025,7 +1049,7 @@ export function VideoEditingWorkbench({
   const [submitting, setSubmitting] = useState(false);
   const [submissionNeedsConfirmation, setSubmissionNeedsConfirmation] = useState(false);
   const [smartPrompt, setSmartPrompt] = useState("");
-  const [smartThinking, setSmartThinking] = useState(false);
+  const [smartThinking, setSmartThinking] = useState(loadSmartEditThinkingPreference);
   const [smartStarting, setSmartStarting] = useState(false);
   const [smartSnapshot, setSmartSnapshot] =
     useState<SmartEditGenerationSnapshot | null>(null);
@@ -1718,7 +1742,10 @@ export function VideoEditingWorkbench({
                       busy={smartBusy}
                       message={smartMessage}
                       onPromptChange={setSmartPrompt}
-                      onThinkingChange={setSmartThinking}
+                      onThinkingChange={(enabled) => {
+                        setSmartThinking(enabled);
+                        saveSmartEditThinkingPreference(enabled);
+                      }}
                       onStart={startSmartEdit}
                       onCancel={cancelSmartEdit}
                     />
