@@ -5,8 +5,17 @@ import test from "node:test";
 const frontendRoot = new URL("../", import.meta.url);
 
 test("H8-16E composes every startup component through one path-free native aggregate", async () => {
-  const [startup, gateway, main, entry, nativeStartup, platform, profiles, appLogging] =
-    await Promise.all([
+  const [
+    startup,
+    gateway,
+    main,
+    entry,
+    nativeStartup,
+    platform,
+    profiles,
+    appLogging,
+    manager,
+  ] = await Promise.all([
     readFile(new URL("src/app/startup.ts", frontendRoot), "utf8"),
     readFile(
       new URL("src/platform/tauri/startup-environment-gateway.ts", frontendRoot),
@@ -18,6 +27,7 @@ test("H8-16E composes every startup component through one path-free native aggre
     readFile(new URL("src-tauri/src/executor_platform.rs", frontendRoot), "utf8"),
     readFile(new URL("src-tauri/src/browser_profiles.rs", frontendRoot), "utf8"),
     readFile(new URL("src-tauri/src/app_logging.rs", frontendRoot), "utf8"),
+    readFile(new URL("src-tauri/src/executor_manager.rs", frontendRoot), "utf8"),
   ]);
 
   assert.match(startup, /Promise\.allSettled/u);
@@ -56,6 +66,18 @@ test("H8-16E composes every startup component through one path-free native aggre
     "ControlPlaneHealthCheckRejected",
   ]) {
     assert.match(entry, new RegExp(`DesktopLogEvent::${event}`, "u"));
+    assert.match(appLogging, new RegExp(`Self::${event}`, "u"));
+  }
+  for (const event of [
+    "StartupExecutorPackageConfigurationRejected",
+    "StartupExecutorPackageSignatureRejected",
+    "StartupExecutorPackageManifestRejected",
+    "StartupExecutorPackagePlatformRejected",
+    "StartupExecutorPackageVersionRejected",
+    "StartupExecutorPackageInventoryRejected",
+    "StartupExecutorPackageIoRejected",
+  ]) {
+    assert.match(manager, new RegExp(`DesktopLogEvent::${event}`, "u"));
     assert.match(appLogging, new RegExp(`Self::${event}`, "u"));
   }
   for (const event of [

@@ -47,6 +47,13 @@ pub(crate) enum DesktopLogEvent {
     StartupExecutorManagerStatusRejected,
     StartupExecutorPackageReady,
     StartupExecutorPackageRejected,
+    StartupExecutorPackageConfigurationRejected,
+    StartupExecutorPackageSignatureRejected,
+    StartupExecutorPackageManifestRejected,
+    StartupExecutorPackagePlatformRejected,
+    StartupExecutorPackageVersionRejected,
+    StartupExecutorPackageInventoryRejected,
+    StartupExecutorPackageIoRejected,
     StartupExecutorCheckCompleted,
     StartupLocalCheckCompleted,
     StartupLocalCheckRejected,
@@ -133,6 +140,25 @@ impl DesktopLogEvent {
             }
             Self::StartupExecutorPackageReady => "startup.local.executor.package.ready",
             Self::StartupExecutorPackageRejected => "startup.local.executor.package.rejected",
+            Self::StartupExecutorPackageConfigurationRejected => {
+                "startup.local.executor.package.configuration_rejected"
+            }
+            Self::StartupExecutorPackageSignatureRejected => {
+                "startup.local.executor.package.signature_rejected"
+            }
+            Self::StartupExecutorPackageManifestRejected => {
+                "startup.local.executor.package.manifest_rejected"
+            }
+            Self::StartupExecutorPackagePlatformRejected => {
+                "startup.local.executor.package.platform_rejected"
+            }
+            Self::StartupExecutorPackageVersionRejected => {
+                "startup.local.executor.package.version_rejected"
+            }
+            Self::StartupExecutorPackageInventoryRejected => {
+                "startup.local.executor.package.inventory_rejected"
+            }
+            Self::StartupExecutorPackageIoRejected => "startup.local.executor.package.io_rejected",
             Self::StartupExecutorCheckCompleted => "startup.local.executor.completed",
             Self::StartupLocalCheckCompleted => "startup.local.completed",
             Self::StartupLocalCheckRejected => "startup.local.rejected",
@@ -820,6 +846,34 @@ mod tests {
             (
                 DesktopLogEvent::StartupExecutorPackageRejected,
                 "startup.local.executor.package.rejected",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorPackageConfigurationRejected,
+                "startup.local.executor.package.configuration_rejected",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorPackageSignatureRejected,
+                "startup.local.executor.package.signature_rejected",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorPackageManifestRejected,
+                "startup.local.executor.package.manifest_rejected",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorPackagePlatformRejected,
+                "startup.local.executor.package.platform_rejected",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorPackageVersionRejected,
+                "startup.local.executor.package.version_rejected",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorPackageInventoryRejected,
+                "startup.local.executor.package.inventory_rejected",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorPackageIoRejected,
+                "startup.local.executor.package.io_rejected",
             ),
             (
                 DesktopLogEvent::StartupLocalCheckCompleted,
