@@ -5,6 +5,10 @@ import os
 import platform
 import subprocess
 import sys
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 # `conftest.py` puts the repository root on `sys.path`; this is the same route
@@ -26,12 +30,12 @@ LOCAL_SESSION_TOKEN = "06" * 32
 TEST_SIGNING_KEY = bytes(range(32))
 
 
-def bootstrap(state_directory: Path) -> bytes:
+def bootstrap(state_directory: Path, *, websocket_port: int = 9) -> bytes:
     return (
         json.dumps(
             {
                 "bootstrap_version": "1",
-                "websocket_url": "ws://127.0.0.1:9/api/v1/executors/connect",
+                "websocket_url": (f"ws://127.0.0.1:{websocket_port}/api/v1/executors/connect"),
                 "local_session_token": LOCAL_SESSION_TOKEN,
                 "session_token": PRIVATE_SESSION,
                 "installation_id": "123e4567-e89b-42d3-a456-426614174003",
@@ -43,6 +47,29 @@ def bootstrap(state_directory: Path) -> bytes:
         )
         + "\n"
     ).encode()
+
+
+@contextmanager
+def rejecting_websocket_endpoint() -> Iterator[int]:
+    class RejectedWebSocket(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(403)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), RejectedWebSocket)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield int(server.server_address[1])
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        assert not thread.is_alive()
 
 
 def test_pyinstaller_onedir_bundle_contains_locked_runtimes_and_starts_without_python(
@@ -116,14 +143,18 @@ def test_pyinstaller_onedir_bundle_contains_locked_runtimes_and_starts_without_p
     assert startup.stdout == b""
     assert startup.stderr == b"Local Executor bootstrap is rejected\n"
 
-    unavailable = subprocess.run(
-        [os.fspath(executable)],
-        input=bootstrap(tmp_path / "executor-state"),
-        capture_output=True,
-        check=False,
-        timeout=45,
-        env=frozen_artifact_environment(),
-    )
+    with rejecting_websocket_endpoint() as websocket_port:
+        unavailable = subprocess.run(
+            [os.fspath(executable)],
+            input=bootstrap(
+                tmp_path / "executor-state",
+                websocket_port=websocket_port,
+            ),
+            capture_output=True,
+            check=False,
+            timeout=45,
+            env=frozen_artifact_environment(),
+        )
     assert unavailable.returncode == 1
     assert unavailable.stdout == b""
     assert unavailable.stderr == b"Local Executor process is unavailable\n"
