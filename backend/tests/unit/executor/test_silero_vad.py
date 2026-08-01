@@ -60,6 +60,7 @@ def test_locked_asset_reader_requests_binary_mode_when_the_platform_defines_it(
     asset = tmp_path / "locked.onnx"
     asset.write_bytes(payload)
     binary_flag = 1 << 28
+    real_binary_flag = getattr(os, "O_BINARY", 0)
     real_open = os.open
     observed_flags: list[int] = []
 
@@ -69,7 +70,7 @@ def test_locked_asset_reader_requests_binary_mode_when_the_platform_defines_it(
         mode: int = 0o777,
     ) -> int:
         observed_flags.append(flags)
-        return real_open(path, flags & ~binary_flag, mode)
+        return real_open(path, (flags & ~binary_flag) | real_binary_flag, mode)
 
     monkeypatch.setattr(os, "O_BINARY", binary_flag, raising=False)
     monkeypatch.setattr(os, "open", recording_open)
