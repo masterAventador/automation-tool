@@ -314,6 +314,73 @@ def environment_python(runtime: Path) -> Path:
     return runtime / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
+def resolve_locked_python(
+    contract: dict[str, object],
+    environment: dict[str, str],
+) -> tuple[str, Path]:
+    """Resolve the exact interpreter before uv creates the isolated runtime."""
+    expected = contract.get("python")
+    if not isinstance(expected, dict):
+        reject("Python 契约缺失")
+    version = expected.get("version")
+    if not isinstance(version, str) or not version:
+        reject("Python 契约未精确锁定版本")
+    resolved = run(
+        ["uv", "python", "find", version],
+        cwd=ROOT,
+        environment=environment,
+    ).stdout.strip()
+    interpreter = Path(resolved)
+    if not resolved or not interpreter.is_file():
+        reject("无法定位契约锁定的 Python 解释器")
+    return version, interpreter
+
+
+def normalize_windows_uv_python_home(
+    runtime: Path,
+    *,
+    platform: str = os.name,
+) -> None:
+    """Replace an unusable uv managed-Python junction with its exact target.
+
+    Current Windows hardening can reject traversal through uv's version alias
+    junction even though the exact managed interpreter remains executable. uv
+    writes that alias into ``pyvenv.cfg`` regardless of the exact interpreter
+    passed to it, so its trampoline cannot start until the home is normalized.
+    """
+    if platform != "nt":
+        return
+    configuration = runtime / "pyvenv.cfg"
+    try:
+        lines = configuration.read_text(encoding="utf-8").splitlines(keepends=True)
+    except OSError as error:
+        reject(f"无法读取 uv Python 环境配置：{error}")
+    home_lines = [
+        index for index, line in enumerate(lines) if line.startswith("home = ")
+    ]
+    if len(home_lines) != 1:
+        reject("uv Python 环境配置缺少唯一 home")
+    index = home_lines[0]
+    home = Path(lines[index].removeprefix("home = ").rstrip("\r\n"))
+    try:
+        target = os.readlink(home)
+    except OSError:
+        return
+    if target.startswith("\\\\?\\UNC\\"):
+        target = f"\\\\{target[8:]}"
+    elif target.startswith("\\\\?\\"):
+        target = target[4:]
+    target_path = Path(target)
+    if not (target_path / "python.exe").is_file():
+        reject("uv Python home junction 未指向可执行解释器")
+    newline = "\r\n" if lines[index].endswith("\r\n") else "\n"
+    lines[index] = f"home = {target_path}{newline}"
+    try:
+        configuration.write_text("".join(lines), encoding="utf-8")
+    except OSError as error:
+        reject(f"无法规范化 uv Python 环境配置：{error}")
+
+
 def probe_environment() -> dict[str, str]:
     """The frozen candidate's environment: the shared minimum plus this Worker's own.
 
@@ -349,6 +416,11 @@ def build_candidate(output: Path) -> MaterialVideoWorkerAudit:
         runtime = temporary / "runtime"
         environment = dict(os.environ)
         environment["UV_PROJECT_ENVIRONMENT"] = str(runtime)
+        expected_python_version, interpreter = resolve_locked_python(
+            contract,
+            environment,
+        )
+        environment["UV_PYTHON"] = str(interpreter)
         run(
             [
                 "uv",
@@ -362,15 +434,13 @@ def build_candidate(output: Path) -> MaterialVideoWorkerAudit:
             cwd=ROOT,
             environment=environment,
         )
+        normalize_windows_uv_python_home(runtime)
         python = environment_python(runtime)
-        expected_python = contract.get("python")
-        if not isinstance(expected_python, dict):
-            reject("Python 契约缺失")
         actual_python = run(
             [str(python), "-c", "import platform; print(platform.python_version())"],
             cwd=ROOT,
         ).stdout.strip()
-        if actual_python != expected_python.get("version"):
+        if actual_python != expected_python_version:
             reject("Python 版本未精确锁定")
 
         product = product_dependencies(contract)

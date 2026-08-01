@@ -259,6 +259,66 @@ class MaterialVideoWorkerExcludedModulesTest(unittest.TestCase):
 
 
 class MaterialVideoWorkerProductDependenciesTest(unittest.TestCase):
+    def test_build_resolves_the_exact_contract_python_before_uv_sync(self) -> None:
+        contract = build_candidate_module.load_contract()
+        version = contract["python"]["version"]
+        environment = {"UV_PROJECT_ENVIRONMENT": "isolated-runtime"}
+        with tempfile.TemporaryDirectory() as directory:
+            interpreter = Path(directory) / "python.exe"
+            interpreter.write_bytes(b"MZ")
+            completed = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=f"{interpreter}\n",
+                stderr="",
+            )
+            with mock.patch.object(
+                build_candidate_module,
+                "run",
+                return_value=completed,
+            ) as run:
+                resolved = build_candidate_module.resolve_locked_python(
+                    contract,
+                    environment,
+                )
+
+        self.assertEqual(resolved, (version, interpreter))
+        run.assert_called_once_with(
+            ["uv", "python", "find", version],
+            cwd=ROOT,
+            environment=environment,
+        )
+
+    def test_windows_uv_python_junction_is_normalized_before_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "runtime"
+            runtime.mkdir()
+            alias = root / "cpython-3.11-windows-x86_64-none"
+            target = root / "cpython-3.11.15-windows-x86_64-none"
+            target.mkdir()
+            (target / "python.exe").write_bytes(b"MZ")
+            configuration = runtime / "pyvenv.cfg"
+            configuration.write_text(
+                f"home = {alias}\nimplementation = CPython\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(
+                build_candidate_module.os,
+                "readlink",
+                return_value=str(target),
+            ):
+                build_candidate_module.normalize_windows_uv_python_home(
+                    runtime,
+                    platform="nt",
+                )
+
+            self.assertEqual(
+                configuration.read_text(encoding="utf-8"),
+                f"home = {target}\nimplementation = CPython\n",
+            )
+
     def test_local_editing_font_runtime_is_a_locked_product_dependency(self) -> None:
         contract = build_candidate_module.load_contract()
 
