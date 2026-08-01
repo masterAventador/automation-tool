@@ -78,11 +78,24 @@ class NativePostgresDiagnosticTest(unittest.TestCase):
 
     def test_windows_without_native_tools_uses_isolated_docker_compose(self) -> None:
         commands: list[list[str]] = []
+        docker_configs: list[Path] = []
+        original_environment = {
+            "PATH": "trusted",
+            "DOCKER_CONFIG": "C:/private-docker-config",
+        }
 
         def run(
-            command: list[str], **_kwargs: object
+            command: list[str], **kwargs: object
         ) -> subprocess.CompletedProcess[str]:
             commands.append(command)
+            environment = kwargs["env"]
+            self.assertIsInstance(environment, dict)
+            docker_config = Path(environment["DOCKER_CONFIG"])  # type: ignore[index]
+            self.assertEqual(
+                (docker_config / "config.json").read_text(encoding="utf-8"),
+                "{}\n",
+            )
+            docker_configs.append(docker_config)
             return subprocess.CompletedProcess(command, 0, "", "")
 
         with (
@@ -94,7 +107,7 @@ class NativePostgresDiagnosticTest(unittest.TestCase):
             acceptance_postgres.managed_test_postgres(
                 compose=["docker", "compose", "--project-name", "isolated"],
                 database_port=54321,
-                environment={"PATH": "trusted"},
+                environment=original_environment,
                 repository_root=ROOT,
             ),
         ):
@@ -123,6 +136,13 @@ class NativePostgresDiagnosticTest(unittest.TestCase):
                     "--remove-orphans",
                 ],
             ],
+        )
+        self.assertEqual(len(docker_configs), 2)
+        self.assertEqual(docker_configs[0], docker_configs[1])
+        self.assertFalse(docker_configs[0].exists())
+        self.assertEqual(
+            original_environment,
+            {"PATH": "trusted", "DOCKER_CONFIG": "C:/private-docker-config"},
         )
 
     def test_parent_owned_windows_root_uses_native_inherited_acl(self) -> None:

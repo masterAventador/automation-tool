@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tempfile
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 WINDOWS_POSTGRES_ROOT_ENVIRONMENT = "AUTOMATION_TOOL_ACCEPTANCE_WINDOWS_POSTGRES_ROOT"
@@ -184,6 +184,21 @@ def _native_windows_postgres(
 
 
 @contextmanager
+def _isolated_windows_docker_environment(
+    environment: dict[str, str],
+) -> Iterator[dict[str, str]]:
+    with tempfile.TemporaryDirectory(
+        prefix="automation-tool-docker-config-",
+        ignore_cleanup_errors=True,
+    ) as directory:
+        docker_config = Path(directory)
+        (docker_config / "config.json").write_text("{}\n", encoding="utf-8")
+        isolated_environment = environment.copy()
+        isolated_environment["DOCKER_CONFIG"] = os.fspath(docker_config)
+        yield isolated_environment
+
+
+@contextmanager
 def managed_test_postgres(
     *,
     compose: list[str],
@@ -193,7 +208,8 @@ def managed_test_postgres(
 ) -> Iterator[None]:
     """Start one isolated test database and always remove its resources."""
 
-    if platform.system() == "Windows" and _native_windows_postgres_available():
+    system = platform.system()
+    if system == "Windows" and _native_windows_postgres_available():
         with _native_windows_postgres(
             database_port=database_port,
             environment=environment,
@@ -201,20 +217,26 @@ def managed_test_postgres(
             yield
         return
 
-    try:
-        subprocess.run(
-            [*compose, "up", "--detach", "--wait", "postgres-test"],
-            check=True,
-            cwd=repository_root,
-            env=environment,
-        )
-        yield
-    finally:
-        subprocess.run(
-            [*compose, "down", "--volumes", "--remove-orphans"],
-            check=False,
-            cwd=repository_root,
-            env=environment,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+    docker_environment = (
+        _isolated_windows_docker_environment(environment)
+        if system == "Windows"
+        else nullcontext(environment)
+    )
+    with docker_environment as process_environment:
+        try:
+            subprocess.run(
+                [*compose, "up", "--detach", "--wait", "postgres-test"],
+                check=True,
+                cwd=repository_root,
+                env=process_environment,
+            )
+            yield
+        finally:
+            subprocess.run(
+                [*compose, "down", "--volumes", "--remove-orphans"],
+                check=False,
+                cwd=repository_root,
+                env=process_environment,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
