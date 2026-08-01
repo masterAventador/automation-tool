@@ -339,7 +339,7 @@ def resolve_locked_python(
 def create_locked_python_environment(interpreter: Path, runtime: Path) -> None:
     """Create a standard venv without uv's Windows managed-Python trampoline."""
     run(
-        [str(interpreter), "-m", "venv", str(runtime)],
+        [str(interpreter), "-m", "venv", "--without-pip", str(runtime)],
         cwd=ROOT,
     )
 

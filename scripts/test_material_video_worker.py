@@ -269,7 +269,7 @@ class MaterialVideoWorkerProductDependenciesTest(unittest.TestCase):
             )
 
         run.assert_called_once_with(
-            [str(interpreter), "-m", "venv", str(runtime)],
+            [str(interpreter), "-m", "venv", "--without-pip", str(runtime)],
             cwd=ROOT,
         )
 
