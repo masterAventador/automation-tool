@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "unicodeVersion": "17.0.0",
+  "unicodeRangeSource": "https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-18/",
+  "method": "Count every cmap code point in each fixed Unicode 17 CJK Unified Ideographs block; block slots include unassigned values so results do not depend on the host Unicode database.",
+  "baseline": {
+    "fontKey": "noto-sans-cjk-sc-regular",
+    "sourceVersion": "notofonts/noto-cjk Sans2.004",
+    "sha256": "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b",
+    "bytes": 16437364,
+    "measurements": {
+      "extension-a": { "covered": 6582, "slots": 6592 },
+      "unified": { "covered": 20976, "slots": 20992 },
+      "extension-b": { "covered": 2108, "slots": 42720 },
+      "extension-c": { "covered": 47, "slots": 4160 },
+      "extension-d": { "covered": 34, "slots": 224 },
+      "extension-e": { "covered": 112, "slots": 5776 },
+      "extension-f": { "covered": 5, "slots": 7488 },
+      "extension-i": { "covered": 0, "slots": 624 },
+      "extension-g": { "covered": 4, "slots": 4944 },
+      "extension-h": { "covered": 0, "slots": 4192 },
+      "extension-j": { "covered": 0, "slots": 4304 }
+    },
+    "namedRareSampleCodepoints": [
+      "U+71DA",
+      "U+73A5",
+      "U+7482",
+      "U+74A8",
+      "U+750D",
+      "U+7111",
+      "U+6DFC",
+      "U+7131",
+      "U+579A",
+      "U+20BB7"
+    ],
+    "namedRareSamplesCovered": 10
+  },
+  "decision": "supplement-required",
+  "decisionRationale": "The familiar U+20BB7 sample is present, but the locked production face covers only 2108 of 42720 Extension B slots, 202 slots in Extensions C through G combined, and no slots in Extensions H, I or J. A few named samples therefore cannot establish rare-Han coverage.",
+  "candidate": {
+    "family": "Plangothic",
+    "version": "V2.9.5795",
+    "releaseUrl": "https://github.com/Fitzgerald-Porthmouth-Koenigsegg/Plangothic_Project/releases/tag/V2.9.5795",
+    "projectCoverageClaim": "CJK Unified Ideographs Extensions B through J",
+    "license": "OFL-1.1"
+  },
+  "acceptance": {
+    "requiredFallbackBlocks": [
+      "extension-b",
+      "extension-c",
+      "extension-d",
+      "extension-e",
+      "extension-f",
+      "extension-i",
+      "extension-g",
+      "extension-h",
+      "extension-j"
+    ],
+    "policy": "Each required block must gain coverage over the Noto baseline, and the combined production registry must render the pinned cross-block sample without tofu. The packaged-candidate gate separately proves the same registered bytes ship."
+  }
+}
