@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Automation Tool LE23 Windows Package Acceptance",
+  "version": "0.1.0",
+  "identifier": "com.aventador.automationtool.le23windowspackage",
+  "mainBinaryName": "automation-tool-le23-windows-package",
+  "build": {
+    "beforeBuildCommand": "pnpm build:desktop-e2e-le23-windows-assets",
+    "frontendDist": "../dist-le23-windows"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "自动化运营工具",
+        "visible": false
+      }
+    ],
+    "security": {
+      "capabilities": [
+        "main",
+        {
+          "identifier": "wdio-le23-windows-package",
+          "description": "LE-23 isolated Windows package acceptance through the formal smart-edit UI",
+          "windows": ["main"],
+          "permissions": [
+            "wdio:allow-execute",
+            "wdio:allow-log-frontend",
+            "wdio:allow-debug-plugin",
+            "wdio:allow-get-active-window-label",
+            "wdio:allow-get-window-states",
+            "wdio:allow-list-windows",
+            "wdio-webdriver:default"
+          ]
+        }
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}
