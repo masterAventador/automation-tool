@@ -37,6 +37,7 @@ from automation_tool.executor.script_segmentation import (  # noqa: E402
     ScriptSentence,
 )
 from automation_tool.executor.script_voiceover import (  # noqa: E402
+    ScriptVoiceoverCancelled,
     ScriptVoiceoverClip,
     ScriptVoiceoverRejected,
     ScriptVoiceoverResult,
@@ -212,6 +213,38 @@ def test_a_second_sentence_tts_failure_is_not_retried_and_rolls_back_the_batch(
     assert raised.value.__cause__ is None
     assert raised.value.__context__ is None
     assert [narration for narration, _ in synthesizer.calls] == ["第一句。", "第二句。"]
+    assert list(workspace.root.rglob("*.wav")) == []
+
+
+def test_cancellation_between_sentences_rolls_back_without_calling_next_tts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = _workspace(tmp_path / "workspace")
+    synthesizer = _Synthesizer()
+    monkeypatch.setattr(script_voiceover_module, "synthesize_voiceover", synthesizer)
+    _install_probe(monkeypatch, [_facts(1_237)])
+    polls = 0
+
+    def cancelled() -> bool:
+        nonlocal polls
+        polls += 1
+        return polls >= 2
+
+    with pytest.raises(
+        ScriptVoiceoverCancelled,
+        match=r"^script voiceover cancelled$",
+    ) as raised:
+        synthesize_script_voiceovers(
+            _script("第一句。", "不得调用的第二句。"),
+            config=_config(),
+            workspace=workspace,
+            tools=_stub_tools(tmp_path),
+            cancellation_requested=cancelled,
+        )
+
+    assert raised.value.__cause__ is None
+    assert [narration for narration, _ in synthesizer.calls] == ["第一句。"]
     assert list(workspace.root.rglob("*.wav")) == []
 
 

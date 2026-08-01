@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import NoReturn, Protocol, runtime_checkable
 from uuid import UUID
 
-from automation_tool.control_plane.domain.material import Material, MaterialKind
+from automation_tool.control_plane.domain.material import (
+    DescriptionSource,
+    Material,
+    MaterialId,
+    MaterialKind,
+)
+from automation_tool.executor.motion_authoring.voiceover import MAX_VOICEOVER_BYTES
 from automation_tool.executor.script_segmentation import ScriptSegmentationResult
 from automation_tool.executor.script_voiceover import ScriptVoiceoverResult
 from automation_tool.executor.segment_selection import (
@@ -28,13 +37,18 @@ from automation_tool.executor.speech_paragraph_draft import (
     resolve_speech_aware_paragraph_draft,
 )
 from automation_tool.protocol.local_editing import (
+    MAX_LOCAL_EDITING_SEMANTIC_MATERIALS,
     LocalEditingTimelineDraft,
+    LocalEditingTimelineParagraphKind,
     SegmentSelectionCandidateScore,
     SegmentSelectionMaterial,
     SegmentSelectionMaterialKind,
     SegmentSelectionSentenceMatches,
     SpeechParagraphMaterial,
+    is_canonical_local_editing_material_id,
 )
+
+_DIGEST = re.compile(r"^[0-9a-f]{64}\Z")
 
 
 class SmartEditGenerationRejected(RuntimeError):
@@ -82,11 +96,173 @@ class SmartEditGenerationFailure:
 
 
 @dataclass(frozen=True, slots=True)
-class SmartEditGenerationResult:
-    draft: LocalEditingTimelineDraft
+class SmartEditMaterialAnalysis:
+    """One path-free, digest-bound material analysis snapshot to persist."""
+
+    material_id: UUID
+    content_digest: str
+    has_speech: bool
+    speech_segments_ms: tuple[tuple[int, int], ...]
+    speech_transcript: str | None
+    shot_boundaries_ms: tuple[int, ...]
+    ai_description: str | None
+    ai_tags: tuple[str, ...]
+    description_source: DescriptionSource
+    described_at: datetime | None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.draft, LocalEditingTimelineDraft):
+        if (
+            not is_canonical_local_editing_material_id(self.material_id)
+            or type(self.content_digest) is not str
+            or _DIGEST.fullmatch(self.content_digest) is None
+        ):
+            _reject()
+        material: Material | None = None
+        with suppress(Exception):
+            material = Material.register(
+                material_id=_material_id(self.material_id),
+                kind=MaterialKind.VIDEO,
+                duration_ms=max(
+                    1,
+                    max((end for _start, end in self.speech_segments_ms), default=0),
+                    max(self.shot_boundaries_ms, default=0) + 1,
+                ),
+                width=1,
+                height=1,
+                content_digest=self.content_digest,
+                has_audio=self.has_speech,
+                audio_loudness_lufs=None,
+                has_speech=self.has_speech,
+                speech_segments_ms=self.speech_segments_ms,
+                speech_transcript=self.speech_transcript,
+                shot_boundaries_ms=self.shot_boundaries_ms,
+                ai_description=self.ai_description,
+                ai_tags=self.ai_tags,
+                description_source=self.description_source,
+                described_at=self.described_at,
+            )
+        if material is None or material.duration_ms is None or material.duration_ms < 1:
+            _reject()
+
+    @classmethod
+    def from_material(cls, material: Material) -> SmartEditMaterialAnalysis:
+        validated = _validated_material(material)
+        return cls(
+            material_id=validated.material_id.uuid,
+            content_digest=validated.content_digest,
+            has_speech=validated.has_speech,
+            speech_segments_ms=validated.speech_segments_ms,
+            speech_transcript=validated.speech_transcript,
+            shot_boundaries_ms=validated.shot_boundaries_ms,
+            ai_description=validated.ai_description,
+            ai_tags=validated.ai_tags,
+            description_source=validated.description_source,
+            described_at=validated.described_at,
+        )
+
+
+def _material_id(value: UUID) -> MaterialId:
+    return MaterialId(value)
+
+
+@dataclass(frozen=True, slots=True)
+class SmartEditNarrationRegistration:
+    """Path-free facts needed to register one generated narration file."""
+
+    sequence: int
+    material_id: UUID
+    relative_path: str
+    duration_ms: int
+    content_digest: str
+    bytes_written: int
+
+    def __post_init__(self) -> None:
+        binding: NarrationMaterialBinding | None = None
+        with suppress(Exception):
+            binding = NarrationMaterialBinding(
+                sequence=self.sequence,
+                narration_relative_path=self.relative_path,
+                material_id=self.material_id,
+                kind=SegmentSelectionMaterialKind.AUDIO,
+                duration_ms=self.duration_ms,
+            )
+        if (
+            binding is None
+            or binding.material_id != self.material_id
+            or type(self.content_digest) is not str
+            or _DIGEST.fullmatch(self.content_digest) is None
+            or type(self.bytes_written) is not int
+            or not 1 <= self.bytes_written <= MAX_VOICEOVER_BYTES
+        ):
+            _reject()
+
+    @property
+    def binding(self) -> NarrationMaterialBinding:
+        return NarrationMaterialBinding(
+            sequence=self.sequence,
+            narration_relative_path=self.relative_path,
+            material_id=self.material_id,
+            kind=SegmentSelectionMaterialKind.AUDIO,
+            duration_ms=self.duration_ms,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedSmartEditNarration:
+    bindings: tuple[NarrationMaterialBinding, ...]
+    registrations: tuple[SmartEditNarrationRegistration, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.bindings, tuple)
+            or not self.bindings
+            or not all(isinstance(value, NarrationMaterialBinding) for value in self.bindings)
+            or not isinstance(self.registrations, tuple)
+            or not self.registrations
+            or not all(
+                isinstance(value, SmartEditNarrationRegistration) for value in self.registrations
+            )
+            or len({value.sequence for value in self.registrations}) != len(self.registrations)
+            or len({value.material_id for value in self.registrations}) != len(self.registrations)
+            or tuple(value.binding for value in self.registrations) != self.bindings
+        ):
+            _reject()
+
+
+@dataclass(frozen=True, slots=True)
+class SmartEditGenerationResult:
+    draft: LocalEditingTimelineDraft
+    analysis_updates: tuple[SmartEditMaterialAnalysis, ...] = ()
+    narration_registrations: tuple[SmartEditNarrationRegistration, ...] = ()
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.draft, LocalEditingTimelineDraft)
+            or not isinstance(self.analysis_updates, tuple)
+            or not all(
+                isinstance(value, SmartEditMaterialAnalysis) for value in self.analysis_updates
+            )
+            or len({value.material_id for value in self.analysis_updates})
+            != len(self.analysis_updates)
+            or not isinstance(self.narration_registrations, tuple)
+            or not all(
+                isinstance(value, SmartEditNarrationRegistration)
+                for value in self.narration_registrations
+            )
+            or len({value.sequence for value in self.narration_registrations})
+            != len(self.narration_registrations)
+            or len({value.material_id for value in self.narration_registrations})
+            != len(self.narration_registrations)
+            or (
+                bool(self.narration_registrations)
+                and tuple(value.material_id for value in self.narration_registrations)
+                != tuple(
+                    paragraph.audio_material_id
+                    for paragraph in self.draft.paragraphs
+                    if paragraph.kind is LocalEditingTimelineParagraphKind.NARRATED
+                )
+            )
+        ):
             _reject()
 
 
@@ -94,11 +270,13 @@ class SmartEditGenerationResult:
 class PreparedSmartEditMaterials:
     materials: tuple[Material, ...]
     decodable_materials: tuple[VerifiedDecodableMaterial, ...]
+    analysis_updates: tuple[SmartEditMaterialAnalysis, ...] = ()
 
     def __post_init__(self) -> None:
         if (
             not isinstance(self.materials, tuple)
             or not self.materials
+            or len(self.materials) > MAX_LOCAL_EDITING_SEMANTIC_MATERIALS
             or not all(isinstance(material, Material) for material in self.materials)
             or len({material.material_id for material in self.materials}) != len(self.materials)
             or not isinstance(self.decodable_materials, tuple)
@@ -106,7 +284,20 @@ class PreparedSmartEditMaterials:
                 isinstance(evidence, VerifiedDecodableMaterial)
                 for evidence in self.decodable_materials
             )
+            or not isinstance(self.analysis_updates, tuple)
+            or not all(
+                isinstance(update, SmartEditMaterialAnalysis) for update in self.analysis_updates
+            )
+            or len({update.material_id for update in self.analysis_updates})
+            != len(self.analysis_updates)
+            or not {update.material_id for update in self.analysis_updates}.issubset(
+                {material.material_id.uuid for material in self.materials}
+            )
         ):
+            _reject()
+        try:
+            tuple(_validated_material(material) for material in self.materials)
+        except Exception:
             _reject()
 
 
@@ -145,14 +336,13 @@ class SmartEditGenerationPipeline(Protocol):
         voiceovers: ScriptVoiceoverResult,
         *,
         cancellation_requested: CancellationProbe,
-    ) -> tuple[NarrationMaterialBinding, ...]: ...
+    ) -> PreparedSmartEditNarration: ...
 
 
 def _cancel_if_requested(cancellation_requested: CancellationProbe) -> None:
-    try:
+    requested: object = None
+    with suppress(Exception):
         requested = cancellation_requested()
-    except Exception:
-        _reject()
     if type(requested) is not bool:
         _reject()
     if requested:
@@ -164,9 +354,12 @@ def _report_progress(
     stage: SmartEditGenerationStage,
     per_mille: int,
 ) -> None:
+    failed = False
     try:
         progress(stage, per_mille)
     except Exception:
+        failed = True
+    if failed:
         _reject()
 
 
@@ -195,29 +388,32 @@ def generate_smart_edit_timeline_draft(
         not isinstance(pipeline, SmartEditGenerationPipeline)
         or not _valid_prompt(prompt)
         or not isinstance(materials, tuple)
-        or not materials
+        or not 1 <= len(materials) <= MAX_LOCAL_EDITING_SEMANTIC_MATERIALS
+        or not all(isinstance(material, Material) for material in materials)
         or type(enable_thinking) is not bool
         or not callable(progress)
         or not callable(cancellation_requested)
     ):
         _reject()
     try:
+        validated_materials = tuple(_validated_material(material) for material in materials)
         _report_progress(progress, SmartEditGenerationStage.PREPARING, 0)
         _cancel_if_requested(cancellation_requested)
         _report_progress(progress, SmartEditGenerationStage.ANALYZING, 100)
         prepared = pipeline.prepare(
-            materials,
+            validated_materials,
             cancellation_requested=cancellation_requested,
         )
         if not isinstance(prepared, PreparedSmartEditMaterials):
             _reject()
-        _require_prepared_materials(materials, prepared)
+        _require_prepared_materials(validated_materials, prepared)
         _cancel_if_requested(cancellation_requested)
         silent = tuple(material for material in prepared.materials if not material.has_speech)
         script: ScriptSegmentationResult | None = None
         voiceovers: ScriptVoiceoverResult | None = None
         matches: SemanticMatchingResult | None = None
         narration: tuple[NarrationMaterialBinding, ...] = ()
+        narration_registrations: tuple[SmartEditNarrationRegistration, ...] = ()
         if silent:
             _report_progress(progress, SmartEditGenerationStage.SCRIPTING, 350)
             script = pipeline.segment(prompt, enable_thinking=enable_thinking)
@@ -253,18 +449,22 @@ def generate_smart_edit_timeline_draft(
         if isinstance(selected, SmartEditGenerationFailure):
             return selected
         if voiceovers is not None:
-            narration = pipeline.bind_narration(
+            prepared_narration = pipeline.bind_narration(
                 voiceovers,
                 cancellation_requested=cancellation_requested,
             )
-            if not isinstance(narration, tuple):
+            if not isinstance(prepared_narration, PreparedSmartEditNarration):
                 _reject()
+            narration = prepared_narration.bindings
+            narration_registrations = prepared_narration.registrations
         _cancel_if_requested(cancellation_requested)
         outcome = SmartEditGenerationResult(
-            project_local_editing_timeline_draft(
+            draft=project_local_editing_timeline_draft(
                 selected,
                 narration_materials=narration,
-            )
+            ),
+            analysis_updates=prepared.analysis_updates,
+            narration_registrations=narration_registrations,
         )
         _cancel_if_requested(cancellation_requested)
         _report_progress(progress, SmartEditGenerationStage.PUBLISHING, 950)
@@ -274,7 +474,8 @@ def generate_smart_edit_timeline_draft(
     except (SmartEditGenerationCancelled, SmartEditGenerationRejected):
         raise
     except Exception:
-        _reject()
+        pass
+    _reject()
 
 
 def _material_kind(material: Material) -> SegmentSelectionMaterialKind:
@@ -282,6 +483,32 @@ def _material_kind(material: Material) -> SegmentSelectionMaterialKind:
         return SegmentSelectionMaterialKind(material.kind.value)
     except (TypeError, ValueError):
         _reject()
+
+
+def _validated_material(material: Material) -> Material:
+    validated: Material | None = None
+    with suppress(Exception):
+        validated = Material.register(
+            material_id=material.material_id,
+            kind=material.kind,
+            duration_ms=material.duration_ms,
+            width=material.width,
+            height=material.height,
+            content_digest=material.content_digest,
+            has_audio=material.has_audio,
+            audio_loudness_lufs=material.audio_loudness_lufs,
+            has_speech=material.has_speech,
+            speech_segments_ms=material.speech_segments_ms,
+            speech_transcript=material.speech_transcript,
+            shot_boundaries_ms=material.shot_boundaries_ms,
+            ai_description=material.ai_description,
+            ai_tags=material.ai_tags,
+            description_source=material.description_source,
+            described_at=material.described_at,
+        )
+    if validated is None:
+        _reject()
+    return validated
 
 
 def _decodable_evidence(
@@ -341,6 +568,10 @@ def _require_prepared_materials(
     requested: tuple[Material, ...],
     prepared: PreparedSmartEditMaterials,
 ) -> None:
+    try:
+        tuple(_validated_material(material) for material in prepared.materials)
+    except Exception:
+        _reject()
     if (
         len(requested) != len(prepared.materials)
         or any(
@@ -354,6 +585,12 @@ def _require_prepared_materials(
         prepared.materials,
         prepared.decodable_materials,
     )
+    prepared_by_id = {material.material_id.uuid: material for material in prepared.materials}
+    if any(
+        update != SmartEditMaterialAnalysis.from_material(prepared_by_id[update.material_id])
+        for update in prepared.analysis_updates
+    ):
+        _reject()
     if any(
         material.has_speech
         and not _speech_window_is_decodable(
@@ -465,7 +702,8 @@ def assemble_smart_edit_timeline_draft(
     except SmartEditGenerationRejected:
         raise
     except Exception:
-        _reject()
+        pass
+    _reject()
 
 
 def _assemble_smart_edit_timeline_draft(
@@ -487,12 +725,13 @@ def _assemble_smart_edit_timeline_draft(
     )
     if isinstance(selected, SmartEditGenerationFailure):
         return selected
-    try:
+    projected: LocalEditingTimelineDraft | None = None
+    with suppress(Exception):
         projected = project_local_editing_timeline_draft(
             selected,
             narration_materials=narration_materials,
         )
-    except Exception:
+    if projected is None:
         _reject()
     return SmartEditGenerationResult(projected)
 
@@ -608,6 +847,7 @@ def _select_smart_edit_paragraphs(
 __all__ = [
     "CancellationProbe",
     "PreparedSmartEditMaterials",
+    "PreparedSmartEditNarration",
     "SmartEditGenerationCancelled",
     "SmartEditGenerationFailure",
     "SmartEditGenerationFailureCode",
@@ -615,6 +855,8 @@ __all__ = [
     "SmartEditGenerationRejected",
     "SmartEditGenerationResult",
     "SmartEditGenerationStage",
+    "SmartEditMaterialAnalysis",
+    "SmartEditNarrationRegistration",
     "assemble_smart_edit_timeline_draft",
     "generate_smart_edit_timeline_draft",
 ]

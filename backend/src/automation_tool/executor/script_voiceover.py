@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import stat
 import unicodedata
+from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, NoReturn
@@ -39,8 +41,29 @@ class ScriptVoiceoverRejected(RuntimeError):
         super().__init__("script voiceover request rejected")
 
 
+class ScriptVoiceoverCancelled(RuntimeError):
+    """The caller cooperatively stopped a batch between sentences."""
+
+    def __init__(self) -> None:
+        super().__init__("script voiceover cancelled")
+
+
 def _reject() -> NoReturn:
     raise ScriptVoiceoverRejected from None
+
+
+def _never_cancel() -> bool:
+    return False
+
+
+def _cancel_if_requested(cancellation_requested: Callable[[], bool]) -> None:
+    requested: object = None
+    with suppress(Exception):
+        requested = cancellation_requested()
+    if type(requested) is not bool:
+        _reject()
+    if requested:
+        raise ScriptVoiceoverCancelled from None
 
 
 def _relative_path(sequence: int) -> str:
@@ -168,6 +191,7 @@ def synthesize_script_voiceovers(
     config: VoiceoverConfig,
     workspace: AuthoringWorkspace,
     tools: PackagedMediaTools,
+    cancellation_requested: Callable[[], bool] = _never_cancel,
 ) -> ScriptVoiceoverResult:
     """Synthesize and probe every sentence, or leave no audio from the batch."""
 
@@ -176,6 +200,7 @@ def synthesize_script_voiceovers(
         or not isinstance(config, VoiceoverConfig)
         or not isinstance(workspace, AuthoringWorkspace)
         or not isinstance(tools, PackagedMediaTools)
+        or not callable(cancellation_requested)
     ):
         _reject()
 
@@ -201,6 +226,7 @@ def synthesize_script_voiceovers(
         # and therefore rolls back only files authored by this batch.
         batch_workspace = AuthoringWorkspace(workspace.root)
         for sentence, relative_path, output_path in planned_outputs:
+            _cancel_if_requested(cancellation_requested)
             # Close the window between the batch preflight and this sentence.
             output_path = _fresh_output_path(batch_workspace, relative_path)
             synthesized = _require_written_audio(
@@ -227,7 +253,7 @@ def synthesize_script_voiceovers(
             script_request_id=script.request_id,
             clips=tuple(clips),
         )
-    except ScriptVoiceoverRejected:
+    except (ScriptVoiceoverCancelled, ScriptVoiceoverRejected):
         if batch_workspace is not None:
             batch_workspace.rollback_authored_files()
         raise
@@ -238,6 +264,7 @@ def synthesize_script_voiceovers(
 
 
 __all__ = [
+    "ScriptVoiceoverCancelled",
     "ScriptVoiceoverClip",
     "ScriptVoiceoverRejected",
     "ScriptVoiceoverResult",

@@ -14,6 +14,7 @@ from automation_tool.control_plane.domain import (
     MaterialId,
     MaterialKind,
 )
+from automation_tool.executor.motion_authoring.voiceover import MAX_VOICEOVER_BYTES
 from automation_tool.executor.script_segmentation import (
     ScriptSegmentationResult,
     ScriptSentence,
@@ -33,6 +34,7 @@ from automation_tool.executor.semantic_matching import (
 )
 from automation_tool.executor.smart_edit_generation import (
     PreparedSmartEditMaterials,
+    PreparedSmartEditNarration,
     SmartEditGenerationCancelled,
     SmartEditGenerationFailure,
     SmartEditGenerationFailureCode,
@@ -40,6 +42,8 @@ from automation_tool.executor.smart_edit_generation import (
     SmartEditGenerationRejected,
     SmartEditGenerationResult,
     SmartEditGenerationStage,
+    SmartEditMaterialAnalysis,
+    SmartEditNarrationRegistration,
     assemble_smart_edit_timeline_draft,
     generate_smart_edit_timeline_draft,
 )
@@ -310,6 +314,47 @@ def test_wrong_outer_container_is_rejected_before_it_is_normalized() -> None:
         )
 
 
+def test_narration_registration_rejects_unbounded_output_size() -> None:
+    with pytest.raises(SmartEditGenerationRejected):
+        SmartEditNarrationRegistration(
+            sequence=1,
+            material_id=uuid4(),
+            relative_path="voiceover/sentence-0001.wav",
+            duration_ms=800,
+            content_digest="f" * 64,
+            bytes_written=MAX_VOICEOVER_BYTES + 1,
+        )
+
+
+def test_result_rejects_registration_for_audio_not_used_by_the_draft() -> None:
+    silent = _material()
+    script, voiceovers, matches, narration = _narrated_inputs(silent)
+    assembled = assemble_smart_edit_timeline_draft(
+        materials=(silent,),
+        script=script,
+        voiceovers=voiceovers,
+        matches=matches,
+        decodable_materials=(_evidence(silent),),
+        narration_materials=narration,
+    )
+    assert isinstance(assembled, SmartEditGenerationResult)
+
+    with pytest.raises(SmartEditGenerationRejected):
+        SmartEditGenerationResult(
+            draft=assembled.draft,
+            narration_registrations=(
+                SmartEditNarrationRegistration(
+                    sequence=1,
+                    material_id=uuid4(),
+                    relative_path="voiceover/sentence-0001.wav",
+                    duration_ms=800,
+                    content_digest="f" * 64,
+                    bytes_written=1_024,
+                ),
+            ),
+        )
+
+
 class _RecordingPipeline:
     def __init__(self, material: Material, *, score: int = 91) -> None:
         self.material = material
@@ -327,7 +372,11 @@ class _RecordingPipeline:
     ) -> PreparedSmartEditMaterials:
         assert callable(cancellation_requested)
         self.calls.append("prepare")
-        return PreparedSmartEditMaterials(materials, (_evidence(self.material),))
+        return PreparedSmartEditMaterials(
+            materials,
+            (_evidence(self.material),),
+            (SmartEditMaterialAnalysis.from_material(self.material),),
+        )
 
     def segment(self, prompt: str, *, enable_thinking: bool) -> ScriptSegmentationResult:
         assert prompt == "把发布会剪成一条产品亮点短片。"
@@ -366,11 +415,24 @@ class _RecordingPipeline:
         voiceovers: ScriptVoiceoverResult,
         *,
         cancellation_requested: object,
-    ) -> tuple[NarrationMaterialBinding, ...]:
+    ) -> PreparedSmartEditNarration:
         assert voiceovers is self.voiceovers
         assert callable(cancellation_requested)
         self.calls.append("bind")
-        return self.narration
+        return PreparedSmartEditNarration(
+            bindings=self.narration,
+            registrations=tuple(
+                SmartEditNarrationRegistration(
+                    sequence=binding.sequence,
+                    material_id=binding.material_id,
+                    relative_path=binding.narration_relative_path,
+                    duration_ms=binding.duration_ms,
+                    content_digest="f" * 64,
+                    bytes_written=1_024,
+                )
+                for binding in self.narration
+            ),
+        )
 
 
 def test_pipeline_reports_monotonic_real_stages_and_uses_existing_generator() -> None:
@@ -399,6 +461,8 @@ def test_pipeline_reports_monotonic_real_stages_and_uses_existing_generator() ->
         (SmartEditGenerationStage.PUBLISHING, 950),
         (SmartEditGenerationStage.COMPLETED, 1_000),
     ]
+    assert outcome.analysis_updates == (SmartEditMaterialAnalysis.from_material(silent),)
+    assert outcome.narration_registrations[0].material_id == (pipeline.narration[0].material_id)
 
 
 def test_pipeline_cancellation_stops_before_the_next_billable_stage() -> None:
@@ -476,6 +540,40 @@ def test_prepared_materials_are_bound_to_the_original_request_before_model_calls
     assert pipeline.calls == ["prepare"]
 
 
+def test_analysis_update_must_exactly_describe_its_prepared_material() -> None:
+    silent = _material()
+
+    class _MismatchedUpdatePipeline(_RecordingPipeline):
+        def prepare(
+            self,
+            materials: tuple[Material, ...],
+            *,
+            cancellation_requested: object,
+        ) -> PreparedSmartEditMaterials:
+            assert callable(cancellation_requested)
+            self.calls.append("prepare")
+            mismatched = materials[0].with_user_description("另一份未参与匹配的描述")
+            return PreparedSmartEditMaterials(
+                materials,
+                (_evidence(materials[0]),),
+                (SmartEditMaterialAnalysis.from_material(mismatched),),
+            )
+
+    pipeline = _MismatchedUpdatePipeline(silent)
+
+    with pytest.raises(SmartEditGenerationRejected):
+        generate_smart_edit_timeline_draft(
+            cast(SmartEditGenerationPipeline, pipeline),
+            prompt="把发布会剪成一条产品亮点短片。",
+            materials=(silent,),
+            enable_thinking=False,
+            progress=lambda _stage, _per_mille: None,
+            cancellation_requested=lambda: False,
+        )
+
+    assert pipeline.calls == ["prepare"]
+
+
 def test_all_voiced_pipeline_skips_every_billable_text_and_tts_stage() -> None:
     voiced = _material(has_speech=True)
     pipeline = _RecordingPipeline(voiced)
@@ -493,3 +591,39 @@ def test_all_voiced_pipeline_skips_every_billable_text_and_tts_stage() -> None:
     assert isinstance(outcome, SmartEditGenerationResult)
     assert pipeline.calls == ["prepare"]
     assert progress == [0, 100, 850, 950, 1_000]
+
+
+def test_request_materials_are_fully_revalidated_before_pipeline_work() -> None:
+    silent = _material()
+    pipeline = _RecordingPipeline(silent)
+    object.__setattr__(silent, "ai_description", "含有\0控制字符")
+
+    with pytest.raises(SmartEditGenerationRejected):
+        generate_smart_edit_timeline_draft(
+            cast(SmartEditGenerationPipeline, pipeline),
+            prompt="把发布会剪成一条产品亮点短片。",
+            materials=(silent,),
+            enable_thinking=False,
+            progress=lambda _stage, _per_mille: None,
+            cancellation_requested=lambda: False,
+        )
+
+    assert pipeline.calls == []
+
+
+def test_more_than_32_visual_materials_are_rejected_before_preparation() -> None:
+    first = _material()
+    pipeline = _RecordingPipeline(first)
+    materials = (first, *(_material() for _ in range(32)))
+
+    with pytest.raises(SmartEditGenerationRejected):
+        generate_smart_edit_timeline_draft(
+            cast(SmartEditGenerationPipeline, pipeline),
+            prompt="把发布会剪成一条产品亮点短片。",
+            materials=materials,
+            enable_thinking=False,
+            progress=lambda _stage, _per_mille: None,
+            cancellation_requested=lambda: False,
+        )
+
+    assert pipeline.calls == []
