@@ -31,12 +31,18 @@ from automation_tool.executor.material_probe import (  # noqa: E402
     MaterialPathRegistry,
     MaterialPathRegistryRejected,
     MaterialPathRegistryRejection,
+    MaterialProbeRejected,
+    MaterialProbeRejection,
+    approve_source,
+    require_source_unchanged,
 )
 from prepare_video_runtime import prepare  # noqa: E402
 
 COMMAND_DOMAIN = b"automation-tool.video-worker-command.v1\0"
 EVENT_DOMAIN = b"automation-tool.video-worker-event.v1\0"
 TIMEOUT_SECONDS = 90
+SOURCE_SETTLEMENT_ATTEMPTS = 10
+SOURCE_SETTLEMENT_INTERVAL_SECONDS = 1.0
 _FAILURE_EVENT_FOR = {
     "worker.material.imported": "worker.material.import_failed",
     "worker.material.forgotten": "worker.material.forget_failed",
@@ -178,6 +184,22 @@ def _generate_source(ffmpeg: Path, source: Path) -> None:
     )
 
 
+def _wait_for_generated_source(source: Path) -> None:
+    """Wait until Windows has committed the fixture's final-write metadata."""
+
+    for _ in range(SOURCE_SETTLEMENT_ATTEMPTS):
+        try:
+            path, approved = approve_source(source)
+            time.sleep(SOURCE_SETTLEMENT_INTERVAL_SECONDS)
+            require_source_unchanged(path, approved)
+        except MaterialProbeRejected as error:
+            if error.rejection is MaterialProbeRejection.SOURCE_NOT_AT_REST:
+                continue
+            raise AssertionError("generated acceptance source is unusable") from None
+        return
+    raise AssertionError("generated acceptance source did not settle")
+
+
 def _stop_process(process: subprocess.Popen[str]) -> None:
     """Bound cleanup even when an acceptance assertion interrupts the dialogue."""
 
@@ -240,6 +262,7 @@ def main() -> int:
             app_data.chmod(0o700)
         source = (root / "operator-private-source.mp4").resolve()
         _generate_source(ffmpeg, source)
+        _wait_for_generated_source(source)
         material_id = uuid4()
         token = os.urandom(32)
         bootstrap = {

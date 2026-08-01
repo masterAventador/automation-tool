@@ -8,6 +8,10 @@ from pathlib import Path
 from unittest import mock
 
 import run_le_18_t3_acceptance as acceptance
+from automation_tool.executor.material_probe import (
+    MaterialProbeRejected,
+    MaterialProbeRejection,
+)
 
 
 class _RunningProcess:
@@ -69,6 +73,32 @@ class FrozenWorkerEventTest(unittest.TestCase):
             "event leaked the selected source path",
         ):
             self._next(lines, source)
+
+
+class GeneratedSourceSettlementTest(unittest.TestCase):
+    def test_retries_until_the_generated_source_is_unchanged(self) -> None:
+        source = Path("/generated-source.mp4")
+        still_writing = MaterialProbeRejected(MaterialProbeRejection.SOURCE_NOT_AT_REST)
+        with (
+            mock.patch.object(
+                acceptance,
+                "approve_source",
+                return_value=(source, mock.sentinel.approved),
+            ),
+            mock.patch.object(
+                acceptance,
+                "require_source_unchanged",
+                side_effect=[
+                    still_writing,
+                    (source, mock.sentinel.settled),
+                ],
+            ) as require,
+            mock.patch("run_le_18_t3_acceptance.time.sleep") as sleep,
+        ):
+            acceptance._wait_for_generated_source(source)
+
+        self.assertEqual(require.call_count, 2)
+        self.assertEqual(sleep.call_count, 2)
 
 
 if __name__ == "__main__":
