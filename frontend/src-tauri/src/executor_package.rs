@@ -193,13 +193,23 @@ impl ExecutorPackageVerifier {
         architecture: &str,
     ) -> Result<VerifiedExecutorPackage, ExecutorPackageError> {
         ensure_safe_package_root(package_root)?;
+        crate::app_logging::record(crate::app_logging::DesktopLogEvent::ExecutorPackageRootReady);
         let manifest_bytes =
             read_bounded_regular_file(&package_root.join(MANIFEST_FILE_NAME), MAX_MANIFEST_BYTES)?;
+        crate::app_logging::record(
+            crate::app_logging::DesktopLogEvent::ExecutorPackageManifestRead,
+        );
         let signature_bytes = read_bounded_regular_file(
             &package_root.join(SIGNATURE_FILE_NAME),
             MAX_SIGNATURE_BYTES,
         )?;
+        crate::app_logging::record(
+            crate::app_logging::DesktopLogEvent::ExecutorPackageSignatureRead,
+        );
         self.verify_signature(&manifest_bytes, &signature_bytes)?;
+        crate::app_logging::record(
+            crate::app_logging::DesktopLogEvent::ExecutorPackageSignatureVerified,
+        );
         let manifest = parse_canonical_manifest(&manifest_bytes)?;
         let version = validate_manifest_identity(&manifest, platform, architecture)?;
         if !self.allowed_versions.matches(&version) {
@@ -216,6 +226,12 @@ impl ExecutorPackageVerifier {
                 ExecutorPackageErrorCode::RollbackRejected,
             ));
         }
+        crate::app_logging::record(
+            crate::app_logging::DesktopLogEvent::ExecutorPackageIdentityVerified,
+        );
+        crate::app_logging::record(
+            crate::app_logging::DesktopLogEvent::ExecutorPackageInventoryStarted,
+        );
         verify_complete_inventory(package_root, &manifest)?;
         Ok(VerifiedExecutorPackage {
             version,
@@ -348,6 +364,9 @@ fn verify_complete_inventory(
             ExecutorPackageErrorCode::PackageInvalid,
         ));
     }
+    crate::app_logging::record(
+        crate::app_logging::DesktopLogEvent::ExecutorPackageInventoryPathsVerified,
+    );
 
     let mut total_size = 0_u64;
     let mut inventory = Sha256::new();
@@ -380,6 +399,9 @@ fn verify_complete_inventory(
         inventory.update(actual_size.to_be_bytes());
         inventory.update(actual_digest);
     }
+    crate::app_logging::record(
+        crate::app_logging::DesktopLogEvent::ExecutorPackageInventoryHashesVerified,
+    );
     let package_digest: [u8; 32] = inventory.finalize().into();
     if total_size != manifest.package_size
         || Some(package_digest) != decode_sha256(&manifest.package_sha256)
@@ -393,11 +415,17 @@ fn verify_complete_inventory(
             ExecutorPackageErrorCode::DigestMismatch,
         ));
     }
+    crate::app_logging::record(
+        crate::app_logging::DesktopLogEvent::ExecutorPackageInventoryDigestVerified,
+    );
     if collect_payload_paths(package_root)? != actual_paths {
         return Err(ExecutorPackageError::new(
             ExecutorPackageErrorCode::PackageInvalid,
         ));
     }
+    crate::app_logging::record(
+        crate::app_logging::DesktopLogEvent::ExecutorPackageInventoryRewalkVerified,
+    );
     Ok(())
 }
 

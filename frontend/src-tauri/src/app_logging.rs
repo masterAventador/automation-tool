@@ -54,6 +54,16 @@ pub(crate) enum DesktopLogEvent {
     StartupExecutorPackageVersionRejected,
     StartupExecutorPackageInventoryRejected,
     StartupExecutorPackageIoRejected,
+    ExecutorPackageRootReady,
+    ExecutorPackageManifestRead,
+    ExecutorPackageSignatureRead,
+    ExecutorPackageSignatureVerified,
+    ExecutorPackageIdentityVerified,
+    ExecutorPackageInventoryStarted,
+    ExecutorPackageInventoryPathsVerified,
+    ExecutorPackageInventoryHashesVerified,
+    ExecutorPackageInventoryDigestVerified,
+    ExecutorPackageInventoryRewalkVerified,
     StartupExecutorCheckCompleted,
     StartupLocalCheckCompleted,
     StartupLocalCheckRejected,
@@ -159,6 +169,24 @@ impl DesktopLogEvent {
                 "startup.local.executor.package.inventory_rejected"
             }
             Self::StartupExecutorPackageIoRejected => "startup.local.executor.package.io_rejected",
+            Self::ExecutorPackageRootReady => "executor.package.root.ready",
+            Self::ExecutorPackageManifestRead => "executor.package.manifest.read",
+            Self::ExecutorPackageSignatureRead => "executor.package.signature.read",
+            Self::ExecutorPackageSignatureVerified => "executor.package.signature.verified",
+            Self::ExecutorPackageIdentityVerified => "executor.package.identity.verified",
+            Self::ExecutorPackageInventoryStarted => "executor.package.inventory.started",
+            Self::ExecutorPackageInventoryPathsVerified => {
+                "executor.package.inventory.paths_verified"
+            }
+            Self::ExecutorPackageInventoryHashesVerified => {
+                "executor.package.inventory.hashes_verified"
+            }
+            Self::ExecutorPackageInventoryDigestVerified => {
+                "executor.package.inventory.digest_verified"
+            }
+            Self::ExecutorPackageInventoryRewalkVerified => {
+                "executor.package.inventory.rewalk_verified"
+            }
             Self::StartupExecutorCheckCompleted => "startup.local.executor.completed",
             Self::StartupLocalCheckCompleted => "startup.local.completed",
             Self::StartupLocalCheckRejected => "startup.local.rejected",
@@ -874,6 +902,46 @@ mod tests {
             (
                 DesktopLogEvent::StartupExecutorPackageIoRejected,
                 "startup.local.executor.package.io_rejected",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageRootReady,
+                "executor.package.root.ready",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageManifestRead,
+                "executor.package.manifest.read",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageSignatureRead,
+                "executor.package.signature.read",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageSignatureVerified,
+                "executor.package.signature.verified",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageIdentityVerified,
+                "executor.package.identity.verified",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageInventoryStarted,
+                "executor.package.inventory.started",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageInventoryPathsVerified,
+                "executor.package.inventory.paths_verified",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageInventoryHashesVerified,
+                "executor.package.inventory.hashes_verified",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageInventoryDigestVerified,
+                "executor.package.inventory.digest_verified",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageInventoryRewalkVerified,
+                "executor.package.inventory.rewalk_verified",
             ),
             (
                 DesktopLogEvent::StartupLocalCheckCompleted,

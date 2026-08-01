@@ -15,6 +15,7 @@ test("H8-16E composes every startup component through one path-free native aggre
     profiles,
     appLogging,
     manager,
+    executorPackage,
   ] = await Promise.all([
     readFile(new URL("src/app/startup.ts", frontendRoot), "utf8"),
     readFile(
@@ -28,6 +29,7 @@ test("H8-16E composes every startup component through one path-free native aggre
     readFile(new URL("src-tauri/src/browser_profiles.rs", frontendRoot), "utf8"),
     readFile(new URL("src-tauri/src/app_logging.rs", frontendRoot), "utf8"),
     readFile(new URL("src-tauri/src/executor_manager.rs", frontendRoot), "utf8"),
+    readFile(new URL("src-tauri/src/executor_package.rs", frontendRoot), "utf8"),
   ]);
 
   assert.match(startup, /Promise\.allSettled/u);
@@ -66,6 +68,21 @@ test("H8-16E composes every startup component through one path-free native aggre
     "ControlPlaneHealthCheckRejected",
   ]) {
     assert.match(entry, new RegExp(`DesktopLogEvent::${event}`, "u"));
+    assert.match(appLogging, new RegExp(`Self::${event}`, "u"));
+  }
+  for (const event of [
+    "ExecutorPackageRootReady",
+    "ExecutorPackageManifestRead",
+    "ExecutorPackageSignatureRead",
+    "ExecutorPackageSignatureVerified",
+    "ExecutorPackageIdentityVerified",
+    "ExecutorPackageInventoryStarted",
+    "ExecutorPackageInventoryPathsVerified",
+    "ExecutorPackageInventoryHashesVerified",
+    "ExecutorPackageInventoryDigestVerified",
+    "ExecutorPackageInventoryRewalkVerified",
+  ]) {
+    assert.match(executorPackage, new RegExp(`DesktopLogEvent::${event}`, "u"));
     assert.match(appLogging, new RegExp(`Self::${event}`, "u"));
   }
   for (const event of [
