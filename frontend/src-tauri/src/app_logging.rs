@@ -37,6 +37,19 @@ pub(crate) enum DesktopLogEvent {
     ExecutorServiceInitialized,
     CredentialsInitialized,
     AppSetupCompleted,
+    StartupLocalCheckStarted,
+    StartupAppDataCheckCompleted,
+    StartupBrowserCheckCompleted,
+    StartupExecutorCheckStarted,
+    StartupExecutorCheckCompleted,
+    StartupLocalCheckCompleted,
+    StartupLocalCheckRejected,
+    ControlPlaneHealthCheckStarted,
+    ControlPlaneServiceHealthCompleted,
+    ControlPlaneRegistrationCompleted,
+    ControlPlaneInstallationAccessCompleted,
+    ControlPlaneHealthCheckCompleted,
+    ControlPlaneHealthCheckRejected,
     // Startup found persisted state it could not use and put the App back into
     // a state it can launch from. Recovery that leaves no trace is the failure
     // this project keeps meeting, so each of these is worth one line.
@@ -98,6 +111,25 @@ impl DesktopLogEvent {
             Self::ExecutorServiceInitialized => "app.setup.executor_service.initialized",
             Self::CredentialsInitialized => "app.setup.credentials.initialized",
             Self::AppSetupCompleted => "app.setup.completed",
+            Self::StartupLocalCheckStarted => "startup.local.started",
+            Self::StartupAppDataCheckCompleted => "startup.local.app_data.completed",
+            Self::StartupBrowserCheckCompleted => "startup.local.browser.completed",
+            Self::StartupExecutorCheckStarted => "startup.local.executor.started",
+            Self::StartupExecutorCheckCompleted => "startup.local.executor.completed",
+            Self::StartupLocalCheckCompleted => "startup.local.completed",
+            Self::StartupLocalCheckRejected => "startup.local.rejected",
+            Self::ControlPlaneHealthCheckStarted => "startup.control_plane.started",
+            Self::ControlPlaneServiceHealthCompleted => {
+                "startup.control_plane.service_health.completed"
+            }
+            Self::ControlPlaneRegistrationCompleted => {
+                "startup.control_plane.registration.completed"
+            }
+            Self::ControlPlaneInstallationAccessCompleted => {
+                "startup.control_plane.installation_access.completed"
+            }
+            Self::ControlPlaneHealthCheckCompleted => "startup.control_plane.completed",
+            Self::ControlPlaneHealthCheckRejected => "startup.control_plane.rejected",
             Self::UpdatePolicyDocumentMigrated => "app_update.policy_document.migrated",
             Self::UpdatePolicyDocumentReplaced => "app_update.policy_document.replaced",
             Self::UpdateCacheStateRecovered => "app_update.cache_state.recovered",
@@ -722,6 +754,68 @@ mod tests {
             DesktopLogEvent::TaskStatusUnknown.as_str(),
             task_status_event("atas1.private-access-secret").as_str()
         );
+    }
+
+    #[test]
+    fn startup_probe_events_are_fixed_and_stage_specific() {
+        let events = [
+            (
+                DesktopLogEvent::StartupLocalCheckStarted,
+                "startup.local.started",
+            ),
+            (
+                DesktopLogEvent::StartupAppDataCheckCompleted,
+                "startup.local.app_data.completed",
+            ),
+            (
+                DesktopLogEvent::StartupBrowserCheckCompleted,
+                "startup.local.browser.completed",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorCheckStarted,
+                "startup.local.executor.started",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorCheckCompleted,
+                "startup.local.executor.completed",
+            ),
+            (
+                DesktopLogEvent::StartupLocalCheckCompleted,
+                "startup.local.completed",
+            ),
+            (
+                DesktopLogEvent::StartupLocalCheckRejected,
+                "startup.local.rejected",
+            ),
+            (
+                DesktopLogEvent::ControlPlaneHealthCheckStarted,
+                "startup.control_plane.started",
+            ),
+            (
+                DesktopLogEvent::ControlPlaneServiceHealthCompleted,
+                "startup.control_plane.service_health.completed",
+            ),
+            (
+                DesktopLogEvent::ControlPlaneRegistrationCompleted,
+                "startup.control_plane.registration.completed",
+            ),
+            (
+                DesktopLogEvent::ControlPlaneInstallationAccessCompleted,
+                "startup.control_plane.installation_access.completed",
+            ),
+            (
+                DesktopLogEvent::ControlPlaneHealthCheckCompleted,
+                "startup.control_plane.completed",
+            ),
+            (
+                DesktopLogEvent::ControlPlaneHealthCheckRejected,
+                "startup.control_plane.rejected",
+            ),
+        ];
+
+        for (event, expected) in events {
+            assert_eq!(event.as_str(), expected);
+        }
     }
 
     #[test]

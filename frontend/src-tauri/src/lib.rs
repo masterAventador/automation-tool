@@ -1195,12 +1195,13 @@ fn delete_motion_video_artifact(
 async fn check_local_startup_environment(
     app: tauri::AppHandle,
 ) -> startup_environment::StartupEnvironmentSnapshot {
+    app_logging::record(app_logging::DesktopLogEvent::StartupLocalCheckStarted);
     // The gate hashes every byte of the packaged Executor and, the first time,
     // of the packaged browser as well — 519 MB between them, off a disk that is
     // cold on the launch that matters most. That is not work the UI thread may
     // own: a window that cannot repaint while it happens is the first thing a
     // customer sees, and it looks exactly like a hang.
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         let (Some(startup), Some(profiles), Some(authority), Some(platform)) = (
             app.try_state::<startup_environment::StartupEnvironmentService>(),
             app.try_state::<browser_profiles::BrowserProfileStore>(),
@@ -1217,6 +1218,7 @@ async fn check_local_startup_environment(
         } else {
             startup_environment::AppDataStartupState::Unavailable
         };
+        app_logging::record(app_logging::DesktopLogEvent::StartupAppDataCheckCompleted);
         // EB-08：健康状态来自内置发行物验证，不再询问系统浏览器发现/选择。
         let embedded_browser = match authority.resolve() {
             Ok(_) => startup_environment::EmbeddedBrowserStartupState::Ready,
@@ -1228,14 +1230,23 @@ async fn check_local_startup_environment(
             }
             Err(_) => startup_environment::EmbeddedBrowserStartupState::ComponentDamaged,
         };
-        startup_environment::StartupEnvironmentSnapshot::new(
-            app_data,
-            platform.startup_environment_state(),
-            embedded_browser,
-        )
+        app_logging::record(app_logging::DesktopLogEvent::StartupBrowserCheckCompleted);
+        app_logging::record(app_logging::DesktopLogEvent::StartupExecutorCheckStarted);
+        let executor = platform.startup_environment_state();
+        app_logging::record(app_logging::DesktopLogEvent::StartupExecutorCheckCompleted);
+        startup_environment::StartupEnvironmentSnapshot::new(app_data, executor, embedded_browser)
     })
-    .await
-    .unwrap_or_else(|_| startup_environment_unusable())
+    .await;
+    match result {
+        Ok(snapshot) => {
+            app_logging::record(app_logging::DesktopLogEvent::StartupLocalCheckCompleted);
+            snapshot
+        }
+        Err(_) => {
+            app_logging::record(app_logging::DesktopLogEvent::StartupLocalCheckRejected);
+            startup_environment_unusable()
+        }
+    }
 }
 
 /// What the startup gate answers when it could not run its probes at all.
@@ -2146,7 +2157,18 @@ async fn restart_executor(
 async fn check_control_plane_health(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
 ) -> Result<control_plane::ControlPlaneHealth, ControlPlaneCommandError> {
-    client.check_health().await.map_err(map_control_plane_error)
+    app_logging::record(app_logging::DesktopLogEvent::ControlPlaneHealthCheckStarted);
+    match client.check_health().await.map_err(map_control_plane_error) {
+        Ok(health) => {
+            app_logging::record(app_logging::DesktopLogEvent::ControlPlaneServiceHealthCompleted);
+            app_logging::record(app_logging::DesktopLogEvent::ControlPlaneHealthCheckCompleted);
+            Ok(health)
+        }
+        Err(error) => {
+            app_logging::record(app_logging::DesktopLogEvent::ControlPlaneHealthCheckRejected);
+            Err(error)
+        }
+    }
 }
 
 #[tauri::command]
@@ -2157,15 +2179,34 @@ async fn check_control_plane_health(
     vault: tauri::State<'_, ProductionDeviceCredentialVault>,
     handoff: tauri::State<'_, ProductionLocalRegistrationHandoffStore>,
 ) -> Result<control_plane::ControlPlaneHealth, ControlPlaneCommandError> {
-    let health = client
-        .check_health()
-        .await
-        .map_err(map_control_plane_error)?;
-    register_installation_from_local_handoff(&client, &identity, &vault, &handoff).await?;
-    client
+    app_logging::record(app_logging::DesktopLogEvent::ControlPlaneHealthCheckStarted);
+    let health = match client.check_health().await.map_err(map_control_plane_error) {
+        Ok(health) => {
+            app_logging::record(app_logging::DesktopLogEvent::ControlPlaneServiceHealthCompleted);
+            health
+        }
+        Err(error) => {
+            app_logging::record(app_logging::DesktopLogEvent::ControlPlaneHealthCheckRejected);
+            return Err(error);
+        }
+    };
+    if let Err(error) =
+        register_installation_from_local_handoff(&client, &identity, &vault, &handoff).await
+    {
+        app_logging::record(app_logging::DesktopLogEvent::ControlPlaneHealthCheckRejected);
+        return Err(error);
+    }
+    app_logging::record(app_logging::DesktopLogEvent::ControlPlaneRegistrationCompleted);
+    if let Err(error) = client
         .check_installation_access_if_registered(&vault)
         .await
-        .map_err(map_control_plane_error)?;
+        .map_err(map_control_plane_error)
+    {
+        app_logging::record(app_logging::DesktopLogEvent::ControlPlaneHealthCheckRejected);
+        return Err(error);
+    }
+    app_logging::record(app_logging::DesktopLogEvent::ControlPlaneInstallationAccessCompleted);
+    app_logging::record(app_logging::DesktopLogEvent::ControlPlaneHealthCheckCompleted);
     Ok(health)
 }
 
