@@ -48,8 +48,8 @@
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| LE-05 | 数据库迁移与仓储 | 项目/素材/时间轴/任务表迁移、SQLAlchemy 仓储；**真实 PostgreSQL** 集成测试，断言落库行；**同任务内加结构性边界测试守住 Material 的描述保护**——`with_ai_description` 只挡住走它的调用方，`dataclasses.replace()` 与直接构造 `Material(...)` 都能到达它要阻止的状态（转换不变式无法由单快照构造校验表达，LE-02 T5 审查实跑证明）。用 AST 做法（**注意：`backend/tests/unit/executor/test_shipped_package_boundary.py` 这个样板不在本线分支上**——它由 `ddc6632` 引入，只存在于未合并的 `feature-audit` / `pc21-b`，`main` 与三条 LE 分支都没有，本线自 `5875191` 分出、比它早。所以 LE-05 要么自己从零写这个 AST 检查，要么先等那条分支合并。连带事实：三条 LE 分支的 `executor/__init__.py` 至今仍导出 `FakeExecutorEngine` 等测试替身，即 CLAUDE.md §9.2 禁止的形态，而 §9.2 点名的守卫在这里并不存在），禁止 `material.py` 之外的模块调用 `replace(` 于 Material 或直接构造它；**并承接 LE-04 新造的三条跨聚合根不变式**（领域对象不持有彼此引用，只能在仓储层成立，LE-04 终审实测三者当前全部 ACCEPTED）：① `EditingJob.project_id` 必须等于其 `timeline_id` 所属 `Timeline.project_id`——`project_id` 同时挂在两处是有意冗余，**普通外键管不住这个三角，需要复合外键或 CHECK**；② `EditingJob.timeline_revision` 必须真实存在；③ 同一 `(timeline_id, revision)` 不得同时有多个 QUEUED 作业；**T1～T5 全部完成**（四表、迁移 `0036`～`0039`、四个 SQLAlchemy 仓储、Material 描述保护的 AST 结构守卫、三条跨聚合根不变式全部由库结构而非应用层检查挡住），证据见 `docs/development/LE-05.md`；**顶格 `🔍 待验收`**——本线拿到的是真实 PostgreSQL 的分层证据，没有任何用户可操作路径：补验收依赖 LE-06（REST 面把四个仓储接到 Control Plane 接口上）与 LE-17（工作台接真实网关，形成正式 App 的用户路径并核对可外部核对的终态），两条都不满足之前不得标完成 | LE-04 | 🔍 待验收 |
-| LE-06 | 剪辑 REST API | `control_plane/api/` 下新增剪辑路由，首期严格对齐现有 `VideoEditingGateway` 六个操作：项目列表/创建（项目 write-once，**不做更新删除**）、时间轴读取/保存、作业列表/提交；素材登记与查询作为 LE-18 的后端前置一并交付。为项目/作业补带总序游标的仓储分页查询；Timeline 保持 write-once，`EditingJob.update(previous, changed)` 的 CAS 不得错接到时间轴路由，Worker 写回由 LE-12 消费。修订冲突的 `currentRevision` 走 `ErrorEnvelope` 严格可选 `details`，不塞 message；数据库守住一个项目唯一 timeline 身份。**T1～T6 已完成**：真实 Uvicorn、HTTP 与 PostgreSQL 纵向契约、模块门禁和逐任务 Codex Review 均已收口，证据见 `docs/development/LE-06.md`；正式 App 用户路径依赖 LE-17，完成前顶格 `🔍 待验收` | LE-05 | 🔍 待验收 |
+| LE-05 | 数据库迁移与仓储 | 项目/素材/时间轴/任务表迁移、SQLAlchemy 仓储；**真实 PostgreSQL** 集成测试，断言落库行；**同任务内加结构性边界测试守住 Material 的描述保护**——`with_ai_description` 只挡住走它的调用方，`dataclasses.replace()` 与直接构造 `Material(...)` 都能到达它要阻止的状态（转换不变式无法由单快照构造校验表达，LE-02 T5 审查实跑证明）。用 AST 做法（**注意：`backend/tests/unit/executor/test_shipped_package_boundary.py` 这个样板不在本线分支上**——它由 `ddc6632` 引入，只存在于未合并的 `feature-audit` / `pc21-b`，`main` 与三条 LE 分支都没有，本线自 `5875191` 分出、比它早。所以 LE-05 要么自己从零写这个 AST 检查，要么先等那条分支合并。连带事实：三条 LE 分支的 `executor/__init__.py` 至今仍导出 `FakeExecutorEngine` 等测试替身，即 CLAUDE.md §9.2 禁止的形态，而 §9.2 点名的守卫在这里并不存在），禁止 `material.py` 之外的模块调用 `replace(` 于 Material 或直接构造它；**并承接 LE-04 新造的三条跨聚合根不变式**（领域对象不持有彼此引用，只能在仓储层成立，LE-04 终审实测三者当前全部 ACCEPTED）：① `EditingJob.project_id` 必须等于其 `timeline_id` 所属 `Timeline.project_id`——`project_id` 同时挂在两处是有意冗余，**普通外键管不住这个三角，需要复合外键或 CHECK**；② `EditingJob.timeline_revision` 必须真实存在；③ 同一 `(timeline_id, revision)` 不得同时有多个 QUEUED 作业；**T1～T5 全部完成**（四表、迁移 `0036`～`0039`、四个 SQLAlchemy 仓储、Material 描述保护的 AST 结构守卫、三条跨聚合根不变式全部由库结构而非应用层检查挡住），证据见 `docs/development/LE-05.md`；LE-17 已在 macOS/Windows 正式 App 正常入口以真实 PostgreSQL 落库 Project、Timeline、Job 与 Artifact，并由 ffprobe 核对终态，补齐原缺失的用户可操作验收 | LE-04 | ✅ 已完成 |
+| LE-06 | 剪辑 REST API | `control_plane/api/` 下新增剪辑路由，首期严格对齐现有 `VideoEditingGateway` 六个操作：项目列表/创建（项目 write-once，**不做更新删除**）、时间轴读取/保存、作业列表/提交；素材登记与查询作为 LE-18 的后端前置一并交付。为项目/作业补带总序游标的仓储分页查询；Timeline 保持 write-once，`EditingJob.update(previous, changed)` 的 CAS 不得错接到时间轴路由，Worker 写回由 LE-12 消费。修订冲突的 `currentRevision` 走 `ErrorEnvelope` 严格可选 `details`，不塞 message；数据库守住一个项目唯一 timeline 身份。**T1～T6 已完成**：真实 Uvicorn、HTTP 与 PostgreSQL 纵向契约、模块门禁和逐任务 Codex Review 均已收口，证据见 `docs/development/LE-06.md`；LE-17 已从 macOS/Windows 正式 App 正常入口穿过同一 REST API 完成创建、保存、提交、轮询成功与 Artifact 核验，补齐用户路径验收 | LE-05 | ✅ 已完成 |
 
 ### 3.4 本地渲染引擎（6 项）
 
@@ -75,7 +75,7 @@
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| LE-17 | 工作台接真实网关 | `main.tsx` 生产组合根从 sessionStorage 草稿网关换成真实 Control Plane 网关；提交路径打通不再固定抛错；重写 `e2e-tauri/video-editing.spec.ts`，断言目标从"诚实展示不可用"改为真实出片；**同任务内必须重写前端 Timeline 契约**——`video-editing-dto.ts` 那份手写 zod 副本与新后端模型**整体不兼容，需按 `timeline.py` 重写而非逐点修补**（drift 由 LE-03 在 T2/T3/T4 改后端时造成，终审核基线 `d00f547` 确认此前前后端逐字同步）。LE-03 终审用真实 zod 探针实测：带转场的后端时间轴、带 `sourceInMs`/`sourceOutMs`/`gainDb` 的 clip、`narration`/`ambient`/`music` 三种轨道，**前端一律拒绝**。分歧至少七处：① `timelineClipSchema` 是 `z.strictObject` 且缺三个新字段，后端快照是硬报错不是静默忽略；② 仍用 `sourceArtifactId`（`ArtifactId`），后端已改指 `MaterialId`；③ 布局 refine 对所有轨道要求「不许重叠」，而新后端转场靠真实重叠实现；④ 无画面轨首尾相接、`visual.end == duration`、每种轨道至多一条等核心不变式；⑤ `transitionKindSchema` 仍含 `"cut"`；⑥ `timelineTrackKindSchema` 仍是单一音频轨；⑦ `MAX_TRACKS = 32`（应为 5）。2026-08-01 已按 `docs/development/LE-17.md` 拆为六项；T1～T5 已完成领域契约、Rust/Tauri 边界、真实前端网关、生产组合根接线、工作台真实状态/刷新语义以及真实 Control Plane/Worker/ffprobe 出片纵向验收，逐任务 Review 与专项验收均闭环，当前进入 T6 双平台复验、模块门禁与最终收口 | LE-06 | 🧪 RED |
+| LE-17 | 工作台接真实网关 | `main.tsx` 生产组合根从 sessionStorage 草稿网关换成真实 Control Plane 网关；提交路径打通不再固定抛错；重写 `e2e-tauri/video-editing.spec.ts`，断言目标从"诚实展示不可用"改为真实出片；**同任务内必须重写前端 Timeline 契约**——`video-editing-dto.ts` 那份手写 zod 副本与新后端模型**整体不兼容，需按 `timeline.py` 重写而非逐点修补**（drift 由 LE-03 在 T2/T3/T4 改后端时造成，终审核基线 `d00f547` 确认此前前后端逐字同步）。LE-03 终审用真实 zod 探针实测：带转场的后端时间轴、带 `sourceInMs`/`sourceOutMs`/`gainDb` 的 clip、`narration`/`ambient`/`music` 三种轨道，**前端一律拒绝**。分歧至少七处：① `timelineClipSchema` 是 `z.strictObject` 且缺三个新字段，后端快照是硬报错不是静默忽略；② 仍用 `sourceArtifactId`（`ArtifactId`），后端已改指 `MaterialId`；③ 布局 refine 对所有轨道要求「不许重叠」，而新后端转场靠真实重叠实现；④ 无画面轨首尾相接、`visual.end == duration`、每种轨道至多一条等核心不变式；⑤ `transitionKindSchema` 仍含 `"cut"`；⑥ `timelineTrackKindSchema` 仍是单一音频轨；⑦ `MAX_TRACKS = 32`（应为 5）。2026-08-01 已按 `docs/development/LE-17.md` 拆为六项；T1～T6 已完成领域契约、Rust/Tauri 边界、真实前端网关、生产组合根接线、工作台真实状态/刷新语义、取消终态审查修复和双平台真实出片。最终提交 `904f2075` 在 macOS/Windows 各由同一非 ignored 正式 App 驱动得到 `1 passing`，ffprobe 均为 H.264 `720×1280@20`、20 帧、1 秒；完整 backend integration `460 passed, 17 skipped`，模块门禁与最终 Review 全部闭环，证据见 `docs/development/LE-17.md` | LE-06 | ✅ 已完成 |
 | LE-18 | 素材库界面 | 导入素材、展示 AI 描述与标签、**标注哪些素材有人说话并可试听/查看转写**、编辑描述、去重提示、缺失素材提示；**LE-07 交接**：`MaterialPathRegistry` **没有 forget/删除接口**（T6 未要求、当时无调用方），素材删除必须先补；缺失素材提示要分三种理由——`FILE_MISSING`（不在了，去找回来）、`FILE_UNREADABLE`（还在原地但读不了，别让用户去找）、`FILE_CHANGED`（换过了，重新导入）。依据见 `docs/development/LE-07.md` T6 修复轮 Q5；用户可见文案全中文且无未解释术语。**LE-07 交接的硬约束**：`UNDECODABLE` 的文案不得写死成「文件已损坏」——实测默认布局 MP4（浏览器/yt-dlp 常态）在下载完成前一律报这个码，必须留「稍后重试」路径；`SOURCE_NOT_AT_REST` 才是明确的「还在写，等一下」。依据见 `docs/development/LE-07.md`「交接给 LE-18」。**修复轮新增三条**：① 导入配方是四步且都是公开的——`approve_source` 取受守卫的首个 stat → `probe_material` → `register` → `require_source_unchanged` 闭窗，**不要自己 `Path.stat()`**（裸 `FileNotFoundError` 会带出操作者私有路径）；② 新拒绝码 `WORKSPACE_UNUSABLE` 的文案是「本机暂存空间不够/不可写」，既不是「文件坏了」也不是「重试」，实测卷满时每条素材都会撞上它；③ 注册表**有意不自建目录**，调用方用普通 `mkdir` 建的子目录在 umask 022 下是 0755，会被判 `REGISTRY_UNREADABLE`——负担在调用方，建目录要显式 0700。依据见 `docs/development/LE-07.md` T7 修复轮 | LE-17 | ⬜ 未开始 |
 | LE-19 | 智能剪辑入口 | 一句话输入 → 生成 Timeline 草稿落进工作台；"一键直出片"跳过审阅走同一生成器；进度与取消可见；**剪辑模块的产品形态在此最终确定，同任务内复核 `contracts/quality/user-facing-terminology.v1.json` 的 `video_editing_module` 条目与实际界面一致，并让当前已绿的 `check_user_facing_branding.py` 保持绿色**（见 §7 现状） | LE-16,LE-18 | ⬜ 未开始 |
 | LE-24 | 深度思考开关与耗时告知 | 智能剪辑入口的高级选项里增加一个总开关，统一控制素材理解、文案分句、语义匹配三处模型调用是否开启深度思考；默认关闭；用户偏好持久化并在下次进入时保持；**开关旁必须显示开启后预计多花的时间，该数字由实测得出，禁止估计或编造**——先用固定素材集实测开/关两种模式的端到端耗时差，若耗时随素材条数线性增长则按条数动态计算展示（如"约多花 3 秒 × 素材条数"），否则展示实测区间；实测数据与计算方式写入 `docs/development/LE-24.md`；用户可见文案无未解释术语，过 `check_user_facing_branding.py`；开关状态真实传达到模型请求参数，断言请求体中该字段随开关变化 | LE-16,LE-19 | ⬜ 未开始 |
@@ -99,12 +99,15 @@
 任务总数与各状态计数由 `scripts/check_local_editing_roadmap_counts.py` 守护，只在此处记录一次：
 
 - 任务总数：24
-- ✅ 已完成：6
-- 🔍 待验收：10
-- 🧪 RED / 🚧 实现中：1
+- ✅ 已完成：9
+- 🔍 待验收：8
+- 🧪 RED / 🚧 实现中：0
 - ⬜ 未开始：7
 
-## 5. 当前下一步
+## 5. 历史进度与当前下一步
+
+**LE-17 已完成；当前按依赖进入 LE-18 素材库界面。** 下文保留 LE-10～LE-17 的推进背景，
+不再把其中“下一步进入 LE-17”的历史句子解释为当前状态。
 
 **LE-12 T1～T5 已完成；下一步进入 LE-17 工作台接真实网关。** LE-10 已交付从真实领域投影、绝对
 帧栅格、VIDEO/IMAGE 居中 crop、硬切/连续 xfade、LE-09 字幕 overlay 到受控 FFmpeg、
