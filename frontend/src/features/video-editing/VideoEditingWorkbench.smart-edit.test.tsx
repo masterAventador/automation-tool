@@ -204,6 +204,7 @@ describe("video editing smart-edit entry", () => {
 
     await openSmartEdit(user);
     expect(screen.getByText("高级选项")).toBeVisible();
+    expect(screen.getByText("开启后预计约多花 45～64 秒。")).toBeVisible();
     expect(screen.getByRole("switch", { name: "深度思考" })).not.toBeChecked();
     await user.click(screen.getByRole("switch", { name: "深度思考" }));
     expect(screen.getByRole("switch", { name: "深度思考" })).toBeChecked();

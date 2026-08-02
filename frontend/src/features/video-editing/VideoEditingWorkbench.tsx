@@ -357,17 +357,22 @@ function SmartEditPage({
             onChange={(event) => onPromptChange(event.target.value)}
           />
           <Card size="small" title="高级选项">
-            <Space size="small">
+            <Space size="small" align="start">
               <Switch
                 aria-label="深度思考"
                 checked={enableThinking}
                 disabled={busy}
                 onChange={onThinkingChange}
               />
-              <Typography.Text>深度思考</Typography.Text>
-              <Typography.Text type="secondary">
-                {enableThinking ? "已开启" : "默认关闭"}
-              </Typography.Text>
+              <Space orientation="vertical" size={0}>
+                <Typography.Text>深度思考</Typography.Text>
+                <Typography.Text type="secondary">
+                  {enableThinking ? "已开启" : "默认关闭"}
+                </Typography.Text>
+                <Typography.Text type="secondary">
+                  开启后预计约多花 45～64 秒。
+                </Typography.Text>
+              </Space>
             </Space>
           </Card>
           <Space size="small" wrap>

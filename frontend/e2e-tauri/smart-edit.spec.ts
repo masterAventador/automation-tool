@@ -161,6 +161,9 @@ async function runThinkingMeasurement(
   const configured = await workbench();
   await openCurrentEditingProject(configured);
   await configured.$("div[role='tab']=智能剪辑").click();
+  await expect(configured).toHaveText(
+    expect.stringContaining("开启后预计约多花 45～64 秒。"),
+  );
   await configured.$("textarea[aria-label='一句话描述成片']").setValue(PROMPT);
   const thinking = await configured.$("[role='switch'][aria-label='深度思考']");
   const thinkingState = await thinking.getAttribute("aria-checked");

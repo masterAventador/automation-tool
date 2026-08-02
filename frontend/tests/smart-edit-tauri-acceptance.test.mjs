@@ -33,6 +33,7 @@ test("LE-19 owns one isolated real App smart-edit normal and failure journey", a
     "成片已入库",
     "正在理解素材",
     "只用一句旁白描述全部素材：彩色测试图包含彩色条纹、圆形和网格图案。",
+    "开启后预计约多花 45～64 秒。",
   ]) {
     assert.ok(spec.includes(required), `acceptance spec is missing ${required}`);
   }
