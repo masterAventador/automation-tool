@@ -32,6 +32,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -150,12 +151,12 @@ def host_platform() -> str:
 
 def _build_media_toolchain(destination: Path, *, platform: str) -> None:
     target = MEDIA_TOOLCHAIN_TARGETS[platform]
+    builder_shell = os.environ.get("AUTOMATION_TOOL_BASH") or "bash"
     # The builder creates the directory itself and refuses to reuse one.
     completed = subprocess.run(
-        ["bash", str(MEDIA_TOOLCHAIN_BUILDER), target, str(destination)],
+        [builder_shell, str(MEDIA_TOOLCHAIN_BUILDER), target, str(destination)],
         cwd=ROOT,
         capture_output=True,
-        text=True,
         check=False,
     )
     if completed.returncode != 0:

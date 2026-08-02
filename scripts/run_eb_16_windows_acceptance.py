@@ -34,6 +34,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -94,6 +95,7 @@ from run_p9_04_acceptance import (  # noqa: E402
     package_files,
     release_environment,
     installer_environment,
+    require_non_elevated_process,
     require_windows,
     run_checked,
     run_powershell,
@@ -418,6 +420,15 @@ def packaged_distribution(root: Path) -> tuple[Path, dict[str, Any]]:
     return browser / Path(*str(document["executable"]).split("/")), document
 
 
+def browser_probe_environment(
+    profile: Path, *, base_environment: Mapping[str, str] | None = None
+) -> dict[str, str]:
+    """Keep Chromium diagnostics inside the disposable probe profile."""
+    environment = dict(os.environ if base_environment is None else base_environment)
+    environment["CHROME_LOG_FILE"] = os.fspath(profile / "chrome-debug.log")
+    return environment
+
+
 def processes_matching(marker: str) -> list[dict[str, Any]]:
     output = run_powershell(
         "param([string]$Marker);"
@@ -473,6 +484,7 @@ def probe_packaged_browser(root: Path) -> str:
                     headless=True,
                     offline=True,
                     args=["--no-first-run", "--no-default-browser-check"],
+                    env=browser_probe_environment(profile),
                 )
                 try:
                     version = context.browser.version if context.browser else ""
@@ -525,6 +537,7 @@ def parse_arguments() -> argparse.Namespace:
 
 def main() -> int:
     architecture = require_windows()
+    require_non_elevated_process()
     arguments = parse_arguments()
     archive = arguments.archive or archive_path(
         REPOSITORY_ROOT, WINDOWS_X86_64_ARCHIVE

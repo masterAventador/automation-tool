@@ -545,6 +545,16 @@ pub(crate) fn ensure_no_symlink_ancestors(path: &Path) -> Result<(), ExecutorPac
     let mut current = PathBuf::new();
     for component in absolute.components() {
         current.push(component.as_os_str());
+        // A Windows drive/UNC prefix is not a filesystem object until its
+        // following RootDir component is present. Querying `\\?\C:` (the
+        // first component of the canonical path Tauri returns from
+        // `resource_dir()`) fails with `ERROR_INVALID_NAME`, so every intact
+        // installed package was rejected before the verifier reached its
+        // manifest. Keep the prefix in the path under construction, but begin
+        // ancestor metadata checks at `\\?\C:\` / the UNC share root.
+        if matches!(component, Component::Prefix(_)) {
+            continue;
+        }
         match fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err(ExecutorPackageError::new(

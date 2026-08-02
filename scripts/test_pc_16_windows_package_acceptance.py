@@ -5,12 +5,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 import run_pc_16_windows_package_acceptance as acceptance
+import run_eb_16_windows_acceptance as production_windows
 from build_motion_catalog_release import aggregate_digest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +36,81 @@ def record(relative: str, data: bytes) -> dict[str, object]:
 
 
 class WindowsRunnerWiringTests(unittest.TestCase):
+    def test_production_browser_probe_routes_chromium_logs_to_its_profile(self) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="automation-tool-eb16-browser-profile-"
+        ) as raw:
+            profile = Path(raw) / "profile"
+            environment = production_windows.browser_probe_environment(
+                profile,
+                base_environment={"KEEP": "yes", "CHROME_LOG_FILE": "outside"},
+            )
+
+            self.assertEqual(environment["KEEP"], "yes")
+            self.assertEqual(
+                environment["CHROME_LOG_FILE"],
+                os.fspath(profile / "chrome-debug.log"),
+            )
+
+    def test_windows_owned_tree_cleanup_uses_the_verbatim_root(self) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="automation-tool-pc16-cleanup-parent-"
+        ) as raw:
+            owned = Path(raw) / "owned"
+            nested = owned / "deep" / "leaf"
+            nested.mkdir(parents=True)
+            (nested / "artifact.txt").write_text("owned", encoding="utf-8")
+            removed_targets: list[str] = []
+
+            def remove(target: str | os.PathLike[str]) -> None:
+                removed_targets.append(os.fspath(target))
+                shutil.rmtree(owned)
+
+            acceptance.remove_owned_tree(owned, platform="nt", remove=remove)
+
+            self.assertEqual(len(removed_targets), 1)
+            self.assertTrue(removed_targets[0].startswith("\\\\?\\"))
+            self.assertFalse(owned.exists())
+
+    def test_windows_owned_tree_cleanup_refuses_a_link_before_removal(self) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="automation-tool-pc16-cleanup-link-"
+        ) as raw:
+            parent = Path(raw)
+            target = parent / "not-owned"
+            target.mkdir()
+            artifact = target / "keep.txt"
+            artifact.write_text("keep", encoding="utf-8")
+            owned = parent / "owned"
+            owned.symlink_to(target, target_is_directory=True)
+            removed_targets: list[str] = []
+
+            with self.assertRaisesRegex(acceptance.AcceptanceFailed, "reparse"):
+                acceptance.remove_owned_tree(
+                    owned,
+                    platform="nt",
+                    remove=lambda value: removed_targets.append(os.fspath(value)),
+                )
+
+            self.assertEqual(removed_targets, [])
+            self.assertTrue(owned.is_symlink())
+            self.assertEqual(artifact.read_text(encoding="utf-8"), "keep")
+
+    def test_windows_verbatim_path_keeps_the_lexical_owned_root(self) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="automation-tool-pc16-verbatim-link-"
+        ) as raw:
+            parent = Path(raw)
+            target = parent / "target"
+            target.mkdir()
+            owned = parent / "owned"
+            owned.symlink_to(target, target_is_directory=True)
+
+            rendered = acceptance.windows_verbatim_path(owned)
+
+            self.assertIn("owned", rendered)
+            self.assertNotIn("target", rendered)
+
     def test_non_windows_preflight_uses_pc16_vocabulary_without_a_traceback(self) -> None:
         with patch.object(
             acceptance,
@@ -98,6 +176,13 @@ class WindowsRunnerWiringTests(unittest.TestCase):
             self.assertIn(call, source)
         self.assertIn('"--bundles",\n            "nsis"', source)
         self.assertIn('"--features",\n            "control-plane-e2e"', source)
+        self.assertNotIn(
+            '"--debug"',
+            source,
+            "the installed user journey must exercise a release-mode App whose "
+            "Executor verifier accepts the release signing key",
+        )
+        self.assertIn('cargo_target / "release"', source)
         self.assertIn("_answers_the_authoring_protocol", source)
         self.assertIn("134", source)
         self.assertIn("aggregateSha256", source)
@@ -106,8 +191,35 @@ class WindowsRunnerWiringTests(unittest.TestCase):
         self.assertIn("missing-manifest", source)
         self.assertIn("missing-sentinel", source)
 
+    def test_installed_app_is_probed_with_the_windows_resource_path_shape(self) -> None:
+        source = RUNNER.read_text(encoding="utf-8")
+        self.assertIn("verify_installed_startup_gate_inputs(", source)
+        self.assertIn('"--test",\n                "installed_release_startup"', source)
+        self.assertIn(
+            '"AUTOMATION_TOOL_WINDOWS_PACKAGE_PAYLOAD": os.fspath(root)',
+            source,
+        )
+        self.assertIn(
+            '"--test",\n                "motion_authoring_runtime"',
+            source,
+        )
+        self.assertIn(
+            '"the_windows_packaged_motion_worker_starts_from_the_verbatim_resource_path"',
+            source,
+        )
+        self.assertIn(
+            '"--test",\n                "video_media_toolchain"',
+            source,
+        )
+        self.assertIn(
+            '"the_windows_packaged_ffmpeg_runs_from_the_verbatim_resource_path"',
+            source,
+        )
+        self.assertIn("os.path.abspath(os.fspath(path))", source)
+
     def test_production_windows_release_installs_and_gates_the_catalog(self) -> None:
         source = PRODUCTION_WINDOWS.read_text(encoding="utf-8")
+        self.assertIn("require_non_elevated_process()", source)
         for call in (
             "stage_motion_catalog(",
             "install_motion_catalog(",
@@ -160,7 +272,7 @@ class InstalledCatalogAuditTests(unittest.TestCase):
         )
         self.typography = self.root / "typography.json"
         self.typography.write_text(
-            json.dumps({"cjk": {"artifactPath": self.font_relative}}),
+            json.dumps({"chineseFace": {"artifactPath": self.font_relative}}),
             encoding="utf-8",
         )
 

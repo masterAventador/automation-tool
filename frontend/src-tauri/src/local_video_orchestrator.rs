@@ -12,6 +12,8 @@ use std::fmt;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
+#[cfg(windows)]
+use std::path::Component;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
@@ -219,7 +221,7 @@ impl VideoWorkerRenderBrowserConfiguration {
             return Err(configuration_invalid());
         }
         Ok(Self {
-            executable_path,
+            executable_path: child_process_path(&executable_path),
             chromium_major,
             launch_timeout,
         })
@@ -323,9 +325,7 @@ impl VideoWorkerSourceWindow {
     /// matching and the command is dropped in silence. Every other number in
     /// the spec is an integer for the same reason.
     pub fn new(start_millis: u32, end_millis: u32) -> Result<Self, VideoWorkerError> {
-        if end_millis <= start_millis
-            || end_millis > SANDBOX_SECONDS_MAXIMUM.saturating_mul(1000)
-        {
+        if end_millis <= start_millis || end_millis > SANDBOX_SECONDS_MAXIMUM.saturating_mul(1000) {
             return Err(configuration_invalid());
         }
         Ok(Self {
@@ -524,11 +524,11 @@ impl VideoWorkerLaunch {
         }
         Ok(Self {
             kind,
-            executable_path,
+            executable_path: child_process_path(&executable_path),
             arguments: Vec::new(),
             isolated_environment: false,
             environment: BTreeMap::new(),
-            asset_root,
+            asset_root: child_process_path(&asset_root),
             expected_version,
             restart_policy,
             script_model: None,
@@ -557,7 +557,9 @@ impl VideoWorkerLaunch {
             MOTION_VIDEO_WORKER_VERSION.to_owned(),
             restart_policy,
         )?;
-        launch.arguments.push(entrypoint.into_os_string());
+        launch
+            .arguments
+            .push(child_process_path(&entrypoint).into_os_string());
         launch.isolated_environment = true;
         Ok(launch)
     }
@@ -584,7 +586,11 @@ impl VideoWorkerLaunch {
                 return Err(configuration_invalid());
             }
             validate_executable_path(value)?;
-            if self.environment.insert(name, value.to_path_buf()).is_some() {
+            if self
+                .environment
+                .insert(name, child_process_path(value))
+                .is_some()
+            {
                 return Err(configuration_invalid());
             }
         }
@@ -1763,19 +1769,7 @@ fn validate_executable_path(path: &Path) -> Result<(), VideoWorkerError> {
     if !path.is_absolute() || path.as_os_str().len() > MAX_PATH_BYTES {
         return Err(configuration_invalid());
     }
-    for ancestor in path.ancestors() {
-        let metadata = fs::symlink_metadata(ancestor).map_err(|_| configuration_invalid())?;
-        #[cfg(windows)]
-        let windows_file_attributes = {
-            use std::os::windows::fs::MetadataExt;
-            Some(metadata.file_attributes())
-        };
-        #[cfg(not(windows))]
-        let windows_file_attributes = None;
-        if unsafe_path_component(metadata.file_type().is_symlink(), windows_file_attributes) {
-            return Err(configuration_invalid());
-        }
-    }
+    validate_safe_path_components(path)?;
     let metadata = fs::metadata(path).map_err(|_| configuration_invalid())?;
     if !metadata.is_file() {
         return Err(configuration_invalid());
@@ -1794,19 +1788,7 @@ fn validate_regular_file_path(path: &Path) -> Result<(), VideoWorkerError> {
     if !path.is_absolute() || path.as_os_str().len() > MAX_PATH_BYTES {
         return Err(configuration_invalid());
     }
-    for ancestor in path.ancestors() {
-        let metadata = fs::symlink_metadata(ancestor).map_err(|_| configuration_invalid())?;
-        #[cfg(windows)]
-        let windows_file_attributes = {
-            use std::os::windows::fs::MetadataExt;
-            Some(metadata.file_attributes())
-        };
-        #[cfg(not(windows))]
-        let windows_file_attributes = None;
-        if unsafe_path_component(metadata.file_type().is_symlink(), windows_file_attributes) {
-            return Err(configuration_invalid());
-        }
-    }
+    validate_safe_path_components(path)?;
     if !fs::metadata(path)
         .map_err(|_| configuration_invalid())?
         .is_file()
@@ -1820,8 +1802,29 @@ fn validate_directory_path(path: &Path) -> Result<(), VideoWorkerError> {
     if !path.is_absolute() || path.as_os_str().len() > MAX_PATH_BYTES {
         return Err(configuration_invalid());
     }
-    for ancestor in path.ancestors() {
-        let metadata = fs::symlink_metadata(ancestor).map_err(|_| configuration_invalid())?;
+    validate_safe_path_components(path)?;
+    if !fs::metadata(path)
+        .map_err(|_| configuration_invalid())?
+        .is_dir()
+    {
+        return Err(configuration_invalid());
+    }
+    Ok(())
+}
+
+/// Reject links/reparse points without asking Windows to inspect a bare drive
+/// prefix such as `\\?\C:`. That prefix is a syntactic path component, not a
+/// filesystem object; querying it returns `ERROR_INVALID_NAME` even though the
+/// rooted verbatim path Tauri supplied is valid.
+fn validate_safe_path_components(path: &Path) -> Result<(), VideoWorkerError> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        #[cfg(windows)]
+        if matches!(component, Component::Prefix(_)) {
+            continue;
+        }
+        let metadata = fs::symlink_metadata(&current).map_err(|_| configuration_invalid())?;
         #[cfg(windows)]
         let windows_file_attributes = {
             use std::os::windows::fs::MetadataExt;
@@ -1833,13 +1836,36 @@ fn validate_directory_path(path: &Path) -> Result<(), VideoWorkerError> {
             return Err(configuration_invalid());
         }
     }
-    if !fs::metadata(path)
-        .map_err(|_| configuration_invalid())?
-        .is_dir()
-    {
-        return Err(configuration_invalid());
-    }
     Ok(())
+}
+
+/// Windows filesystem APIs accept the extended-length device spelling, but
+/// Node treats it as a module-specifier shape and CreateProcessW cannot launch
+/// the packaged executable from it. Validate the original path first, then
+/// hand the child boundary the equivalent native drive/UNC spelling. Modern
+/// Node and Chromium retain long-path support themselves.
+#[cfg(windows)]
+fn child_process_path(path: &Path) -> PathBuf {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+    let encoded = path.as_os_str().encode_wide().collect::<Vec<_>>();
+    let verbatim_unc = "\\\\?\\UNC\\".encode_utf16().collect::<Vec<_>>();
+    let verbatim = "\\\\?\\".encode_utf16().collect::<Vec<_>>();
+    if encoded.starts_with(&verbatim_unc) {
+        let mut native = "\\\\".encode_utf16().collect::<Vec<_>>();
+        native.extend_from_slice(&encoded[verbatim_unc.len()..]);
+        return PathBuf::from(OsString::from_wide(&native));
+    }
+    if encoded.starts_with(&verbatim) {
+        return PathBuf::from(OsString::from_wide(&encoded[verbatim.len()..]));
+    }
+    path.to_path_buf()
+}
+
+#[cfg(not(windows))]
+fn child_process_path(path: &Path) -> PathBuf {
+    path.to_path_buf()
 }
 
 fn valid_environment_name(value: &str) -> bool {

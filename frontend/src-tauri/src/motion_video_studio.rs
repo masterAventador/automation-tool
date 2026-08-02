@@ -1559,6 +1559,36 @@ fn code_for_non_refusal_class(class: &str) -> MotionVideoStudioError {
     }
 }
 
+/// Describe a failed child using only vocabulary from the built-in contract.
+///
+/// The child response may be malformed or attacker-controlled, so arbitrary
+/// status/reason text must never reach App logs. Closed tokens are safe and are
+/// the only useful distinction when several executor defects share one UI code.
+pub fn safe_failed_authoring_diagnostic(answer: &str) -> String {
+    let (Some(contract), Ok(document)) = (
+        refusal_contract(),
+        serde_json::from_str::<RefusedAuthoringAnswer>(answer),
+    ) else {
+        return "status=unknown reason=unknown".to_owned();
+    };
+    if document.schema_version != 1 {
+        return "status=unknown reason=unknown".to_owned();
+    }
+    let status = if document.status == REFUSED_STATUS
+        || contract.non_refusal_outcomes.contains_key(&document.status)
+    {
+        document.status.as_str()
+    } else {
+        "unknown"
+    };
+    let reason = match document.rejection_reason.as_deref() {
+        None => "absent",
+        Some(reason) if rejection_reason_is_closed(&contract, reason) => reason,
+        Some(_) => "unknown",
+    };
+    format!("status={status} reason={reason}")
+}
+
 /// What actually happened to a child that exited non-zero.
 ///
 /// It is answered from the document rather than the exit status because only

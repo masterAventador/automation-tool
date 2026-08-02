@@ -238,6 +238,7 @@ fn main() {{
         None
     }};
     let mut invocation = format!("INVOCATION pid={{}}\\n", process::id());
+    invocation.push_str(&format!("CWD {{}}\\n", env::current_dir().unwrap().display()));
     for argument in arguments {{
         invocation.push_str(&format!("ARG {{argument}}\\n"));
     }}
@@ -296,6 +297,7 @@ import json, os, sys, time
 
 with open({json.dumps(str(record))}, "a") as record:
     record.write("INVOCATION pid=%d\\n" % os.getpid())
+    record.write("CWD %s\\n" % os.getcwd())
     for argument in sys.argv[1:]:
         record.write("ARG %s\\n" % argument)
     for name, value in os.environ.items():
@@ -682,6 +684,7 @@ def test_sandbox_isolation_flags_and_wall_timeout(assets: Path, decoy: Path) -> 
     if os.name != "nt":
         assert invocations[0]["arguments"] == ["--version"]
     headless = invocations[-1]
+    assert RENDER_JOB_PREFIX + JOB_ID in str(headless.get("cwd", "")), headless
     arguments = headless["arguments"]
     for required in (
         "--headless",
@@ -699,6 +702,9 @@ def test_sandbox_isolation_flags_and_wall_timeout(assets: Path, decoy: Path) -> 
         "the workspace must be reached over CDP navigation, not the command line"
     )
     environment = headless["environment"]
+    chrome_log = str(environment.get("CHROME_LOG_FILE", ""))
+    assert RENDER_JOB_PREFIX + JOB_ID in chrome_log, environment
+    assert chrome_log.endswith("chrome-debug.log"), environment
     for name in (
         "HYPERFRAMES_BROWSER_PATH",
         "PRODUCER_HEADLESS_SHELL_PATH",

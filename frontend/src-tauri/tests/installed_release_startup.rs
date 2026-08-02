@@ -54,6 +54,12 @@ fn installed_release_package_satisfies_every_startup_gate_input() {
         &resources.join("local-executor").join("package"),
     )
     .expect("the installed Local Executor package initializes");
+    executor
+        .status()
+        .expect("the installed Local Executor manager status is readable");
+    executor
+        .verified_entrypoint()
+        .expect("the installed Local Executor signature and inventory verify");
     assert_eq!(
         executor.startup_environment_state(),
         ExecutorStartupState::Ready,

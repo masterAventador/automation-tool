@@ -234,7 +234,11 @@ async function executableFileMetadata(path) {
 }
 
 function renderProcessEnvironment(jobDirectory) {
-  const environment = { HOME: jobDirectory, TMPDIR: jobDirectory };
+  const environment = {
+    CHROME_LOG_FILE: join(jobDirectory, "chrome-debug.log"),
+    HOME: jobDirectory,
+    TMPDIR: jobDirectory,
+  };
   if (process.platform !== "win32") return environment;
   environment.USERPROFILE = jobDirectory;
   environment.TEMP = jobDirectory;
@@ -489,11 +493,18 @@ function validSandboxCommand(bootstrap, command) {
   return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);
 }
 
-function runBrowserProcess(executablePath, browserArguments, environment, timeoutMs) {
+function runBrowserProcess(
+  executablePath,
+  browserArguments,
+  environment,
+  workingDirectory,
+  timeoutMs,
+) {
   return new Promise((resolve) => {
     let child;
     try {
       child = spawn(executablePath, browserArguments, {
+        cwd: workingDirectory,
         detached: true,
         env: environment,
         stdio: ["ignore", "pipe", "ignore"],
@@ -533,11 +544,18 @@ function runBrowserProcess(executablePath, browserArguments, environment, timeou
  * listening debug port), confirm the running product version over CDP and
  * shut it down with `Browser.close`. The process group is killed on timeout.
  */
-function runHeadlessProbe(executablePath, browserArguments, environment, timeoutMs) {
+function runHeadlessProbe(
+  executablePath,
+  browserArguments,
+  environment,
+  workingDirectory,
+  timeoutMs,
+) {
   return new Promise((resolve) => {
     let child;
     try {
       child = spawn(executablePath, browserArguments, {
+        cwd: workingDirectory,
         detached: true,
         env: environment,
         stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"],
@@ -642,6 +660,7 @@ async function renderVerify(renderBrowser, jobId) {
         renderBrowser.executablePath,
         ["--version"],
         environment,
+        jobDirectory,
         timeoutMs,
       );
       if (version.status === "timeout") return { failed: "render_timeout" };
@@ -674,6 +693,7 @@ async function renderVerify(renderBrowser, jobId) {
         "about:blank",
       ],
       environment,
+      jobDirectory,
       timeoutMs,
     );
     if (probe.status === "timeout") return { failed: "render_timeout" };
@@ -927,6 +947,7 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         `--window-size=${canvas.width},${canvas.height}`,
         "about:blank",
       ], {
+        cwd: jobDirectory,
         detached: true,
         env: environment,
         stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"],
@@ -1166,6 +1187,7 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
       // twelve-style sweep. Capturing until two probes agree removes that
       // dependency on how loaded the host happens to be.
       let previousProbe = null;
+      let visualStable = false;
       let stable = false;
       for (let attempt = 0; attempt < WARM_UP_STABLE_ATTEMPTS; attempt += 1) {
         const warmed = await pipe.send("Runtime.evaluate", {
@@ -1194,12 +1216,13 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
           finish({ status: "protocol" });
           return;
         }
+        visualStable = data === previousProbe;
         // A stable background is not a ready composition when the document
         // declares that it will register a timeline. Give its bounded async
         // initialisation the entire warm-up budget instead of freezing the
         // initial zero-timeline result forever.
         if (
-          data === previousProbe
+          visualStable
           && !(
             timelineMetadata.timelineExpected === true
             && timelineMetadata.timelineCount === 0
@@ -1211,6 +1234,20 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         previousProbe = data;
       }
       if (!stable) {
+        // A document that declares an animation timeline but never registers
+        // it has settled into the exact still-image failure this gate exists
+        // to identify. Waiting through every warm-up round protects slow
+        // asynchronous initialisation; once the final probes still agree,
+        // report the closed static-frame reason rather than mislabelling the
+        // deterministic failure as a wall-clock timeout.
+        if (
+          visualStable
+          && timelineMetadata.timelineExpected === true
+          && timelineMetadata.timelineCount === 0
+        ) {
+          finish({ status: "static" });
+          return;
+        }
         // The page never settled within the warm-up budget; a render that
         // cannot be reproduced must not be reported as a successful one.
         finish({ status: "timeout" });
@@ -1349,6 +1386,7 @@ async function renderSandbox(renderBrowser, jobId, spec) {
         renderBrowser.executablePath,
         ["--version"],
         environment,
+        jobDirectory,
         renderBrowser.launchTimeoutSeconds * 1000,
       );
       if (version.status === "timeout") return { failed: "render_timeout" };

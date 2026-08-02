@@ -22,6 +22,7 @@ byte is downloaded; what is under test is the mapping, which is what was absent.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -321,6 +322,52 @@ class CacheKeysCoverEveryBuildInput(unittest.TestCase):
                         f"{resource}, but they are not in its cache key and carry no "
                         "recorded reason for being left out",
                     )
+
+
+class MediaToolchainBuilderDiagnostics(unittest.TestCase):
+    def test_builder_shell_can_be_selected_for_a_windows_msys2_host(self) -> None:
+        shell = r"C:\msys64\usr\bin\bash.exe"
+        completed = subprocess.CompletedProcess(
+            args=[shell, "builder"], returncode=0, stdout=b"", stderr=b""
+        )
+        with (
+            mock.patch.dict(os.environ, {"AUTOMATION_TOOL_BASH": shell}),
+            mock.patch.object(
+                prepare_video_runtime.subprocess,
+                "run",
+                return_value=completed,
+            ) as run,
+        ):
+            prepare_video_runtime._build_media_toolchain(
+                Path("unused"), platform="windows"
+            )
+
+        self.assertEqual(shell, run.call_args.args[0][0])
+
+    def test_non_utf8_windows_builder_output_is_captured_as_bytes(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=["bash", "builder"],
+            returncode=1,
+            stdout=b"",
+            stderr=b"\xc0\xee\xea\xe0\xeb\xfc\xed\xfb\xe9 builder failure\n",
+        )
+        with mock.patch.object(
+            prepare_video_runtime.subprocess,
+            "run",
+            return_value=completed,
+        ) as run:
+            with self.assertRaisesRegex(
+                prepare_video_runtime.VideoRuntimeUnavailable,
+                "stderr",
+            ):
+                prepare_video_runtime._build_media_toolchain(
+                    Path("unused"), platform="windows"
+                )
+
+        self.assertFalse(
+            run.call_args.kwargs.get("text", False),
+            "Windows builder output must not be decoded by subprocess reader threads",
+        )
 
 
 class InstallIntoAResourceDirectory(unittest.TestCase):
