@@ -13,8 +13,7 @@ const UUID_V4_SOURCE =
   "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const UUID_V4 = new RegExp(`^${UUID_V4_SOURCE}$`);
 const UUID_V4_IN_TEXT = new RegExp(UUID_V4_SOURCE, "g");
-const PROMPT =
-  "依次展示全部导入的彩色测试图，包括彩色条纹、圆形和网格图案，制作一条简短视频。";
+const PROMPT = "只用一句旁白描述全部素材：彩色测试图包含彩色条纹、圆形和网格图案。";
 const MEASUREMENT_MODES = ["enabled", "disabled"] as const;
 const TERMINAL_FAILURES = [
   "可用素材不足",

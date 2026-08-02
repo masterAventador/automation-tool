@@ -32,7 +32,7 @@ test("LE-19 owns one isolated real App smart-edit normal and failure journey", a
     "草稿已生成，成片任务正在排队",
     "成片已入库",
     "正在理解素材",
-    "依次展示全部导入的彩色测试图，包括彩色条纹、圆形和网格图案，制作一条简短视频。",
+    "只用一句旁白描述全部素材：彩色测试图包含彩色条纹、圆形和网格图案。",
   ]) {
     assert.ok(spec.includes(required), `acceptance spec is missing ${required}`);
   }
