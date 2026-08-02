@@ -223,6 +223,17 @@ describe("LE-19 production App smart-edit acceptance", () => {
     const draft = await configured.$("button=生成草稿");
     assert.equal(await draft.isEnabled(), true, "返回后没有重新打开现有剪辑项目");
     await draft.click();
+    await browser.waitUntil(
+      async () => {
+        const text = await configured.getText();
+        return (
+          /正在(?:准备|理解素材|整理文案|生成旁白|匹配画面|选择片段|保存结果)/.test(
+            text,
+          ) || text.includes("当前修订：第 1 版")
+        );
+      },
+      { timeout: 30_000, timeoutMsg: "生成草稿按钮没有启动真实智能剪辑" },
+    );
     await waitForSmartResult(configured, 1, true);
     await configured.$("div[role='tab']=智能剪辑").click();
     await expect(configured).toHaveText(
