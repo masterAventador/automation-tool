@@ -10,9 +10,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
-#[cfg(not(debug_assertions))]
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-#[cfg(not(debug_assertions))]
 use base64::Engine as _;
 use uuid::{Uuid, Variant};
 
@@ -987,13 +985,27 @@ fn set_private_directory_permissions(_path: &Path) -> Result<(), ExecutorPlatfor
 
 #[cfg(debug_assertions)]
 fn executor_verifying_key() -> Result<[u8; 32], ExecutorPlatformError> {
-    Ok(DEVELOPMENT_EXECUTOR_VERIFYING_KEY)
+    configured_debug_executor_verifying_key(option_env!("AUTOMATION_TOOL_EXECUTOR_VERIFYING_KEY"))
+}
+
+#[cfg(debug_assertions)]
+fn configured_debug_executor_verifying_key(
+    configured: Option<&str>,
+) -> Result<[u8; 32], ExecutorPlatformError> {
+    configured.map_or(
+        Ok(DEVELOPMENT_EXECUTOR_VERIFYING_KEY),
+        decode_executor_verifying_key,
+    )
 }
 
 #[cfg(not(debug_assertions))]
 fn executor_verifying_key() -> Result<[u8; 32], ExecutorPlatformError> {
     let encoded =
         option_env!("AUTOMATION_TOOL_EXECUTOR_VERIFYING_KEY").ok_or_else(configuration_invalid)?;
+    decode_executor_verifying_key(encoded)
+}
+
+fn decode_executor_verifying_key(encoded: &str) -> Result<[u8; 32], ExecutorPlatformError> {
     let decoded = URL_SAFE_NO_PAD
         .decode(encoded)
         .map_err(|_| configuration_invalid())?;
@@ -1028,12 +1040,35 @@ const fn storage_unavailable() -> ExecutorPlatformError {
 
 #[cfg(all(test, any(not(feature = "desktop-e2e"), feature = "control-plane-e2e")))]
 mod tests {
+    #[cfg(debug_assertions)]
+    use super::{configured_debug_executor_verifying_key, DEVELOPMENT_EXECUTOR_VERIFYING_KEY};
     use super::{map_profile_error, ExecutorPlatformService};
     use crate::browser_profiles::BrowserProfileError;
     use crate::startup_environment::ExecutorStartupState;
+    #[cfg(debug_assertions)]
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    #[cfg(debug_assertions)]
+    use base64::Engine as _;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn debug_package_uses_the_configured_executor_verifying_key_when_present() {
+        let expected = [7_u8; 32];
+        let encoded = URL_SAFE_NO_PAD.encode(expected);
+
+        assert_eq!(
+            configured_debug_executor_verifying_key(Some(&encoded))
+                .expect("configured acceptance key"),
+            expected
+        );
+        assert_eq!(
+            configured_debug_executor_verifying_key(None).expect("development fixture key"),
+            DEVELOPMENT_EXECUTOR_VERIFYING_KEY
+        );
+    }
 
     /// T109: an abandoned Profile lease is recoverable, and saying so is the
     /// whole point.
