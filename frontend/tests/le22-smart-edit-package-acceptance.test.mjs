@@ -50,6 +50,11 @@ test("LE-22 package journey uses one speech material and the formal editing UI",
     /terminalFailure = failure;\s+return true;/u,
     "a product failure must end the wait instead of being retried until timeout",
   );
+  assert.match(
+    spec,
+    /taskFailed = true;\s+return true;/u,
+    "a render failure must end the wait instead of being retried until timeout",
+  );
 
   assert.equal(
     scripts["test:le-22-macos-package"],
@@ -74,6 +79,7 @@ test("LE-22 package journey uses one speech material and the formal editing UI",
     "validate_le22_database_evidence",
     "validate_le22_ffprobe",
     "compare_pcm_envelopes",
+    "collect_editing_job_failure",
     "hdiutil",
     "ditto",
     "ffprobe",
@@ -106,6 +112,7 @@ test("LE-22 package journey uses one speech material and the formal editing UI",
     /finally:\n\s+stop_control_plane\(server\)\n\s+server = None/u,
     "the Control Plane must stop before the isolated PostgreSQL context exits",
   );
+  assert.match(runner, /failureCode=\{failure_code\}/u);
   assert.doesNotMatch(runner, /__import__\(/u);
   assert.doesNotMatch(runner, /mock|stub|sessionStorage|localStorage/iu);
   assert.match(gitignore, /^frontend\/dist-le22-mac\/$/mu);

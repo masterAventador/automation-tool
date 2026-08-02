@@ -200,12 +200,14 @@ describe("LE-22 installed package smart-edit acceptance", () => {
       async () => (await editing.getText()).includes("已提交剪辑任务，正在排队。"),
       { timeout: 30_000, timeoutMsg: "正式包没有提交原声成片任务" },
     );
+    let taskFailed = false;
     await browser.waitUntil(
       async () => {
         await editing.$("button=刷新任务").click();
         const text = await editing.getText();
         if (text.includes("剪辑失败")) {
-          throw new Error("正式包原声成片任务失败");
+          taskFailed = true;
+          return true;
         }
         return text.includes("已完成") && text.includes("成片已入库");
       },
@@ -215,5 +217,8 @@ describe("LE-22 installed package smart-edit acceptance", () => {
         timeoutMsg: "正式包没有发布原声成片",
       },
     );
+    if (taskFailed) {
+      throw new Error("正式包原声成片任务失败");
+    }
   });
 });

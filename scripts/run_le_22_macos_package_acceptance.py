@@ -399,6 +399,25 @@ async def collect_database_evidence(database_url: str) -> Le22DatabaseSummary:
     )
 
 
+async def collect_editing_job_failure(database_url: str) -> str:
+    engine = create_async_engine(database_url)
+    try:
+        async with engine.connect() as connection:
+            row = (
+                await connection.execute(
+                    text(
+                        "select status, failure_code from editing_jobs "
+                        "order by created_at desc limit 1"
+                    )
+                )
+            ).one_or_none()
+    finally:
+        await engine.dispose()
+    if row is None:
+        return "missing_job"
+    return f"{row.status}:{row.failure_code or 'none'}"
+
+
 def extract_pcm(
     ffmpeg: Path,
     source: Path,
@@ -650,12 +669,22 @@ def main() -> int:
                     port=control_plane_port, environment=environment
                 )
                 try:
-                    run_wdio(
-                        application=installed_application,
-                        environment=environment,
-                        api_key=api_key,
-                        source=placeholder_source,
-                    )
+                    try:
+                        run_wdio(
+                            application=installed_application,
+                            environment=environment,
+                            api_key=api_key,
+                            source=placeholder_source,
+                        )
+                    except RuntimeError as error:
+                        failure_code = asyncio.run(
+                            collect_editing_job_failure(
+                                environment["AUTOMATION_TOOL_DATABASE_URL"]
+                            )
+                        )
+                        raise RuntimeError(
+                            f"LE-22 installed App journey failureCode={failure_code}"
+                        ) from error
                     summary = asyncio.run(
                         collect_database_evidence(
                             environment["AUTOMATION_TOOL_DATABASE_URL"]
