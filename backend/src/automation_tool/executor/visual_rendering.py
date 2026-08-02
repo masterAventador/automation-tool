@@ -322,6 +322,12 @@ def _clip_filter(
             f"scale=w={width}:h={height}:force_original_aspect_ratio=increase",
             f"crop=w={width}:h={height}:x=(in_w-out_w)/2:y=(in_h-out_h)/2",
             f"fps={fps}",
+        )
+    )
+    if clip.kind is SegmentSelectionMaterialKind.VIDEO:
+        filters.append("tpad=stop_mode=clone:stop=1")
+    filters.extend(
+        (
             f"settb=1/{fps}",
             f"trim=end_frame={clip.frame_count}",
             "setpts=N",

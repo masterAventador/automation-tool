@@ -22,6 +22,7 @@ from automation_tool.protocol.local_rendering import (
     LocalEditingAudioRenderClip,
     LocalEditingAudioRenderPlan,
     LocalEditingAudioTrackKind,
+    LocalEditingOriginalAudioMode,
     LocalEditingVisualRenderClip,
     LocalEditingVisualRenderPlan,
 )
@@ -147,3 +148,112 @@ def test_real_audiovisual_render_publishes_verified_h264_aac(
         f"{receipt.frame_count}frames,{receipt.duration_ms}ms,"
         f"48000Hz,stereo,{receipt.bytes_written}bytes,sha256={receipt.sha256}"
     )
+
+
+def test_real_portrait_render_keeps_audio_from_the_same_landscape_video(
+    tmp_path: Path,
+) -> None:
+    tools = _tools()
+    project_id, timeline_id, material_id = (uuid4() for _ in range(3))
+    source = tmp_path / "speech.mkv"
+    subprocess.run(
+        (
+            os.fspath(tools.ffmpeg_path),
+            "-y",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=navy:s=1280x720:r=17:d=7.173",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=700:sample_rate=44100:duration=6.173",
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "flac",
+            "-t",
+            "6.173",
+            os.fspath(source),
+        ),
+        check=True,
+        timeout=30,
+    )
+    _, approved = approve_source(source)
+    duration_ms = 5_088
+    visual_plan = LocalEditingVisualRenderPlan(
+        project_id,
+        timeline_id,
+        1,
+        720,
+        1280,
+        20,
+        duration_ms,
+        (
+            LocalEditingVisualRenderClip(
+                1,
+                material_id,
+                SegmentSelectionMaterialKind.VIDEO,
+                0,
+                duration_ms,
+                480,
+                5_568,
+                None,
+                None,
+            ),
+        ),
+    )
+    audio_plan = LocalEditingAudioRenderPlan(
+        project_id,
+        timeline_id,
+        1,
+        duration_ms,
+        (
+            LocalEditingAudioRenderClip(
+                1,
+                LocalEditingAudioTrackKind.AMBIENT,
+                material_id,
+                0,
+                duration_ms,
+                480,
+                5_568,
+                0.0,
+                LocalEditingOriginalAudioMode.FIXED_VOLUME,
+            ),
+        ),
+    )
+    task = tmp_path / "task"
+    task.mkdir()
+
+    receipt = execute_audiovisual_render(
+        tools,
+        visual_plan,
+        (
+            VisualRenderSourceBinding(
+                material_id,
+                SegmentSelectionMaterialKind.VIDEO,
+                source,
+            ),
+        ),
+        (approved,),
+        audio_plan,
+        (AudioRenderSourceBinding(material_id, source, True),),
+        (approved,),
+        task,
+    )
+
+    assert receipt.duration_ms == 5_100
+    assert receipt.frame_count == 102
+    assert receipt.audio_codec == "aac"
