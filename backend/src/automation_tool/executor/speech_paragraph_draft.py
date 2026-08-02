@@ -366,8 +366,14 @@ class ResolvedSpeechAwareParagraphDraft:
             > MAX_LOCAL_EDITING_SEMANTIC_MATERIALS
             or tuple(paragraph.sequence for paragraph in validated_narrated)
             != tuple(range(1, len(validated_narrated) + 1))
-            or len({paragraph.segment.material_id for paragraph in validated_narrated})
-            != len(validated_narrated)
+            or len(
+                {
+                    paragraph.segment.material_id
+                    for paragraph in validated_narrated
+                    if not _is_static_segment(paragraph.segment)
+                }
+            )
+            != sum(not _is_static_segment(paragraph.segment) for paragraph in validated_narrated)
             or any(
                 narrated.segment.material_id == original.material_id
                 for narrated in validated_narrated
@@ -535,6 +541,8 @@ def _has_complete_assignment(
 
     def assign(paragraph_index: int, seen: set[UUID]) -> bool:
         for candidate in paragraphs[paragraph_index].candidates:
+            if _is_static_segment(candidate):
+                return True
             material_id = candidate.material_id
             if material_id in blocked or material_id in seen:
                 continue
@@ -546,6 +554,10 @@ def _has_complete_assignment(
         return False
 
     return all(assign(index, set()) for index in range(len(paragraphs)))
+
+
+def _is_static_segment(segment: FittingMaterialSegment) -> bool:
+    return segment.source_in_ms is None and segment.source_out_ms is None
 
 
 def resolve_speech_aware_paragraph_draft(
@@ -561,8 +573,6 @@ def resolve_speech_aware_paragraph_draft(
             original_speech_paragraphs=validated.original_speech_paragraphs,
             narrated_paragraphs=(),
         )
-    if len(validated.silent_material_ids) < len(validated.narrated_paragraphs):
-        return ParagraphDraftFailure(code=ParagraphDraftFailureCode.INSUFFICIENT_MATERIALS)
     for paragraph in validated.narrated_paragraphs:
         if not paragraph.qualified_material_ids:
             return ParagraphDraftFailure(code=ParagraphDraftFailureCode.NO_RELEVANT_MATERIAL)
@@ -574,17 +584,20 @@ def resolve_speech_aware_paragraph_draft(
     for index, paragraph in enumerate(validated.narrated_paragraphs):
         chosen: FittingMaterialSegment | None = None
         for candidate in paragraph.candidates:
-            if candidate.material_id in used:
+            reusable = _is_static_segment(candidate)
+            if not reusable and candidate.material_id in used:
                 continue
+            blocked = frozenset(used) if reusable else frozenset({*used, candidate.material_id})
             if _has_complete_assignment(
                 validated.narrated_paragraphs[index + 1 :],
-                frozenset({*used, candidate.material_id}),
+                blocked,
             ):
                 chosen = candidate
                 break
         if chosen is None:
             return ParagraphDraftFailure(code=ParagraphDraftFailureCode.INSUFFICIENT_MATERIALS)
-        used.add(chosen.material_id)
+        if not _is_static_segment(chosen):
+            used.add(chosen.material_id)
         selected.append(
             SelectedNarratedParagraphDraft(
                 sequence=paragraph.sequence,

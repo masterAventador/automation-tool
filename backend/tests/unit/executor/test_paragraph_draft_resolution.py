@@ -96,6 +96,38 @@ def test_fewer_silent_materials_than_sentences_is_all_or_nothing_failure() -> No
     assert not isinstance(result, ResolvedSpeechAwareParagraphDraft)
 
 
+def test_one_static_image_can_cover_multiple_narrated_sentences() -> None:
+    image = uuid4()
+
+    def static_paragraph(sequence: int) -> NarratedParagraphDraft:
+        return NarratedParagraphDraft(
+            sequence=sequence,
+            caption_text=f"第{sequence}句",
+            narration_relative_path=f"voiceover/sentence-{sequence:04d}.wav",
+            duration_ms=1_000,
+            qualified_material_ids=(image,),
+            candidates=(
+                FittingMaterialSegment(
+                    material_id=image,
+                    score=90,
+                    duration_ms=1_000,
+                    source_in_ms=None,
+                    source_out_ms=None,
+                ),
+            ),
+        )
+
+    result = resolve_speech_aware_paragraph_draft(
+        _draft((image,), (static_paragraph(1), static_paragraph(2)))
+    )
+
+    assert isinstance(result, ResolvedSpeechAwareParagraphDraft)
+    assert tuple(paragraph.segment.material_id for paragraph in result.narrated_paragraphs) == (
+        image,
+        image,
+    )
+
+
 def test_qualified_candidates_with_no_decodable_window_are_source_too_short() -> None:
     material_id = uuid4()
     draft = _draft(
