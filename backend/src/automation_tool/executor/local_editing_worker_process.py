@@ -511,15 +511,17 @@ def execute_local_editing_job(
                     LocalEditingRenderDiagnosticCode.BINDING_MISSING,
                 )
             resolved[material_id] = registry.resolve(material_id)
+        visual_material_ids = tuple(dict.fromkeys(clip.material_id for clip in visual_plan.clips))
+        visual_kind_by_id = {clip.material_id: clip.kind for clip in visual_plan.clips}
         visual_sources = tuple(
             VisualRenderSourceBinding(
-                material_id=clip.material_id,
-                kind=clip.kind,
-                source_path=resolved[clip.material_id][0],
+                material_id=material_id,
+                kind=visual_kind_by_id[material_id],
+                source_path=resolved[material_id][0],
             )
-            for clip in visual_plan.clips
+            for material_id in visual_material_ids
         )
-        visual_approvals = tuple(resolved[clip.material_id][1] for clip in visual_plan.clips)
+        visual_approvals = tuple(resolved[material_id][1] for material_id in visual_material_ids)
         audio_material_ids = tuple(dict.fromkeys(clip.material_id for clip in audio_plan.clips))
         audio_sources = tuple(
             AudioRenderSourceBinding(

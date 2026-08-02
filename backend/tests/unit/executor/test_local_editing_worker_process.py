@@ -195,6 +195,80 @@ def test_job_bundle_builds_existing_render_plan_and_uses_registered_source(
     )
 
 
+def test_job_bundle_deduplicates_one_static_source_reused_by_multiple_clips(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app_data, source = prepare_job(tmp_path)
+    checkpoint = (
+        app_data
+        / "video-workspaces-v1"
+        / "jobs"
+        / str(JOB_ID)
+        / "checkpoints"
+        / "local-editing-render-request.checkpoint"
+    )
+    request = render_request()
+    timeline = cast("dict[str, object]", request["timeline"])
+    visual_track = cast("list[dict[str, object]]", timeline["tracks"])[0]
+    clips = cast("list[dict[str, object]]", visual_track["clips"])
+    clips[0].update(
+        {
+            "durationMs": 500,
+            "sourceInMs": None,
+            "sourceOutMs": None,
+        }
+    )
+    clips.append(
+        {
+            **clips[0],
+            "clipId": "clip-visual-second",
+            "startMs": 500,
+        }
+    )
+    checkpoint.write_text(json.dumps(request, separators=(",", ":")), encoding="utf-8")
+    observed: dict[str, object] = {}
+
+    def render(
+        tools: object,
+        plan: object,
+        sources: object,
+        approvals: object,
+        task_directory: Path,
+        **options: object,
+    ) -> VisualRenderReceipt:
+        observed["sources"] = sources
+        observed["approvals"] = approvals
+        (task_directory / "render.mp4").write_bytes(b"real render boundary")
+        return VisualRenderReceipt(
+            frame_count=25,
+            width=1280,
+            height=720,
+            fps=25,
+            duration_ms=1000,
+            bytes_written=20,
+            sha256="a" * 64,
+        )
+
+    monkeypatch.setattr(
+        "automation_tool.executor.local_editing_worker_process.execute_visual_render",
+        render,
+    )
+
+    execute_local_editing_job(
+        bootstrap(app_data),
+        LocalEditingStartCommand(JOB_ID, PROJECT_ID, TIMELINE_ID, 1),
+        cancel_requested=lambda: False,
+        artifact_id_factory=lambda: ARTIFACT_ID,
+    )
+
+    sources = cast("tuple[VisualRenderSourceBinding, ...]", observed["sources"])
+    approvals = cast("tuple[object, ...]", observed["approvals"])
+    assert len(sources) == 1
+    assert sources[0].material_id == MATERIAL_ID
+    assert sources[0].source_path == source.resolve()
+    assert len(approvals) == 1
+
+
 def test_job_bundle_fails_closed_when_the_command_and_checkpoint_disagree(
     tmp_path: Path,
 ) -> None:
