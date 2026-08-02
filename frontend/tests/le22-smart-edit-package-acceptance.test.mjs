@@ -42,7 +42,9 @@ test("LE-22 package journey uses one speech material and the formal editing UI",
   }
   assert.doesNotMatch(spec, /一键直出片/u);
   assert.doesNotMatch(spec, /sessionStorage|localStorage|mock|stub/iu);
-  assert.match(spec, /assert\.doesNotMatch\([^;]+旁白轨道/su);
+  assert.match(spec, /\.video-editing-track strong/u);
+  assert.match(spec, /assert\.equal\([^;]+旁白轨道/su);
+  assert.doesNotMatch(spec, /assert\.doesNotMatch\(await editing\.getText\(\)/u);
   assert.match(
     spec,
     /terminalFailure = failure;\s+return true;/u,

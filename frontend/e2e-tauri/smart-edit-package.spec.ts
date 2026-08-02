@@ -46,6 +46,11 @@ async function materialIds(value: BrowserElement): Promise<readonly string[]> {
   return Array.from(new Set((await value.getText()).match(UUID_V4_IN_TEXT) ?? []));
 }
 
+async function timelineTrackLabels(value: BrowserElement): Promise<readonly string[]> {
+  const headings = await value.$$(".video-editing-track strong");
+  return headings.map(async (heading) => heading.getText());
+}
+
 async function configureScriptModel(apiKey: string): Promise<void> {
   await openSettings();
   const section = await browser.$(".model-service-purpose--script");
@@ -176,10 +181,18 @@ describe("LE-22 installed package smart-edit acceptance", () => {
 
     await editing.$("div[role='tab']=时间轴编辑").click();
     await browser.waitUntil(
-      async () => (await editing.getText()).includes("原声轨道"),
+      async () =>
+        (await timelineTrackLabels(editing)).some((label) =>
+          /^原声轨道 [1-9][0-9]*$/.test(label),
+        ),
       { timeout: 30_000, timeoutMsg: "正式包时间轴没有原声轨道" },
     );
-    assert.doesNotMatch(await editing.getText(), /旁白轨道/);
+    assert.equal(
+      (await timelineTrackLabels(editing)).some((label) =>
+        /^旁白轨道 [1-9][0-9]*$/.test(label),
+      ),
+      false,
+    );
 
     await editing.$("div[role='tab']=提交与任务").click();
     await editing.$("button=提交剪辑任务").click();
