@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import {
   motionRunAttention,
@@ -26,6 +26,16 @@ import {
   motionBriefWaitEstimate,
 } from "./motion-one-sentence";
 import { VideoStudio } from "./VideoStudio";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
+let fontFaceLoad: Mock<() => Promise<void>>;
 
 function gateway(): MaterialVideoStudioGateway {
   return {
@@ -83,6 +93,15 @@ describe("video studio shell", () => {
   // 必须清空，否则上一条的选择和提交会渗进下一条。
   beforeEach(() => {
     resetMotionRunStore();
+    fontFaceLoad = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    vi.stubGlobal(
+      "FontFace",
+      class {
+        load() {
+          return fontFaceLoad().then(() => this);
+        }
+      },
+    );
   });
 
   it("exposes every planned page without inventing jobs or artifacts", async () => {
@@ -302,7 +321,8 @@ describe("video studio shell", () => {
 
   it("previews actual copy with brand colors, font and a local logo", async () => {
     const user = userEvent.setup();
-    render(<VideoStudio gateway={gateway()} />);
+    const studioGateway = gateway();
+    render(<VideoStudio gateway={studioGateway} />);
 
     await user.click(screen.getByRole("button", { name: /选择品牌动效成片/u }));
     await user.click(screen.getByRole("tab", { name: "制作设置" }));
@@ -317,6 +337,12 @@ describe("video studio shell", () => {
     await user.type(screen.getByRole("textbox", { name: "品牌辅助色" }), "#f2eadb");
     await user.type(screen.getByRole("textbox", { name: "品牌字体" }), "Acme Sans");
     await user.upload(
+      screen.getByLabelText("品牌字体文件"),
+      new File([new Uint8Array([0x77, 0x4f, 0x46, 0x32, 1, 2, 3, 4])], "AcmeSans-Regular.woff2", {
+        type: "font/woff2",
+      }),
+    );
+    await user.upload(
       screen.getByLabelText("品牌 Logo 文件"),
       new File(["logo"], "acme-logo.png", { type: "image/png" }),
     );
@@ -325,6 +351,7 @@ describe("video studio shell", () => {
     expect(within(preview).getByText("本周销售增长 38%")).toBeVisible();
     expect(within(preview).getByText("华东区和续费业务共同推动增长。")).toBeVisible();
     expect(within(preview).getByText("Acme Sans")).toBeVisible();
+    expect(within(preview).getByText(/AcmeSans-Regular\.woff2/u)).toBeVisible();
     expect(within(preview).getByText(/acme-logo\.png/u)).toBeVisible();
     expect(
       await within(preview).findByRole("img", { name: "品牌 Logo 预览" }),
@@ -334,6 +361,195 @@ describe("video studio shell", () => {
       color: "#1234ab",
       fontFamily: "Acme Sans",
     });
+
+    await user.click(screen.getByRole("radio", { name: "专业蓝" }));
+    await user.click(screen.getByRole("tab", { name: "预览" }));
+    await user.click(screen.getByRole("button", { name: "提交本机渲染" }));
+    expect(studioGateway.submitMotionDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        font: expect.objectContaining({
+          family: "Acme Sans",
+          fileName: "AcmeSans-Regular.woff2",
+          base64: "d09GMgECAwQ=",
+        }),
+      }),
+    );
+    expect(vi.mocked(studioGateway.submitMotionDraft).mock.calls[0]![0].font).not.toHaveProperty(
+      "bytes",
+    );
+  });
+
+  it("clears a selected local font and returns the draft to the default font", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: /选择品牌动效成片/u }));
+    await user.click(screen.getByRole("tab", { name: "制作设置" }));
+    const family = screen.getByRole("textbox", { name: "品牌字体" });
+    const file = screen.getByLabelText<HTMLInputElement>("品牌字体文件");
+    await user.type(family, "Acme Sans");
+    await user.upload(
+      file,
+      new File(
+        [new Uint8Array([0x77, 0x4f, 0x46, 0x32, 1, 2, 3, 4])],
+        "AcmeSans-Regular.woff2",
+        { type: "font/woff2" },
+      ),
+    );
+
+    expect(await screen.findByText(/AcmeSans-Regular\.woff2/u)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "清除品牌字体" }));
+
+    expect(family).toHaveValue("");
+    expect(file.files).toHaveLength(0);
+    expect(screen.queryByText(/AcmeSans-Regular\.woff2/u)).toBeNull();
+    await user.click(screen.getByRole("radio", { name: "专业蓝" }));
+    await user.click(screen.getByRole("tab", { name: "预览" }));
+    await user.click(screen.getByRole("button", { name: "提交本机渲染" }));
+    expect(studioGateway.submitMotionDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ font: null }),
+    );
+  });
+
+  it("refuses a renamed non-font file before a brand-motion draft can be submitted", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: /选择品牌动效成片/u }));
+    await user.click(screen.getByRole("tab", { name: "制作设置" }));
+    await user.type(screen.getByRole("textbox", { name: "品牌字体" }), "Acme Sans");
+    await user.upload(
+      screen.getByLabelText("品牌字体文件"),
+      new File(["not a font"], "renamed.woff2", { type: "font/woff2" }),
+    );
+
+    expect(await screen.findByText("字体文件格式与扩展名不一致，请重新选择。")).toBeVisible();
+    await user.click(screen.getByRole("radio", { name: "专业蓝" }));
+    await user.click(screen.getByRole("tab", { name: "预览" }));
+    expect(screen.getByRole("button", { name: "提交本机渲染" })).toBeDisabled();
+    expect(studioGateway.submitMotionDraft).not.toHaveBeenCalled();
+  });
+
+  it("accepts the legacy true scaler signature used by valid TrueType fonts", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: /选择品牌动效成片/u }));
+    await user.click(screen.getByRole("tab", { name: "制作设置" }));
+    await user.type(screen.getByRole("textbox", { name: "品牌字体" }), "Legacy Sans");
+    const bytes = [0x74, 0x72, 0x75, 0x65, 1, 2, 3, 4];
+    await user.upload(
+      screen.getByLabelText("品牌字体文件"),
+      new File([new Uint8Array(bytes)], "LegacySans.ttf", { type: "font/ttf" }),
+    );
+
+    expect(await screen.findByText(/LegacySans\.ttf/u)).toBeVisible();
+    await user.click(screen.getByRole("radio", { name: "专业蓝" }));
+    await user.click(screen.getByRole("tab", { name: "预览" }));
+    await user.click(screen.getByRole("button", { name: "提交本机渲染" }));
+    expect(studioGateway.submitMotionDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        font: expect.objectContaining({ fileName: "LegacySans.ttf", base64: "dHJ1ZQECAwQ=" }),
+      }),
+    );
+  });
+
+  it("keeps the latest font when an earlier file read completes last", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: /选择品牌动效成片/u }));
+    await user.click(screen.getByRole("tab", { name: "制作设置" }));
+    await user.type(screen.getByRole("textbox", { name: "品牌字体" }), "Acme Sans");
+    const firstBytes = new Uint8Array([0x77, 0x4f, 0x46, 0x32, 1]);
+    const secondBytes = new Uint8Array([0x77, 0x4f, 0x46, 0x32, 2]);
+    const firstRead = deferred<ArrayBuffer>();
+    const secondRead = deferred<ArrayBuffer>();
+    const first = new File([firstBytes], "first.woff2", { type: "font/woff2" });
+    const second = new File([secondBytes], "second.woff2", { type: "font/woff2" });
+    Object.defineProperty(first, "arrayBuffer", { value: () => firstRead.promise });
+    Object.defineProperty(second, "arrayBuffer", { value: () => secondRead.promise });
+
+    await user.upload(screen.getByLabelText("品牌字体文件"), first);
+    await user.upload(screen.getByLabelText("品牌字体文件"), second);
+    await act(async () => secondRead.resolve(secondBytes.buffer));
+    expect(await screen.findByText(/second\.woff2/u)).toBeVisible();
+    await act(async () => firstRead.resolve(firstBytes.buffer));
+
+    await user.click(screen.getByRole("radio", { name: "专业蓝" }));
+    await user.click(screen.getByRole("tab", { name: "预览" }));
+    await user.click(screen.getByRole("button", { name: "提交本机渲染" }));
+    expect(studioGateway.submitMotionDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        font: expect.objectContaining({
+          fileName: "second.woff2",
+          base64: "d09GMgI=",
+        }),
+      }),
+    );
+  });
+
+  it("shows the exact font file problem instead of masking it with the pairing rule", async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    render(<VideoStudio gateway={gateway()} />);
+
+    await user.click(screen.getByRole("button", { name: /选择品牌动效成片/u }));
+    await user.click(screen.getByRole("tab", { name: "制作设置" }));
+    await user.type(screen.getByRole("textbox", { name: "品牌字体" }), "Acme Sans");
+    await user.upload(
+      screen.getByLabelText("品牌字体文件"),
+      new File(["plain text"], "font.txt", { type: "text/plain" }),
+    );
+
+    expect(
+      screen.getByText("字体只接受不超过 32 MB 的 WOFF2、WOFF、TTF 或 OTF 本地文件。"),
+    ).toBeVisible();
+    expect(screen.queryByText(/字体只填字体名称/u)).toBeNull();
+  });
+
+  it("points a blocked submission back to invalid brand settings", async () => {
+    const user = userEvent.setup();
+    render(<VideoStudio gateway={gateway()} />);
+
+    await user.click(screen.getByRole("button", { name: /选择品牌动效成片/u }));
+    await user.click(screen.getByRole("tab", { name: "制作设置" }));
+    await user.type(screen.getByRole("textbox", { name: "品牌字体" }), "Broken Sans");
+    await user.upload(
+      screen.getByLabelText("品牌字体文件"),
+      new File(["not a font"], "broken.woff2", { type: "font/woff2" }),
+    );
+    await user.click(screen.getByRole("radio", { name: "专业蓝" }));
+    await user.click(screen.getByRole("tab", { name: "预览" }));
+
+    expect(screen.getByRole("button", { name: "提交本机渲染" })).toBeDisabled();
+    expect(screen.getAllByText("字体文件格式与扩展名不一致，请重新选择。")).toHaveLength(2);
+  });
+
+  it("refuses a signature-shaped font that Chromium cannot decode", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    fontFaceLoad.mockRejectedValueOnce(new Error("invalid font data"));
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("button", { name: /选择品牌动效成片/u }));
+    await user.click(screen.getByRole("tab", { name: "制作设置" }));
+    await user.type(screen.getByRole("textbox", { name: "品牌字体" }), "Broken Sans");
+    await user.upload(
+      screen.getByLabelText("品牌字体文件"),
+      new File([new Uint8Array([0x77, 0x4f, 0x46, 0x32, 1])], "broken.woff2", {
+        type: "font/woff2",
+      }),
+    );
+
+    expect(await screen.findByText("字体文件无法解析，请重新选择有效字体。")).toBeVisible();
+    await user.click(screen.getByRole("radio", { name: "专业蓝" }));
+    await user.click(screen.getByRole("tab", { name: "预览" }));
+    expect(screen.getByRole("button", { name: "提交本机渲染" })).toBeDisabled();
+    expect(studioGateway.submitMotionDraft).not.toHaveBeenCalled();
   });
 
   it("shows only reconciled jobs and artifacts without inventing file paths", async () => {

@@ -15,13 +15,37 @@ const EMPTY_BRAND: BrandStyleDraft = {
   primaryColor: null,
   secondaryColor: null,
   fontFamily: null,
+  fontFileName: null,
   logoFileName: null,
 };
+
+const MAX_FONT_BYTES = 32 * 1024 * 1024;
+
+function fontFileSignatureMatches(fileName: string, bytes: Uint8Array): boolean {
+  const lower = fileName.toLowerCase();
+  const prefix = String.fromCharCode(...bytes.slice(0, 4));
+  return (
+    (lower.endsWith(".woff2") && prefix === "wOF2") ||
+    (lower.endsWith(".woff") && prefix === "wOFF") ||
+    (lower.endsWith(".ttf") &&
+      ((bytes[0] === 0 && bytes[1] === 1 && bytes[2] === 0 && bytes[3] === 0) ||
+        prefix === "true")) ||
+    (lower.endsWith(".otf") && prefix === "OTTO")
+  );
+}
 
 export interface MotionStyleDraftSelection {
   readonly stylePresetId: string | null;
   readonly primaryColor: string;
   readonly secondaryColor: string;
+  readonly isValid: boolean;
+  readonly problem: string | null;
+  readonly font: {
+    readonly family: string;
+    readonly fileName: string;
+    readonly base64: string;
+    readonly previewUrl: string;
+  } | null;
   readonly logo: {
     readonly fileName: string;
     readonly mediaType: "image/png" | "image/jpeg" | "image/webp";
@@ -46,6 +70,10 @@ export function MotionStyleCatalog({
   const [primaryColor, setPrimaryColor] = useState("");
   const [secondaryColor, setSecondaryColor] = useState("");
   const [fontFamily, setFontFamily] = useState("");
+  const [fontFileName, setFontFileName] = useState("");
+  const [fontPreviewUrl, setFontPreviewUrl] = useState<string | null>(null);
+  const [fontBase64, setFontBase64] = useState<string | null>(null);
+  const [fontError, setFontError] = useState<string | null>(null);
   const [logoFileName, setLogoFileName] = useState("");
   const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
   const [logoBytes, setLogoBytes] = useState<readonly number[] | null>(null);
@@ -53,6 +81,20 @@ export function MotionStyleCatalog({
     useState<"image/png" | "image/jpeg" | "image/webp" | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
   const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const fontSelectionSequence = useRef(0);
+  const fontFileInput = useRef<HTMLInputElement | null>(null);
+
+  const clearFont = () => {
+    fontSelectionSequence.current += 1;
+    if (fontFileInput.current !== null) {
+      fontFileInput.current.value = "";
+    }
+    setFontFamily("");
+    setFontFileName("");
+    setFontPreviewUrl(null);
+    setFontBase64(null);
+    setFontError(null);
+  };
 
   let brand = EMPTY_BRAND;
   let brandError: string | null = null;
@@ -61,6 +103,7 @@ export function MotionStyleCatalog({
       primaryColor,
       secondaryColor,
       fontFamily,
+      fontFileName,
       logoFileName,
     });
   } catch {
@@ -93,18 +136,44 @@ export function MotionStyleCatalog({
   );
 
   useEffect(() => {
+    const fontReady =
+      brandError === null &&
+      brand.fontFamily !== null &&
+      fontFileName !== "" &&
+      fontBase64 !== null &&
+      fontPreviewUrl !== null;
+    const logoReady =
+      logoFileName !== "" &&
+      logoPreviewUrl !== null &&
+      logoBytes !== null &&
+      logoMediaType !== null;
+    const problem = fontError ?? logoError ?? brandError;
     onDraftChange?.({
       stylePresetId: selectedId,
       primaryColor,
       secondaryColor,
+      isValid:
+        problem === null &&
+        (fontFileName === "" || fontReady) &&
+        (logoFileName === "" || logoReady),
+      problem,
+      font:
+        fontReady
+          ? {
+              family: brand.fontFamily!,
+              fileName: fontFileName,
+              base64: fontBase64!,
+              previewUrl: fontPreviewUrl!,
+            }
+          : null,
       logo:
-        logoPreviewUrl === null || logoBytes === null || logoMediaType === null
+        !logoReady
           ? null
           : {
               fileName: logoFileName,
-              mediaType: logoMediaType,
-              bytes: logoBytes,
-              previewUrl: logoPreviewUrl,
+              mediaType: logoMediaType!,
+              bytes: logoBytes!,
+              previewUrl: logoPreviewUrl!,
             },
     });
   }, [
@@ -112,6 +181,14 @@ export function MotionStyleCatalog({
     logoFileName,
     logoMediaType,
     logoPreviewUrl,
+    fontBase64,
+    fontError,
+    fontFileName,
+    fontFamily,
+    fontPreviewUrl,
+    brand.fontFamily,
+    brandError,
+    logoError,
     onDraftChange,
     primaryColor,
     secondaryColor,
@@ -251,6 +328,104 @@ export function MotionStyleCatalog({
             />
           </label>
           <label>
+            <span>品牌字体文件</span>
+            <input
+              ref={fontFileInput}
+              aria-label="品牌字体文件"
+              type="file"
+              accept=".woff2,.woff,.ttf,.otf"
+              onChange={(event) => {
+                const selectionSequence = ++fontSelectionSequence.current;
+                const file = event.currentTarget.files?.[0];
+                if (file === undefined) {
+                  setFontFileName("");
+                  setFontPreviewUrl(null);
+                  setFontBase64(null);
+                  setFontError(null);
+                  return;
+                }
+                if (file.size === 0 || file.size > MAX_FONT_BYTES ||
+                    !/\.(?:woff2?|ttf|otf)$/iu.test(file.name)) {
+                  setFontFileName("");
+                  setFontPreviewUrl(null);
+                  setFontBase64(null);
+                  setFontError("字体只接受不超过 32 MB 的 WOFF2、WOFF、TTF 或 OTF 本地文件。");
+                  return;
+                }
+                setFontFileName(file.name);
+                setFontPreviewUrl(null);
+                setFontBase64(null);
+                setFontError(null);
+                void file.arrayBuffer().then(async (value) => {
+                  if (fontSelectionSequence.current !== selectionSequence) {
+                    return;
+                  }
+                  const bytes = new Uint8Array(value);
+                  if (!fontFileSignatureMatches(file.name, bytes)) {
+                    setFontError("字体文件格式与扩展名不一致，请重新选择。");
+                    return;
+                  }
+                  try {
+                    if (typeof FontFace !== "function") {
+                      throw new Error("FontFace unavailable");
+                    }
+                    await new FontFace(`bm07-font-validation-${selectionSequence}`, value).load();
+                  } catch {
+                    if (fontSelectionSequence.current === selectionSequence) {
+                      setFontPreviewUrl(null);
+                      setFontBase64(null);
+                      setFontError("字体文件无法解析，请重新选择有效字体。");
+                    }
+                    return;
+                  }
+                  if (fontSelectionSequence.current !== selectionSequence) {
+                    return;
+                  }
+                  const reader = new FileReader();
+                  reader.addEventListener("load", () => {
+                    if (fontSelectionSequence.current !== selectionSequence) {
+                      return;
+                    }
+                    if (typeof reader.result !== "string") {
+                      setFontPreviewUrl(null);
+                      setFontBase64(null);
+                      setFontError("字体本地预览读取失败，请重新选择文件。");
+                      return;
+                    }
+                    const separator = reader.result.indexOf(",");
+                    if (separator < 0 || !reader.result.slice(0, separator).endsWith(";base64")) {
+                      setFontPreviewUrl(null);
+                      setFontBase64(null);
+                      setFontError("字体本地预览读取失败，请重新选择文件。");
+                      return;
+                    }
+                    setFontPreviewUrl(reader.result);
+                    setFontBase64(reader.result.slice(separator + 1));
+                  });
+                  reader.addEventListener("error", () => {
+                    if (fontSelectionSequence.current !== selectionSequence) {
+                      return;
+                    }
+                    setFontPreviewUrl(null);
+                    setFontBase64(null);
+                    setFontError("字体本地预览读取失败，请重新选择文件。");
+                  });
+                  reader.readAsDataURL(file);
+                }).catch(() => {
+                  if (fontSelectionSequence.current !== selectionSequence) {
+                    return;
+                  }
+                  setFontPreviewUrl(null);
+                  setFontBase64(null);
+                  setFontError("字体本地读取失败，请重新选择文件。");
+                });
+              }}
+            />
+          </label>
+          {fontFamily === "" && fontFileName === "" && fontError === null ? null : (
+            <Button onClick={clearFont}>清除品牌字体</Button>
+          )}
+          <label>
             <span>品牌 Logo 文件</span>
             <input
               aria-label="品牌 Logo 文件"
@@ -302,13 +477,17 @@ export function MotionStyleCatalog({
             />
           </label>
         </div>
-        {brandError === null && logoError === null ? null : (
-          <Alert type="error" showIcon title={brandError ?? logoError} />
+        {brandError === null && fontError === null && logoError === null ? null : (
+          <Alert type="error" showIcon title={fontError ?? logoError ?? brandError} />
         )}
         <Typography.Text type="secondary">
           自定义字体在冻结时必须同时提供本地字体文件；Logo 与字体不会自动上传到模型服务。
         </Typography.Text>
       </section>
+
+      {fontPreviewUrl === null || actualPreview.fontFamily === null ? null : (
+        <style>{`@font-face{font-family:"${actualPreview.fontFamily}";font-display:block;src:url("${fontPreviewUrl}")}`}</style>
+      )}
 
       <section
         role="region"
@@ -339,7 +518,12 @@ export function MotionStyleCatalog({
           {actualPreview.body}
         </p>
         {actualPreview.fontFamily === null ? null : (
-          <Typography.Text>{actualPreview.fontFamily}</Typography.Text>
+          <Space orientation="vertical" size={0}>
+            <Typography.Text>{actualPreview.fontFamily}</Typography.Text>
+            <Typography.Text type="secondary">
+              字体文件 · {actualPreview.fontFileName}
+            </Typography.Text>
+          </Space>
         )}
       </section>
 

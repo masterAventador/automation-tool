@@ -182,6 +182,9 @@ const EMPTY_MOTION_STYLE: MotionStyleDraftSelection = {
   stylePresetId: null,
   primaryColor: "",
   secondaryColor: "",
+  isValid: true,
+  problem: null,
+  font: null,
   logo: null,
 };
 
@@ -1011,9 +1014,13 @@ function MotionPreviewPage({
     draft.subject.trim() !== "" &&
     draft.beats.every((item) => item.title.trim() !== "" && item.caption.trim() !== "") &&
     draft.style.stylePresetId !== null &&
+    draft.style.isValid &&
     durationProblem === null;
   return (
     <Card className="video-studio-panel" title="品牌动效播放预览">
+      {draft.style.font === null ? null : (
+        <style>{`@font-face{font-family:"${draft.style.font.family}";font-display:block;src:url("${draft.style.font.previewUrl}")}`}</style>
+      )}
       <Space orientation="vertical" size="middle" className="motion-preview-workspace">
         <section
           role="region"
@@ -1021,6 +1028,7 @@ function MotionPreviewPage({
           className="motion-playback-preview"
           style={{
             background: `linear-gradient(135deg, ${secondary}, #ffffff 58%, ${primary}22)`,
+            fontFamily: draft.style.font?.family ?? "inherit",
           }}
         >
           <div className="motion-playback-brand" style={{ color: primary }}>
@@ -1072,7 +1080,12 @@ function MotionPreviewPage({
           <Alert
             type="warning"
             showIcon
-            title={durationProblem ?? "请先补全标题、每段脚本并选择一套整体画面风格。"}
+            title={
+              durationProblem ??
+              (!draft.style.isValid
+                ? draft.style.problem ?? "请返回“制作设置”检查品牌颜色、字体文件或 Logo。"
+                : "请先补全标题、每段脚本并选择一套整体画面风格。")
+            }
           />
         )}
       </Space>
@@ -1565,6 +1578,14 @@ export function VideoStudio({
         title: beat.title.trim(),
         caption: beat.caption.trim(),
       })),
+      font:
+        motionDraft.style.font === null
+          ? null
+          : {
+              family: motionDraft.style.font.family,
+              fileName: motionDraft.style.font.fileName,
+              base64: motionDraft.style.font.base64,
+            },
       logo:
         motionDraft.style.logo === null
           ? null

@@ -36,6 +36,12 @@ export interface MotionVideoLogoDraft {
   readonly bytes: readonly number[];
 }
 
+export interface MotionVideoFontDraft {
+  readonly family: string;
+  readonly fileName: string;
+  readonly base64: string;
+}
+
 export interface MotionVideoDraftRequest {
   readonly creationMode: "manual_template_v1";
   readonly subject: string;
@@ -45,6 +51,7 @@ export interface MotionVideoDraftRequest {
   /** How long every beat is held; the film length is this times the beat count. */
   readonly secondsPerBeat: number;
   readonly beats: readonly MotionVideoBeatDraft[];
+  readonly font: MotionVideoFontDraft | null;
   readonly logo: MotionVideoLogoDraft | null;
 }
 

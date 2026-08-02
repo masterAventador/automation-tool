@@ -145,6 +145,7 @@ const RESOURCE_MONITOR_INTERVAL_MS = 300;
 const FRAME_TIME_TOLERANCE_SECONDS = 0.001;
 const SANDBOX_FAILURES = {
   cancelled: "render_cancelled",
+  font: "render_font_unavailable",
   mismatch: "chromium_major_mismatch",
   output: "render_output_exceeded",
   protocol: "render_protocol_invalid",
@@ -1142,6 +1143,25 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
       }, sessionId);
       if (fontsReady?.result?.exceptionDetails !== undefined) {
         finish({ status: "protocol" });
+        return;
+      }
+      const requiredFontReady = await pipe.send("Runtime.evaluate", {
+        expression: `(() => {
+          const required = document.querySelector('[data-composition-id][data-duration]')
+            ?.getAttribute('data-required-font-family');
+          if (required === null || required === undefined) return true;
+          return Array.from(document.fonts).some((face) => {
+            const family = face.family.replace(/^["']|["']$/g, '');
+            return family === required && face.status === "loaded";
+          });
+        })()`,
+        returnByValue: true,
+      }, sessionId);
+      if (
+        requiredFontReady?.result?.exceptionDetails !== undefined
+        || requiredFontReady?.result?.result?.value !== true
+      ) {
+        finish({ status: "font" });
         return;
       }
       const readTimelineMetadata = async () => {

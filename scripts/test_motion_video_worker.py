@@ -91,8 +91,11 @@ def main() -> int:
     assert source.count("await readTimelineMetadata()") >= 2
     assert "timelineExpected" in source
     assert "timelineMetadata.timelineCount === 0" in source
+    assert "data-required-font-family" in source
+    assert "face.status === \"loaded\"" in source
+    assert "finish({ status: \"font\" })" in source
     print("BM-02 Node Worker rejection tests passed")
-    print("executed checks: 6")
+    print("executed checks: 7")
     return 0
 
 
