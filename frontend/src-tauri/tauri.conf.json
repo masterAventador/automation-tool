@@ -39,6 +39,11 @@
     "active": true,
     "macOS": {
       "minimumSystemVersion": "13.4"
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows-installer-hooks.nsh"
+      }
     }
   },
   "plugins": {

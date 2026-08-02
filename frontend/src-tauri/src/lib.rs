@@ -646,6 +646,10 @@ pub fn motion_authoring_request(
     model_id: &str,
     api_key: &str,
 ) -> serde_json::Value {
+    let work = child_filesystem_path(work);
+    let catalog_root = child_filesystem_path(catalog_root);
+    let browser = child_filesystem_path(browser);
+    let ffprobe = child_filesystem_path(ffprobe);
     serde_json::json!({
         "schemaVersion": 1,
         "workspace": work,
@@ -672,6 +676,47 @@ pub fn motion_authoring_request(
             "apiKey": api_key,
         },
     })
+}
+
+/// Hand an out-of-process Windows worker paths that remain usable past
+/// `MAX_PATH`.
+///
+/// The App's private job root is already long before catalog assets add their
+/// nested font names. Rust can create that tree through modern Windows APIs,
+/// while the frozen Python worker needs the extended-length spelling to keep
+/// writing below it. Existing verbatim/device paths are left untouched and UNC
+/// paths use Windows' required `\\?\UNC\` form.
+#[cfg(windows)]
+fn child_filesystem_path(path: &std::path::Path) -> std::path::PathBuf {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+    let encoded = path.as_os_str().encode_wide().collect::<Vec<_>>();
+    const SEPARATOR: u16 = b'\\' as u16;
+    const QUESTION: u16 = b'?' as u16;
+    const DOT: u16 = b'.' as u16;
+    let already_device = encoded.starts_with(&[SEPARATOR, SEPARATOR, QUESTION, SEPARATOR])
+        || encoded.starts_with(&[SEPARATOR, SEPARATOR, DOT, SEPARATOR]);
+    if already_device || !path.is_absolute() {
+        return path.to_path_buf();
+    }
+
+    let mut extended = if encoded.starts_with(&[SEPARATOR, SEPARATOR]) {
+        "\\\\?\\UNC\\".encode_utf16().collect::<Vec<_>>()
+    } else {
+        "\\\\?\\".encode_utf16().collect::<Vec<_>>()
+    };
+    extended.extend_from_slice(if encoded.starts_with(&[SEPARATOR, SEPARATOR]) {
+        &encoded[2..]
+    } else {
+        &encoded
+    });
+    std::path::PathBuf::from(OsString::from_wide(&extended))
+}
+
+#[cfg(not(windows))]
+fn child_filesystem_path(path: &std::path::Path) -> std::path::PathBuf {
+    path.to_path_buf()
 }
 
 pub fn run_motion_authoring(
@@ -708,9 +753,11 @@ pub fn run_motion_authoring(
         return Err(error);
     }
     let deadline = std::time::Instant::now() + budget;
-    let exited_cleanly = loop {
+    let exit_status = loop {
         match child.try_wait() {
-            Ok(Some(status)) => break status.success(),
+            Ok(Some(status)) => {
+                break status;
+            }
             Ok(None) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(std::time::Duration::from_millis(200));
             }
@@ -739,9 +786,15 @@ pub fn run_motion_authoring(
     // reason token and no model output, so nothing the model produced is read
     // here.
     let answer = read_bounded_child_output(&mut child)?;
-    if exited_cleanly {
+    if exit_status.success() {
         return Ok(answer);
     }
+    eprintln!(
+        "motion authoring child failed: exitCode={:?} answerBytes={} {}",
+        exit_status.code(),
+        answer.len(),
+        motion_video_studio::safe_failed_authoring_diagnostic(&answer),
+    );
     Err(motion_video_studio::classify_failed_authoring_answer(
         &answer,
     ))

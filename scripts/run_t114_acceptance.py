@@ -72,7 +72,7 @@ EXECUTOR_SPEC = BACKEND_ROOT / "tests/fixtures/automation-tool-executor-b515.spe
 APP_IDENTIFIER = "com.aventador.automationtool.t114acceptance"
 ENVIRONMENT_ID = "t114-acceptance"
 EXECUTOR_BUILD_ID = "t114-platform-session-recovery"
-PROFILE_LOCK_FILE = ".automation-tool-profile-lock-v1"
+PROFILE_LEASE_FILE_PREFIX = ".automation-tool-profile-lease-v1-"
 ACTIVE_MARKER = b'{"state":"active","version":1}'
 
 
@@ -234,7 +234,9 @@ def require_abandoned_lease(profile_directory: Path) -> None:
     Seeding this by hand would prove nothing: the point is that the shipping
     build produces this state on an ordinary ungraceful exit.
     """
-    lock_path = profile_directory / PROFILE_LOCK_FILE
+    lock_path = profile_directory.parent / (
+        f"{PROFILE_LEASE_FILE_PREFIX}{profile_directory.name}"
+    )
     if not lock_path.is_file():
         raise RuntimeError("T114 killed App left no profile lock at all")
     marker = lock_path.read_bytes()

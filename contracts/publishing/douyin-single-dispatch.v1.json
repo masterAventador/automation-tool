@@ -14,7 +14,7 @@
   "dispatch": {
     "maximumClicks": 1,
     "durableRecord": "executor_publish_dispatches",
-    "ledgerSchemaVersion": 8,
+    "ledgerSchemaVersion": 9,
     "states": ["prepared", "dispatched", "verified", "uncertain"],
     "honoursEmergencyStop": true,
     "minimumIntervalSecondsDefault": 60,

@@ -98,24 +98,36 @@ def terminate_matching_processes(
     marker: str,
     *,
     baseline: Iterable[int] = (),
+    observed: set[int] | None = None,
     timeout_seconds: float = 20,
     process_ids: Callable[[str], set[int]] = process_ids_matching,
     terminate: Callable[[int], None] = terminate_process,
     monotonic: Callable[[], float] = time.monotonic,
     pause: Callable[[float], None] = time.sleep,
 ) -> set[int]:
-    """Terminate only matches created after ``baseline`` and return survivors."""
+    """Terminate post-baseline matches, recording every PID seen, and return survivors."""
     if timeout_seconds <= 0:
         raise ProcessInspectionFailed("process cleanup timeout is invalid")
     preserved = set(baseline)
     owned = process_ids(marker) - preserved
+    if observed is not None:
+        observed.update(owned)
+    signalled: set[int] = set()
     for process_id in sorted(owned):
         terminate(process_id)
+        signalled.add(process_id)
     deadline = monotonic() + timeout_seconds
     remaining = process_ids(marker) - preserved
+    if observed is not None:
+        observed.update(remaining)
     while remaining and monotonic() < deadline:
+        for process_id in sorted(remaining - signalled):
+            terminate(process_id)
+            signalled.add(process_id)
         pause(0.2)
         remaining = process_ids(marker) - preserved
+        if observed is not None:
+            observed.update(remaining)
     return remaining
 
 

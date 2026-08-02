@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -224,6 +226,101 @@ def test_recovery_requeues_only_the_same_persisted_outbox_messages(tmp_path: Pat
     assert recovered.recover_outbox() == batch
 
 
+def test_recovery_does_not_replay_outbox_messages_after_their_wire_deadline(
+    tmp_path: Path,
+) -> None:
+    state_directory = tmp_path / "state"
+    active = processor(state_directory)
+    batch = active.handle(command())
+    for message in batch:
+        assert active.mark_delivered(str(message.message_id)) is True
+
+    recovered = processor(
+        state_directory,
+        clock=MutableClock(NOW + timedelta(seconds=31)),
+    )
+
+    assert recovered.recover_outbox() == ()
+    assert recovered.pending_outbox() == ()
+
+
+def test_recovery_keeps_expired_never_sent_messages_durable(tmp_path: Path) -> None:
+    state_directory = tmp_path / "state"
+    active = processor(state_directory)
+    batch = active.handle(command())
+
+    recovered = processor(
+        state_directory,
+        clock=MutableClock(NOW + timedelta(seconds=31)),
+    )
+
+    assert recovered.recover_outbox() == ()
+    assert recovered.pending_outbox() == ()
+    with sqlite3.connect(recovered.ledger.database_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT envelope, delivered, expired
+            FROM executor_outbox ORDER BY ordinal
+            """
+        ).fetchall()
+    assert tuple(parse_executor_message(str(row[0])) for row in rows) == batch
+    assert [(int(row[1]), int(row[2])) for row in rows] == [(0, 1), (0, 1)]
+
+
+def test_recovery_reaches_valid_messages_after_more_than_one_historical_batch(
+    tmp_path: Path,
+) -> None:
+    state_directory = tmp_path / "state"
+    active = processor(state_directory)
+    batch = active.handle(command())
+    for message in batch:
+        assert active.mark_delivered(str(message.message_id)) is True
+
+    last_message = batch[0]
+    with sqlite3.connect(active.ledger.database_path) as connection:
+        for ordinal in range(3, 1002):
+            active_deadline = ordinal == 1001
+            message = batch[0].model_copy(
+                update={
+                    "message_id": UUID(
+                        f"923e4567-e89b-42d3-a456-{ordinal:012d}"
+                    ),
+                    "idempotency_key": f"executor-recovery-history:{ordinal}",
+                    "deadline_at": NOW
+                    + timedelta(seconds=90 if active_deadline else 30),
+                }
+            )
+            envelope = message.model_dump_json()
+            connection.execute(
+                """
+                INSERT INTO executor_outbox (
+                    ordinal, message_id, idempotency_key, intent_sha256,
+                    envelope, source_message_id, delivered
+                ) VALUES (?, ?, ?, ?, ?, ?, 1)
+                """,
+                (
+                    ordinal,
+                    str(message.message_id),
+                    str(message.idempotency_key),
+                    hashlib.sha256(envelope.encode("utf-8")).digest(),
+                    envelope,
+                    "323e4567-e89b-42d3-a456-426614174001",
+                ),
+            )
+            last_message = message
+
+    recovered = processor(
+        state_directory,
+        clock=MutableClock(NOW + timedelta(seconds=31)),
+    )
+
+    restored = recovered.recover_outbox()
+    assert len(restored) == 1
+    assert str(restored[0].message_id) == str(last_message.message_id)
+    assert restored[0].deadline_at == last_message.deadline_at
+    assert recovered.pending_outbox() == restored
+
+
 def test_invalid_expired_or_effectful_commands_fail_closed_without_an_outbox(
     tmp_path: Path,
 ) -> None:
@@ -379,8 +476,8 @@ def test_outbox_operations_collapse_ledger_failures(tmp_path: Path) -> None:
         raise ExecutorLedgerRejected
 
     for method_name, operation in (
-        ("pending_outbox", active.pending_outbox),
-        ("requeue_delivered_outbox", active.recover_outbox),
+        ("outbox_for_delivery", active.pending_outbox),
+        ("outbox_for_delivery", active.recover_outbox),
         ("mark_outbox_delivered", lambda: active.mark_delivered("not-a-message")),
     ):
         original = getattr(active.ledger, method_name)

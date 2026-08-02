@@ -30,6 +30,7 @@ reads Chinese-bearing literals in a `.py` source as operator copy.)
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Final
 
@@ -89,15 +90,17 @@ class PackagedSlotProbe:
         request = BrowserLaunchRequest(
             # Resolved so the request's symlink refusal judges the real path —
             # macOS render workspaces routinely sit under /var, a symlink.
-            executable_path=self._browser_executable.resolve(),
-            profile_directory=self._profile_directory.resolve(),
+            executable_path=_native_path_for_playwright(self._browser_executable).resolve(),
+            profile_directory=_native_path_for_playwright(self._profile_directory).resolve(),
             headless=True,
         )
         readings: list[ProbeReading] = []
         with self._runtime.running(request):
             page = self._runtime.primary_window().playwright_page
             for document in documents:
-                page.goto(document.resolve().as_uri())  # type: ignore[attr-defined]
+                page.goto(  # type: ignore[attr-defined]
+                    _native_path_for_playwright(document).resolve().as_uri()
+                )
                 page.wait_for_timeout(_LOAD_SETTLE_MILLISECONDS)  # type: ignore[attr-defined]
                 page.evaluate(_SEEK_TO_END_JS)  # type: ignore[attr-defined]
                 page.wait_for_timeout(_SEEK_SETTLE_MILLISECONDS)  # type: ignore[attr-defined]
@@ -118,6 +121,18 @@ class PackagedSlotProbe:
                     )
                 )
         return readings
+
+
+def _native_path_for_playwright(path: Path) -> Path:
+    """Remove the Windows device prefix before handing a path to Playwright."""
+    if os.name != "nt":
+        return path
+    value = os.fspath(path)
+    if value.startswith("\\\\?\\UNC\\"):
+        return Path("\\\\" + value[8:])
+    if value.startswith("\\\\?\\"):
+        return Path(value[4:])
+    return path
 
 
 __all__ = [

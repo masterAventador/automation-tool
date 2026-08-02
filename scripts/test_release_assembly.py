@@ -316,7 +316,10 @@ class ReleaseConfigurationTests(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.base = Path(tempfile.mkdtemp(prefix="release-configuration-"))
+        (ROOT / ".local").mkdir(exist_ok=True)
+        self.base = Path(
+            tempfile.mkdtemp(prefix="release-configuration-", dir=ROOT / ".local")
+        )
         self.addCleanup(shutil.rmtree, self.base, True)
         self.executor = self.base / "build/executor/automation-tool-executor"
         self.executor.mkdir(parents=True)
@@ -361,6 +364,53 @@ class ReleaseConfigurationTests(unittest.TestCase):
                 "motion-video-worker/package/",
             ],
         )
+        configuration = json.loads(
+            (ROOT / "frontend/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            configuration["bundle"]["windows"]["nsis"]["installerHooks"],
+            "windows-installer-hooks.nsh",
+            "the production uninstaller must remove packaged browser directories "
+            "that NSIS leaves empty after deleting their files",
+        )
+        hook = ROOT / "frontend/src-tauri/windows-installer-hooks.nsh"
+        source = hook.read_text(encoding="utf-8")
+        self.assertIn("!macro NSIS_HOOK_POSTUNINSTALL", source)
+        self.assertNotIn(
+            "RMDir /r",
+            source,
+            "the uninstaller must not follow a replaced browser directory recursively",
+        )
+        first_delete = source.index(
+            'RMDir "$INSTDIR\\embedded-browser\\chrome-win64\\Dictionaries"'
+        )
+        self.assertIn("FILE_ATTRIBUTE_REPARSE_POINT", source)
+        self.assertIn("GetFileAttributes", source)
+        self.assertIn(
+            "System::Call",
+            source,
+            "the hook must call the Windows attribute API through valid NSIS syntax",
+        )
+        for guarded in (
+            "$INSTDIR",
+            "$INSTDIR\\embedded-browser",
+            "$INSTDIR\\embedded-browser\\chrome-win64",
+            "$INSTDIR\\embedded-browser\\chrome-win64\\Dictionaries",
+        ):
+            guard = f'!insertmacro EBVS_ABORT_IF_REPARSE "{guarded}"'
+            self.assertIn(guard, source)
+            self.assertLess(
+                source.index(guard),
+                first_delete,
+                "every ancestor must be checked before the first nested removal",
+            )
+        self.assertIn(
+            'RMDir "$INSTDIR\\embedded-browser\\chrome-win64\\Dictionaries"',
+            source,
+        )
+        self.assertIn('RMDir "$INSTDIR\\embedded-browser\\chrome-win64"', source)
+        self.assertIn('RMDir "$INSTDIR\\embedded-browser"', source)
+        self.assertIn('RMDir "$INSTDIR"', source)
 
     def test_a_missing_bundler_source_is_refused_rather_than_dropped(self) -> None:
         from release_configuration import (

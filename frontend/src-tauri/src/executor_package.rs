@@ -589,15 +589,20 @@ pub(crate) fn ensure_no_symlink_ancestors(path: &Path) -> Result<(), ExecutorPac
         }
         normalized
     };
-    // On Windows a verbatim absolute path starts with a standalone `\\?\F:`
-    // prefix component. That prefix is not itself a filesystem object, so
-    // probing components while incrementally pushing them reports an I/O
-    // failure before reaching the real `\\?\F:\` root. `ancestors()` only
-    // yields complete filesystem paths on every supported platform.
-    let mut ancestors = absolute.ancestors().collect::<Vec<_>>();
-    ancestors.reverse();
-    for current in ancestors {
-        match fs::symlink_metadata(current) {
+    let mut current = PathBuf::new();
+    for component in absolute.components() {
+        current.push(component.as_os_str());
+        // A Windows drive/UNC prefix is not a filesystem object until its
+        // following RootDir component is present. Querying `\\?\C:` (the
+        // first component of the canonical path Tauri returns from
+        // `resource_dir()`) fails with `ERROR_INVALID_NAME`, so every intact
+        // installed package was rejected before the verifier reached its
+        // manifest. Keep the prefix in the path under construction, but begin
+        // ancestor metadata checks at `\\?\C:\` / the UNC share root.
+        if matches!(component, Component::Prefix(_)) {
+            continue;
+        }
+        match fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err(ExecutorPackageError::new(
                     ExecutorPackageErrorCode::PackageInvalid,

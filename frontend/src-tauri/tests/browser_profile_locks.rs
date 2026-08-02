@@ -1,17 +1,27 @@
-use automation_tool_desktop_lib::browser_profiles::{BrowserProfileErrorCode, BrowserProfileStore};
+use automation_tool_desktop_lib::browser_profiles::{
+    BrowserProfile, BrowserProfileErrorCode, BrowserProfileStore,
+};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const LOCK_FILE_NAME: &str = ".automation-tool-profile-lock-v1";
+const LEASE_FILE_PREFIX: &str = ".automation-tool-profile-lease-v1-";
 const ACTIVE_MARKER: &[u8] = br#"{"state":"active","version":1}"#;
 const HELPER_MODE_ENV: &str = "AUTOMATION_TOOL_B506_LOCK_HELPER";
 const HELPER_APP_DATA_ENV: &str = "AUTOMATION_TOOL_B506_APP_DATA";
 const HELPER_PROFILE_ID_ENV: &str = "AUTOMATION_TOOL_B506_PROFILE_ID";
 
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+
+fn lease_path(profile: &BrowserProfile) -> std::path::PathBuf {
+    profile
+        .directory()
+        .parent()
+        .expect("platform profile directory")
+        .join(format!("{LEASE_FILE_PREFIX}{}", profile.profile_id()))
+}
 
 struct TemporaryAppData {
     path: std::path::PathBuf,
@@ -69,6 +79,27 @@ fn same_profile_is_exclusive_and_explicit_release_allows_reacquire() {
 }
 
 #[test]
+fn profile_lease_file_stays_outside_the_chromium_user_data_directory() {
+    let app_data = TemporaryAppData::new();
+    let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");
+    let profile = store.create_douyin_profile().expect("profile");
+
+    let lease = profile.try_acquire_lock().expect("profile lease");
+    assert!(lease_path(&profile).is_file());
+    assert!(
+        fs::read_dir(profile.directory())
+            .expect("read Chromium user data directory")
+            .all(|entry| !entry
+                .expect("profile entry")
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".automation-tool-profile-")),
+        "the frozen Playwright runtime rejects a Chromium user-data-dir that contains an OS-locked file",
+    );
+    lease.release().expect("release profile lease");
+}
+
+#[test]
 fn owned_profile_lease_keeps_the_profile_exclusive_until_explicit_release() {
     let app_data = TemporaryAppData::new();
     let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");
@@ -103,6 +134,7 @@ fn safe_current_removal_retains_profile_while_an_owned_lease_is_active() {
     let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");
     let profile = store.current_douyin_profile().expect("current profile");
     let profile_directory = profile.directory().to_path_buf();
+    let profile_lease_path = lease_path(&profile);
     let lease = profile.try_acquire_owned_lock().expect("owned lease");
 
     assert_eq!(
@@ -119,6 +151,36 @@ fn safe_current_removal_retains_profile_while_an_owned_lease_is_active() {
         .remove_current_douyin_profile()
         .expect("remove after release");
     assert!(!profile_directory.exists());
+    assert!(!profile_lease_path.exists());
+}
+
+#[test]
+fn current_removal_finishes_an_external_lease_left_after_the_tombstone_was_deleted() {
+    let app_data = TemporaryAppData::new();
+    let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");
+    let profile = store.current_douyin_profile().expect("current profile");
+    let profile_id = profile.profile_id().to_owned();
+    let profile_directory = profile.directory().to_path_buf();
+    let profile_lease_path = lease_path(&profile);
+    profile
+        .try_acquire_lock()
+        .expect("create external lease")
+        .release()
+        .expect("leave a clean released lease");
+
+    let tombstone = profile_directory
+        .parent()
+        .expect("platform profile directory")
+        .join(format!(".removing-{profile_id}"));
+    fs::rename(&profile_directory, &tombstone).expect("stage profile removal");
+    fs::remove_dir_all(&tombstone).expect("simulate directory deletion before lease cleanup");
+    assert!(profile_lease_path.is_file());
+
+    store
+        .remove_current_douyin_profile()
+        .expect("retry must finish the external lease cleanup");
+    assert!(!profile_lease_path.exists());
+    assert!(store.current_douyin_profile().is_ok());
 }
 
 #[test]
@@ -219,7 +281,7 @@ fn killed_lock_holder_preserves_marker_and_requires_explicit_recovery() {
     let app_data = TemporaryAppData::new();
     let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");
     let profile = store.create_douyin_profile().expect("profile");
-    let lock_path = profile.directory().join(LOCK_FILE_NAME);
+    let lock_path = lease_path(&profile);
     let mut child = Command::new(std::env::current_exe().expect("test executable"))
         .args([
             "--exact",
@@ -266,7 +328,7 @@ fn dropping_without_explicit_release_preserves_recovery_required_marker() {
     let app_data = TemporaryAppData::new();
     let store = BrowserProfileStore::initialize(&app_data.path).expect("profile store");
     let profile = store.create_douyin_profile().expect("profile");
-    let lock_path = profile.directory().join(LOCK_FILE_NAME);
+    let lock_path = lease_path(&profile);
 
     drop(profile.try_acquire_lock().expect("profile lock"));
     assert_eq!(fs::read(&lock_path).expect("active marker"), ACTIVE_MARKER);
@@ -307,7 +369,7 @@ fn windows_lock_links_dacl_corruption_and_replacement_fail_closed() {
     let junction_profile = store.create_douyin_profile().expect("junction profile");
     let outside_directory = app_data.path.join("outside-lock-directory");
     fs::create_dir(&outside_directory).expect("outside lock directory");
-    let junction_path = junction_profile.directory().join(LOCK_FILE_NAME);
+    let junction_path = lease_path(&junction_profile);
     create_lock_junction(&junction_path, &outside_directory);
     assert_eq!(
         junction_profile
@@ -321,11 +383,7 @@ fn windows_lock_links_dacl_corruption_and_replacement_fail_closed() {
     let hard_link_profile = store.create_douyin_profile().expect("hard-link profile");
     let outside_file = app_data.path.join("outside-lock-file");
     fs::write(&outside_file, b"").expect("outside lock file");
-    fs::hard_link(
-        &outside_file,
-        hard_link_profile.directory().join(LOCK_FILE_NAME),
-    )
-    .expect("hard-link lock file");
+    fs::hard_link(&outside_file, lease_path(&hard_link_profile)).expect("hard-link lock file");
     assert_eq!(
         hard_link_profile
             .try_acquire_lock()
@@ -335,7 +393,7 @@ fn windows_lock_links_dacl_corruption_and_replacement_fail_closed() {
     );
 
     let dacl_profile = store.create_douyin_profile().expect("DACL profile");
-    let dacl_path = dacl_profile.directory().join(LOCK_FILE_NAME);
+    let dacl_path = lease_path(&dacl_profile);
     dacl_profile
         .try_acquire_lock()
         .expect("create private lock file")
@@ -360,7 +418,7 @@ fn windows_lock_links_dacl_corruption_and_replacement_fail_closed() {
     );
 
     let corrupt_profile = store.create_douyin_profile().expect("corrupt profile");
-    let corrupt_path = corrupt_profile.directory().join(LOCK_FILE_NAME);
+    let corrupt_path = lease_path(&corrupt_profile);
     corrupt_profile
         .try_acquire_lock()
         .expect("create corrupt fixture lock")
@@ -377,7 +435,7 @@ fn windows_lock_links_dacl_corruption_and_replacement_fail_closed() {
     assert_eq!(fs::read(&corrupt_path).expect("corrupt bytes"), b"corrupt");
 
     let replacement_profile = store.create_douyin_profile().expect("replacement profile");
-    let replacement_path = replacement_profile.directory().join(LOCK_FILE_NAME);
+    let replacement_path = lease_path(&replacement_profile);
     let replacement_lock = replacement_profile
         .try_acquire_lock()
         .expect("lock replacement profile");
@@ -408,7 +466,7 @@ fn lock_file_symlinks_permissions_corruption_and_replacement_fail_closed() {
     let symlink_profile = store.create_douyin_profile().expect("symlink profile");
     let outside = app_data.path.join("outside-lock");
     fs::write(&outside, b"").expect("outside lock file");
-    symlink(&outside, symlink_profile.directory().join(LOCK_FILE_NAME)).expect("lock file symlink");
+    symlink(&outside, lease_path(&symlink_profile)).expect("lock file symlink");
     assert_eq!(
         symlink_profile
             .try_acquire_lock()
@@ -418,7 +476,7 @@ fn lock_file_symlinks_permissions_corruption_and_replacement_fail_closed() {
     );
 
     let permission_profile = store.create_douyin_profile().expect("permission profile");
-    let permission_lock = permission_profile.directory().join(LOCK_FILE_NAME);
+    let permission_lock = lease_path(&permission_profile);
     fs::write(&permission_lock, b"").expect("permission lock file");
     fs::set_permissions(&permission_lock, fs::Permissions::from_mode(0o644))
         .expect("unsafe lock permissions");
@@ -431,7 +489,7 @@ fn lock_file_symlinks_permissions_corruption_and_replacement_fail_closed() {
     );
 
     let corrupt_profile = store.create_douyin_profile().expect("corrupt profile");
-    let corrupt_lock = corrupt_profile.directory().join(LOCK_FILE_NAME);
+    let corrupt_lock = lease_path(&corrupt_profile);
     fs::write(&corrupt_lock, b"corrupt").expect("corrupt lock state");
     fs::set_permissions(&corrupt_lock, fs::Permissions::from_mode(0o600))
         .expect("private corrupt fixture");
@@ -445,7 +503,7 @@ fn lock_file_symlinks_permissions_corruption_and_replacement_fail_closed() {
     assert_eq!(fs::read(&corrupt_lock).expect("corrupt bytes"), b"corrupt");
 
     let replaced_profile = store.create_douyin_profile().expect("replacement profile");
-    let replaced_lock_path = replaced_profile.directory().join(LOCK_FILE_NAME);
+    let replaced_lock_path = lease_path(&replaced_profile);
     let replaced_lock = replaced_profile
         .try_acquire_lock()
         .expect("lock to replace");

@@ -218,6 +218,7 @@ frontend/
 │   ├── binaries/                  # 构建产物目录，不提交未签名临时包
 │   ├── capabilities/              # 正式最小权限
 │   ├── tauri.conf.json
+│   ├── windows-installer-hooks.nsh # Windows 正式 NSIS 卸载时定向清理 App 自有内置浏览器目录
 │   ├── tauri.dev.conf.json        # 只由 tauri:dev 合并的 loopback URL/devCSP
 │   ├── tauri.test.conf.json       # 后台隐藏的通用桌面测试配置
 │   ├── tauri.control-plane-e2e.conf.json # 后台隐藏的网络桥纵向验收配置
@@ -584,9 +585,11 @@ P9-02 的 `executor/windows_candidate.py` 与 `scripts/run_p9_02_acceptance.py` 
 
 P9-03 的 `tauri.macos-candidate.conf.json` 与 `scripts/run_p9_03_acceptance.py` 在不增加 Capability/CSP/测试 Feature 的前提下，把 P9-01 输出映射到 App 的 `Resources/local-executor/package`。候选配置不锁死发布 identity；runner 只在临时覆盖中强制 ad-hoc，并用一次性 Ed25519 seed 签发正式格式 Manifest，构建 production-mode `.app/.dmg`，逐文件比较源/Resources/DMG 中的 SHA-256 与大小，复验 Manifest、Mach-O、App codesign、DMG 校验/只读挂载及 E4-15 生产二进制边界；所有输出只在 `/private/tmp` 存活且不启动 App、浏览器或服务。Developer ID Application、公证和 Gatekeeper 无警告分发仍是外部证书门禁。
 
-P9-04 的 `tauri.windows-candidate.conf.json` 与 `scripts/run_p9_04_acceptance.py` 把 P9-02 signed Executor 映射到 Windows release 的 `local-executor/package`。正式覆盖只选择 `currentUser` NSIS，不改变生产 identity/窗口/Capability/CSP/plugin 或签名字段；runner 使用独立临时 Cargo target 和一次性 Ed25519 seed，在无测试 Feature 构建中复用 E4-15 制品审计。安装阶段的唯一隔离 product/identifier 只保护现有正式安装，非提权原生验收必须核对 `NotSigned`、二进制版本/哈希、HKCU-only 注册表、LocalAppData、完整 Executor 清单/Manifest/PE 和专属卸载零残留；当前 macOS 只完成静态门禁，Windows 实机与 Authenticode 仍待补。
+P9-04 的 `tauri.windows-candidate.conf.json` 与 `scripts/run_p9_04_acceptance.py` 把 P9-02 signed Executor 映射到 Windows release 的 `local-executor/package`。正式覆盖只选择 `currentUser` NSIS，不改变生产 identity/窗口/Capability/CSP/plugin 或签名字段；runner 使用独立临时 Cargo target 和一次性 Ed25519 seed，在无测试 Feature 构建中复用 E4-15 制品审计。安装阶段的唯一隔离 product/identifier 只保护现有正式安装，非提权原生验收必须核对 `NotSigned`、二进制版本/哈希、HKCU-only 注册表、LocalAppData、完整 Executor 清单/Manifest/PE 和专属卸载零残留；Windows 普通候选已在实体机通过，正式 Authenticode 仍待发布身份。
 
-P9-05 的 `frontend/scripts/audit-release-bundle.mjs` 是完整正式包树的唯一内容审计器，`scripts/run_p9_05_acceptance.py` 只按当前 OS 分派 P9-03/P9-04，不另建第三种包。auditor 固定双平台 Executor Resources 位置，流式扫描所有普通文件并拒绝链接、特殊文件、测试/调试/开发信任材料、私钥及运行期日志/Profile/Cookie/SQLite/诊断/素材；P9-03 同时用于 build App 和 DMG 挂载副本，P9-04 用于安装后根。真实 macOS 已通过，Windows 入口已就绪待实机。
+P9-05 的 `frontend/scripts/audit-release-bundle.mjs` 是完整正式包树的唯一内容审计器，`scripts/run_p9_05_acceptance.py` 只按当前 OS 分派 P9-03/P9-04，不另建第三种包。auditor 固定双平台 Executor Resources 位置，流式扫描所有普通文件并拒绝链接、特殊文件、测试/调试/开发信任材料、私钥及运行期日志/Profile/Cookie/SQLite/诊断/素材；P9-03 同时用于 build App 和 DMG 挂载副本，P9-04 用于安装后根。macOS 与 Windows 原生完整包均已通过。
+
+Windows 正式 `tauri.conf.json` 通过 `windows-installer-hooks.nsh` 接入唯一生产 NSIS 卸载钩子，仅把浏览器树中已知会残留的空目录由深到浅执行非递归 `RMDir`，随后重试空安装根。路径一旦被替换为 junction/reparse point 或含有意外文件，卸载器宁可留下残余也不会沿目标递归删除；该钩子不读取用户输入、注册表路径或运行期 AppData，发布装配契约固定检查 hook 文件、宏名、非递归边界与四个精确目录。
 
 P9-06 的 `scripts/run_p9_06_acceptance.py` 是人工可见 macOS 干净安装的唯一设备入口，`frontend/tests/p9-06-macos-clean-install.test.mjs` 只锁定其安全边界而不启动 App。runner 不构建包，只接受 Developer ID/notarization/Gatekeeper 均通过的 DMG；它在 fresh production AppData 和专属用户级 App 上运行正式二进制，移除 Python/开发环境后从 OS 进程树核对 Resources Executor、Chrome/Edge 私有 Profile、退出清理和二次启动恢复。操作者 checkpoint 只生成无账号/路径/页面内容的 `0600` 证据；安装与 AppData 移到废纸篓。工作流只把 runner 变化列为触发路径，没有自动执行可见 App、浏览器、扫码或平台任务。
 

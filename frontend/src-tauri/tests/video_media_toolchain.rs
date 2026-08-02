@@ -390,6 +390,30 @@ fn the_brand_motion_worker_process_receives_the_packaged_pair_and_nothing_else()
     assert!(!environment.contains_key("PATH"), "{environment:?}");
 }
 
+#[cfg(windows)]
+#[test]
+#[ignore = "requires AUTOMATION_TOOL_WINDOWS_PACKAGE_PAYLOAD with the real packaged toolchain"]
+fn the_windows_packaged_ffmpeg_runs_from_the_verbatim_resource_path() {
+    let payload = PathBuf::from(
+        std::env::var_os("AUTOMATION_TOOL_WINDOWS_PACKAGE_PAYLOAD")
+            .expect("the package payload root is required"),
+    );
+    let verbatim = PathBuf::from(format!(r"\\?\{}", payload.display()));
+    let toolchain = VideoMediaToolchain::load_for_target(&verbatim, "windows-x86_64")
+        .expect("the installed media toolchain must verify");
+
+    let ffmpeg = std::process::Command::new(toolchain.ffmpeg_path())
+        .arg("-version")
+        .output()
+        .expect("the verified packaged ffmpeg must be launchable");
+    assert!(ffmpeg.status.success());
+    let ffprobe = std::process::Command::new(toolchain.ffprobe_path())
+        .arg("-version")
+        .output()
+        .expect("the verified packaged ffprobe must be launchable");
+    assert!(ffprobe.status.success());
+}
+
 /// Walk a source file for one item's body, so a wiring assertion cannot be
 /// satisfied by an unrelated occurrence elsewhere in the file.
 fn function_body(source: &str, header: &str) -> String {

@@ -37,7 +37,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Sequence
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -186,20 +186,28 @@ def media_toolchain_bash(*, platform: str) -> str:
 
 def _build_media_toolchain(destination: Path, *, platform: str) -> None:
     target = MEDIA_TOOLCHAIN_TARGETS[platform]
-    bash = media_toolchain_bash(platform=platform)
+    bash = os.environ.get("AUTOMATION_TOOL_BASH") or media_toolchain_bash(
+        platform=platform
+    )
     environment = None
     if platform == "windows":
-        msys2_root = Path(bash).parents[2]
         environment = os.environ.copy()
         environment["MSYSTEM"] = "MINGW64"
         environment["CHERE_INVOKING"] = "1"
-        environment["PATH"] = ";".join(
-            (
-                str(msys2_root / "mingw64" / "bin"),
-                str(msys2_root / "usr" / "bin"),
-                environment.get("PATH", ""),
-            )
+        shell_path = (
+            PureWindowsPath(bash)
+            if len(bash) >= 2 and bash[1] == ":"
+            else Path(bash)
         )
+        if len(shell_path.parents) >= 3:
+            msys2_root = shell_path.parents[2]
+            environment["PATH"] = ";".join(
+                (
+                    str(msys2_root / "mingw64" / "bin"),
+                    str(msys2_root / "usr" / "bin"),
+                    environment.get("PATH", ""),
+                )
+            )
     # The builder creates the directory itself and refuses to reuse one.
     completed = subprocess.run(
         [
@@ -210,7 +218,6 @@ def _build_media_toolchain(destination: Path, *, platform: str) -> None:
         ],
         cwd=ROOT,
         capture_output=True,
-        text=True,
         check=False,
         env=environment,
     )

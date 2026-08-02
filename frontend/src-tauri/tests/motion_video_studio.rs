@@ -4,10 +4,10 @@ use automation_tool_desktop_lib::local_video_orchestrator::{
 use automation_tool_desktop_lib::motion_video_studio::{
     advance, cancel, cancel_marker_file_name, cancellation_requested, delete_artifact,
     duration_limits, import_rendered_output, prepare_manual_render_job,
-    record_rendered_shot_frames, render_sandbox_budget, rendered_film_is_static, snapshot,
-    MotionRenderFailureCode, MotionRenderJobStatus, MotionVideoBeatDraft, MotionVideoDraftRequest,
-    MotionVideoStudioErrorCode, TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR, TEMPLATE_CANVAS_HEIGHT,
-    TEMPLATE_CANVAS_WIDTH,
+    record_rendered_shot_frames, render_sandbox_budget, rendered_film_is_static,
+    safe_failed_authoring_diagnostic, snapshot, MotionRenderFailureCode, MotionRenderJobStatus,
+    MotionVideoBeatDraft, MotionVideoDraftRequest, MotionVideoStudioErrorCode,
+    TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR, TEMPLATE_CANVAS_HEIGHT, TEMPLATE_CANVAS_WIDTH,
 };
 use automation_tool_desktop_lib::video_job_workspace::{
     VideoJobWorkspacePolicy, VideoJobWorkspaceStore,
@@ -18,6 +18,22 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 static TEMPORARY_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+#[test]
+fn failed_child_diagnostics_keep_closed_tokens_and_drop_arbitrary_text() {
+    let closed = r#"{"schemaVersion":1,"status":"executor_defect","rejectionReason":"agent_slot_overflow_probe_failed_to_measure"}"#;
+    assert_eq!(
+        safe_failed_authoring_diagnostic(closed),
+        "status=executor_defect reason=agent_slot_overflow_probe_failed_to_measure",
+    );
+
+    let arbitrary = safe_failed_authoring_diagnostic(
+        r#"{"schemaVersion":1,"status":"executor_defect","rejectionReason":"sk-secret /Users/private/input"}"#,
+    );
+    assert_eq!(arbitrary, "status=executor_defect reason=unknown");
+    assert!(!arbitrary.contains("secret"));
+    assert!(!arbitrary.contains("private"));
+}
 
 struct TempDirectory(PathBuf);
 
