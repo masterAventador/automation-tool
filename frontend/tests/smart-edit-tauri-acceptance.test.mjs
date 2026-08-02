@@ -55,6 +55,11 @@ test("LE-19 owns one isolated real App smart-edit normal and failure journey", a
     2,
     "normal and measurement journeys must both reopen the project after settings",
   );
+  assert.doesNotMatch(spec, /if \(request\.enableThinking\) \{\s*await thinking\.click/u);
+  assert.match(
+    spec,
+    /const thinkingWasEnabled = [\s\S]*if \(thinkingWasEnabled !== request\.enableThinking\)/u,
+  );
 
   assert.match(wdio, /specs:\s*\["\.\/e2e-tauri\/smart-edit\.spec\.ts"\]/u);
   assert.match(wdio, /driverProvider:\s*"embedded"/u);

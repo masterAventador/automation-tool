@@ -163,7 +163,10 @@ async function runThinkingMeasurement(
   await configured.$("div[role='tab']=智能剪辑").click();
   await configured.$("textarea[aria-label='一句话描述成片']").setValue(PROMPT);
   const thinking = await configured.$("[role='switch'][aria-label='深度思考']");
-  if (request.enableThinking) {
+  const thinkingState = await thinking.getAttribute("aria-checked");
+  assert.ok(thinkingState === "true" || thinkingState === "false");
+  const thinkingWasEnabled = thinkingState === "true";
+  if (thinkingWasEnabled !== request.enableThinking) {
     await thinking.click();
   }
   assert.equal(
