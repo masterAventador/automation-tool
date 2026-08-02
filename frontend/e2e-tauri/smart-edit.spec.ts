@@ -211,6 +211,8 @@ describe("LE-19 production App smart-edit acceptance", () => {
     await configureScriptModel(apiKey);
     await openVideoEditing();
     const configured = await workbench();
+    await configured.$("div[role='tab']=剪辑项目").click();
+    await configured.$("button=打开时间轴编辑").click();
     await configured.$("div[role='tab']=智能剪辑").click();
     await configured.$("textarea[aria-label='一句话描述成片']").setValue(PROMPT);
     assert.equal(
@@ -218,7 +220,9 @@ describe("LE-19 production App smart-edit acceptance", () => {
       PROMPT,
     );
 
-    await configured.$("button=生成草稿").click();
+    const draft = await configured.$("button=生成草稿");
+    assert.equal(await draft.isEnabled(), true, "返回后没有重新打开现有剪辑项目");
+    await draft.click();
     await waitForSmartResult(configured, 1, true);
     await configured.$("div[role='tab']=智能剪辑").click();
     await expect(configured).toHaveText(
