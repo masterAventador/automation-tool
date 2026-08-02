@@ -134,13 +134,12 @@ RELEASE_PAYLOAD_PARTS_MIB: Final = {
     "app-shell-and-web-assets": 24,
 }
 
-# Windows is the 2026-07-31 installed-package audit. The macOS baseline starts
-# from the last whole-package audit (1,207,873,055), replaces the old 184,686,384
-# byte Executor with LE-14's 257,004,128 byte ONNX package, and adds PC-16's
-# 47,671,952 byte catalog. Both are target-shaped packages, never a sum of
-# unrelated cross-platform maxima.
+# Windows is the 2026-07-31 installed-package audit. The macOS baseline is the
+# 2026-08-03 complete signed candidate after the material Worker trim, LE-14
+# Executor and PC-16 catalog all landed. Both are target-shaped packages, never
+# a sum of unrelated cross-platform maxima.
 RELEASE_PACKAGE_BASELINE_BYTES: Final = {
-    "macos": 1_327_862_751,
+    "macos": 1_301_102_222,
     "windows": 1_289_130_572,
 }
 

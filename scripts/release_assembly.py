@@ -601,19 +601,24 @@ def notarize_and_staple(
         run(["ditto", "-c", "-k", "--keepParent", os.fspath(artifact), os.fspath(archive)])
         submission = archive
     try:
-        output = run(
-            [
-                "xcrun",
-                "notarytool",
-                "submit",
-                os.fspath(submission),
-                "--keychain-profile",
-                identity.notary_profile,
-                "--wait",
-                "--output-format",
-                "json",
-            ]
-        )
+        command = [
+            "xcrun",
+            "notarytool",
+            "submit",
+            os.fspath(submission),
+            "--keychain-profile",
+            identity.notary_profile,
+            "--wait",
+            "--output-format",
+            "json",
+        ]
+        try:
+            output = run(command)
+        except ReleaseAssemblyRejected as error:
+            message = str(error)
+            if "abortedUpload" not in message or "deadlineExceeded" not in message:
+                raise
+            output = run([*command, "--no-s3-acceleration"])
         result = _notarization_result(output)
         identifier = str(result.get("id", ""))
         if result.get("status") != "Accepted":

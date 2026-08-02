@@ -908,9 +908,18 @@ def instance_process_records(
         return []
     scoped = descendant_records(instance.pid, records)
     scoped_ids = {record.pid for record in scoped}
-    foreign = [
-        record for record in packaged_process_records(app, records) if record.pid not in scoped_ids
-    ]
+    packaged = packaged_process_records(app, records)
+    if instance.launch_nonce:
+        for record in packaged:
+            if record.pid not in scoped_ids and process_has_launch_nonce(
+                record, instance.launch_nonce
+            ):
+                scoped_ids.add(record.pid)
+        scoped = [record for record in records if record.pid in scoped_ids]
+    foreign = [record for record in packaged if record.pid not in scoped_ids]
+    if instance.launch_nonce and foreign:
+        current = process_snapshot()
+        foreign = [record for record in foreign if record in current]
     if reject_foreign and foreign:
         raise AcceptanceFailed("EB-11 detected another formal App instance during acceptance")
     return scoped
@@ -1005,6 +1014,23 @@ def require_private_directory_identity(path: Path) -> tuple[int, tuple[int, int]
     return descriptor, (metadata.st_dev, metadata.st_ino)
 
 
+def read_process_open_paths(records: list[ProcessRecord]) -> list[Path] | None:
+    process_ids = ",".join(str(record.pid) for record in records)
+    try:
+        rendered = run_checked(
+            ["/usr/sbin/lsof", "-nP", "-Fn", "-p", process_ids],
+            capture=True,
+        ).stdout
+    except subprocess.CalledProcessError as error:
+        current = process_snapshot()
+        if any(record not in current for record in records):
+            return None
+        raise AcceptanceFailed(
+            "EB-11 could not audit stable Chromium open files"
+        ) from error
+    return [Path(line[1:]) for line in rendered.splitlines() if line.startswith("n/")]
+
+
 def require_browser_profile_boundary(
     contract: RuntimeContract,
     browser: ProcessRecord,
@@ -1027,16 +1053,9 @@ def require_browser_profile_boundary(
             first_identities.append(identity)
 
         browser_tree = descendant_records(browser.pid, scoped_records)
-        process_ids = ",".join(str(record.pid) for record in browser_tree)
-        opened_files = run_checked(
-            ["/usr/sbin/lsof", "-nP", "-Fn", "-p", process_ids],
-            capture=True,
-        ).stdout
-        opened_paths = [
-            Path(line[1:])
-            for line in opened_files.splitlines()
-            if line.startswith("n/")
-        ]
+        opened_paths = read_process_open_paths(browser_tree)
+        if opened_paths is None:
+            return None
         if not any(path_is_within(path, candidate) for path in opened_paths):
             raise AcceptanceFailed("EB-11 Chromium did not open the App-owned Profile")
         if any(
@@ -1123,13 +1142,19 @@ def observe_instance_runtime(
         executor_tree = descendant_records(executor_records[0].pid, scoped)
         if browser_records[0] not in executor_tree:
             raise AcceptanceFailed("EB-11 Chromium did not descend from the packaged Executor")
-    for record in executor_records:
-        verify_runtime_process_identity(record, contract.executor_identity)
-    for record in browser_records:
-        verify_runtime_process_identity(record, contract.browser_identity)
+    verified_executor_records = [
+        record
+        for record in executor_records
+        if verify_runtime_process_identity(record, contract.executor_identity)
+    ]
+    verified_browser_records = [
+        record
+        for record in browser_records
+        if verify_runtime_process_identity(record, contract.browser_identity)
+    ]
     verified_bindings = tuple(
         binding
-        for record in browser_records
+        for record in verified_browser_records
         if (
             binding := require_browser_profile_boundary(
                 contract,
@@ -1139,35 +1164,55 @@ def observe_instance_runtime(
         )
         is not None
     )
+    transient_ids = {
+        record.pid
+        for record in [
+            *executor_records,
+            *browser_records,
+        ]
+        if record not in [*verified_executor_records, *verified_browser_records]
+    }
+    verified_scoped = [record for record in scoped if record.pid not in transient_ids]
     return observe_runtime(
         contract,
-        scoped,
+        verified_scoped,
         tuple(binding.path for binding in verified_bindings),
         verified_bindings,
     )
 
 
-def verify_runtime_process_identity(record: ProcessRecord, expected: CodeIdentity) -> None:
+def verify_runtime_process_identity(
+    record: ProcessRecord,
+    expected: CodeIdentity,
+) -> bool:
     if record not in process_snapshot():
-        raise AcceptanceFailed("EB-11 packaged runtime process identity changed")
+        return False
     process_id = str(record.pid)
-    run_checked(
-        ["codesign", "--verify", "--strict", "--verbose=4", process_id],
-        capture=True,
-    )
-    signature = run_checked(
-        ["codesign", "--display", "--verbose=4", process_id],
-        capture=True,
-    )
+    try:
+        run_checked(
+            ["codesign", "--verify", "--strict", "--verbose=4", process_id],
+            capture=True,
+        )
+        signature = run_checked(
+            ["codesign", "--display", "--verbose=4", process_id],
+            capture=True,
+        )
+    except subprocess.CalledProcessError as error:
+        if record not in process_snapshot():
+            return False
+        raise AcceptanceFailed(
+            "EB-11 packaged runtime process signature could not be verified"
+        ) from error
     observed = code_identity_from_details(
         f"{signature.stdout}\n{signature.stderr}",
         authority=expected.authority,
         team_id=expected.team_id,
     )
+    if record not in process_snapshot():
+        return False
     if observed != expected:
         raise AcceptanceFailed("EB-11 packaged runtime process does not match the signed App")
-    if record not in process_snapshot():
-        raise AcceptanceFailed("EB-11 packaged runtime process identity changed")
+    return True
 
 
 def require_complete_runtime(observation: RuntimeObservation) -> None:

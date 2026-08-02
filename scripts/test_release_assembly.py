@@ -576,6 +576,47 @@ class MacOSSigningContractTests(unittest.TestCase):
         for secret in ("password", "-----BEGIN", "app-specific", "AuthKey"):
             self.assertNotIn(secret, document)
 
+    def test_notarization_retries_one_timed_out_upload_without_s3_acceleration(
+        self,
+    ) -> None:
+        from release_assembly import SigningIdentity, notarize_and_staple
+
+        commands: list[list[str]] = []
+
+        def run(command: list[str]) -> str:
+            commands.append(list(command))
+            if "notarytool" not in command:
+                return ""
+            if "--no-s3-acceleration" not in command:
+                raise ReleaseAssemblyRejected(
+                    "release assembly rejected: xcrun failed: "
+                    "Error: abortedUpload(error: HTTPClientError.deadlineExceeded)"
+                )
+            return '{"id":"retry-id","status":"Accepted"}'
+
+        with tempfile.TemporaryDirectory(prefix="notary-retry-test-") as directory:
+            artifact = Path(directory) / "自动化运营工具.app"
+            artifact.mkdir()
+            identifier = notarize_and_staple(
+                artifact=artifact,
+                identity=SigningIdentity(
+                    certificate="Developer ID Application: Test (TEAMID)",
+                    team_id="TEAMID",
+                    notary_profile="test-profile",
+                ),
+                run=run,
+            )
+
+        submissions = [command for command in commands if "notarytool" in command]
+        self.assertEqual(identifier, "retry-id")
+        self.assertEqual(len(submissions), 2)
+        self.assertNotIn("--no-s3-acceleration", submissions[0])
+        self.assertIn("--no-s3-acceleration", submissions[1])
+        self.assertEqual(
+            sum("stapler" in command for command in commands),
+            1,
+        )
+
     def test_every_signed_component_is_a_declared_release_resource(self) -> None:
         from release_assembly import RELEASE_PACKAGE_RESOURCES
 

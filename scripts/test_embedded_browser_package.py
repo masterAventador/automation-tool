@@ -159,9 +159,11 @@ class ReleaseSizeBoundsTests(unittest.TestCase):
 
     def test_macos_bound_uses_the_signed_media_toolchain_size(self) -> None:
         signed_media_toolchain = 43_950_318
+        measured_complete_package = 1_301_102_222
         baseline = RELEASE_PACKAGE_BASELINE_BYTES["macos"]
         bounds = release_size_bounds("macos")
 
+        self.assertEqual(baseline, measured_complete_package)
         self.assertEqual(
             MINIMUM_COMPLETE_RUNTIME_BYTES["macos"],
             signed_media_toolchain,

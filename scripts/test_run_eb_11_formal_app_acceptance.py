@@ -815,6 +815,112 @@ class RuntimeObservationTests(unittest.TestCase):
             ["11", "11", "12", "12"],
         )
 
+    def test_runtime_identity_sampling_treats_process_exit_as_transient(self) -> None:
+        runner = load_runner()
+        record = runner.ProcessRecord(
+            12,
+            11,
+            "/Applications/Formal Product.app/Contents/Resources/browser",
+            "C",
+        )
+        expected = runner.CodeIdentity(
+            identifier="com.google.Chrome.for.Testing",
+            authority="Developer ID Application: Expected",
+            team_id="EXPECTEDTEAM",
+            cdhash="b" * 40,
+        )
+        verified = subprocess.CompletedProcess(["codesign"], 0, stdout="", stderr="")
+        details = subprocess.CompletedProcess(
+            ["codesign"],
+            0,
+            stdout="",
+            stderr=(
+                f"Identifier={expected.identifier}\n"
+                f"Authority={expected.authority}\n"
+                f"TeamIdentifier={expected.team_id}\n"
+                f"CDHash={expected.cdhash}\n"
+            ),
+        )
+
+        with (
+            mock.patch.object(
+                runner,
+                "process_snapshot",
+                side_effect=[[record], []],
+            ),
+            mock.patch.object(runner, "run_checked", side_effect=[verified, details]),
+        ):
+            self.assertFalse(runner.verify_runtime_process_identity(record, expected))
+
+    def test_runtime_identity_sampling_treats_codesign_failure_after_exit_as_transient(
+        self,
+    ) -> None:
+        runner = load_runner()
+        record = runner.ProcessRecord(
+            12,
+            11,
+            "/Applications/Formal Product.app/Contents/Resources/browser",
+            "C",
+        )
+        expected = runner.CodeIdentity(
+            identifier="com.google.Chrome.for.Testing",
+            authority="Developer ID Application: Expected",
+            team_id="EXPECTEDTEAM",
+            cdhash="b" * 40,
+        )
+        verified = subprocess.CompletedProcess(["codesign"], 0, stdout="", stderr="")
+        signing_failure = subprocess.CalledProcessError(1, ["codesign"])
+
+        for signing_results in ([signing_failure], [verified, signing_failure]):
+            with (
+                self.subTest(signing_results=signing_results),
+                mock.patch.object(
+                    runner,
+                    "process_snapshot",
+                    side_effect=[[record], []],
+                ),
+                mock.patch.object(
+                    runner,
+                    "run_checked",
+                    side_effect=signing_results,
+                ),
+            ):
+                self.assertFalse(runner.verify_runtime_process_identity(record, expected))
+
+        with (
+            mock.patch.object(
+                runner,
+                "process_snapshot",
+                side_effect=[[record], [record]],
+            ),
+            mock.patch.object(runner, "run_checked", side_effect=signing_failure),
+            self.assertRaises(runner.AcceptanceFailed),
+        ):
+            runner.verify_runtime_process_identity(record, expected)
+
+    def test_open_file_sampling_retries_only_when_a_sampled_process_exits(self) -> None:
+        runner = load_runner()
+        record = runner.ProcessRecord(
+            12,
+            11,
+            "/Applications/Formal Product.app/Contents/Resources/browser",
+            "C",
+        )
+        failure = subprocess.CalledProcessError(1, ["/usr/sbin/lsof"])
+
+        with (
+            mock.patch.object(runner, "run_checked", side_effect=failure),
+            mock.patch.object(runner, "process_snapshot", return_value=[]),
+        ):
+            self.assertIsNone(runner.read_process_open_paths([record]))
+
+        with (
+            mock.patch.object(runner, "run_checked", side_effect=failure),
+            mock.patch.object(runner, "process_snapshot", return_value=[record]),
+            self.assertRaises(runner.AcceptanceFailed),
+        ):
+            runner.read_process_open_paths([record])
+
     @unittest.skipUnless(os.name == "posix", "POSIX Profile boundary contract")
     def test_runtime_observation_rejects_a_profile_symlinked_outside_app_data(self) -> None:
         runner = load_runner()
@@ -1043,6 +1149,90 @@ class RuntimeObservationTests(unittest.TestCase):
             ),
             [root, own_child],
         )
+
+    def test_instance_scope_keeps_nonce_owned_reparented_browser_helpers(self) -> None:
+        runner = load_runner()
+        app = Path("/Applications/Formal Product.app")
+        root = runner.ProcessRecord(
+            10,
+            1,
+            os.fspath(app / "Contents/MacOS/Product"),
+            "A",
+            launch_nonce="owned-launch",
+        )
+        own_child = runner.ProcessRecord(
+            11,
+            10,
+            os.fspath(app / "Contents/Resources/local-executor/executor"),
+            "B",
+        )
+        reparented_helper = runner.ProcessRecord(
+            12,
+            1,
+            os.fspath(
+                app
+                / "Contents/Resources/embedded-browser/Browser.app/Contents/"
+                "Frameworks/Browser Framework.framework/Helpers/chrome_crashpad_handler"
+            ),
+            "C",
+        )
+
+        with mock.patch.object(
+            runner,
+            "process_has_launch_nonce",
+            side_effect=lambda record, nonce: (
+                record == reparented_helper and nonce == "owned-launch"
+            ),
+        ):
+            self.assertEqual(
+                runner.instance_process_records(
+                    app,
+                    root,
+                    [root, own_child, reparented_helper],
+                ),
+                [root, own_child, reparented_helper],
+            )
+
+    def test_instance_scope_ignores_nonce_helper_that_exits_during_sampling(self) -> None:
+        runner = load_runner()
+        app = Path("/Applications/Formal Product.app")
+        root = runner.ProcessRecord(
+            10,
+            1,
+            os.fspath(app / "Contents/MacOS/Product"),
+            "A",
+            launch_nonce="owned-launch",
+        )
+        reparented_helper = runner.ProcessRecord(
+            12,
+            1,
+            os.fspath(
+                app
+                / "Contents/Resources/embedded-browser/Browser.app/Contents/"
+                "Frameworks/Browser Framework.framework/Helpers/chrome_crashpad_handler"
+            ),
+            "C",
+        )
+
+        with (
+            mock.patch.object(runner, "process_has_launch_nonce", return_value=False),
+            mock.patch.object(runner, "process_snapshot", return_value=[root]),
+        ):
+            self.assertEqual(
+                runner.instance_process_records(app, root, [root, reparented_helper]),
+                [root],
+            )
+
+        with (
+            mock.patch.object(runner, "process_has_launch_nonce", return_value=False),
+            mock.patch.object(
+                runner,
+                "process_snapshot",
+                return_value=[root, reparented_helper],
+            ),
+            self.assertRaises(runner.AcceptanceFailed),
+        ):
+            runner.instance_process_records(app, root, [root, reparented_helper])
 
     def test_instance_scope_rejects_reused_root_pid(self) -> None:
         runner = load_runner()
