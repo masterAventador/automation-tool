@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import stat
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -20,6 +21,7 @@ from automation_tool.control_plane.domain import (
     MaterialKind,
 )
 from automation_tool.executor.local_editing_worker import (
+    LocalEditingScriptModelConfiguration,
     LocalEditingWorkerBootstrap,
     LocalSmartEditFailureCode,
     LocalSmartEditStartCommand,
@@ -30,6 +32,7 @@ from automation_tool.executor.material_probe import (
     MaterialPathRegistryRejection,
     PackagedMediaTools,
 )
+from automation_tool.executor.material_speech_pipeline import LocalAudibleSpeechAnalyzer
 from automation_tool.executor.motion_authoring.authoring_workspace import (
     AuthoringWorkspace,
 )
@@ -47,6 +50,7 @@ from automation_tool.executor.smart_edit_worker_process import (
     LocalSmartEditWorkerRejected,
     abort_smart_edit_job,
     commit_smart_edit_job,
+    create_local_smart_edit_pipeline,
     prepare_smart_edit_job,
 )
 from automation_tool.protocol.local_editing import (
@@ -148,6 +152,28 @@ def _request_path(bootstrap: LocalEditingWorkerBootstrap) -> Path:
         encoding="utf-8",
     )
     return request
+
+
+def test_shipped_pipeline_builds_a_concrete_audible_speech_analyzer(tmp_path: Path) -> None:
+    bootstrap = replace(
+        _bootstrap(tmp_path),
+        script_model=LocalEditingScriptModelConfiguration(
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            model_id="qwen3.7-max-2026-06-08",
+            api_key="sk-" + "private" * 4,
+        ),
+    )
+    workspace_root = _private(tmp_path / "workspace")
+    source = tmp_path / "speech.mp4"
+    source.write_bytes(b"speech")
+
+    pipeline = create_local_smart_edit_pipeline(
+        bootstrap,
+        AuthoringWorkspace(workspace_root),
+    )
+    analyzer = pipeline.audible_speech_analyzer_factory(source, source.stat())
+
+    assert isinstance(analyzer, LocalAudibleSpeechAnalyzer)
 
 
 def _result() -> SmartEditGenerationResult:

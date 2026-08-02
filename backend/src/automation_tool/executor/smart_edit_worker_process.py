@@ -475,7 +475,7 @@ def create_local_smart_edit_pipeline(
             approved=approved,
             vad_factory=create_silero_vad,
             asr_adapter=transcription,
-        )
+        )()
 
     return LocalSmartEditGenerationPipeline(
         tools=bootstrap.media_tools,
