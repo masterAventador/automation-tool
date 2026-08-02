@@ -51,3 +51,13 @@ test("only production-capable handlers expose smart edit", () => {
     1,
   );
 });
+
+test("one-click render releases the material operation before nested dispatch", () => {
+  const release = runtime.indexOf("drop(material_operation);");
+  const dispatch = runtime.indexOf(
+    "local_editing_runtime::dispatch_submitted_job(&app, &value)",
+  );
+
+  assert.ok(release >= 0, "smart edit must release its material operation explicitly");
+  assert.ok(dispatch > release, "render dispatch must happen after the release");
+});

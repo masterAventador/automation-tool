@@ -552,7 +552,7 @@ async fn run_generation<R: Runtime>(
         );
         return;
     };
-    let _material_operation = coordinator.acquire().await;
+    let material_operation = coordinator.acquire().await;
     let initial_timeline = match client
         .get_editing_project_timeline(&vault, &request.project_id)
         .await
@@ -977,6 +977,7 @@ async fn run_generation<R: Runtime>(
             return;
         }
     };
+    drop(material_operation);
     let render_job = if request.mode == SmartEditGenerationMode::Render {
         match client.submit_editing_job(&vault, &request.project_id).await {
             Ok(value) => {
