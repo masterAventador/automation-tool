@@ -10,9 +10,11 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from desktop_e2e_prerequisites import PRODUCT_CONTROL_PLANE_PORT, port_is_free
 from le24_measurement import (
     MATERIAL_COUNT_ENVIRONMENT,
     THINKING_ENVIRONMENT,
@@ -29,6 +31,16 @@ ROOT = Path(__file__).resolve().parents[1]
 SINGLE_OBSERVATION_RUNNER = ROOT / "scripts/run_le_19_acceptance.py"
 DEFAULT_OUTPUT_ROOT = ROOT / ".local/local-video-editing/le24-measurements"
 REVISION = re.compile(r"[0-9a-f]{40}")
+
+
+def _wait_for_formal_observation_slot() -> None:
+    """Let the previous fixed-port App run fully leave TCP TIME_WAIT."""
+    for attempt in range(51):
+        if port_is_free(PRODUCT_CONTROL_PLANE_PORT):
+            return
+        if attempt < 50:
+            time.sleep(0.1)
+    raise RuntimeError("LE-24 formal App product port is not reusable")
 
 
 def collect_le24_paired_measurements(
@@ -129,6 +141,7 @@ def _revision() -> str:
 
 
 def _run_formal_observation(step: Le24MeasurementStep) -> Le24Measurement:
+    _wait_for_formal_observation_slot()
     print(
         "LE-24 正式 App 计时："
         f"第 {step.repetition}/3 轮，{step.material_count} 条素材，"

@@ -13,12 +13,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from le24_measurement import Le24Measurement, Le24MeasurementStep
 from run_le_24_measurements import (
     _run_formal_observation,
+    _wait_for_formal_observation_slot,
     build_le24_report,
     collect_le24_paired_measurements,
 )
 
 
 class Le24MeasurementCollectionTests(unittest.TestCase):
+    def test_waits_for_the_fixed_product_port_to_leave_time_wait(self) -> None:
+        with (
+            patch(
+                "run_le_24_measurements.port_is_free",
+                side_effect=[False, False, True],
+            ) as port_is_free,
+            patch("run_le_24_measurements.time.sleep") as pause,
+        ):
+            _wait_for_formal_observation_slot()
+
+        self.assertEqual(port_is_free.call_count, 3)
+        self.assertEqual(pause.call_count, 2)
+
     def test_failed_formal_observation_preserves_the_child_diagnostic(self) -> None:
         diagnostic = StringIO()
         completed = CompletedProcess(
