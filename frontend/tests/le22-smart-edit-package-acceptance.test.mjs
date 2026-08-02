@@ -85,6 +85,11 @@ test("LE-22 package journey uses one speech material and the formal editing UI",
   assert.match(runner, /bundle_binary\(installed_application\)/u);
   assert.match(
     runner,
+    /speech_transcript from materials "\s+"order by material_id"/u,
+    "the evidence query must order by a column that exists on materials",
+  );
+  assert.match(
+    runner,
     /finally:\n\s+stop_control_plane\(server\)\n\s+server = None/u,
     "the Control Plane must stop before the isolated PostgreSQL context exits",
   );

@@ -345,7 +345,7 @@ async def collect_database_evidence(database_url: str) -> Le22DatabaseSummary:
                     text(
                         "select material_id, kind, duration_ms, has_speech, "
                         "speech_segments_ms, speech_transcript from materials "
-                        "order by created_at"
+                        "order by material_id"
                     )
                 )
             ).all()
