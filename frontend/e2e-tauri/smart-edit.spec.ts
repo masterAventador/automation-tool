@@ -143,6 +143,11 @@ async function createEditingProject(
   );
 }
 
+async function openCurrentEditingProject(editing: BrowserElement): Promise<void> {
+  await editing.$("div[role='tab']=剪辑项目").click();
+  await editing.$("button=打开时间轴编辑").click();
+}
+
 async function runThinkingMeasurement(
   apiKey: string,
   request: NonNullable<ReturnType<typeof measurementRequest>>,
@@ -154,6 +159,7 @@ async function runThinkingMeasurement(
   await configureScriptModel(apiKey);
   await openVideoEditing();
   const configured = await workbench();
+  await openCurrentEditingProject(configured);
   await configured.$("div[role='tab']=智能剪辑").click();
   await configured.$("textarea[aria-label='一句话描述成片']").setValue(PROMPT);
   const thinking = await configured.$("[role='switch'][aria-label='深度思考']");
@@ -165,8 +171,10 @@ async function runThinkingMeasurement(
     String(request.enableThinking),
   );
 
+  const draft = await configured.$("button=生成草稿");
+  assert.equal(await draft.isEnabled(), true, "计时前没有重新打开现有剪辑项目");
   const startedAt = performance.now();
-  await configured.$("button=生成草稿").click();
+  await draft.click();
   await waitForSmartResult(configured, 1, true);
   const elapsedMs = Math.round(performance.now() - startedAt);
   assert.ok(elapsedMs > 0 && elapsedMs <= 900_000);
@@ -216,8 +224,7 @@ describe("LE-19 production App smart-edit acceptance", () => {
     await configureScriptModel(apiKey);
     await openVideoEditing();
     const configured = await workbench();
-    await configured.$("div[role='tab']=剪辑项目").click();
-    await configured.$("button=打开时间轴编辑").click();
+    await openCurrentEditingProject(configured);
     await configured.$("div[role='tab']=智能剪辑").click();
     await configured.$("textarea[aria-label='一句话描述成片']").setValue(PROMPT);
     assert.equal(

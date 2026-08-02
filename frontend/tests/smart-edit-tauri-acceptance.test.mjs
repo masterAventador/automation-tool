@@ -46,6 +46,15 @@ test("LE-19 owns one isolated real App smart-edit normal and failure journey", a
   assert.match(spec, /LE24_MEASUREMENT/u);
   assert.match(spec, /async function materialIds/u);
   assert.match(spec, /\(await materialIds\(editing\)\)\.length > before\.size/u);
+  assert.match(
+    spec,
+    /async function openCurrentEditingProject[\s\S]*button=打开时间轴编辑/u,
+  );
+  assert.equal(
+    spec.match(/await openCurrentEditingProject\(configured\)/gu)?.length,
+    2,
+    "normal and measurement journeys must both reopen the project after settings",
+  );
 
   assert.match(wdio, /specs:\s*\["\.\/e2e-tauri\/smart-edit\.spec\.ts"\]/u);
   assert.match(wdio, /driverProvider:\s*"embedded"/u);
