@@ -546,6 +546,7 @@ def run_wdio(
         raise RuntimeError("LE-22 installed App journey did not finish") from error
     output = output_bytes.decode("utf-8", errors="replace")
     assert_no_private_evidence(output, api_key, source)
+    print(output, end="")
     if PRIVATE_OUTPUT.search(output) or process.returncode != 0:
         raise RuntimeError("LE-22 installed App journey failed")
 

@@ -85,6 +85,11 @@ test("LE-22 package journey uses one speech material and the formal editing UI",
   assert.match(runner, /bundle_binary\(installed_application\)/u);
   assert.match(
     runner,
+    /assert_no_private_evidence\(output, api_key, source\)\n\s+print\(output, end=""\)/u,
+    "the sanitized WebDriver diagnostics must remain visible on failure",
+  );
+  assert.match(
+    runner,
     /speech_transcript from materials "\s+"order by material_id"/u,
     "the evidence query must order by a column that exists on materials",
   );
