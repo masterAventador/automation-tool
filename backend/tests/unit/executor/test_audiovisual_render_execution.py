@@ -206,6 +206,28 @@ def test_audiovisual_execution_publishes_one_verified_h264_aac(
     assert (task / VISUAL_RENDER_OUTPUT_FILENAME).read_bytes() == b"x" * 100
 
 
+def test_receipt_accepts_aac_duration_rounding_within_one_codec_frame(
+    tmp_path: Path,
+) -> None:
+    plan = _request(tmp_path)[0]
+    output = tmp_path / "output.mp4"
+    output.write_bytes(b"x" * 100)
+    audio = _valid_audio_stream()
+    audio["duration"] = "0.988000"
+
+    receipt = execution._verified_receipt(
+        _probe_payload(plan, audio=audio),
+        plan=plan,
+        target_frames=30,
+        output_stat=output.stat(),
+        digest="a" * 64,
+        expect_audio=True,
+    )
+
+    assert receipt.duration_ms == 1000
+    assert receipt.audio_codec == "aac"
+
+
 def test_excluded_audio_needs_no_stat_or_file_and_publishes_video_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

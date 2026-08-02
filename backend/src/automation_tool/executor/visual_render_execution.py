@@ -69,6 +69,7 @@ _FFPROBE_TIMEOUT_SECONDS: Final = 30.0
 _PROCESS_STOP_SECONDS: Final = 5.0
 _PROCESS_POLL_SECONDS: Final = 0.05
 _FFPROBE_STDOUT_LIMIT_BYTES: Final = 1024 * 1024
+_AAC_FRAME_DURATION_SECONDS: Final = Decimal(1024) / Decimal(48_000)
 _CREATE_NEW_PROCESS_GROUP: Final = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}\Z")
 
@@ -212,9 +213,7 @@ def _run_bounded_process(
         captured: BinaryIO | None = None
         if stdout_limit_bytes:
             captured = resources.enter_context(tempfile.TemporaryFile())
-        stdout_target: int | BinaryIO = (
-            captured if captured is not None else subprocess.DEVNULL
-        )
+        stdout_target: int | BinaryIO = captured if captured is not None else subprocess.DEVNULL
         creationflags = _CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
         process = subprocess.Popen(
             argv,
@@ -493,7 +492,7 @@ def _verified_receipt(
         frame_count != target_frames
         or container_size != output_stat.st_size
         or abs(duration - expected_duration) > Decimal("0.001")
-        or (expect_audio and abs(audio_duration - expected_duration) > Decimal("0.001"))
+        or (expect_audio and abs(audio_duration - expected_duration) > _AAC_FRAME_DURATION_SECONDS)
     ):
         _reject(VisualRenderExecutionRejection.OUTPUT_INVALID)
     duration_ms = (target_frames * 1000 + plan.output_fps // 2) // plan.output_fps
@@ -549,10 +548,7 @@ def _execute_render(
     if (
         not isinstance(tools, PackagedMediaTools)
         or not isinstance(plan, LocalEditingVisualRenderPlan)
-        or (
-            audio_plan is None
-            and (audio_sources != () or approved_audio_sources != ())
-        )
+        or (audio_plan is None and (audio_sources != () or approved_audio_sources != ()))
         or (
             audio_plan is not None
             and (
@@ -706,9 +702,7 @@ def _execute_render(
             target_frames=command.target_frames,
             output_stat=after_digest,
             digest=digest,
-            expect_audio=(
-                isinstance(command, AudiovisualFfmpegCommand) and command.has_audio
-            ),
+            expect_audio=(isinstance(command, AudiovisualFfmpegCommand) and command.has_audio),
         )
         publication_rejection: VisualRenderExecutionRejection | None = None
         try:
