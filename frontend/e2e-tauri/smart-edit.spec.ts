@@ -212,6 +212,7 @@ describe("LE-19 production App smart-edit acceptance", () => {
     await openVideoEditing();
     const configured = await workbench();
     await configured.$("div[role='tab']=智能剪辑").click();
+    await configured.$("textarea[aria-label='一句话描述成片']").setValue(PROMPT);
     assert.equal(
       await configured.$("textarea[aria-label='一句话描述成片']").getValue(),
       PROMPT,
