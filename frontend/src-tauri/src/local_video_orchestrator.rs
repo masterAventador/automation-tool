@@ -480,8 +480,8 @@ struct VideoWorkerSmartEditParagraph {
     kind: VideoWorkerSmartEditParagraphKind,
     sequence: u32,
     visual_material_id: String,
-    visual_source_in_ms: u64,
-    visual_source_out_ms: u64,
+    visual_source_in_ms: Option<u64>,
+    visual_source_out_ms: Option<u64>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -539,16 +539,23 @@ impl VideoWorkerSmartEditResult {
                 .map_err(|_| authentication_rejected())?;
             let audio_id = Uuid::parse_str(&paragraph.audio_material_id)
                 .map_err(|_| authentication_rejected())?;
+            let valid_source_window = match (
+                paragraph.visual_source_in_ms,
+                paragraph.visual_source_out_ms,
+            ) {
+                (Some(source_in_ms), Some(source_out_ms)) => {
+                    source_out_ms.checked_sub(source_in_ms) == Some(paragraph.duration_ms)
+                }
+                (None, None) => true,
+                _ => false,
+            };
             if paragraph.sequence != expected_sequence
                 || !valid_uuid_v4(visual_id)
                 || !valid_uuid_v4(audio_id)
                 || visual_id.hyphenated().to_string() != paragraph.visual_material_id
                 || audio_id.hyphenated().to_string() != paragraph.audio_material_id
                 || paragraph.duration_ms == 0
-                || paragraph
-                    .visual_source_out_ms
-                    .checked_sub(paragraph.visual_source_in_ms)
-                    != Some(paragraph.duration_ms)
+                || !valid_source_window
                 || paragraph.caption_text.is_empty()
                 || paragraph.caption_text.trim() != paragraph.caption_text
                 || paragraph.caption_text.chars().count() > 2_000
@@ -557,7 +564,8 @@ impl VideoWorkerSmartEditResult {
                     .chars()
                     .any(|character| character.is_control() && !matches!(character, '\n' | '\t'))
                 || paragraph.kind == VideoWorkerSmartEditParagraphKind::OriginalSpeech
-                    && paragraph.audio_material_id != paragraph.visual_material_id
+                    && (paragraph.audio_material_id != paragraph.visual_material_id
+                        || paragraph.visual_source_in_ms.is_none())
                 || !paragraph_ids.insert(paragraph.sequence)
             {
                 return Err(authentication_rejected());
@@ -665,12 +673,12 @@ impl VideoWorkerSmartEditResult {
                 "durationMs": paragraph.duration_ms,
                 "sourceMaterialId": paragraph.audio_material_id,
                 "sourceInMs": if paragraph.kind == VideoWorkerSmartEditParagraphKind::Narrated {
-                    0
+                    Some(0)
                 } else {
                     paragraph.visual_source_in_ms
                 },
                 "sourceOutMs": if paragraph.kind == VideoWorkerSmartEditParagraphKind::Narrated {
-                    paragraph.duration_ms
+                    Some(paragraph.duration_ms)
                 } else {
                     paragraph.visual_source_out_ms
                 },
@@ -4451,7 +4459,67 @@ const fn timed_out() -> VideoWorkerError {
 
 #[cfg(test)]
 mod tests {
-    use super::unsafe_path_component;
+    use super::{unsafe_path_component, VideoWorkerSmartEditResult};
+
+    #[test]
+    fn smart_edit_result_accepts_one_static_image_in_multiple_paragraphs() {
+        let job_id = "123e4567-e89b-42d3-a456-426614174100";
+        let visual_id = "223e4567-e89b-42d3-a456-426614174101";
+        let result: VideoWorkerSmartEditResult = serde_json::from_value(serde_json::json!({
+            "analysisUpdates": [],
+            "draft": {
+                "durationMs": 2_000,
+                "paragraphs": [
+                    {
+                        "audioMaterialId": "323e4567-e89b-42d3-a456-426614174102",
+                        "captionText": "第一段旁白",
+                        "durationMs": 1_000,
+                        "kind": "narrated",
+                        "sequence": 1,
+                        "visualMaterialId": visual_id,
+                        "visualSourceInMs": null,
+                        "visualSourceOutMs": null
+                    },
+                    {
+                        "audioMaterialId": "423e4567-e89b-42d3-a456-426614174103",
+                        "captionText": "第二段旁白",
+                        "durationMs": 1_000,
+                        "kind": "narrated",
+                        "sequence": 2,
+                        "visualMaterialId": visual_id,
+                        "visualSourceInMs": null,
+                        "visualSourceOutMs": null
+                    }
+                ]
+            },
+            "jobId": job_id,
+            "narrationRegistrations": [
+                {
+                    "bytesWritten": 1_024,
+                    "contentDigest": "a".repeat(64),
+                    "durationMs": 1_000,
+                    "materialId": "323e4567-e89b-42d3-a456-426614174102",
+                    "relativePath": "voiceover/sentence-0001.wav",
+                    "sequence": 1
+                },
+                {
+                    "bytesWritten": 1_024,
+                    "contentDigest": "b".repeat(64),
+                    "durationMs": 1_000,
+                    "materialId": "423e4567-e89b-42d3-a456-426614174103",
+                    "relativePath": "voiceover/sentence-0002.wav",
+                    "sequence": 2
+                }
+            ],
+            "schemaVersion": "smart-edit-generation-result.v1"
+        }))
+        .expect("static smart-edit result");
+
+        result.validate(job_id).expect("valid static result");
+        let timeline = result.timeline_document();
+        assert!(timeline["tracks"][0]["clips"][0]["sourceInMs"].is_null());
+        assert_eq!(timeline["tracks"][1]["clips"][0]["sourceInMs"], 0);
+    }
 
     #[test]
     fn windows_reparse_points_are_rejected_even_when_not_reported_as_symlinks() {
