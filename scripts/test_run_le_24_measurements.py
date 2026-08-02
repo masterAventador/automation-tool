@@ -20,18 +20,20 @@ from run_le_24_measurements import (
 
 
 class Le24MeasurementCollectionTests(unittest.TestCase):
-    def test_waits_for_the_fixed_product_port_to_leave_time_wait(self) -> None:
+    def test_waits_past_five_seconds_for_the_product_port_to_leave_time_wait(
+        self,
+    ) -> None:
         with (
             patch(
                 "run_le_24_measurements.port_is_free",
-                side_effect=[False, False, True],
+                side_effect=[False] * 51 + [True],
             ) as port_is_free,
             patch("run_le_24_measurements.time.sleep") as pause,
         ):
             _wait_for_formal_observation_slot()
 
-        self.assertEqual(port_is_free.call_count, 3)
-        self.assertEqual(pause.call_count, 2)
+        self.assertEqual(port_is_free.call_count, 52)
+        self.assertEqual(pause.call_count, 51)
 
     def test_failed_formal_observation_preserves_the_child_diagnostic(self) -> None:
         diagnostic = StringIO()

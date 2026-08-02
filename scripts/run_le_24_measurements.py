@@ -35,10 +35,10 @@ REVISION = re.compile(r"[0-9a-f]{40}")
 
 def _wait_for_formal_observation_slot() -> None:
     """Let the previous fixed-port App run fully leave TCP TIME_WAIT."""
-    for attempt in range(51):
+    for attempt in range(1_201):
         if port_is_free(PRODUCT_CONTROL_PLANE_PORT):
             return
-        if attempt < 50:
+        if attempt < 1_200:
             time.sleep(0.1)
     raise RuntimeError("LE-24 formal App product port is not reusable")
 
