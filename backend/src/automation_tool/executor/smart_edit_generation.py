@@ -37,6 +37,7 @@ from automation_tool.executor.speech_paragraph_draft import (
     resolve_speech_aware_paragraph_draft,
 )
 from automation_tool.protocol.local_editing import (
+    LOCAL_EDITING_SEMANTIC_SCORE_THRESHOLD,
     MAX_LOCAL_EDITING_SEMANTIC_MATERIALS,
     LocalEditingTimelineDraft,
     LocalEditingTimelineParagraphKind,
@@ -616,6 +617,16 @@ class _SilentPlanner:
     def plan(self, material_ids: tuple[UUID, ...]) -> tuple[NarratedParagraphDraft, ...]:
         if material_ids != self.silent_ids:
             _reject()
+        reusable_static_id: UUID | None = None
+        if (
+            len(self.selection_materials) == 1
+            and self.selection_materials[0].kind is SegmentSelectionMaterialKind.IMAGE
+            and all(len(sentence.candidates) == 1 for sentence in self.matches.sentences)
+            and any(
+                sentence.candidates[0].qualified for sentence in self.matches.sentences
+            )
+        ):
+            reusable_static_id = self.selection_materials[0].material_id
         paragraphs: list[NarratedParagraphDraft] = []
         for sentence, voiceover, matching in zip(
             self.script.sentences,
@@ -623,15 +634,25 @@ class _SilentPlanner:
             self.matches.sentences,
             strict=True,
         ):
+            projected_scores = tuple(
+                max(candidate.score, LOCAL_EDITING_SEMANTIC_SCORE_THRESHOLD)
+                if candidate.material_id.uuid == reusable_static_id
+                else candidate.score
+                for candidate in matching.candidates
+            )
             projected = SegmentSelectionSentenceMatches(
                 sequence=matching.sequence,
                 candidates=tuple(
                     SegmentSelectionCandidateScore(
                         material_id=candidate.material_id.uuid,
-                        score=candidate.score,
-                        qualified=candidate.qualified,
+                        score=score,
+                        qualified=score >= LOCAL_EDITING_SEMANTIC_SCORE_THRESHOLD,
                     )
-                    for candidate in matching.candidates
+                    for candidate, score in zip(
+                        matching.candidates,
+                        projected_scores,
+                        strict=True,
+                    )
                 ),
             )
             selected = select_fitting_segments(

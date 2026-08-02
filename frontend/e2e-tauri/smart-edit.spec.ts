@@ -56,6 +56,7 @@ async function waitForSmartResult(
   requireUnderstanding: boolean,
 ): Promise<void> {
   let sawUnderstanding = false;
+  let terminalFailure: (typeof TERMINAL_FAILURES)[number] | undefined;
   await browser.waitUntil(
     async () => {
       const text = await value.getText();
@@ -64,7 +65,8 @@ async function waitForSmartResult(
       }
       const failure = TERMINAL_FAILURES.find((copy) => text.includes(copy));
       if (failure !== undefined) {
-        throw new Error(`正式智能剪辑失败：${failure}`);
+        terminalFailure = failure;
+        return true;
       }
       return (
         text.includes(`当前修订：第 ${expectedRevision} 版`) ||
@@ -77,6 +79,9 @@ async function waitForSmartResult(
       timeoutMsg: `智能剪辑没有生成第 ${expectedRevision} 版时间轴`,
     },
   );
+  if (terminalFailure !== undefined) {
+    throw new Error(`正式智能剪辑失败：${terminalFailure}`);
+  }
   if (requireUnderstanding) {
     assert.equal(sawUnderstanding, true, "用户没有看到真实素材理解进度");
   }

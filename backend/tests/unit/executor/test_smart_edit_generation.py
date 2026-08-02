@@ -208,6 +208,53 @@ def test_all_voiced_materials_skip_script_tts_and_matching() -> None:
     )
 
 
+def test_one_relevant_static_image_covers_a_low_scoring_script_sentence() -> None:
+    image = _material(kind=MaterialKind.IMAGE)
+    script, voiceovers, _matches, narration = _narrated_inputs(
+        image,
+        sentences=("彩色测试图用于校准电视。", "它也承载着模拟电视时代的记忆。"),
+    )
+    matches = SemanticMatchingResult(
+        request_ids=("match-request",),
+        sentences=(
+            SemanticSentenceMatches(
+                sequence=1,
+                candidates=(
+                    SemanticCandidateScore(
+                        material_id=image.material_id,
+                        score=91,
+                        qualified=True,
+                    ),
+                ),
+            ),
+            SemanticSentenceMatches(
+                sequence=2,
+                candidates=(
+                    SemanticCandidateScore(
+                        material_id=image.material_id,
+                        score=59,
+                        qualified=False,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    outcome = assemble_smart_edit_timeline_draft(
+        materials=(image,),
+        script=script,
+        voiceovers=voiceovers,
+        matches=matches,
+        decodable_materials=(),
+        narration_materials=narration,
+    )
+
+    assert isinstance(outcome, SmartEditGenerationResult)
+    assert tuple(
+        paragraph.visual_material_id for paragraph in outcome.draft.paragraphs
+    ) == (image.material_id.uuid, image.material_id.uuid)
+
+
 @pytest.mark.parametrize(
     ("sentences", "duration_ms", "score", "expected"),
     [

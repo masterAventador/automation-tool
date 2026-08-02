@@ -169,7 +169,19 @@ class LocalEditingTimelineDraft:
         if (
             tuple(paragraph.sequence for paragraph in validated)
             != tuple(range(1, len(validated) + 1))
-            or len(visual_ids) != len(validated)
+            or any(
+                sum(
+                    paragraph.visual_material_id == material_id
+                    for paragraph in validated
+                )
+                > 1
+                and any(
+                    paragraph.visual_material_id == material_id
+                    and paragraph.visual_source_in_ms is not None
+                    for paragraph in validated
+                )
+                for material_id in visual_ids
+            )
             or len(set(narration_audio_ids)) != len(narration_audio_ids)
             or any(material_id in visual_ids for material_id in narration_audio_ids)
             or not MIN_LOCAL_EDITING_TIMELINE_DURATION_MS

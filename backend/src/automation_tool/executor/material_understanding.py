@@ -314,10 +314,11 @@ def _parse_understanding_result(
                 end_ms=(
                     1
                     if static_image
+                    and len(raw_shots) == 1
                     and type(raw_start) is int
                     and type(raw_end) is int
                     and raw_start == 0
-                    and raw_end == 0
+                    and raw_end >= 0
                     else cast(int, raw_end)
                 ),
                 description=cast(str, raw_shot["description"]),
