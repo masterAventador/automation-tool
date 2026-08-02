@@ -5,7 +5,18 @@ import test from "node:test";
 const frontendRoot = new URL("../", import.meta.url);
 
 test("H8-16E composes every startup component through one path-free native aggregate", async () => {
-  const [startup, gateway, main, entry, nativeStartup, platform, profiles] = await Promise.all([
+  const [
+    startup,
+    gateway,
+    main,
+    entry,
+    nativeStartup,
+    platform,
+    profiles,
+    appLogging,
+    manager,
+    executorPackage,
+  ] = await Promise.all([
     readFile(new URL("src/app/startup.ts", frontendRoot), "utf8"),
     readFile(
       new URL("src/platform/tauri/startup-environment-gateway.ts", frontendRoot),
@@ -16,6 +27,9 @@ test("H8-16E composes every startup component through one path-free native aggre
     readFile(new URL("src-tauri/src/startup_environment.rs", frontendRoot), "utf8"),
     readFile(new URL("src-tauri/src/executor_platform.rs", frontendRoot), "utf8"),
     readFile(new URL("src-tauri/src/browser_profiles.rs", frontendRoot), "utf8"),
+    readFile(new URL("src-tauri/src/app_logging.rs", frontendRoot), "utf8"),
+    readFile(new URL("src-tauri/src/executor_manager.rs", frontendRoot), "utf8"),
+    readFile(new URL("src-tauri/src/executor_package.rs", frontendRoot), "utf8"),
   ]);
 
   assert.match(startup, /Promise\.allSettled/u);
@@ -38,6 +52,62 @@ test("H8-16E composes every startup component through one path-free native aggre
   assert.match(platform, /validate_installed_package/u);
   assert.match(platform, /from_compile_time_configuration/u);
   assert.match(profiles, /revalidate_storage/u);
+  for (const event of [
+    "StartupLocalCheckStarted",
+    "StartupAppDataCheckCompleted",
+    "StartupBrowserCheckCompleted",
+    "StartupExecutorCheckStarted",
+    "StartupExecutorCheckCompleted",
+    "StartupLocalCheckCompleted",
+    "StartupLocalCheckRejected",
+    "ControlPlaneHealthCheckStarted",
+    "ControlPlaneServiceHealthCompleted",
+    "ControlPlaneRegistrationCompleted",
+    "ControlPlaneInstallationAccessCompleted",
+    "ControlPlaneHealthCheckCompleted",
+    "ControlPlaneHealthCheckRejected",
+  ]) {
+    assert.match(entry, new RegExp(`DesktopLogEvent::${event}`, "u"));
+    assert.match(appLogging, new RegExp(`Self::${event}`, "u"));
+  }
+  for (const event of [
+    "ExecutorPackageRootReady",
+    "ExecutorPackageManifestRead",
+    "ExecutorPackageSignatureRead",
+    "ExecutorPackageSignatureVerified",
+    "ExecutorPackageIdentityVerified",
+    "ExecutorPackageInventoryStarted",
+    "ExecutorPackageInventoryPathsVerified",
+    "ExecutorPackageInventoryHashesVerified",
+    "ExecutorPackageInventoryDigestVerified",
+    "ExecutorPackageInventoryRewalkVerified",
+  ]) {
+    assert.match(executorPackage, new RegExp(`DesktopLogEvent::${event}`, "u"));
+    assert.match(appLogging, new RegExp(`Self::${event}`, "u"));
+  }
+  for (const event of [
+    "StartupExecutorPackageConfigurationRejected",
+    "StartupExecutorPackageSignatureRejected",
+    "StartupExecutorPackageManifestRejected",
+    "StartupExecutorPackagePlatformRejected",
+    "StartupExecutorPackageVersionRejected",
+    "StartupExecutorPackageInventoryRejected",
+    "StartupExecutorPackageIoRejected",
+  ]) {
+    assert.match(manager, new RegExp(`DesktopLogEvent::${event}`, "u"));
+    assert.match(appLogging, new RegExp(`Self::${event}`, "u"));
+  }
+  for (const event of [
+    "StartupExecutorConfigurationReady",
+    "StartupExecutorConfigurationRejected",
+    "StartupExecutorManagerStatusReady",
+    "StartupExecutorManagerStatusRejected",
+    "StartupExecutorPackageReady",
+    "StartupExecutorPackageRejected",
+  ]) {
+    assert.match(platform, new RegExp(`DesktopLogEvent::${event}`, "u"));
+    assert.match(appLogging, new RegExp(`Self::${event}`, "u"));
+  }
   assert.doesNotMatch(gateway, /path|directory|profile|token|secret|credential/iu);
   assert.doesNotMatch(nativeStartup, /#\[tauri::command\]/u);
 });

@@ -41,6 +41,7 @@ cleanup stops only a `Popen` handle this module's harness successfully started.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -69,6 +70,7 @@ PACKAGE_JSON: Final = FRONTEND_ROOT / "package.json"
 if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
+from acceptance_postgres import WINDOWS_POSTGRES_ROOT_ENVIRONMENT  # noqa: E402
 from embedded_browser_archives import (  # noqa: E402
     MACOS_ARM64_ARCHIVE,
     MACOS_X86_64_ARCHIVE,
@@ -126,6 +128,7 @@ LOCAL_ACTION_TASK_LIMIT: Final = "20"
 PRODUCT_CONTROL_PLANE_PORT: Final = 8765
 VIDEO_STUDIO_DRIVER_ENVIRONMENT_NAMES: Final = frozenset(
     {
+        WINDOWS_POSTGRES_ROOT_ENVIRONMENT,
         "AUTOMATION_TOOL_BM08_EVIDENCE_VIDEO",
         "AUTOMATION_TOOL_IM05_WORKER",
     }
@@ -165,8 +168,12 @@ def startup_gate_environment(
     prepared = dict(environment)
     prepared.update(
         {
-            "AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN": control_plane_origin(control_plane_port),
-            "AUTOMATION_TOOL_ACTION_AUTHORIZATION_PUBLIC_KEY": (ACTION_AUTHORIZATION_PUBLIC_KEY),
+            "AUTOMATION_TOOL_CONTROL_PLANE_E2E_ORIGIN": control_plane_origin(
+                control_plane_port
+            ),
+            "AUTOMATION_TOOL_ACTION_AUTHORIZATION_PUBLIC_KEY": (
+                ACTION_AUTHORIZATION_PUBLIC_KEY
+            ),
             "AUTOMATION_TOOL_LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS": (
                 LOCAL_ACTION_MINIMUM_INTERVAL_SECONDS
             ),
@@ -258,14 +265,14 @@ def build_embedded_browser_cache(target_id: str | None = None) -> Path:
     sees. The cache is content-verified on every use, so a damaged one is
     rejected rather than staged.
     """
-    from build_embedded_browser_distribution import (  # noqa: PLC0415
+    from build_embedded_browser_distribution import (
         build_distribution_manifest,
     )
-    from build_embedded_chromium_staging import (  # noqa: PLC0415
+    from build_embedded_chromium_staging import (
+        build_staging,
         load_staging_contract,
         sha256_file,
     )
-    from build_embedded_chromium_staging import build_staging  # noqa: PLC0415
 
     resolved = target_id or release_target_id()
     archive = LOCKED_BROWSER_ARCHIVES.get(resolved)
@@ -297,7 +304,7 @@ def build_embedded_browser_cache(target_id: str | None = None) -> Path:
 
 
 def verify_embedded_browser(tree: Path, target_id: str | None = None) -> None:
-    from build_embedded_browser_distribution import (  # noqa: PLC0415
+    from build_embedded_browser_distribution import (
         DistributionRejected,
         verify_distribution,
     )
@@ -354,7 +361,7 @@ def stage_embedded_browser(
         else:
             return destination
 
-    from build_embedded_browser_distribution import (  # noqa: PLC0415
+    from build_embedded_browser_distribution import (
         install_distribution,
     )
 
@@ -369,7 +376,9 @@ def stage_embedded_browser(
     return destination
 
 
-def remove_staged_embedded_browser(*, resource_root: Path = DEBUG_APP_RESOURCE_ROOT) -> None:
+def remove_staged_embedded_browser(
+    *, resource_root: Path = DEBUG_APP_RESOURCE_ROOT
+) -> None:
     """Leave the resource root without a browser component, on purpose.
 
     H8-16E asserts the blocked diagnostics page, so it needs the component
@@ -388,9 +397,51 @@ _EXECUTOR_FIXED_INPUTS: Final = (
     "backend/automation-tool-executor.spec",
     "backend/pyproject.toml",
     "backend/uv.lock",
+    "scripts/silero_vad_assets.py",
+    "scripts/video_runtime_cache.py",
 )
 _EXECUTOR_CONTRACT_ROOTS: Final = ("contracts/protocol",)
-_EXECUTOR_SPEC_RESOURCE_PATTERN: Final = re.compile(r"""["']((?:contracts|vendor)/[^"']+)["']""")
+
+
+def _executor_spec_resources(source: str) -> tuple[str, ...]:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as error:
+        raise DesktopPrerequisiteRejected(
+            "the Executor spec cannot be parsed"
+        ) from error
+    silero_contract: str | None = None
+    motion_resources: tuple[str, ...] | None = None
+    for statement in tree.body:
+        if not isinstance(statement, ast.Assign):
+            continue
+        names = {
+            target.id for target in statement.targets if isinstance(target, ast.Name)
+        }
+        if "silero_vad_contract_source" in names:
+            value = statement.value
+            if (
+                isinstance(value, ast.BinOp)
+                and isinstance(value.op, ast.Div)
+                and isinstance(value.right, ast.Constant)
+                and isinstance(value.right.value, str)
+            ):
+                silero_contract = value.right.value
+        if "motion_authoring_resources" in names and isinstance(
+            statement.value, (ast.List, ast.Tuple)
+        ):
+            resources = tuple(
+                item.value
+                for item in statement.value.elts
+                if isinstance(item, ast.Constant) and isinstance(item.value, str)
+            )
+            if len(resources) == len(statement.value.elts) and resources:
+                motion_resources = resources
+    if silero_contract is not None and motion_resources is not None:
+        return (silero_contract, *motion_resources)
+    raise DesktopPrerequisiteRejected("the Executor spec resource inventory is invalid")
+
+
 _IGNORED_EXECUTOR_SOURCE_PARTS: Final = frozenset({"__pycache__"})
 _IGNORED_EXECUTOR_SOURCE_SUFFIXES: Final = frozenset({".pyc", ".pyo"})
 
@@ -399,12 +450,16 @@ def _executor_input_paths(repository_root: Path) -> tuple[Path, ...]:
     """Return every repository file whose bytes can change the frozen Executor."""
     source_root = repository_root / "backend/src"
     if not source_root.is_dir():
-        raise DesktopPrerequisiteRejected(f"the Executor source tree is missing ({source_root})")
+        raise DesktopPrerequisiteRejected(
+            f"the Executor source tree is missing ({source_root})"
+        )
     inputs = {
         path
         for path in source_root.rglob("*")
         if path.is_file()
-        and not _IGNORED_EXECUTOR_SOURCE_PARTS.intersection(path.relative_to(source_root).parts)
+        and not _IGNORED_EXECUTOR_SOURCE_PARTS.intersection(
+            path.relative_to(source_root).parts
+        )
         and path.suffix not in _IGNORED_EXECUTOR_SOURCE_SUFFIXES
     }
     if not inputs:
@@ -415,17 +470,21 @@ def _executor_input_paths(repository_root: Path) -> tuple[Path, ...]:
     for relative in _EXECUTOR_FIXED_INPUTS:
         path = repository_root / relative
         if not path.is_file():
-            raise DesktopPrerequisiteRejected(f"the Executor package input is missing ({relative})")
+            raise DesktopPrerequisiteRejected(
+                f"the Executor package input is missing ({relative})"
+            )
         inputs.add(path)
 
     for relative in _EXECUTOR_CONTRACT_ROOTS:
         contract_root = repository_root / relative
         if not contract_root.is_dir():
-            raise DesktopPrerequisiteRejected(f"the Executor contract tree is missing ({relative})")
+            raise DesktopPrerequisiteRejected(
+                f"the Executor contract tree is missing ({relative})"
+            )
         inputs.update(path for path in contract_root.rglob("*") if path.is_file())
 
     spec_path = repository_root / _EXECUTOR_FIXED_INPUTS[0]
-    for relative in _EXECUTOR_SPEC_RESOURCE_PATTERN.findall(spec_path.read_text(encoding="utf-8")):
+    for relative in _executor_spec_resources(spec_path.read_text(encoding="utf-8")):
         resource = Path(relative)
         if resource.is_absolute() or ".." in resource.parts:
             raise DesktopPrerequisiteRejected(
@@ -438,7 +497,9 @@ def _executor_input_paths(repository_root: Path) -> tuple[Path, ...]:
             )
         inputs.add(path)
 
-    return tuple(sorted(inputs, key=lambda path: path.relative_to(repository_root).as_posix()))
+    return tuple(
+        sorted(inputs, key=lambda path: path.relative_to(repository_root).as_posix())
+    )
 
 
 def executor_package_input_digest(repository_root: Path | None = None) -> str:
@@ -461,7 +522,8 @@ def executor_package_cache_key(
     repository_root: Path | None = None,
 ) -> str:
     """Name a cached package by its semantic build id and exact frozen inputs."""
-    return f"{build_id}-inputs-v1-{executor_package_input_digest(repository_root=repository_root)}"
+    digest = executor_package_input_digest(repository_root=repository_root)
+    return f"{build_id}-inputs-v1-{digest}"
 
 
 def ensure_signed_executor_package(build_id: str = SHARED_EXECUTOR_BUILD_ID) -> Path:
@@ -477,7 +539,7 @@ def ensure_signed_executor_package(build_id: str = SHARED_EXECUTOR_BUILD_ID) -> 
         cached / EXECUTOR_MANIFEST_SIGNATURE_NAME
     ).is_file():
         return cached
-    from run_e4_07_acceptance import build_signed_executor  # noqa: PLC0415
+    from run_e4_07_acceptance import build_signed_executor
 
     cached.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
@@ -496,7 +558,7 @@ def install_signed_executor_package(
 ) -> Path:
     """Install the cached signed package in the App's real resource layout."""
     package_source = ensure_signed_executor_package(build_id)
-    from run_e4_14_acceptance import install_executor_package  # noqa: PLC0415
+    from run_e4_14_acceptance import install_executor_package
 
     return install_executor_package(package_source, resource_root=resource_root)
 
@@ -567,12 +629,12 @@ def _start_health_control_plane(*, port: int) -> _HealthControlPlane:
     """
     # Imported lazily: cache-only and staging-only users of this module must not
     # need the backend's dependencies on the import path.
-    import uvicorn  # noqa: PLC0415
+    import uvicorn
 
     backend_source = REPOSITORY_ROOT / "backend" / "src"
     if str(backend_source) not in sys.path:
         sys.path.insert(0, str(backend_source))
-    from automation_tool.control_plane.bootstrap.app import create_app  # noqa: PLC0415
+    from automation_tool.control_plane.bootstrap.app import create_app
 
     server = uvicorn.Server(
         uvicorn.Config(
@@ -605,7 +667,7 @@ def _start_health_control_plane(*, port: int) -> _HealthControlPlane:
 
 def require_product_origin_released(port: int) -> None:
     """Fail if the origin this harness bound is still accepting connections."""
-    from run_i2_13_acceptance import require_port_closed  # noqa: PLC0415
+    from run_i2_13_acceptance import require_port_closed
 
     require_port_closed(port)
 
@@ -659,7 +721,8 @@ def _video_studio_environment(
     prepared = {
         key: value
         for key, value in environment.items()
-        if not key.startswith("AUTOMATION_TOOL_") or key in VIDEO_STUDIO_DRIVER_ENVIRONMENT_NAMES
+        if not key.startswith("AUTOMATION_TOOL_")
+        or key in VIDEO_STUDIO_DRIVER_ENVIRONMENT_NAMES
     }
     prepared.update(
         {
@@ -701,6 +764,8 @@ def video_studio_startup_harness(
     *,
     environment: Mapping[str, str],
     resource_root: Path = DEBUG_APP_RESOURCE_ROOT,
+    demo_environment_id: str | None = None,
+    demo_bootstrap_public_key: str | None = None,
 ) -> Iterator[dict[str, str]]:
     """Yield the complete environment around one real video-studio App run.
 
@@ -720,9 +785,9 @@ def video_studio_startup_harness(
 
     # Import lazily: the helpers load backend acceptance dependencies, while
     # cache/staging-only users of this module must remain stdlib-only.
-    from acceptance_postgres import managed_test_postgres  # noqa: PLC0415
-    from run_e4_14_acceptance import start_control_plane  # noqa: PLC0415
-    from run_i2_13_acceptance import (  # noqa: PLC0415
+    from acceptance_postgres import managed_test_postgres
+    from run_e4_14_acceptance import start_control_plane
+    from run_i2_13_acceptance import (
         BACKEND_ROOT,
         compose_command,
         require_port_closed,
@@ -739,6 +804,17 @@ def video_studio_startup_harness(
         database_port=database_port,
         development_database_port=development_database_port,
     )
+    if (demo_environment_id is None) != (demo_bootstrap_public_key is None):
+        raise DesktopPrerequisiteRejected(
+            "video-studio Demo environment and bootstrap key must be supplied together"
+        )
+    if demo_environment_id is not None and demo_bootstrap_public_key is not None:
+        prepared.update(
+            {
+                "AUTOMATION_TOOL_DEMO_ENVIRONMENT_ID": demo_environment_id,
+                "AUTOMATION_TOOL_DEMO_BOOTSTRAP_PUBLIC_KEY": demo_bootstrap_public_key,
+            }
+        )
     project_name = f"automation-tool-video-studio-{uuid4()}"
     compose = compose_command(project_name)
     server: subprocess.Popen[bytes] | None = None

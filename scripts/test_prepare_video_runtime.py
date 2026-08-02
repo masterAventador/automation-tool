@@ -38,7 +38,10 @@ SCRIPT = ROOT / "scripts" / "prepare_video_runtime.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import prepare_video_runtime  # noqa: E402
-from release_assembly import MOTION_CATALOG_RESOURCES, VIDEO_RUNTIME_RESOURCES  # noqa: E402
+from release_assembly import (  # noqa: E402
+    MOTION_CATALOG_RESOURCES,
+    VIDEO_RUNTIME_RESOURCES,
+)
 from video_runtime_cache import STAMP_VERSION, contract_fingerprint  # noqa: E402
 
 MOTION_WORKER_CONTRACT = ROOT / "contracts/quality/motion-video-worker-package.v1.json"
@@ -81,16 +84,22 @@ def declared_inputs(resource: str) -> tuple[Path, ...]:
     """
     recorded: dict[str, tuple[Path, ...]] = {}
 
-    def record(*, name: str, contracts: Iterable[Path], build: object, root: Path) -> Path:
+    def record(
+        *, name: str, contracts: Iterable[Path], build: object, root: Path
+    ) -> Path:
         recorded[name] = tuple(Path(entry) for entry in contracts)
         return Path(root) / name
 
     with (
         TemporaryDirectory(prefix="automation-tool-declared-inputs-") as directory,
         mock.patch.object(prepare_video_runtime, "ensure_cached", record),
-        mock.patch.object(prepare_video_runtime, "ensure_subtitle_fonts", lambda **_: None),
+        mock.patch.object(
+            prepare_video_runtime, "ensure_subtitle_fonts", lambda **_: None
+        ),
     ):
-        prepare_video_runtime.prepare(platform="macos", root=Path(directory), only=[resource])
+        prepare_video_runtime.prepare(
+            platform="macos", root=Path(directory), only=[resource]
+        )
     return recorded[resource]
 
 
@@ -113,6 +122,7 @@ BUILD_DRIVERS: dict[str, tuple[Path, ...]] = {
         ROOT / "scripts/build_material_video_worker_candidate.py",
         ROOT / "workers/material_montage/material-video-worker.spec",
         ROOT / "scripts/subtitle_font_assets.py",
+        ROOT / "scripts/silero_vad_assets.py",
     ),
 }
 
@@ -168,13 +178,100 @@ def stamped_motion_worker(staging: Path) -> Path:
             {
                 "version": STAMP_VERSION,
                 "name": "motion-video-worker",
-                "fingerprint": contract_fingerprint(declared_inputs("motion-video-worker")),
+                "fingerprint": contract_fingerprint(
+                    declared_inputs("motion-video-worker")
+                ),
             }
         )
         + "\n",
         encoding="utf-8",
     )
     return package
+
+
+class WindowsMediaToolchainShell(unittest.TestCase):
+    def test_windows_resolves_msys2_bash_absolutely_instead_of_the_system32_wsl_stub(
+        self,
+    ) -> None:
+        with TemporaryDirectory(prefix="automation-tool-git-bash-") as directory:
+            msys2_root = Path(directory) / "msys64"
+            bash = msys2_root / "usr" / "bin" / "bash.exe"
+            pacman = msys2_root / "usr" / "bin" / "pacman.exe"
+            bash.parent.mkdir(parents=True)
+            bash.write_bytes(b"bash")
+            pacman.write_bytes(b"pacman")
+
+            with (
+                mock.patch.object(
+                    prepare_video_runtime, "WINDOWS_MSYS2_ROOT", msys2_root, create=True
+                ),
+                mock.patch.object(
+                    prepare_video_runtime.shutil,
+                    "which",
+                    return_value=r"C:\Windows\System32\bash.exe",
+                ),
+            ):
+                resolved = prepare_video_runtime.media_toolchain_bash(
+                    platform="windows"
+                )
+
+            self.assertEqual(bash, Path(resolved))
+            self.assertNotEqual("bash", resolved)
+
+    def test_windows_fails_closed_when_msys2_is_not_installed(self) -> None:
+        with (
+            TemporaryDirectory(prefix="automation-tool-no-msys2-") as directory,
+            mock.patch.object(
+                prepare_video_runtime,
+                "WINDOWS_MSYS2_ROOT",
+                Path(directory) / "missing",
+                create=True,
+            ),
+            mock.patch.object(prepare_video_runtime.shutil, "which", return_value=None),
+            self.assertRaisesRegex(
+                prepare_video_runtime.VideoRuntimeUnavailable,
+                r"^MSYS2 MINGW64 is required to build the Windows media toolchain$",
+            ),
+        ):
+            prepare_video_runtime.media_toolchain_bash(platform="windows")
+
+    def test_windows_launches_the_builder_in_a_mingw64_environment(self) -> None:
+        with TemporaryDirectory(prefix="automation-tool-msys2-env-") as directory:
+            msys2_root = Path(directory) / "msys64"
+            bash = msys2_root / "usr" / "bin" / "bash.exe"
+            pacman = msys2_root / "usr" / "bin" / "pacman.exe"
+            bash.parent.mkdir(parents=True)
+            bash.write_bytes(b"bash")
+            pacman.write_bytes(b"pacman")
+            completed = subprocess.CompletedProcess([], 0, "", "")
+
+            with (
+                mock.patch.object(
+                    prepare_video_runtime, "WINDOWS_MSYS2_ROOT", msys2_root, create=True
+                ),
+                mock.patch.object(
+                    prepare_video_runtime.shutil, "which", return_value=None
+                ),
+                mock.patch.object(
+                    prepare_video_runtime.subprocess,
+                    "run",
+                    return_value=completed,
+                ) as run,
+            ):
+                prepare_video_runtime._build_media_toolchain(
+                    Path(directory) / "output", platform="windows"
+                )
+
+            command = run.call_args.args[0]
+            environment = run.call_args.kwargs["env"]
+            self.assertEqual(str(bash), command[0])
+            self.assertEqual("MINGW64", environment["MSYSTEM"])
+            self.assertEqual("1", environment["CHERE_INVOKING"])
+            self.assertTrue(
+                environment["PATH"].startswith(
+                    f"{msys2_root / 'mingw64' / 'bin'};{msys2_root / 'usr' / 'bin'};"
+                )
+            )
 
 
 def run_prepare(*arguments: str) -> subprocess.CompletedProcess[str]:
@@ -213,7 +310,9 @@ class CacheKeysCoverEveryBuildInput(unittest.TestCase):
         )
         self.assertTrue(sources, "the material Worker source package must exist")
         uncovered = [
-            path.relative_to(ROOT).as_posix() for path in sources if not covered_by(inputs, path)
+            path.relative_to(ROOT).as_posix()
+            for path in sources
+            if not covered_by(inputs, path)
         ]
         self.assertEqual(
             [],
@@ -245,18 +344,22 @@ class CacheKeysCoverEveryBuildInput(unittest.TestCase):
                 (path / webui.name for path in copied if (path / webui.name).is_file()),
                 None,
             )
-            self.assertIsNotNone(edited, f"{webui.name} must be inside a declared input")
+            self.assertIsNotNone(
+                edited, f"{webui.name} must be inside a declared input"
+            )
 
             before = contract_fingerprint(copied)
             assert edited is not None
             edited.write_text(
-                edited.read_text(encoding="utf-8") + "\n# the T32 fix\n", encoding="utf-8"
+                edited.read_text(encoding="utf-8") + "\n# the T32 fix\n",
+                encoding="utf-8",
             )
 
             self.assertNotEqual(
                 before,
                 contract_fingerprint(copied),
-                "the Worker web UI changed and the cache still calls the old build current",
+                "the Worker web UI changed and the cache still calls the old "
+                "build current",
             )
 
     def test_every_motion_worker_build_input_is_in_its_cache_key(self) -> None:
@@ -283,7 +386,9 @@ class CacheKeysCoverEveryBuildInput(unittest.TestCase):
             with self.subTest(relative):
                 self.assertTrue(covered_by(inputs, ROOT / relative))
 
-    def test_no_build_driver_reads_a_repository_path_outside_its_cache_key(self) -> None:
+    def test_no_build_driver_reads_a_repository_path_outside_its_cache_key(
+        self,
+    ) -> None:
         """The gate: a new build input has to be declared or explained.
 
         Content digests catch an edit to a file already in the key. They cannot
@@ -351,11 +456,14 @@ class MediaToolchainBuilderDiagnostics(unittest.TestCase):
             stdout=b"",
             stderr=b"\xc0\xee\xea\xe0\xeb\xfc\xed\xfb\xe9 builder failure\n",
         )
-        with mock.patch.object(
-            prepare_video_runtime.subprocess,
-            "run",
-            return_value=completed,
-        ) as run:
+        with (
+            mock.patch.dict(os.environ, {"AUTOMATION_TOOL_BASH": "bash"}),
+            mock.patch.object(
+                prepare_video_runtime.subprocess,
+                "run",
+                return_value=completed,
+            ) as run,
+        ):
             with self.assertRaisesRegex(
                 prepare_video_runtime.VideoRuntimeUnavailable,
                 "stderr",
@@ -502,7 +610,9 @@ class InstallIntoAResourceDirectory(unittest.TestCase):
                 second.returncode,
                 f"a repeat install must succeed:\n{second.stdout}{second.stderr}",
             )
-            self.assertFalse(stale.exists(), "a repeat install must not merge into the old tree")
+            self.assertFalse(
+                stale.exists(), "a repeat install must not merge into the old tree"
+            )
             for name in host_payloads():
                 self.assertTrue(resources.joinpath(*INSTALLED, name).is_file())
 
@@ -535,7 +645,9 @@ class InstallIntoAResourceDirectory(unittest.TestCase):
                 str(resources),
             )
 
-            self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+            self.assertEqual(
+                0, completed.returncode, completed.stdout + completed.stderr
+            )
             installed_root = resources / "motion-video-worker"
             self.assertFalse(
                 installed_root.is_symlink(),
@@ -601,8 +713,12 @@ class InstallIntoAResourceDirectory(unittest.TestCase):
 
     def test_an_unknown_resource_name_is_refused(self) -> None:
         with TemporaryDirectory(prefix="automation-tool-prepare-test-") as directory:
-            completed = run_prepare("--only", "no-such-resource", "--install-into", directory)
-            self.assertNotEqual(0, completed.returncode, "a typo must not silently install nothing")
+            completed = run_prepare(
+                "--only", "no-such-resource", "--install-into", directory
+            )
+            self.assertNotEqual(
+                0, completed.returncode, "a typo must not silently install nothing"
+            )
             self.assertIn("no-such-resource", completed.stdout + completed.stderr)
 
 

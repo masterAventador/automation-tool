@@ -10,18 +10,16 @@ from enum import StrEnum
 from typing import Final, Never, final
 
 from automation_tool.control_plane.domain.resource_ids import ArtifactId, ResourceId
+from automation_tool.control_plane.domain.timeline import TimelineId
 
 MAX_VIDEO_DURATION_MS: Final = 600_000
 MAX_BRIEF_CHARACTERS: Final = 4_000
 MAX_SCENES: Final = 128
-MAX_TRACKS: Final = 32
-MAX_CLIPS_PER_TRACK: Final = 512
 MAX_ARTIFACT_REFERENCES: Final = 256
 MAX_ARTIFACT_BYTES: Final = 16 * 1024 * 1024 * 1024
 
-_LANGUAGE_PATTERN = re.compile(r"^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|\d{3}))?$")
-_LOCAL_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
-_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_LANGUAGE_PATTERN = re.compile(r"^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|\d{3}))?\Z")
+_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}\Z")
 
 
 class InvalidVideoDomainModel(ValueError):
@@ -48,14 +46,6 @@ class StoryboardId(ResourceId):
 
 
 @final
-class TimelineId(ResourceId):
-    """Stable identifier for one provider-neutral timeline lineage."""
-
-    __slots__ = ()
-    _resource = "timeline"
-
-
-@final
 class RenderJobId(ResourceId):
     """Stable identifier for one video rendering job."""
 
@@ -74,19 +64,6 @@ class VideoAspectRatio(StrEnum):
     LANDSCAPE_16_9 = "landscape_16_9"
     PORTRAIT_9_16 = "portrait_9_16"
     SQUARE_1_1 = "square_1_1"
-
-
-class TimelineTrackKind(StrEnum):
-    VISUAL = "visual"
-    AUDIO = "audio"
-    CAPTION = "caption"
-
-
-class TransitionKind(StrEnum):
-    CUT = "cut"
-    FADE = "fade"
-    DISSOLVE = "dissolve"
-    WIPE = "wipe"
 
 
 class ArtifactRole(StrEnum):
@@ -242,113 +219,6 @@ class Storyboard:
 
 
 @dataclass(frozen=True, slots=True)
-class TimelineTransition:
-    kind: TransitionKind
-    duration_ms: int
-
-    def __post_init__(self) -> None:
-        if (
-            not isinstance(self.kind, TransitionKind)
-            or type(self.duration_ms) is not int
-            or not 1 <= self.duration_ms <= 10_000
-        ):
-            _reject()
-
-
-@dataclass(frozen=True, slots=True)
-class TimelineClip:
-    clip_id: str
-    start_ms: int
-    duration_ms: int
-    source_artifact_id: ArtifactId | None
-    text: str | None
-    transition_in: TimelineTransition | None
-
-    def __post_init__(self) -> None:
-        if (
-            not isinstance(self.clip_id, str)
-            or _LOCAL_ID_PATTERN.fullmatch(self.clip_id) is None
-            or type(self.start_ms) is not int
-            or self.start_ms < 0
-            or type(self.duration_ms) is not int
-            or not 1 <= self.duration_ms <= MAX_VIDEO_DURATION_MS
-            or (
-                self.source_artifact_id is not None
-                and not isinstance(self.source_artifact_id, ArtifactId)
-            )
-            or (
-                self.transition_in is not None
-                and not isinstance(self.transition_in, TimelineTransition)
-            )
-        ):
-            _reject()
-        _validate_text(self.text, maximum=2_000, optional=True)
-        if self.source_artifact_id is None and self.text is None:
-            _reject()
-
-    @property
-    def end_ms(self) -> int:
-        return self.start_ms + self.duration_ms
-
-
-@dataclass(frozen=True, slots=True)
-class TimelineTrack:
-    track_id: str
-    kind: TimelineTrackKind
-    clips: tuple[TimelineClip, ...]
-
-    def __post_init__(self) -> None:
-        if (
-            not isinstance(self.track_id, str)
-            or _LOCAL_ID_PATTERN.fullmatch(self.track_id) is None
-            or not isinstance(self.kind, TimelineTrackKind)
-            or not isinstance(self.clips, tuple)
-            or not 1 <= len(self.clips) <= MAX_CLIPS_PER_TRACK
-            or any(not isinstance(clip, TimelineClip) for clip in self.clips)
-            or len({clip.clip_id for clip in self.clips}) != len(self.clips)
-        ):
-            _reject()
-        previous_end = 0
-        for clip in self.clips:
-            if clip.start_ms < previous_end:
-                _reject()
-            previous_end = clip.end_ms
-            if self.kind is TimelineTrackKind.CAPTION:
-                if clip.text is None or clip.source_artifact_id is not None:
-                    _reject()
-            elif clip.source_artifact_id is None or clip.text is not None:
-                _reject()
-
-
-@dataclass(frozen=True, slots=True)
-class Timeline:
-    timeline_id: TimelineId
-    storyboard_id: StoryboardId
-    revision: int
-    duration_ms: int
-    tracks: tuple[TimelineTrack, ...]
-    created_at: datetime
-
-    def __post_init__(self) -> None:
-        if (
-            not isinstance(self.timeline_id, TimelineId)
-            or not isinstance(self.storyboard_id, StoryboardId)
-            or type(self.revision) is not int
-            or self.revision < 1
-            or type(self.duration_ms) is not int
-            or not 100 <= self.duration_ms <= MAX_VIDEO_DURATION_MS
-            or not isinstance(self.tracks, tuple)
-            or not 1 <= len(self.tracks) <= MAX_TRACKS
-            or any(not isinstance(track, TimelineTrack) for track in self.tracks)
-            or len({track.track_id for track in self.tracks}) != len(self.tracks)
-            or not any(track.kind is TimelineTrackKind.VISUAL for track in self.tracks)
-            or any(clip.end_ms > self.duration_ms for track in self.tracks for clip in track.clips)
-        ):
-            _reject()
-        _validate_timestamp(self.created_at)
-
-
-@dataclass(frozen=True, slots=True)
 class Artifact:
     artifact_id: ArtifactId
     role: ArtifactRole
@@ -432,9 +302,7 @@ __all__ = [
     "MAX_ARTIFACT_BYTES",
     "MAX_ARTIFACT_REFERENCES",
     "MAX_BRIEF_CHARACTERS",
-    "MAX_CLIPS_PER_TRACK",
     "MAX_SCENES",
-    "MAX_TRACKS",
     "MAX_VIDEO_DURATION_MS",
     "Artifact",
     "ArtifactRole",
@@ -448,13 +316,6 @@ __all__ = [
     "Storyboard",
     "StoryboardId",
     "StoryboardScene",
-    "Timeline",
-    "TimelineClip",
-    "TimelineId",
-    "TimelineTrack",
-    "TimelineTrackKind",
-    "TimelineTransition",
-    "TransitionKind",
     "VideoAspectRatio",
     "VideoCreationMethod",
 ]

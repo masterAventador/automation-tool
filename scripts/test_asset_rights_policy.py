@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import check_third_party_sources  # noqa: E402
 
 POLICY_PATH = ROOT / "contracts/quality/asset-rights-policy.v1.json"
+SILERO_VAD_CONTRACT_PATH = ROOT / "contracts/quality/silero-vad-runtime.v1.json"
 OVERLAY_PATH = ROOT / "contracts/quality/motion-asset-overlay.v1.json"
 OFFLINE_DEPENDENCIES_PATH = ROOT / "contracts/video/offline-motion-dependencies.v1.json"
 UTM_FONT_PATH = ROOT / "vendor/moneyprinterturbo/resource/fonts/UTM Kabel KT.ttf"
@@ -115,8 +116,7 @@ class FontRightsPolicyTests(unittest.TestCase):
         overlay_entry = next(
             asset
             for asset in overlay_assets
-            if isinstance(asset, dict)
-            and asset.get("id") == "font-big-shoulders-display"
+            if isinstance(asset, dict) and asset.get("id") == "font-big-shoulders-display"
         )
         font_families = offline.get("fontFamilies")
         self.assertIsInstance(font_families, list)
@@ -145,9 +145,7 @@ class FontRightsPolicyTests(unittest.TestCase):
             "(https://github.com/xotypeco/big_shoulders)",
         )
         evidence_urls = {
-            item.get("url")
-            for item in entry["rightsEvidence"]
-            if isinstance(item, dict)
+            item.get("url") for item in entry["rightsEvidence"] if isinstance(item, dict)
         }
         self.assertTrue(
             any(
@@ -161,6 +159,26 @@ class FontRightsPolicyTests(unittest.TestCase):
             "https://openfontlicense.org/open-font-license-official-text/",
             evidence_urls,
         )
+
+    def test_silero_model_registration_matches_the_runtime_contract(self) -> None:
+        policy = _load(POLICY_PATH)
+        contract = _load(SILERO_VAD_CONTRACT_PATH)
+        entry = _entries(policy)["model-silero-vad-v6.2.1"]
+        model = contract["model"]
+        license_record = contract["license"]
+        self.assertIsInstance(model, dict)
+        self.assertIsInstance(license_record, dict)
+
+        self.assertEqual(entry["category"], "ml_model")
+        self.assertEqual(entry["sourceUrl"], model["sourceUrl"])
+        self.assertEqual(entry["sha256"], model["sha256"])
+        self.assertEqual(entry["bytes"], model["bytes"])
+        self.assertEqual(entry["license"], license_record["spdx"])
+        self.assertEqual(entry["licenseTextUrl"], license_record["sourceUrl"])
+        self.assertEqual(entry["licenseTextSha256"], license_record["sha256"])
+        self.assertEqual(entry["licenseTextBytes"], license_record["bytes"])
+        for permission in ("redistributionAllowed", "commercialUseAllowed"):
+            self.assertIs(entry[permission], True)
 
     def test_gate_rejects_a_duplicate_registered_asset_id(self) -> None:
         policy = _load(POLICY_PATH)

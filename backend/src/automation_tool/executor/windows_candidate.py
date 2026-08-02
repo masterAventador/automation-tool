@@ -13,6 +13,11 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 
+from automation_tool.executor.silero_vad import (
+    SileroVadUnavailable,
+    audit_packaged_silero_vad_runtime,
+)
+
 BUNDLE_NAME = "automation-tool-executor"
 ENTRYPOINT_NAME = f"{BUNDLE_NAME}.exe"
 MAX_CANDIDATE_FILES = 10_000
@@ -194,6 +199,10 @@ def audit_windows_executor_candidate(
             or not any(path.endswith("/playwright/driver/node.exe") for path in rendered_paths)
         ):
             raise _reject()
+        try:
+            audit_packaged_silero_vad_runtime(bundle_directory)
+        except SileroVadUnavailable:
+            raise _reject() from None
         return WindowsExecutorCandidateAudit(
             architecture=expected,
             file_count=len(files),

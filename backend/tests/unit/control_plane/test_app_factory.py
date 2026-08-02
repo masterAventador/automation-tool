@@ -1,12 +1,18 @@
 from collections.abc import Callable
 from uuid import UUID
 
+import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from httpx2 import Response
+from pydantic import ValidationError
 
 from automation_tool.control_plane import create_app
-from automation_tool.control_plane.api.errors import AppError, register_error_handlers
+from automation_tool.control_plane.api.errors import (
+    AppError,
+    TimelineRevisionConflictDetails,
+    register_error_handlers,
+)
 from automation_tool.control_plane.application.executor_connection_registry import (
     ExecutorConnectionRegistry,
 )
@@ -23,6 +29,7 @@ def assert_error_response(
     assert response.status_code == status_code
     assert set(response.json()) == {"error"}
     error = response.json()["error"]
+    assert set(error) == {"code", "message", "retryable", "requestId"}
     assert error["code"] == code
     assert error["message"] == message
     assert error["retryable"] is retryable
@@ -91,6 +98,49 @@ def test_application_error_uses_the_public_structured_envelope() -> None:
         message="Task conflicts",
         retryable=True,
     )
+
+
+def test_timeline_revision_conflict_has_the_only_public_details_shape() -> None:
+    details = TimelineRevisionConflictDetails(
+        kind="timeline_revision_conflict.v1",
+        currentRevision=3,
+    )
+    app = app_with_failing_route(
+        lambda: AppError(
+            status_code=409,
+            code="timeline_revision_conflict",
+            message="Timeline revision conflicts",
+            details=details,
+        )
+    )
+
+    response = TestClient(app).get("/failure")
+
+    assert response.status_code == 409
+    assert response.json()["error"]["details"] == {
+        "kind": "timeline_revision_conflict.v1",
+        "currentRevision": 3,
+    }
+
+
+@pytest.mark.parametrize(
+    "details",
+    [
+        {"kind": "other", "currentRevision": 3},
+        {"kind": "timeline_revision_conflict.v1", "currentRevision": 0},
+        {"kind": "timeline_revision_conflict.v1", "currentRevision": True},
+        {
+            "kind": "timeline_revision_conflict.v1",
+            "currentRevision": 3,
+            "private": "must-not-cross-boundary",
+        },
+    ],
+)
+def test_timeline_revision_conflict_details_are_strict(
+    details: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        TimelineRevisionConflictDetails.model_validate(details)
 
 
 def test_framework_errors_are_normalized_without_reflecting_invalid_input() -> None:

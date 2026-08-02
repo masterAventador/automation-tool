@@ -28,6 +28,8 @@ jobs:
           submodules: recursive
       - run: git submodule foreach --recursive 'git fetch --tags --force origin'
       - run: python3 scripts/check_embedded_browser_video_roadmap.py
+      - run: python3 scripts/check_local_editing_roadmap_counts.py
+      - run: backend/.venv/bin/python -m pytest scripts/test_check_local_editing_roadmap_counts.py -q
       - run: python3 scripts/check_third_party_sources.py
       - run: python3 scripts/check_user_facing_branding.py
 

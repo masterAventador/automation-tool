@@ -13,7 +13,10 @@ from .action_risk_authorization_repository import (
 )
 from .bilibili_publish_repository import SqlAlchemyBilibiliArchivePublishStore
 from .customer_account_repository import SqlAlchemyCustomerAccountRepository
+from .editing_job_repository import SqlAlchemyEditingJobRepository
+from .editing_project_repository import SqlAlchemyEditingProjectRepository
 from .installation_revocation_repository import SqlAlchemyInstallationRevocationRepository
+from .material_repository import SqlAlchemyMaterialRepository
 from .platform_session_health_repository import SqlAlchemyPlatformSessionHealthRepository
 from .schema import (
     account_audit_events,
@@ -30,9 +33,13 @@ from .schema import (
     device_credentials,
     device_sessions,
     douyin_search_exposure_definitions,
+    editing_jobs,
+    editing_project_timelines,
+    editing_projects,
     execution_attempts,
     installation_registration_challenges,
     installations,
+    materials,
     metadata,
     platform_session_gates,
     platform_session_health,
@@ -43,6 +50,8 @@ from .schema import (
     task_target_exclusions,
     task_targets,
     tasks,
+    timeline_material_references,
+    timelines,
     user_password_credentials,
     users,
 )
@@ -53,6 +62,7 @@ from .task_event_convergence_repository import SqlAlchemyTaskEventConvergenceRep
 from .task_event_stream_repository import SqlAlchemyTaskEventStreamRepository
 from .task_target_repository import SqlAlchemyTaskTargetRepository
 from .task_target_result_repository import SqlAlchemyTaskTargetResultRepository
+from .timeline_repository import SqlAlchemyTimelineRepository
 
 __all__ = [
     "Database",
@@ -63,7 +73,10 @@ __all__ = [
     "SqlAlchemyActionRiskAuthorizationRepository",
     "SqlAlchemyBilibiliArchivePublishStore",
     "SqlAlchemyCustomerAccountRepository",
+    "SqlAlchemyEditingJobRepository",
+    "SqlAlchemyEditingProjectRepository",
     "SqlAlchemyInstallationRevocationRepository",
+    "SqlAlchemyMaterialRepository",
     "SqlAlchemyPlatformSessionHealthRepository",
     "SqlAlchemyTaskCommandRepository",
     "SqlAlchemyTaskDiscoveryRepository",
@@ -71,6 +84,7 @@ __all__ = [
     "SqlAlchemyTaskEventStreamRepository",
     "SqlAlchemyTaskTargetRepository",
     "SqlAlchemyTaskTargetResultRepository",
+    "SqlAlchemyTimelineRepository",
     "account_audit_events",
     "account_installation_binding_challenges",
     "account_login_rate_limits",
@@ -85,9 +99,13 @@ __all__ = [
     "device_credentials",
     "device_sessions",
     "douyin_search_exposure_definitions",
+    "editing_jobs",
+    "editing_project_timelines",
+    "editing_projects",
     "execution_attempts",
     "installation_registration_challenges",
     "installations",
+    "materials",
     "metadata",
     "platform_session_gates",
     "platform_session_health",
@@ -98,6 +116,8 @@ __all__ = [
     "task_target_exclusions",
     "task_targets",
     "tasks",
+    "timeline_material_references",
+    "timelines",
     "user_password_credentials",
     "users",
 ]

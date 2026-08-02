@@ -21,6 +21,7 @@ notice next time.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import unittest
@@ -32,10 +33,42 @@ CHECKER = ROOT / "scripts" / "check_video_media_toolchain.py"
 
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from check_video_media_toolchain import (  # noqa: E402
+from check_video_media_toolchain import (
+    capability_output_contains,
     create_test_directory_link,
     remove_test_directory_link,
+    validate_contract,
 )
+
+EXPECTED_PRODUCTION_FILTERS = {
+    "adelay",
+    "aformat",
+    "ametadata",
+    "amix",
+    "anull",
+    "apad",
+    "aresample",
+    "asetpts",
+    "asplit",
+    "atrim",
+    "concat",
+    "crop",
+    "ebur128",
+    "format",
+    "fps",
+    "overlay",
+    "scale",
+    "scdet",
+    "select",
+    "setpts",
+    "setsar",
+    "settb",
+    "silencedetect",
+    "sidechaincompress",
+    "trim",
+    "volume",
+    "xfade",
+}
 
 
 class SelfTestRunsOnThisPlatform(unittest.TestCase):
@@ -54,6 +87,19 @@ class SelfTestRunsOnThisPlatform(unittest.TestCase):
             f"only Windows:\n{completed.stdout}{completed.stderr}",
         )
         self.assertIn("video media toolchain contract is valid", completed.stdout)
+
+    def test_contract_and_validator_pin_every_production_filter(self) -> None:
+        document = json.loads(
+            (ROOT / "contracts/video/ffmpeg-toolchain.v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        self.assertEqual(
+            EXPECTED_PRODUCTION_FILTERS,
+            set(document["required_capabilities"]["filters"]),
+        )
+        validate_contract(document)
 
 
 class DirectoryLinkFixture(unittest.TestCase):
@@ -83,6 +129,19 @@ class DirectoryLinkFixture(unittest.TestCase):
                 (target / "keep.txt").is_file(),
                 "removing the link must not delete what it pointed at",
             )
+
+
+class ExactCapabilityProbe(unittest.TestCase):
+    def test_aliases_are_exact_and_similarly_named_filters_do_not_match(self) -> None:
+        self.assertTrue(
+            capability_output_contains(" D  mov,mp4,m4a  QuickTime\n", "mp4")
+        )
+        self.assertTrue(capability_output_contains(" ... xfade  VV->V\n", "xfade"))
+        self.assertTrue(capability_output_contains("  file\n", "file"))
+        self.assertFalse(
+            capability_output_contains(" ... xfade_opencl  VV->V\n", "xfade")
+        )
+        self.assertFalse(capability_output_contains("  profile\n", "file"))
 
 
 if __name__ == "__main__":

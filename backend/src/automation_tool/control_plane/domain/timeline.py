@@ -1,0 +1,381 @@
+"""Local editing timeline: what plays when, taken from where, at what level."""
+
+from __future__ import annotations
+
+import re
+import unicodedata
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Final, Never, final
+
+from automation_tool.control_plane.domain.editing_project import EditingProjectId
+from automation_tool.control_plane.domain.material import (
+    MAX_MATERIAL_DURATION_MS,
+    MaterialId,
+)
+from automation_tool.control_plane.domain.resource_ids import ResourceId
+
+MAX_TIMELINE_DURATION_MS: Final = 600_000
+MIN_TIMELINE_DURATION_MS: Final = 100
+MAX_CLIPS_PER_TRACK: Final = 512
+MAX_TRANSITION_DURATION_MS: Final = 10_000
+MAX_CLIP_TEXT_CHARACTERS: Final = 2_000
+MIN_GAIN_DB: Final = -60.0
+MAX_GAIN_DB: Final = 12.0
+
+_LOCAL_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,63}\Z")
+
+
+class InvalidTimelineModel(ValueError):
+    """A timeline domain value is invalid."""
+
+    def __init__(self) -> None:
+        super().__init__("Timeline model is invalid")
+
+
+@final
+class TimelineId(ResourceId):
+    """Stable identifier for one timeline lineage."""
+
+    __slots__ = ()
+    _resource = "timeline"
+
+
+class TimelineTrackKind(StrEnum):
+    """One lane of the film. The three audio lanes mix differently.
+
+    `NARRATION` drives the ducking sidechain, `AMBIENT` and `MUSIC` get
+    ducked by it — one `AUDIO` lane could not say which was which.
+    """
+
+    VISUAL = "visual"
+    NARRATION = "narration"
+    AMBIENT = "ambient"
+    MUSIC = "music"
+    CAPTION = "caption"
+
+
+class OriginalAudioMode(StrEnum):
+    """How one source-material audio clip participates in the final mix."""
+
+    AUTO_DUCK = "auto_duck"
+    FIXED_VOLUME = "fixed_volume"
+    MUTED = "muted"
+
+
+AUDIBLE_TRACK_KINDS: Final = frozenset(
+    {TimelineTrackKind.NARRATION, TimelineTrackKind.AMBIENT, TimelineTrackKind.MUSIC}
+)
+
+
+class TransitionKind(StrEnum):
+    """How one visual clip gives way to the next.
+
+    A hard cut is the absence of a transition — `transition_in=None` — so
+    there is deliberately no `CUT` member: two spellings of one state is
+    how they drift apart.
+    """
+
+    FADE = "fade"
+    DISSOLVE = "dissolve"
+    WIPE = "wipe"
+
+
+def _reject() -> Never:
+    raise InvalidTimelineModel
+
+
+def _validate_text(value: object, *, maximum: int, optional: bool = False) -> None:
+    if value is None and optional:
+        return
+    if not isinstance(value, str) or not value or value != value.strip() or len(value) > maximum:
+        _reject()
+    for character in value:
+        if character in {"\n", "\t"}:
+            continue
+        if unicodedata.category(character).startswith("C"):
+            _reject()
+
+
+def _validate_timestamp(value: object) -> None:
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() != UTC.utcoffset(value)
+    ):
+        _reject()
+
+
+@dataclass(frozen=True, slots=True)
+class TimelineTransition:
+    kind: TransitionKind
+    duration_ms: int
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.kind, TransitionKind)
+            or type(self.duration_ms) is not int
+            or not 1 <= self.duration_ms <= MAX_TRANSITION_DURATION_MS
+        ):
+            _reject()
+
+
+@dataclass(frozen=True, slots=True)
+class TimelineClip:
+    """One thing happening on one lane, for one stretch of the film."""
+
+    clip_id: str
+    start_ms: int
+    duration_ms: int
+    source_material_id: MaterialId | None
+    source_in_ms: int | None
+    source_out_ms: int | None
+    text: str | None
+    gain_db: float | None
+    transition_in: TimelineTransition | None
+    original_audio_mode: OriginalAudioMode | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.clip_id, str)
+            or _LOCAL_ID_PATTERN.fullmatch(self.clip_id) is None
+            or type(self.start_ms) is not int
+            or self.start_ms < 0
+            or type(self.duration_ms) is not int
+            or not 1 <= self.duration_ms <= MAX_TIMELINE_DURATION_MS
+            or self.start_ms + self.duration_ms > MAX_TIMELINE_DURATION_MS
+            or (
+                self.source_material_id is not None
+                and not isinstance(self.source_material_id, MaterialId)
+            )
+            or (
+                self.transition_in is not None
+                and not isinstance(self.transition_in, TimelineTransition)
+            )
+        ):
+            _reject()
+        _validate_text(self.text, maximum=MAX_CLIP_TEXT_CHARACTERS, optional=True)
+        if (self.source_material_id is None) == (self.text is None):
+            _reject()
+        self._validate_source_window()
+        self._validate_gain()
+        self._validate_transition()
+
+    def _validate_source_window(self) -> None:
+        """Where in the source this slice comes from — at both ends or neither.
+
+        Omitting it means the source has no time axis of its own: a still
+        image occupies `duration_ms` without any stretch of it being taken.
+        """
+        if (self.source_in_ms is None) != (self.source_out_ms is None):
+            _reject()
+        if self.source_in_ms is None:
+            return
+        if self.source_material_id is None:
+            _reject()
+        source_in = self.source_in_ms
+        source_out = self.source_out_ms
+        if type(source_in) is not int or type(source_out) is not int:
+            _reject()
+        if source_in < 0 or source_out > MAX_MATERIAL_DURATION_MS:
+            _reject()
+        if source_out - source_in != self.duration_ms:
+            _reject()
+
+    def _validate_gain(self) -> None:
+        """Gain adjusts a clip's own audio — nothing to adjust without one.
+
+        A caption plays no audio at all, and an omitted source window means
+        the source has no time axis (a still image) to carry sound either.
+        Both cases must state `gain_db=None`.
+        """
+        if self.gain_db is None:
+            return
+        if self.source_in_ms is None:
+            _reject()
+        if type(self.gain_db) is not float or not MIN_GAIN_DB <= self.gain_db <= MAX_GAIN_DB:
+            _reject()
+
+    def _validate_transition(self) -> None:
+        """A transition may not cover the whole clip — it would never play on its own.
+
+        This only guards the half the clip itself has enough information to
+        judge. Not swallowing the *previous* clip is the track's problem
+        (`TimelineTrack`, T3), since that needs a neighbour to compare against.
+        """
+        if self.transition_in is None:
+            return
+        if self.transition_in.duration_ms >= self.duration_ms:
+            _reject()
+
+    @property
+    def end_ms(self) -> int:
+        return self.start_ms + self.duration_ms
+
+
+@dataclass(frozen=True, slots=True)
+class TimelineTrack:
+    """One lane of the film, and everything scheduled on it."""
+
+    track_id: str
+    kind: TimelineTrackKind
+    clips: tuple[TimelineClip, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.track_id, str)
+            or _LOCAL_ID_PATTERN.fullmatch(self.track_id) is None
+            or not isinstance(self.kind, TimelineTrackKind)
+            or not isinstance(self.clips, tuple)
+            or not 1 <= len(self.clips) <= MAX_CLIPS_PER_TRACK
+            or any(not isinstance(clip, TimelineClip) for clip in self.clips)
+            or len({clip.clip_id for clip in self.clips}) != len(self.clips)
+        ):
+            _reject()
+        for clip in self.clips:
+            self._validate_clip_shape(clip)
+        self._validate_layout()
+
+    def _validate_clip_shape(self, clip: TimelineClip) -> None:
+        """What a clip on THIS lane is allowed to carry.
+
+        Every kind gets a rule. A kind with no rule of its own is how a
+        model ends up accepting states nobody can render.
+        """
+        if self.kind is TimelineTrackKind.CAPTION:
+            # No separate `gain_db is not None` check: `_validate_gain` requires
+            # a source window for a level, and `_validate_source_window`
+            # requires a material for a window — so a clip carrying a level
+            # already has a material, which the first disjunct below catches.
+            if (
+                clip.source_material_id is not None
+                or clip.transition_in is not None
+                or clip.original_audio_mode is not None
+            ):
+                _reject()
+            return
+        if clip.text is not None:
+            _reject()
+        if self.kind is TimelineTrackKind.VISUAL:
+            # The picture lane carries no level of its own; a material's own
+            # sound rides the separate AMBIENT lane so it can be ducked.
+            if clip.gain_db is not None or clip.original_audio_mode is not None:
+                _reject()
+            return
+        # NARRATION / AMBIENT / MUSIC: every clip states its level, and the
+        # first release mixes them with no crossfades. Having a level already
+        # implies having a stretch to play — `TimelineClip` enforces that —
+        # so checking the window again here would be unreachable.
+        if clip.gain_db is None or clip.transition_in is not None:
+            _reject()
+        if self.kind is TimelineTrackKind.AMBIENT:
+            if not isinstance(clip.original_audio_mode, OriginalAudioMode):
+                _reject()
+        elif clip.original_audio_mode is not None:
+            _reject()
+
+    def _validate_layout(self) -> None:
+        """Where the clips sit relative to each other.
+
+        The picture lane runs end to end from zero — a gap would render as
+        black nobody asked for. A transition is a real overlap: `xfade`
+        outputs `a + b - transition`, so the incoming clip must start
+        exactly that much before the outgoing one ends, or the timeline's
+        own duration stops matching the film it describes.
+        """
+        previous_end = 0
+        previous_tail = 0
+        for clip in self.clips:
+            if self.kind is not TimelineTrackKind.VISUAL:
+                if clip.start_ms < previous_end:
+                    _reject()
+            else:
+                transition = clip.transition_in
+                overlap = 0 if transition is None else transition.duration_ms
+                # `TimelineClip` already refuses a transition that would swallow
+                # the incoming clip. Only the outgoing one needs a neighbour to
+                # judge, so only that half lives here — against its *remaining*
+                # tail, not its raw `duration_ms`: an earlier transition may
+                # already have eaten into it, and checking the raw duration
+                # would let a second transition eat the same stretch twice,
+                # swallowing the clip between them whole. The first clip has
+                # no neighbour of its own: `previous_tail` starts at 0 and a
+                # real transition is at least 1ms, so `overlap >= previous_tail`
+                # already rejects it without a separate index check.
+                if transition is not None and overlap >= previous_tail:
+                    _reject()
+                if clip.start_ms != previous_end - overlap:
+                    _reject()
+                previous_tail = clip.duration_ms - overlap
+            previous_end = clip.end_ms
+
+    @property
+    def end_ms(self) -> int:
+        return self.clips[-1].end_ms
+
+
+@dataclass(frozen=True, slots=True)
+class Timeline:
+    """One editable cut of one film, owned by one editing project.
+
+    Render settings — frame size, frame rate, caption style — live on the
+    project rather than here: they are the same for every cut of it.
+    """
+
+    timeline_id: TimelineId
+    project_id: EditingProjectId
+    revision: int
+    duration_ms: int
+    tracks: tuple[TimelineTrack, ...]
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.timeline_id, TimelineId)
+            or not isinstance(self.project_id, EditingProjectId)
+            or type(self.revision) is not int
+            or self.revision < 1
+            or type(self.duration_ms) is not int
+            or not MIN_TIMELINE_DURATION_MS <= self.duration_ms <= MAX_TIMELINE_DURATION_MS
+            or not isinstance(self.tracks, tuple)
+            or not 1 <= len(self.tracks) <= len(TimelineTrackKind)
+            or any(not isinstance(track, TimelineTrack) for track in self.tracks)
+            or len({track.track_id for track in self.tracks}) != len(self.tracks)
+            or len({track.kind for track in self.tracks}) != len(self.tracks)
+        ):
+            _reject()
+        _validate_timestamp(self.created_at)
+        picture = self.track_of(TimelineTrackKind.VISUAL)
+        if picture is None or picture.end_ms != self.duration_ms:
+            _reject()
+        if any(clip.end_ms > self.duration_ms for track in self.tracks for clip in track.clips):
+            _reject()
+
+    def track_of(self, kind: TimelineTrackKind) -> TimelineTrack | None:
+        """The one track on that lane, or None. Lanes are unique by construction."""
+        for track in self.tracks:
+            if track.kind is kind:
+                return track
+        return None
+
+
+__all__ = [
+    "AUDIBLE_TRACK_KINDS",
+    "MAX_CLIPS_PER_TRACK",
+    "MAX_CLIP_TEXT_CHARACTERS",
+    "MAX_GAIN_DB",
+    "MAX_TIMELINE_DURATION_MS",
+    "MAX_TRANSITION_DURATION_MS",
+    "MIN_GAIN_DB",
+    "MIN_TIMELINE_DURATION_MS",
+    "InvalidTimelineModel",
+    "OriginalAudioMode",
+    "Timeline",
+    "TimelineClip",
+    "TimelineId",
+    "TimelineTrack",
+    "TimelineTrackKind",
+    "TimelineTransition",
+    "TransitionKind",
+]

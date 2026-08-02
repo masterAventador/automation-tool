@@ -1,1 +1,3 @@
 * text=auto eol=lf
+# Preserve the upstream OFL byte-for-byte; one licensed line intentionally ends in a space.
+assets/motion-catalog-overlay/fonts/BigShouldersDisplay-OFL.txt -whitespace

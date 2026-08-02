@@ -51,8 +51,6 @@ import { AppUpdateCenter } from "../features/app-updates/AppUpdateCenter";
 import type { AppUpdateGateway } from "../features/app-updates/contracts";
 import { ModelServiceSettings } from "../features/settings/ModelServiceSettings";
 import type { ModelServiceGateway } from "../features/settings/model-service-gateway";
-import { VideoEditingServiceSettings } from "../features/settings/VideoEditingServiceSettings";
-import type { VideoEditingServiceGateway } from "../features/settings/video-editing-service-gateway";
 import {
   motionRunAttention,
   useMotionRun,
@@ -70,6 +68,8 @@ import {
   VideoEditingGatewayError,
   type VideoEditingGateway,
 } from "../features/video-editing/video-editing-gateway";
+import type { MaterialLibraryGateway } from "../features/video-editing/material-library-gateway";
+import type { SmartEditGateway } from "../features/video-editing/smart-edit-gateway";
 import {
   AccountPlatformOverview,
   AiAssistantHome,
@@ -340,7 +340,7 @@ const shellModelServiceGateway: ModelServiceGateway = {
     return {
       provider: "bailian",
       providerLabel: "阿里百炼",
-      catalogVerifiedAt: "2026-07-23",
+      catalogVerifiedAt: "2026-07-31",
       script: { purpose: "script", configured: false, modelId: "qwen3.7-max-2026-06-08" },
       videoCreative: {
         purpose: "video_creative",
@@ -402,27 +402,6 @@ const shellVideoEditingGateway: VideoEditingGateway = {
   },
 };
 
-const shellVideoEditingServiceGateway: VideoEditingServiceGateway = {
-  async getSettings() {
-    return {
-      provider: "aliyun_ims",
-      providerLabel: "阿里云视频剪辑服务",
-      catalogVerifiedAt: "2026-07-23",
-      configured: false,
-      region: null,
-    };
-  },
-  async configure() {
-    throw new Error("Video editing service configuration is unavailable");
-  },
-  async clear() {
-    throw new Error("Video editing service configuration is unavailable");
-  },
-  async testConnection() {
-    throw new Error("Video editing service connection test is unavailable");
-  },
-};
-
 const shellMaterialVideoStudioGateway: MaterialVideoStudioGateway = {
   async open() {
     throw new Error("Material video studio is unavailable");
@@ -475,9 +454,10 @@ interface WorkbenchShellProps {
   readonly platformSessionGateway?: PlatformSessionGateway | undefined;
   readonly appUpdateGateway?: AppUpdateGateway | undefined;
   readonly modelServiceGateway?: ModelServiceGateway | undefined;
-  readonly videoEditingServiceGateway?: VideoEditingServiceGateway | undefined;
   readonly materialVideoStudioGateway?: MaterialVideoStudioGateway | undefined;
   readonly videoEditingGateway?: VideoEditingGateway | undefined;
+  readonly materialLibraryGateway?: MaterialLibraryGateway | undefined;
+  readonly smartEditGateway?: SmartEditGateway | undefined;
   readonly publishWorkspaceGateway?: PublishWorkspaceGateway | undefined;
   /**
    * The video the publishing page starts with, if one is already chosen.
@@ -501,9 +481,10 @@ export function WorkbenchShell({
   platformSessionGateway = shellPlatformSessionGateway,
   appUpdateGateway = shellAppUpdateGateway,
   modelServiceGateway = shellModelServiceGateway,
-  videoEditingServiceGateway = shellVideoEditingServiceGateway,
   materialVideoStudioGateway = shellMaterialVideoStudioGateway,
   videoEditingGateway = shellVideoEditingGateway,
+  materialLibraryGateway,
+  smartEditGateway,
   publishWorkspaceGateway = shellPublishWorkspaceGateway,
   selectedVideo: initialSelectedVideo,
 }: WorkbenchShellProps) {
@@ -713,6 +694,8 @@ export function WorkbenchShell({
               <CreationHub
                 gateway={materialVideoStudioGateway}
                 editingGateway={videoEditingGateway}
+                materialLibraryGateway={materialLibraryGateway}
+                smartEditGateway={smartEditGateway}
                 onPublishArtifact={publishSelectedVideo}
               />
             ) : activePage === "publishing" ? (
@@ -757,13 +740,12 @@ export function WorkbenchShell({
                   <Typography.Text className="ops-eyebrow">本机与服务</Typography.Text>
                   <Typography.Title level={2}>设置</Typography.Title>
                   <Typography.Paragraph>
-                    管理模型、视频剪辑服务、本机执行器、诊断和更新。真实凭据不会进入页面状态。
+                    管理模型、本机执行器、诊断和更新。真实凭据不会进入页面状态。
                   </Typography.Paragraph>
                 </div>
                 <Space orientation="vertical" size="large" className="settings-stack">
                   <AppUpdateCenter gateway={appUpdateGateway} showSettings />
                   <ModelServiceSettings gateway={modelServiceGateway} />
-                  <VideoEditingServiceSettings gateway={videoEditingServiceGateway} />
                   <Diagnostics platform={platformAdapter} />
                   <div className="settings-legal-entry">
                     <Button

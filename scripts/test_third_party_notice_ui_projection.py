@@ -91,9 +91,7 @@ def run_check(projection: Path = PROJECTION) -> subprocess.CompletedProcess[str]
 
 
 def expect_check_failure(name: str, projection: dict) -> None:
-    with tempfile.TemporaryDirectory(
-        prefix="automation-tool-legal-projection-test-"
-    ) as temporary:
+    with tempfile.TemporaryDirectory(prefix="automation-tool-legal-projection-test-") as temporary:
         path = Path(temporary) / "projection.json"
         path.write_text(json.dumps(projection, ensure_ascii=False), encoding="utf-8")
         result = run_check(path)
@@ -128,17 +126,13 @@ def digest(path: Path) -> str:
 def main() -> int:
     assert BUILD.is_file(), "scripts/build_third_party_notice_ui_projection.py is missing"
     assert CHECK.is_file(), "scripts/check_third_party_notice_ui_projection.py is missing"
-    assert PROJECTION.is_file(), (
-        "contracts/quality/third-party-notice-ui.v1.json is missing"
-    )
+    assert PROJECTION.is_file(), "contracts/quality/third-party-notice-ui.v1.json is missing"
 
     passing = run_check()
     assert passing.returncode == 0, f"committed projection must pass: {passing.stderr}"
 
     # Determinism: rebuilding into a scratch path reproduces identical bytes.
-    with tempfile.TemporaryDirectory(
-        prefix="automation-tool-legal-projection-test-"
-    ) as temporary:
+    with tempfile.TemporaryDirectory(prefix="automation-tool-legal-projection-test-") as temporary:
         rebuilt = Path(temporary) / "projection.json"
         build = subprocess.run(
             [sys.executable, str(BUILD), "--output", str(rebuilt)],
@@ -170,7 +164,7 @@ def main() -> int:
     # Every locked source is disclosed, verbatim, in the lock's own order.
     projects = projection["upstreamProjects"]
     assert len(projects) == len(sources["sources"]), "every locked source is disclosed"
-    for project, source in zip(projects, sources["sources"]):
+    for project, source in zip(projects, sources["sources"], strict=True):
         assert set(project) == {
             "id",
             "name",
@@ -201,7 +195,7 @@ def main() -> int:
     # MIT and Apache-2.0 both oblige the distributor to reproduce the upstream
     # copyright line and to hand over the licence itself. Naming the licence is
     # not doing either, so both are derived from the locked LICENSE blob.
-    for project, source in zip(projects, sources["sources"]):
+    for project, source in zip(projects, sources["sources"], strict=True):
         licence_file = ROOT / source["path"] / source["license"]["path"]
         licence_text = licence_file.read_text(encoding="utf-8")
         assert project["copyright"] in licence_text, (
@@ -230,7 +224,10 @@ def main() -> int:
         "x264",
         "nodejs",
         "material-video-worker-python",
+        "onnxruntime",
+        "silero-vad-model",
         "subtitle-fonts",
+        "plangothic-fonts",
     }, "every redistributed runtime component is disclosed"
 
     for component in components:
@@ -277,9 +274,7 @@ def main() -> int:
     assert x264["license"] == ffmpeg_contract["x264"]["license"] == "GPL-2.0-or-later"
     assert x264["copyleft"] is True
     assert x264["upstreamSourceUrl"] == ffmpeg_contract["x264"]["source_url"]
-    assert x264["packagedSourcePaths"] == [
-        f"{layout['root']}/{layout['x264_source_archive']}"
-    ]
+    assert x264["packagedSourcePaths"] == [f"{layout['root']}/{layout['x264_source_archive']}"]
     # The conveyed binary is one GPL-3.0 work, so both entries point at the one
     # licence text the package and the App carry.
     assert ffmpeg["licenseTextId"] == x264["licenseTextId"] == "gpl-3.0"
@@ -289,52 +284,66 @@ def main() -> int:
     # holder, so the notice has to publish the holder separately — and it is read
     # out of the font binary itself rather than retyped.
     sys.path.insert(0, str(ROOT / "scripts"))
-    from subtitle_font_assets import (  # noqa: PLC0415
-        bundled_subtitle_fonts,
-        packaged_license_notice,
+    from subtitle_font_assets import (
+        bundled_font_families,
+        packaged_license_notices,
     )
 
-    fonts = bundled_subtitle_fonts()
-    subtitle_fonts = by_id["subtitle-fonts"]
-    assert subtitle_fonts["license"] == "OFL-1.1"
-    assert subtitle_fonts["copyleft"] is False
-    assert subtitle_fonts["licenseTextId"] == "ofl-1.1"
+    families = {family.component_id: family for family in bundled_font_families()}
+    for component_id, family in families.items():
+        component = by_id[component_id]
+        assert component["license"] == "OFL-1.1"
+        assert component["copyleft"] is False
+        assert component["licenseTextId"] == "ofl-1.1"
+        assert component["version"] == family.version
+        assert component["upstreamSourceUrl"] == family.project_url
+        assert component["copyright"] == family.attribution, (
+            "the published font copyright is not the registered attribution"
+        )
+        assert component["packagedNoticePath"].endswith(
+            family.packaged_license_name
+        ), "the notice does not point at the licence text shipped beside the fonts"
     # The fonts themselves are fetched at build time, so this page stays offline
     # and publishes the register's attribution. That value is not free text: the
     # fetch step and the frozen-candidate audit both reject a font whose own
     # `name` table carries a different notice.
-    assert subtitle_fonts["copyright"] == fonts[0].attribution, (
-        "the published font copyright is not the registered attribution"
-    )
-    assert len({font.attribution for font in fonts}) == 1
-    assert subtitle_fonts["packagedNoticePath"].endswith(
-        packaged_license_notice().packaged_name
-    ), "the notice does not point at the licence text shipped beside the fonts"
     for component in components:
-        if component["id"] != "subtitle-fonts":
+        if component["id"] not in families:
             assert component["copyright"] is None, (
                 f"{component['id']}: publishes a copyright the projection cannot derive"
             )
 
     assert by_id["embedded-browser"]["version"] == chromium["chromium"]["browser_version"]
     assert by_id["nodejs"]["version"] == motion_worker["runtime"]["version"]
-    assert (
-        by_id["material-video-worker-python"]["version"]
-        == material_worker["python"]["version"]
+    assert by_id["material-video-worker-python"]["version"] == material_worker["python"]["version"]
+    silero_contract = load(ROOT / "contracts/quality/silero-vad-runtime.v1.json")
+    silero_model = by_id["silero-vad-model"]
+    assert silero_model["version"] == silero_contract["upstream"]["tag"]
+    assert silero_model["license"] == silero_contract["license"]["spdx"] == "MIT"
+    assert silero_model["packagedNoticePath"].endswith(silero_contract["license"]["packagedPath"])
+    onnxruntime = by_id["onnxruntime"]
+    assert onnxruntime["version"] == silero_contract["runtime"]["version"]
+    assert onnxruntime["license"] == "MIT"
+    assert onnxruntime["packagedNoticePath"].endswith(
+        silero_contract["runtime"]["packagedLicensePath"]
     )
 
     # A published in-package path has to be one the production resource layout
     # actually has, and one the build that writes it actually writes.
     sys.path.insert(0, str(ROOT / "scripts"))
-    from release_assembly import VIDEO_RUNTIME_RESOURCES  # noqa: PLC0415
+    from release_assembly import RELEASE_PACKAGE_RESOURCES
 
     prefixes = tuple(
-        "/".join(resource.installed_parts) + "/" for resource in VIDEO_RUNTIME_RESOURCES
+        "/".join(str(part) for part in resource["installedParts"]) + "/"
+        for resource in RELEASE_PACKAGE_RESOURCES
     )
     packaged = [
         path
         for entry in list(components) + list(projects)
-        for path in ([entry.get("packagedNoticePath")] + list(entry.get("packagedSourcePaths", [])))
+        for path in (
+            entry.get("packagedNoticePath"),
+            *entry.get("packagedSourcePaths", []),
+        )
         if path
     ]
     assert packaged, "no in-package licence or source location is published at all"
@@ -348,9 +357,7 @@ def main() -> int:
     texts = projection["licenseTexts"]
     assert {text["id"] for text in texts} == {"mit", "apache-2.0", "gpl-3.0", "ofl-1.1"}
     for text in texts:
-        assert set(text) == {"id", "spdx", "sha256", "bytes"}, (
-            f"{text['id']}: closed key set"
-        )
+        assert set(text) == {"id", "spdx", "sha256", "bytes"}, f"{text['id']}: closed key set"
         shipped = LICENSE_TEXT_ROOT / f"{text['id']}.txt"
         assert shipped.is_file(), f"{text['id']}: the App ships no copy of this licence"
         assert digest(shipped) == text["sha256"], f"{text['id']}: shipped text drifted"
@@ -372,7 +379,12 @@ def main() -> int:
     # The OFL text the App carries must be the very file that travels with the
     # fonts inside the package, not a second copy that can drift from it.
     ofl = LICENSE_TEXT_ROOT / "ofl-1.1.txt"
-    assert digest(ofl) == packaged_license_notice().sha256, (
+    noto_license = next(
+        notice
+        for notice in packaged_license_notices()
+        if notice.packaged_name == "NotoSansCJK-LICENSE.txt"
+    )
+    assert digest(ofl) == noto_license.sha256, (
         "the App's OFL text is not the licence text the package fetches and ships"
     )
     assert "SIL OPEN FONT LICENSE Version 1.1" in ofl.read_text(encoding="utf-8")
@@ -390,9 +402,7 @@ def main() -> int:
         "categories",
     }, "asset rights block has a closed key set"
     assert rights["deniedByDefault"] is (asset_rights["defaultDecision"] == "deny")
-    assert rights["sharedRequiredFieldCount"] == len(
-        asset_rights["distributionRequiredFields"]
-    )
+    assert rights["sharedRequiredFieldCount"] == len(asset_rights["distributionRequiredFields"])
     assert rights["registeredEntryCount"] == len(asset_rights["entries"])
     assert len(rights["categories"]) == len(asset_rights["requiredCategories"])
     for category in rights["categories"]:
@@ -422,12 +432,12 @@ def main() -> int:
     assert motion["partsNeedingWorkCount"] == sum(counts.values()) - counts["cleared"]
     assert motion["webFontFamilyCount"] == stats["googleFontFamilyCount"]
     assert motion["bundledSampleAssetPartCount"] == stats["itemsWithBundledSampleAssets"]
-    assert (
-        motion["networkDependentPartCount"] == stats["itemsWithRuntimeRemoteDependencies"]
-    )
+    assert motion["networkDependentPartCount"] == stats["itemsWithRuntimeRemoteDependencies"]
     assert len(motion["dependencies"]) == len(motion_rights["remoteDependencyPackages"])
     for dependency, package in zip(
-        motion["dependencies"], motion_rights["remoteDependencyPackages"]
+        motion["dependencies"],
+        motion_rights["remoteDependencyPackages"],
+        strict=True,
     ):
         assert set(dependency) == {"name", "license", "partCount"}
         assert dependency["name"] == package["package"]
@@ -487,9 +497,7 @@ def main() -> int:
 
     tampered = clone()
     tampered["distributedComponents"] = [
-        component
-        for component in tampered["distributedComponents"]
-        if component["id"] != "ffmpeg"
+        component for component in tampered["distributedComponents"] if component["id"] != "ffmpeg"
     ]
     expect_check_failure("undisclosed GPL component", tampered)
 
@@ -516,9 +524,7 @@ def main() -> int:
     expect_check_failure("internal review field reintroduced", tampered)
 
     tampered = clone()
-    tampered["motionAssetRights"]["dependencies"][0]["name"] = (
-        "https://cdn.jsdelivr.net/npm/gsap"
-    )
+    tampered["motionAssetRights"]["dependencies"][0]["name"] = "https://cdn.jsdelivr.net/npm/gsap"
     expect_check_failure("CDN address reintroduced", tampered)
 
     # The tamper cases above all trip the equality check first, so the leakage

@@ -7,10 +7,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use automation_tool_desktop_lib::local_video_orchestrator::{
     LocalVideoOrchestrator, VideoWorkerErrorCode, VideoWorkerKind, VideoWorkerLaunch,
-    VideoWorkerRenderBrowserConfiguration, VideoWorkerRenderSandboxRequest,
-    VideoWorkerRestartPolicy, VideoWorkerState,
+    VideoWorkerRenderBrowserConfiguration, VideoWorkerRenderCanvas,
+    VideoWorkerRenderSandboxRequest, VideoWorkerRestartPolicy, VideoWorkerSourceWindow,
+    VideoWorkerState,
 };
-use automation_tool_desktop_lib::motion_video_studio::cancel_marker_file_name;
+use automation_tool_desktop_lib::motion_video_studio::{
+    cancel_marker_file_name, TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR, TEMPLATE_CANVAS_HEIGHT,
+    TEMPLATE_CANVAS_WIDTH,
+};
 use uuid::Uuid;
 use windows_sys::Win32::Foundation::CloseHandle;
 use windows_sys::Win32::System::Threading::{
@@ -195,6 +199,13 @@ fn real_worker_render_sandbox_isolates_malicious_html() {
         cancel_marker_file_name()
             .expect("declared cancellation marker")
             .to_owned(),
+        VideoWorkerRenderCanvas::new(
+            TEMPLATE_CANVAS_WIDTH,
+            TEMPLATE_CANVAS_HEIGHT,
+            TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR,
+        )
+        .expect("the template canvas is inside the declared bounds"),
+        VideoWorkerSourceWindow::new(0, 6_000).expect("a window inside the declared bounds"),
         vec!["assets/style.css".to_owned()],
         3,
         60,

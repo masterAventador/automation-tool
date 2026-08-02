@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "version": "local-video-editing.failure-matrix.v1",
+  "roadmapTask": "LE-21",
+  "scenarios": [
+    {
+      "id": "material-disappeared",
+      "name": "素材消失",
+      "expectedOutcome": "source_changed",
+      "evidence": [
+        {
+          "runner": "pytest",
+          "path": "backend/tests/unit/executor/test_visual_render_execution.py",
+          "anchor": "test_source_disappears_before_render_is_source_changed_without_publication"
+        }
+      ]
+    },
+    {
+      "id": "disk-full",
+      "name": "磁盘满",
+      "expectedOutcome": "resource_exhausted",
+      "evidence": [
+        {
+          "runner": "pytest",
+          "path": "backend/tests/unit/executor/test_visual_render_execution.py",
+          "anchor": "test_disk_full_and_permission_denial_leave_no_partial_output"
+        },
+        {
+          "runner": "cargo-test",
+          "path": "frontend/src-tauri/tests/local_editing_job_ledger_platform.rs",
+          "anchor": "cross_platform_workspace_failure_maps_to_resource_exhausted"
+        }
+      ]
+    },
+    {
+      "id": "permission-denied",
+      "name": "权限拒绝",
+      "expectedOutcome": "resource_exhausted",
+      "evidence": [
+        {
+          "runner": "pytest",
+          "path": "backend/tests/unit/executor/test_visual_render_execution.py",
+          "anchor": "test_disk_full_and_permission_denial_leave_no_partial_output"
+        },
+        {
+          "runner": "cargo-test",
+          "path": "frontend/src-tauri/tests/local_editing_job_ledger_platform.rs",
+          "anchor": "cross_platform_workspace_failure_maps_to_resource_exhausted"
+        }
+      ]
+    },
+    {
+      "id": "render-timeout",
+      "name": "渲染超时",
+      "expectedOutcome": "timed_out",
+      "evidence": [
+        {
+          "runner": "pytest",
+          "path": "backend/tests/unit/executor/test_visual_render_execution.py",
+          "anchor": "test_render_timeout_stops_the_real_child_before_returning"
+        },
+        {
+          "runner": "pytest",
+          "path": "backend/tests/unit/executor/test_visual_render_execution.py",
+          "anchor": "test_process_control_failure_has_a_fixed_code_and_cleans_working_output"
+        }
+      ]
+    },
+    {
+      "id": "process-killed",
+      "name": "进程被杀",
+      "expectedOutcome": "recovered_once",
+      "evidence": [
+        {
+          "runner": "cargo-test",
+          "path": "frontend/src-tauri/tests/local_editing_lifecycle_platform.rs",
+          "anchor": "native_process_crash_recovers_with_a_new_generation"
+        }
+      ]
+    },
+    {
+      "id": "cancel-race",
+      "name": "取消竞争",
+      "expectedOutcome": "cancelled_once",
+      "evidence": [
+        {
+          "runner": "cargo-test",
+          "path": "frontend/src-tauri/tests/local_editing_job_ledger_platform.rs",
+          "anchor": "cross_platform_cancellation_races_settle_once"
+        },
+        {
+          "runner": "cargo-test",
+          "path": "frontend/src-tauri/tests/local_editing_lifecycle_platform.rs",
+          "anchor": "native_process_cooperative_cancel_and_emergency_stop_are_distinct"
+        }
+      ]
+    },
+    {
+      "id": "app-exit-recovery",
+      "name": "App 退出恢复",
+      "expectedOutcome": "resumed_without_redispatch",
+      "evidence": [
+        {
+          "runner": "cargo-test",
+          "path": "frontend/src-tauri/tests/local_editing_lifecycle_platform.rs",
+          "anchor": "native_process_running_job_recovers_after_app_components_restart"
+        }
+      ]
+    }
+  ]
+}

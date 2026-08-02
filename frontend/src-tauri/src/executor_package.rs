@@ -193,13 +193,23 @@ impl ExecutorPackageVerifier {
         architecture: &str,
     ) -> Result<VerifiedExecutorPackage, ExecutorPackageError> {
         ensure_safe_package_root(package_root)?;
+        crate::app_logging::record(crate::app_logging::DesktopLogEvent::ExecutorPackageRootReady);
         let manifest_bytes =
             read_bounded_regular_file(&package_root.join(MANIFEST_FILE_NAME), MAX_MANIFEST_BYTES)?;
+        crate::app_logging::record(
+            crate::app_logging::DesktopLogEvent::ExecutorPackageManifestRead,
+        );
         let signature_bytes = read_bounded_regular_file(
             &package_root.join(SIGNATURE_FILE_NAME),
             MAX_SIGNATURE_BYTES,
         )?;
+        crate::app_logging::record(
+            crate::app_logging::DesktopLogEvent::ExecutorPackageSignatureRead,
+        );
         self.verify_signature(&manifest_bytes, &signature_bytes)?;
+        crate::app_logging::record(
+            crate::app_logging::DesktopLogEvent::ExecutorPackageSignatureVerified,
+        );
         let manifest = parse_canonical_manifest(&manifest_bytes)?;
         let version = validate_manifest_identity(&manifest, platform, architecture)?;
         if !self.allowed_versions.matches(&version) {
@@ -216,6 +226,12 @@ impl ExecutorPackageVerifier {
                 ExecutorPackageErrorCode::RollbackRejected,
             ));
         }
+        crate::app_logging::record(
+            crate::app_logging::DesktopLogEvent::ExecutorPackageIdentityVerified,
+        );
+        crate::app_logging::record(
+            crate::app_logging::DesktopLogEvent::ExecutorPackageInventoryStarted,
+        );
         verify_complete_inventory(package_root, &manifest)?;
         Ok(VerifiedExecutorPackage {
             version,
@@ -348,6 +364,9 @@ fn verify_complete_inventory(
             ExecutorPackageErrorCode::PackageInvalid,
         ));
     }
+    crate::app_logging::record(
+        crate::app_logging::DesktopLogEvent::ExecutorPackageInventoryPathsVerified,
+    );
 
     let mut total_size = 0_u64;
     let mut inventory = Sha256::new();
@@ -380,6 +399,9 @@ fn verify_complete_inventory(
         inventory.update(actual_size.to_be_bytes());
         inventory.update(actual_digest);
     }
+    crate::app_logging::record(
+        crate::app_logging::DesktopLogEvent::ExecutorPackageInventoryHashesVerified,
+    );
     let package_digest: [u8; 32] = inventory.finalize().into();
     if total_size != manifest.package_size
         || Some(package_digest) != decode_sha256(&manifest.package_sha256)
@@ -393,11 +415,17 @@ fn verify_complete_inventory(
             ExecutorPackageErrorCode::DigestMismatch,
         ));
     }
+    crate::app_logging::record(
+        crate::app_logging::DesktopLogEvent::ExecutorPackageInventoryDigestVerified,
+    );
     if collect_payload_paths(package_root)? != actual_paths {
         return Err(ExecutorPackageError::new(
             ExecutorPackageErrorCode::PackageInvalid,
         ));
     }
+    crate::app_logging::record(
+        crate::app_logging::DesktopLogEvent::ExecutorPackageInventoryRewalkVerified,
+    );
     Ok(())
 }
 
@@ -520,6 +548,25 @@ fn ensure_safe_package_root(package_root: &Path) -> Result<(), ExecutorPackageEr
         ));
     }
     Ok(())
+}
+
+#[cfg(all(test, windows))]
+mod windows_ancestor_tests {
+    use super::*;
+
+    #[test]
+    fn verbatim_absolute_paths_do_not_treat_the_drive_prefix_as_an_ancestor() {
+        let current = std::env::current_dir().expect("current directory");
+        let rendered = current.to_str().expect("ASCII test checkout");
+        let verbatim = if rendered.starts_with(r"\\?\") {
+            current
+        } else {
+            PathBuf::from(format!(r"\\?\{rendered}"))
+        };
+
+        ensure_no_symlink_ancestors(&verbatim)
+            .expect("a normal directory stays safe through its verbatim absolute path");
+    }
 }
 
 pub(crate) fn ensure_no_symlink_ancestors(path: &Path) -> Result<(), ExecutorPackageError> {

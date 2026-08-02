@@ -17,10 +17,11 @@ import { TauriStartupEnvironmentGateway } from "./platform/tauri/startup-environ
 import { TauriAppUpdateGateway } from "./platform/tauri/app-update-gateway";
 import { TauriAccountSessionGateway } from "./platform/tauri/account-session-gateway";
 import { TauriModelServiceGateway } from "./platform/tauri/model-service-gateway";
-import { TauriVideoEditingServiceGateway } from "./platform/tauri/video-editing-service-gateway";
 import { TauriMaterialVideoStudioGateway } from "./platform/tauri/material-video-studio-gateway";
 import { TauriPublishWorkspaceGateway } from "./platform/tauri/publish-workspace-gateway";
-import { createLocalVideoEditingGateway } from "./features/video-editing/local-video-editing-gateway";
+import { TauriVideoEditingGateway } from "./platform/tauri/video-editing-gateway";
+import { TauriMaterialLibraryGateway } from "./platform/tauri/material-library-gateway";
+import { TauriSmartEditGateway } from "./platform/tauri/smart-edit-gateway";
 import "./styles/global.css";
 
 const root = document.getElementById("root");
@@ -44,10 +45,11 @@ const platformAdapter = new TauriPlatformAdapter();
 const platformSessionGateway = new TauriPlatformSessionGateway();
 const appUpdateGateway = new TauriAppUpdateGateway();
 const modelServiceGateway = new TauriModelServiceGateway();
-const videoEditingServiceGateway = new TauriVideoEditingServiceGateway();
 const materialVideoStudioGateway = new TauriMaterialVideoStudioGateway();
 const publishWorkspaceGateway = new TauriPublishWorkspaceGateway();
-const videoEditingGateway = createLocalVideoEditingGateway(window.sessionStorage);
+const videoEditingGateway = new TauriVideoEditingGateway();
+const materialLibraryGateway = new TauriMaterialLibraryGateway();
+const smartEditGateway = new TauriSmartEditGateway();
 // Always constructed. Whether a product account is actually required is a
 // property of the deployment this build was configured for, answered at
 // runtime by `restore_product_account_session`. Selecting it by Vite mode
@@ -70,10 +72,11 @@ createRoot(root).render(
       platformSessionGateway={platformSessionGateway}
       appUpdateGateway={appUpdateGateway}
       modelServiceGateway={modelServiceGateway}
-      videoEditingServiceGateway={videoEditingServiceGateway}
       materialVideoStudioGateway={materialVideoStudioGateway}
       publishWorkspaceGateway={publishWorkspaceGateway}
       videoEditingGateway={videoEditingGateway}
+      materialLibraryGateway={materialLibraryGateway}
+      smartEditGateway={smartEditGateway}
       accountSessionGateway={accountSessionGateway}
     />
   </StrictMode>,

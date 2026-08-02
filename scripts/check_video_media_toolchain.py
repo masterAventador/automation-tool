@@ -14,7 +14,6 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = ROOT / "contracts/video/ffmpeg-toolchain.v1.json"
 SHA256_LENGTH = 64
@@ -177,7 +176,35 @@ def validate_contract(document: dict[str, Any]) -> None:
         "decoders": {"h264", "aac", "png"},
         "demuxers": {"concat", "image2", "image2pipe", "mov"},
         "muxers": {"mp4", "mov", "image2"},
-        "filters": {"amix", "aresample", "concat", "overlay", "scale"},
+        "filters": {
+            "adelay",
+            "aformat",
+            "ametadata",
+            "amix",
+            "anull",
+            "apad",
+            "aresample",
+            "asetpts",
+            "asplit",
+            "atrim",
+            "concat",
+            "crop",
+            "ebur128",
+            "format",
+            "fps",
+            "overlay",
+            "scale",
+            "scdet",
+            "select",
+            "setpts",
+            "setsar",
+            "settb",
+            "sidechaincompress",
+            "silencedetect",
+            "trim",
+            "volume",
+            "xfade",
+        },
         "protocols": {"file", "pipe"},
     }
     for group, expected in required.items():
@@ -282,6 +309,29 @@ def command_output(binary: Path, *arguments: str) -> str:
     if result.returncode != 0:
         raise ContractError(f"media tool failed capability probe: {binary.name}")
     return result.stdout + result.stderr
+
+
+def capability_output_contains(output: str, required: str) -> bool:
+    """Match one FFmpeg capability identifier, including comma aliases.
+
+    FFmpeg's tables put a compact uppercase/dot flag column before names while
+    the protocol table contains bare names.  Looking for a substring is not a
+    capability check: for example, a build with only ``xfade_opencl`` would
+    otherwise satisfy the required software ``xfade`` filter.
+    """
+    for line in output.splitlines():
+        columns = line.split()
+        if not columns:
+            continue
+        token = columns[0]
+        if len(columns) > 1 and all(
+            character == "." or character == "|" or character.isupper()
+            for character in token
+        ):
+            token = columns[1]
+        if required in token.split(","):
+            return True
+    return False
 
 
 def run_checked(binary: Path, *arguments: str) -> None:
@@ -501,7 +551,7 @@ def validate_candidate(root: Path, target_id: str, document: dict[str, Any]) -> 
         if group == "programs":
             continue
         for name in names:
-            if name not in probes[group]:
+            if not capability_output_contains(probes[group], name):
                 raise ContractError(f"candidate missing {group} capability: {name}")
     compatibility_smoke(ffmpeg, ffprobe)
 
@@ -529,6 +579,10 @@ def self_test(document: dict[str, Any]) -> None:
         (
             "missing codec",
             lambda data: data["required_capabilities"]["encoders"].remove("libx264"),
+        ),
+        (
+            "missing local-editing filter",
+            lambda data: data["required_capabilities"]["filters"].remove("xfade"),
         ),
         ("unknown target", lambda data: data["targets"][0].update(arch="x86_64")),
         ("partial digest", lambda data: data["x264"].update(source_sha256="abc")),

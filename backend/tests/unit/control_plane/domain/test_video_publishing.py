@@ -404,6 +404,12 @@ class TestPublishJob:
             _job(content_sha256=SHA256.upper())
         with pytest.raises(InvalidVideoPublishingModel):
             _job(content_sha256="deadbeef")
+        # `_SHA256_PATTERN.fullmatch` requires consuming the whole string, so
+        # this is already rejected today — but only because the call site uses
+        # `fullmatch` rather than `match`. Pinned separately so the guard does
+        # not quietly start depending on that choice of verb.
+        with pytest.raises(InvalidVideoPublishingModel):
+            _job(content_sha256=SHA256 + "\n")
 
     def test_revision_and_time_validation(self) -> None:
         with pytest.raises(InvalidVideoPublishingModel):
@@ -435,3 +441,20 @@ class TestPublishJob:
         job = _job(description=None, cover_artifact_id=ArtifactId.new())
         assert job.description is None
         assert job.cover_artifact_id is not None
+
+
+def test_the_guard_does_not_depend_on_the_calling_verb() -> None:
+    """`\\Z` is why, and this is the only shape that pins it.
+
+    Under `fullmatch` a trailing `$` behaves identically, so every
+    behavioural case in this file passes either way -- reverting the
+    anchor is invisible to them. Calling `match` instead states the
+    property the anchor actually buys: the guard holds even if the
+    verb is ever weakened.
+    """
+    from automation_tool.control_plane.domain.video_publishing import (
+        _SHA256_PATTERN,
+    )
+
+    digest = "b" * 64
+    assert _SHA256_PATTERN.match(digest + "\n") is None

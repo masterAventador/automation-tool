@@ -48,6 +48,19 @@ dev = [
 ]
 executor = [
     "playwright==1.61.0",
+    # LE-14 runs the digest-locked Silero model locally. CPU-only ONNX Runtime
+    # has native wheels for both release targets; NumPy is a direct dependency
+    # because the production inference boundary constructs its tensors.
+    "onnxruntime==1.23.2",
+    "numpy==2.5.1",
+    # Captions are drawn by PIL and overlaid by ffmpeg: the shipped ffmpeg has
+    # no freetype/libass, so drawtext/subtitles/ass are all unavailable (see
+    # the local smart edit design 5.2). fontTools reads each face's cmap to
+    # decide which face draws a character, and brotli is what lets it read the
+    # WOFF2 faces -- FreeType decompresses those on its own, fontTools does not.
+    "pillow",
+    "fonttools==4.63.0",
+    "brotli==1.2.0",
 ]
 # Build-time only, and deliberately not in `executor`. The frozen executor spec
 # sets `excludes=[]`, so what ships is decided by the import graph; keeping the
@@ -91,6 +104,14 @@ mypy_path = "src"
 python_version = "3.12"
 strict = true
 warn_unused_configs = true
+
+# fontTools ships no py.typed marker, so strict mode cannot follow it. Scoped
+# to that one package deliberately: it is the only untyped import in the tree,
+# and Pillow -- the other new face-handling dependency -- does ship py.typed,
+# so caption rendering stays fully checked.
+[[tool.mypy.overrides]]
+module = "fontTools.*"
+ignore_missing_imports = true
 
 [tool.coverage.run]
 branch = true

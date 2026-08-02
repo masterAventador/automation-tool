@@ -1,5 +1,7 @@
 import type {
+  EditingCaptionStyle,
   EditingJobSnapshot,
+  EditingOutputSpec,
   EditingProjectSnapshot,
   EditingTimelineDraft,
   EditingTimelineSnapshot,
@@ -9,7 +11,8 @@ export type VideoEditingErrorCode =
   | "invalid_project"
   | "invalid_timeline"
   | "draft_storage_unavailable"
-  | "editing_service_unavailable";
+  | "editing_service_unavailable"
+  | "outcome_uncertain";
 
 export class VideoEditingGatewayError extends Error {
   constructor(
@@ -23,7 +26,8 @@ export class VideoEditingGatewayError extends Error {
 
 export interface CreateEditingProjectInput {
   readonly title: string;
-  readonly sourceArtifactIds: readonly string[];
+  readonly output: EditingOutputSpec;
+  readonly captionStyle: EditingCaptionStyle;
 }
 
 export interface VideoEditingGateway {

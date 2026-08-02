@@ -25,7 +25,7 @@ test("B5-07 packages Playwright for an explicit system browser without a WebView
   );
   assert.match(
     project,
-    /\[dependency-groups\][\s\S]*?\nexecutor\s*=\s*\[\s*"playwright==1\.61\.0",?\s*\]/u,
+    /\[dependency-groups\][\s\S]*?\nexecutor\s*=\s*\[[^\]]*"playwright==1\.61\.0"[^\]]*\]/u,
   );
   assert.match(spec, /collect_all\(["']playwright["']\)/u);
   assert.match(spec, /automation_tool\.executor\.browser_runtime/u);

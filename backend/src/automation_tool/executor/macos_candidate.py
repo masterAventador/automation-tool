@@ -14,6 +14,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from automation_tool.executor.silero_vad import (
+    SileroVadUnavailable,
+    audit_packaged_silero_vad_runtime,
+)
+
 BUNDLE_NAME = "automation-tool-executor"
 ENTRYPOINT_NAME = BUNDLE_NAME
 MAX_CANDIDATE_FILES = 10_000
@@ -272,6 +277,10 @@ def audit_macos_executor_candidate(
             or not any(path.endswith("/playwright/driver/node") for path in rendered_paths)
         ):
             raise _reject()
+        try:
+            audit_packaged_silero_vad_runtime(bundle_directory)
+        except SileroVadUnavailable:
+            raise _reject() from None
         _verify_code_signatures(tuple(mach_o_files))
         return MacOSExecutorCandidateAudit(
             architecture=expected,

@@ -24,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import subtitle_font_assets  # noqa: E402
+import subtitle_font_assets
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SOURCES_PATH = REPOSITORY_ROOT / "contracts/quality/third-party-sources.v1.json"
@@ -33,9 +33,8 @@ MOTION_RIGHTS_PATH = REPOSITORY_ROOT / "contracts/quality/motion-catalog-rights.
 FFMPEG_TOOLCHAIN_PATH = REPOSITORY_ROOT / "contracts/video/ffmpeg-toolchain.v1.json"
 CHROMIUM_STAGING_PATH = REPOSITORY_ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
 MOTION_WORKER_PATH = REPOSITORY_ROOT / "contracts/quality/motion-video-worker-package.v1.json"
-MATERIAL_WORKER_PATH = (
-    REPOSITORY_ROOT / "contracts/quality/material-video-worker-package.v1.json"
-)
+MATERIAL_WORKER_PATH = REPOSITORY_ROOT / "contracts/quality/material-video-worker-package.v1.json"
+SILERO_VAD_RUNTIME_PATH = REPOSITORY_ROOT / "contracts/quality/silero-vad-runtime.v1.json"
 PROJECTION_PATH = REPOSITORY_ROOT / "contracts/quality/third-party-notice-ui.v1.json"
 LICENSE_TEXT_ROOT = (
     REPOSITORY_ROOT / "frontend/src/features/legal/third-party-software/license-texts"
@@ -62,17 +61,12 @@ LICENSE_TEXT_SPDX: dict[str, str] = {
 GPL_3_0_SHA256 = "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
 LICENSE_TEXT_BY_SPDX: dict[str, str] = {"MIT": "mit", "Apache-2.0": "apache-2.0"}
 
-# The subtitle fonts the installer redistributes in place of the four
-# proprietary Windows/macOS system faces the upstream project bundled. They are
-# one disclosure entry rather than one per face: a user reads about a licence and
-# a copyright holder, and both are identical across the faces — the register and
-# the candidate audit are where the per-file digests live.
-SUBTITLE_FONT_COMPONENT_ID = "subtitle-fonts"
-SUBTITLE_FONT_COMPONENT_NAME = "Noto Sans CJK SC"
+# The two font families share the standard OFL terms, while their upstream
+# copyright notices and packaged licence files remain separate and are derived
+# from the rights register.
 SUBTITLE_FONT_LICENSE_TEXT_ID = "ofl-1.1"
-SUBTITLE_FONT_VERSION = "Sans2.004"
-SUBTITLE_FONT_SOURCE_URL = "https://github.com/notofonts/noto-cjk"
 MATERIAL_WORKER_INTERNAL_PREFIX = "material-video-worker/package/_internal"
+LOCAL_EXECUTOR_INTERNAL_PREFIX = "local-executor/package/_internal"
 
 # Where a locked submodule's own LICENSE file lands inside the installed
 # package. Only the material-video Worker carries one: its PyInstaller spec
@@ -90,11 +84,8 @@ UPSTREAM_PACKAGED_NOTICE: dict[str, str | None] = {
 # so a rename that leaves this notice pointing at a file the installer no longer
 # writes fails the gate instead of shipping a dead path to a user.
 PACKAGED_PATH_PRODUCERS: dict[str, str] = {
-    "motion-video-worker/package/NODE-LICENSE": (
-        "scripts/build_motion_video_worker_candidate.py"
-    ),
-    "material-video-worker/package/_internal/licenses/"
-    "material-video-worker-dependencies.json": (
+    "motion-video-worker/package/NODE-LICENSE": ("scripts/build_motion_video_worker_candidate.py"),
+    "material-video-worker/package/_internal/licenses/material-video-worker-dependencies.json": (
         "scripts/build_material_video_worker_candidate.py"
     ),
     "material-video-worker/package/_internal/upstream/LICENSE": (
@@ -229,24 +220,20 @@ def _media_toolchain_path(layout: dict, key: str) -> str:
     return f"{root}/{_text(layout.get(key), f'package_layout.{key}')}"
 
 
-def subtitle_font_license_path() -> str:
+def subtitle_font_license_path(packaged_name: str) -> str:
     """Where the font licence text lands inside the installed package.
 
     Derived from the asset rights register and the packaging layout the Worker
     spec uses, so a renamed licence file cannot leave this page pointing at
     something the installer never writes.
     """
-    try:
-        notice = subtitle_font_assets.packaged_license_notice()
-    except subtitle_font_assets.SubtitleFontRightsError as error:
-        raise ProjectionError(f"the subtitle fonts are not cleared: {error}") from error
     return (
         f"{MATERIAL_WORKER_INTERNAL_PREFIX}/"
-        f"{subtitle_font_assets.PACKAGED_FONT_DIRECTORY}/{notice.packaged_name}"
+        f"{subtitle_font_assets.PACKAGED_FONT_DIRECTORY}/{packaged_name}"
     )
 
 
-def _subtitle_font_component() -> dict:
+def _subtitle_font_components() -> list[dict]:
     """Disclose the open fonts that replaced the proprietary system faces.
 
     The SIL Open Font License is unlike the other licences on this page: its text
@@ -256,29 +243,88 @@ def _subtitle_font_component() -> dict:
     the licence itself says that notice may live.
     """
     try:
-        fonts = subtitle_font_assets.bundled_subtitle_fonts()
+        families = subtitle_font_assets.bundled_font_families()
     except subtitle_font_assets.SubtitleFontRightsError as error:
         raise ProjectionError(f"the subtitle fonts are not cleared: {error}") from error
-    notices = {font.attribution for font in fonts}
-    if len(notices) != 1:
-        raise ProjectionError("the shipped fonts disagree on their copyright notice")
-    return {
-        "id": SUBTITLE_FONT_COMPONENT_ID,
-        "name": SUBTITLE_FONT_COMPONENT_NAME,
-        "version": SUBTITLE_FONT_VERSION,
-        "license": subtitle_font_assets.OPEN_FONT_LICENSE,
-        "copyleft": False,
-        "copyright": notices.pop(),
-        "licenseTextId": SUBTITLE_FONT_LICENSE_TEXT_ID,
-        "packagedNoticePath": subtitle_font_license_path(),
-        "noticeChannelId": None,
-        "packagedSourcePaths": [],
-        "upstreamSourceUrl": SUBTITLE_FONT_SOURCE_URL,
-    }
+    return [
+        {
+            "id": family.component_id,
+            "name": family.display_name,
+            "version": family.version,
+            "license": subtitle_font_assets.OPEN_FONT_LICENSE,
+            "copyleft": False,
+            "copyright": family.attribution,
+            "licenseTextId": family.license_text_id,
+            "packagedNoticePath": subtitle_font_license_path(
+                family.packaged_license_name
+            ),
+            "noticeChannelId": None,
+            "packagedSourcePaths": [],
+            "upstreamSourceUrl": family.project_url,
+        }
+        for family in families
+    ]
+
+
+def _local_executor_internal_path(value: object, field: str) -> str:
+    relative = _text(value, field)
+    parts = relative.split("/")
+    if relative.startswith("/") or any(part in {"", ".", ".."} for part in parts):
+        raise ProjectionError(f"{field} is not a canonical package-relative path")
+    return f"{LOCAL_EXECUTOR_INTERNAL_PREFIX}/{relative}"
+
+
+def _silero_vad_components(contract: dict) -> list[dict]:
+    upstream = contract.get("upstream")
+    model_license = contract.get("license")
+    runtime = contract.get("runtime")
+    if not all(isinstance(value, dict) for value in (upstream, model_license, runtime)):
+        raise ProjectionError("the Silero VAD runtime contract is incomplete")
+    assert (
+        isinstance(upstream, dict) and isinstance(model_license, dict) and isinstance(runtime, dict)
+    )
+    return [
+        {
+            "id": "onnxruntime",
+            "name": "ONNX Runtime",
+            "version": _text(runtime.get("version"), "silero.runtime.version"),
+            "license": _text(runtime.get("licenseSpdx"), "silero.runtime.licenseSpdx"),
+            "copyleft": False,
+            "copyright": None,
+            "licenseTextId": None,
+            "packagedNoticePath": _local_executor_internal_path(
+                runtime.get("packagedLicensePath"),
+                "silero.runtime.packagedLicensePath",
+            ),
+            "noticeChannelId": None,
+            "packagedSourcePaths": [],
+            "upstreamSourceUrl": None,
+        },
+        {
+            "id": "silero-vad-model",
+            "name": "Silero VAD model",
+            "version": _text(upstream.get("tag"), "silero.upstream.tag"),
+            "license": _text(model_license.get("spdx"), "silero.license.spdx"),
+            "copyleft": False,
+            "copyright": None,
+            "licenseTextId": None,
+            "packagedNoticePath": _local_executor_internal_path(
+                model_license.get("packagedPath"),
+                "silero.license.packagedPath",
+            ),
+            "noticeChannelId": None,
+            "packagedSourcePaths": [],
+            "upstreamSourceUrl": None,
+        },
+    ]
 
 
 def _distributed_components(
-    ffmpeg_contract: dict, chromium: dict, motion_worker: dict, material_worker: dict
+    ffmpeg_contract: dict,
+    chromium: dict,
+    motion_worker: dict,
+    material_worker: dict,
+    silero_vad_runtime: dict,
 ) -> list[dict]:
     """Every third-party runtime the installer puts on a user's disk.
 
@@ -381,7 +427,8 @@ def _distributed_components(
             "packagedSourcePaths": [],
             "upstreamSourceUrl": None,
         },
-        _subtitle_font_component(),
+        *_silero_vad_components(silero_vad_runtime),
+        *_subtitle_font_components(),
     ]
 
 
@@ -407,9 +454,7 @@ def _upstream_projects(sources: dict) -> list[dict]:
         if license_text_id is None:
             raise ProjectionError(f"{identifier}: the App ships no {spdx} licence text")
         source_root = REPOSITORY_ROOT / _text(entry.get("path"), f"{identifier}: path")
-        license_file = source_root / _text(
-            licence.get("path"), f"{identifier}: license.path"
-        )
+        license_file = source_root / _text(licence.get("path"), f"{identifier}: license.path")
         projects.append(
             {
                 "id": identifier,
@@ -508,6 +553,7 @@ def compose_projection() -> dict:
             _load(CHROMIUM_STAGING_PATH),
             _load(MOTION_WORKER_PATH),
             _load(MATERIAL_WORKER_PATH),
+            _load(SILERO_VAD_RUNTIME_PATH),
         ),
         "licenseTexts": texts,
         "assetRights": _asset_rights(_load(ASSET_RIGHTS_PATH)),

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """CQ-04 验收：专项终验，如实说清哪些真跑了、哪些跑不了。
 
-CQ-04 要的是"从全新安装的真实 App 一句话创建两类视频、送入独立阿里云剪辑、预览、
-成片入库，再用抖音 Browser Use 完成真实发布"。这条链路上有三处外部条件：
+CQ-04 要的是"从全新安装的真实 App 一句话创建两类视频、预览、
+成片入库，再用抖音 Browser Use 完成真实发布"。这条链路上有两处外部条件：
 
 | 条件 | 本机 | 影响 |
 | --- | --- | --- |
 | 百炼模型密钥 | 有 | 一句话生成脚本可跑 |
-| 阿里云剪辑密钥 | 有 | 独立剪辑可跑 |
 | 抖音创作者账号 | **没有**（要扫码） | 真实发布跑不了 |
 
 所以本脚本不假装跑完了整条链路。它做三件事：
@@ -16,7 +15,7 @@ CQ-04 要的是"从全新安装的真实 App 一句话创建两类视频、送�
 2. **跑不依赖缺失条件的那些段**，用的是真实正式包；
 3. **核对台账没有虚标**——每个 `🔍 待验收` 的任务必须说得出自己缺什么。
 
-第 3 条是 CQ-04 独有的：作为终验，它必须能回答"这 87 项里哪些是真完成的"。
+第 3 条是 CQ-04 独有的：作为终验，它必须能回答"这 79 项里哪些是真完成的"。
 """
 
 from __future__ import annotations
@@ -47,7 +46,6 @@ _NOT_ACTIVATED = ("⬜", "⏸")
 # 外部条件：只看文件在不在，不读内容——密钥不该进入任何日志或报告。
 EXTERNAL_CONDITIONS = {
     "百炼模型密钥": SECRETS / "bailian-model.json",
-    "阿里云剪辑密钥": SECRETS / "aliyun-video-editing.json",
 }
 
 # 不依赖缺失外部条件、且跑在真实正式包上的段。
@@ -95,8 +93,8 @@ def sweep_the_ledger() -> int:
     """核对每个已激活任务的状态与它自己的证据内容自洽。"""
     roadmap = ROADMAP.read_text(encoding="utf-8")
     rows = _TASK_ROW.findall(roadmap)
-    if len(rows) != 87:
-        fail(f"expected 87 task rows in the specialized roadmap, found {len(rows)}")
+    if len(rows) != 79:
+        fail(f"expected 79 task rows in the specialized roadmap, found {len(rows)}")
     problems: list[str] = []
     checked = 0
     for task_id, status in rows:

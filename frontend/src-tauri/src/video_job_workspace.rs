@@ -527,7 +527,7 @@ impl VideoJobWorkspaceStore {
         if metadata.len() == 0 || metadata.len() > MAX_CHECKPOINT_BYTES {
             return Err(storage_unavailable());
         }
-        read_bounded_file(&path, metadata.len())
+        read_private_checkpoint(&path, metadata)
     }
 
     pub fn import_output(
@@ -537,9 +537,28 @@ impl VideoJobWorkspaceStore {
         media_type: &str,
         role: &str,
     ) -> Result<VideoArtifactRecord, VideoWorkspaceError> {
+        self.import_output_with_id(workspace, generate_uuid_v4()?, file_name, media_type, role)
+    }
+
+    /// Import a Worker-authenticated output under the identifier its terminal
+    /// event already committed to. The same validation and atomic copy used by
+    /// ordinary imports still applies; only UUID generation moves across the
+    /// authenticated process boundary.
+    pub fn import_output_with_id(
+        &self,
+        workspace: &VideoJobWorkspace,
+        artifact_id: Uuid,
+        file_name: &str,
+        media_type: &str,
+        role: &str,
+    ) -> Result<VideoArtifactRecord, VideoWorkspaceError> {
         self.revalidate_workspace(workspace)?;
         self.revalidate_roots()?;
-        if !valid_file_name(file_name) || !valid_media_type(media_type) || !valid_role(role) {
+        if !valid_uuid_v4(artifact_id)
+            || !valid_file_name(file_name)
+            || !valid_media_type(media_type)
+            || !valid_role(role)
+        {
             return Err(path_rejected());
         }
         let source = workspace.directory.join(OUTPUTS_DIRECTORY).join(file_name);
@@ -556,7 +575,11 @@ impl VideoJobWorkspaceStore {
             source_metadata.len(),
             self.policy,
         )?;
-        let artifact_id = generate_uuid_v4()?;
+        if fs::symlink_metadata(self.artifact_directory(artifact_id)).is_ok() {
+            return Err(VideoWorkspaceError::new(
+                VideoWorkspaceErrorCode::AlreadyExists,
+            ));
+        }
         let sequence = TEMPORARY_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let temporary = self.artifacts_directory.join(format!(
             ".import-{}-{}-{sequence}",
@@ -1240,6 +1263,44 @@ fn read_bounded_file(path: &Path, expected_bytes: u64) -> Result<Vec<u8>, VideoW
         return Err(storage_unavailable());
     }
     Ok(payload)
+}
+
+fn read_private_checkpoint(
+    path: &Path,
+    expected: fs::Metadata,
+) -> Result<Vec<u8>, VideoWorkspaceError> {
+    require_private_file_metadata(&expected)?;
+    let expected_bytes = expected.len();
+    let capacity = usize::try_from(expected_bytes).map_err(|_| storage_unavailable())?;
+    let mut payload = Vec::with_capacity(capacity);
+    let file = open_read_no_follow(path)?;
+    let opened = file.metadata().map_err(|_| storage_unavailable())?;
+    if !same_file(&expected, &opened) {
+        return Err(storage_unavailable());
+    }
+    require_private_file_metadata(&opened)?;
+    file.take(expected_bytes.saturating_add(1))
+        .read_to_end(&mut payload)
+        .map_err(|_| storage_unavailable())?;
+    if payload.len() as u64 != expected_bytes {
+        return Err(storage_unavailable());
+    }
+    Ok(payload)
+}
+
+fn require_private_file_metadata(metadata: &fs::Metadata) -> Result<(), VideoWorkspaceError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o7777 != 0o600 {
+            return Err(storage_unavailable());
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+    }
+    Ok(())
 }
 
 fn ensure_free_space(

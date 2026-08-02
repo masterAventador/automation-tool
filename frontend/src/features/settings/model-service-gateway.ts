@@ -17,7 +17,7 @@ export interface ModelPurposeSnapshot {
 export interface ModelServiceSnapshot {
   readonly provider: "bailian";
   readonly providerLabel: "阿里百炼";
-  readonly catalogVerifiedAt: "2026-07-23";
+  readonly catalogVerifiedAt: "2026-07-31";
   readonly script: ModelPurposeSnapshot;
   readonly videoCreative: ModelPurposeSnapshot;
   readonly sameCredential: boolean;
