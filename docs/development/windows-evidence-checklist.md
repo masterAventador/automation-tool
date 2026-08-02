@@ -299,8 +299,10 @@ containment 的 NTFS 语义重验**已完成，并修掉三个真实缺陷**—�
 Windows 真机复验通过：`rejected ... differs only by case`，原文件未被覆盖；
 `python scripts\test_motion_authoring_agent.py` 在 Windows 真机 `Ran 48 tests ... OK`。
 
-Windows 侧仍待补：BM-05 生成物真正被逐帧渲染并从正式 App 用户入口纵向验收，随 BM-08
-（页面）与 BM-16（生产包冻结）在 Windows 平台一并补齐。
+Windows 侧已于 2026-08-02 由 BM-16 的生产 NSIS 已安装 App 正常用户路径闭合：真实模型
+编排结果进入逐帧渲染并产出 H.264 1920×1080 / 990 帧 / 33 秒成片，App 内播放推进。
+BM-08 同日先在交互会话原生 App 闭合手工编辑、取消、90 帧成片、播放与删除，又在无测试
+feature 的生产 NSIS 已安装可见 App 中把同一完整路径重跑通过。
 
 ### 8. BM-07 风格微调与冻结 Windows 待补
 
@@ -309,23 +311,39 @@ Logo、实际文案预览与键盘选择；锁定上游 builder 生成的品牌�
 远程/主动内容、字体/Logo 文件签名、路径 containment 和摘要校验，并在两个 RenderJob
 私有目录重现相同冻结字节。macOS WebKit WebDriver 不支持 `uploadFile`，验收只能在正式
 App WebView 内把真实 PNG 字节构造成 `File` 交给生产文件输入控件，已证明生产
-`FileReader` 与 `<img>` 预览链路，但没有覆盖操作系统原生文件选择器。Windows 侧随 BM-08
-纵向验收：用原生文件选择器选真实 PNG/JPEG/WebP 和本地字体，确认页面预览、Rust/Worker
-提交到 RenderJob 的冻结摘要、NTFS reparse/大小写/短名 containment 与二次打开重现一致。
+`FileReader` 与 `<img>` 预览链路，但没有覆盖操作系统原生文件选择器。Windows 原生文件
+选择器、字体文件选择和冻结摘要重现仍只属于 BM-07 自身的待验收项；BM-08 已验证同一生产
+文件输入控件收到真实 PNG 字节后可预览、提交并进入最终像素，不再把 BM-07 的操作系统
+选择器证据横向算作 BM-08 的完成条件。
 
-### 9. BM-08 App 原生编辑、渲染与 Artifact 导入 Windows 待补
+### 9. BM-08 App 原生编辑、渲染与 Artifact 导入 Windows 已闭合（2026-08-02）
 
-BM-08 已在 macOS 真实测试版 Tauri App 完成正式用户入口全链路验收（编辑三段文案、
-风格与品牌素材、真实草稿预览、提交、渲染中取消并验证 cancelled checkpoint、恢复路径
-重试、真实 Chromium 90 帧渲染 + FFmpeg 编码、App 内解码播放约 3 秒 MP4、删除后
-Artifact 与工作副本双清理、ffprobe 与三帧视觉证据），入口为
-`python3 scripts/run_bm_08_acceptance.py`。Windows 侧待补：同脚本路径在 Windows 真实
-App 重跑（脚本当前对 `os.name == "nt"` 显式拒绝，需补 Windows worker/浏览器包装）；
-用原生文件选择器上传 Logo（macOS 只能以真实字节构造 `File` 交给生产输入控件）；
-Windows WebView2 对 `data:video/mp4;base64` 的 H.264 解码播放；NTFS
-reparse/大小写/短名下 RenderJob 工作区与 Artifact 删除语义。正式双平台安装包链路仍属
-BM-16。通过后更新 `docs/development/BM-08.md` 遗留项并评估 BM-05/BM-07/BM-08 三项
-`🔍 待验收` 状态闭合。
+Windows 11 x86_64 专用最新 `main` worktree `F:\b8` 已从普通登录用户的交互桌面会话运行
+`scripts/run_bm_08_acceptance.py`，退出码 0。入口先通过渲染沙箱 9/9、Rust 20/20、前端
+70/70、typecheck 与 Tauri 构建，再由 WebdriverIO 经原生 App 正常页面完成编辑三段文案、
+品牌设置、真实预览、取消、再次提交、90 帧渲染、播放和删除，原生用例 1/1。
+
+最终 MP4 为 H.264 1920×1080 / 30 fps / 90 帧 / 3.000 秒 / 132374 bytes，SHA-256
+`864186cd4380939cc5e75e7762664a5b0a0b15e4a9f6095628e72e4606ba050c`；三段抽帧摘要互异，
+联系表逐张人工复核无黑屏、乱码或裁切。Windows WebView2 对 base64 MP4 的解码与播放推进、
+cancelled/succeeded checkpoint、Artifact 删除和工作副本清理均通过。退出后专用计划任务、
+工作树归属进程、临时 PostgreSQL 容器/网络和 WebDriver 45457 监听均为 0。
+
+提交前 Codex Review 拒绝用上述测试 App 加 BM-16 一句话路径拼成 BM-08 正式包证据。随后
+在同一 `F:\b8` 构建并安装无 WebDriver、无测试 feature、窗口可见的隔离身份 release
+NSIS；只替换包身份以避开用户与另一会话 AppData，产品业务代码、资源和 capability 保持
+发布路径。已安装 App 从左侧“创作”正常入口再次完成三段编辑、专业蓝、品牌色、真实 PNG
+Logo、三段预览、9 秒任务 5% 取消、1 秒每段重提、90 帧完成、WebView2 播放和确认删除。
+
+正式 App `<video>` 实测 `readyState=4`、非暂停、1920×1080、3 秒并发生播放推进；产物
+仍为 132374 bytes 和同一 SHA-256，证明测试 App 与正式包逐字节一致。删除后 Artifact
+目录为空，成功 checkpoint 的 Artifact 字段清空。NSIS 为 450,677,315 bytes、安装树
+3,915 files / 1,464,632,484 bytes；最新主线资源令 EB-16 通用 runner 的发布大小上限
+失败，此项如实留在 BM-16，不通过放宽预算横向并入 BM-08。退出后安装根、HKCU 卸载项、
+隔离 AppData、计划任务、端口、进程、Docker 容器/网络和临时正式包目录均为 0。
+
+Windows 原生文件选择器仍记录在 BM-07，自身不影响 BM-08 已验证的文件输入、最终像素和
+Artifact 全链路。
 
 ### 10. BM-16 确定性与正式包 Windows 部分完成（2026-07-25）
 
@@ -451,10 +469,12 @@ Windows 验收机的 sshd 以 SYSTEM 运行，SSH 会话拿到的是**已提权�
 **这两个都不是产品缺陷**：用户双击运行 App 是非提权的，创建的目录属主就是本人，校验通过。
 已用 `(Get-Acl <新建目录>).Owner` 与 `#[track_caller]` 插桩双向确认（插桩已还原，工作树干净）。
 
-**因此以下验收项不能用当前的 SSH 远程链路完成**，需要用户在本机**交互式（非提权）会话**执行，
-或后续建立"以 LIMITED 权限运行整条验收链"的机制（任务计划程序 `/rl LIMITED`）：
+**因此以下验收项不能在 SSH 的 Session 0 进程里直接完成**，需要用户在本机**交互式
+（非提权）会话**执行，或由任务计划程序以当前交互用户运行。BM-08 已于 2026-08-02 用后者
+进入 `SessionId=1` 完成；直接 SSH 进程的窗口句柄为 0、没有 WebView2 子进程，不能作为失败
+证据：
 
-- 任何创建运营 Profile 的真实 App 启动（含 CQ-01 的桌面 E2E、BM-07/BM-08 的原生入口）；
+- 任何创建运营 Profile 的真实 App 启动（BM-08 已闭合；CQ-01、BM-07 仍按各自状态验收）；
 - `cargo test --test browser_profiles`、`--test browser_profile_locks` 等属主/ACL 相关用例。
 
 纯命令行、不校验属主的项（EB-11~15、BM-05、BM-16 等）不受影响，已正常远程完成。

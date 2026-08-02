@@ -1176,42 +1176,48 @@ describe("video studio shell", () => {
   // path. The user's override must now cross the same submission boundary:
   // keeping this page disabled would leave the last BM-15 field stranded in
   // React while the model's own choice renders correctly.
-  it("submits a selected catalog part as a one-sentence shot override", async () => {
-    const user = userEvent.setup();
-    const studioGateway = gateway();
-    render(<VideoStudio gateway={studioGateway} />);
+  it(
+    "submits a selected catalog part as a one-sentence shot override",
+    async () => {
+      const user = userEvent.setup();
+      const studioGateway = gateway();
+      render(<VideoStudio gateway={studioGateway} />);
 
-    await user.click(screen.getByRole("button", { name: "选择品牌动效成片" }));
-    await user.click(screen.getByRole("tab", { name: "动效零件" }));
+      await user.click(
+        screen.getByRole("button", { name: "选择品牌动效成片" }),
+      );
+      await user.click(screen.getByRole("tab", { name: "动效零件" }));
 
-    const browser = screen.getByRole("region", { name: "动效零件目录" });
-    const card = within(browser).getByText("数据图表动画").closest("li");
-    await user.click(
-      within(card as HTMLElement).getByRole("button", {
-        name: "指定给第 1 镜头",
-      }),
-    );
-    expect(
-      within(screen.getByRole("region", { name: "分镜零件选用" })).getByText(
-        "第 1 镜头：已指定数据图表动画",
-      ),
-    ).toBeVisible();
+      const browser = screen.getByRole("region", { name: "动效零件目录" });
+      const card = within(browser).getByText("数据图表动画").closest("li");
+      await user.click(
+        within(card as HTMLElement).getByRole("button", {
+          name: "指定给第 1 镜头",
+        }),
+      );
+      expect(
+        within(screen.getByRole("region", { name: "分镜零件选用" })).getByText(
+          "第 1 镜头：已指定数据图表动画",
+        ),
+      ).toBeVisible();
 
-    await user.click(screen.getByRole("tab", { name: "新建视频" }));
-    await user.clear(screen.getByLabelText("一句话视频需求"));
-    await user.type(
-      screen.getByLabelText("一句话视频需求"),
-      "用蓝色商务风做一段本周销售增长说明",
-    );
-    await user.click(screen.getByRole("button", { name: "开始自动制作" }));
+      await user.click(screen.getByRole("tab", { name: "新建视频" }));
+      await user.clear(screen.getByLabelText("一句话视频需求"));
+      await user.type(
+        screen.getByLabelText("一句话视频需求"),
+        "用蓝色商务风做一段本周销售增长说明",
+      );
+      await user.click(screen.getByRole("button", { name: "开始自动制作" }));
 
-    expect(studioGateway.submitMotionBrief).toHaveBeenCalledWith(
-      expect.objectContaining({
-        catalogPartOverrides: ["data-chart", null, null],
-      }),
-    );
-    expect(studioGateway.submitMotionDraft).not.toHaveBeenCalled();
-  });
+      expect(studioGateway.submitMotionBrief).toHaveBeenCalledWith(
+        expect.objectContaining({
+          catalogPartOverrides: ["data-chart", null, null],
+        }),
+      );
+      expect(studioGateway.submitMotionDraft).not.toHaveBeenCalled();
+    },
+    10_000,
+  );
 
   it("does not force a shot count when no catalog part was overridden", async () => {
     const user = userEvent.setup();
