@@ -56,6 +56,7 @@ test("LE-23 drives the installed Windows NSIS through the formal smart-edit UI",
     "audit_installed_motion_catalog",
     "prepare_voice_fixture",
     "collect_database_evidence",
+    "collect_editing_job_failure",
     "validate_le22_ffprobe",
     "compare_pcm_envelopes",
     "install_package",
@@ -79,5 +80,10 @@ test("LE-23 drives the installed Windows NSIS through the formal smart-edit UI",
   assert.doesNotMatch(runner, /installed_binary\(root\)\.is_file\(\)/u);
   assert.doesNotMatch(runner, /__import__\(|shutil\.which\("pnpm/u);
   assert.doesNotMatch(runner, /mock|stub|sessionStorage|localStorage/iu);
+  assert.match(
+    runner,
+    /assert_no_private_evidence\(output, api_key, source\)\n\s+print\(output, end=""\)/u,
+  );
+  assert.match(runner, /failureCode=\{failure_code\}/u);
   assert.match(gitignore, /^frontend\/dist-le23-windows\/$/mu);
 });

@@ -75,6 +75,7 @@ from run_le_14_acceptance import prepare_voice_fixture
 from run_le_19_acceptance import assert_no_private_evidence
 from run_le_22_macos_package_acceptance import (
     collect_database_evidence,
+    collect_editing_job_failure,
     create_speech_video,
     extract_pcm,
     package_size,
@@ -343,6 +344,7 @@ def run_wdio(
         raise AcceptanceFailed("LE-23 installed App journey did not finish") from error
     output = output_bytes.decode("utf-8", errors="replace")
     assert_no_private_evidence(output, api_key, source)
+    print(output, end="")
     if process.returncode != 0:
         raise AcceptanceFailed("LE-23 installed App journey failed")
 
@@ -566,12 +568,22 @@ def main() -> int:
                     port=control_plane_port, environment=environment
                 )
                 try:
-                    run_wdio(
-                        binary=binary,
-                        environment=environment,
-                        api_key=api_key,
-                        source=placeholder_source,
-                    )
+                    try:
+                        run_wdio(
+                            binary=binary,
+                            environment=environment,
+                            api_key=api_key,
+                            source=placeholder_source,
+                        )
+                    except AcceptanceFailed as error:
+                        failure_code = asyncio.run(
+                            collect_editing_job_failure(
+                                environment["AUTOMATION_TOOL_DATABASE_URL"]
+                            )
+                        )
+                        raise AcceptanceFailed(
+                            f"LE-23 installed App journey failureCode={failure_code}"
+                        ) from error
                     summary = asyncio.run(
                         collect_database_evidence(
                             environment["AUTOMATION_TOOL_DATABASE_URL"]
