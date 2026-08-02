@@ -149,6 +149,8 @@ def _run_formal_observation(step: Le24MeasurementStep) -> Le24Measurement:
         timeout=1_800,
     )
     if completed.returncode != 0:
+        print(completed.stdout, end="", file=sys.stderr)
+        print(completed.stderr, end="", file=sys.stderr)
         raise RuntimeError("LE-24 formal App observation failed")
     return parse_le24_measurement(
         completed.stdout + completed.stderr,

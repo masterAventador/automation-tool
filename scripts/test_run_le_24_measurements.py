@@ -2,18 +2,50 @@ from __future__ import annotations
 
 import sys
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
+from subprocess import CompletedProcess
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from le24_measurement import Le24Measurement
+from le24_measurement import Le24Measurement, Le24MeasurementStep
 from run_le_24_measurements import (
+    _run_formal_observation,
     build_le24_report,
     collect_le24_paired_measurements,
 )
 
 
 class Le24MeasurementCollectionTests(unittest.TestCase):
+    def test_failed_formal_observation_preserves_the_child_diagnostic(self) -> None:
+        diagnostic = StringIO()
+        completed = CompletedProcess(
+            args=["acceptance"],
+            returncode=1,
+            stdout="formal App terminal failure\n",
+            stderr="webdriver detail\n",
+        )
+
+        with (
+            patch("run_le_24_measurements.subprocess.run", return_value=completed),
+            redirect_stderr(diagnostic),
+            self.assertRaisesRegex(RuntimeError, "LE-24 formal App observation failed"),
+        ):
+            _run_formal_observation(
+                Le24MeasurementStep(
+                    repetition=1,
+                    material_count=1,
+                    enable_thinking=False,
+                )
+            )
+
+        self.assertEqual(
+            diagnostic.getvalue(),
+            "formal App terminal failure\nwebdriver detail\n",
+        )
+
     def test_collects_the_fixed_alternating_plan_into_nine_pairs(self) -> None:
         calls: list[tuple[int, int, bool]] = []
 
