@@ -36,12 +36,18 @@ test("LE-22 package journey uses one speech material and the formal editing UI",
     "提交剪辑任务",
     "刷新任务",
     "成片已入库",
+    "最后阶段",
   ]) {
     assert.ok(spec.includes(required), `LE-22 package spec is missing ${required}`);
   }
   assert.doesNotMatch(spec, /一键直出片/u);
   assert.doesNotMatch(spec, /sessionStorage|localStorage|mock|stub/iu);
   assert.match(spec, /assert\.doesNotMatch\([^;]+旁白轨道/su);
+  assert.match(
+    spec,
+    /terminalFailure = failure;\s+return true;/u,
+    "a product failure must end the wait instead of being retried until timeout",
+  );
 
   assert.equal(
     scripts["test:le-22-macos-package"],

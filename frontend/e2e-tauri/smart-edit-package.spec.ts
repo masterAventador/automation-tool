@@ -89,15 +89,24 @@ async function createProject(value: BrowserElement): Promise<void> {
 
 async function waitForDraft(value: BrowserElement): Promise<void> {
   let sawUnderstanding = false;
+  let lastStage = "未出现生成进度";
+  let terminalFailure: (typeof TERMINAL_FAILURES)[number] | undefined;
   await browser.waitUntil(
     async () => {
       const text = await value.getText();
+      const stage = text.match(
+        /正在(?:准备|理解素材|整理文案|生成旁白|匹配画面|选择片段|保存结果)/,
+      )?.[0];
+      if (stage !== undefined) {
+        lastStage = stage;
+      }
       if (text.includes("正在理解素材")) {
         sawUnderstanding = true;
       }
       const failure = TERMINAL_FAILURES.find((copy) => text.includes(copy));
       if (failure !== undefined) {
-        throw new Error(`正式包智能剪辑失败：${failure}`);
+        terminalFailure = failure;
+        return true;
       }
       return text.includes("当前修订：第 1 版");
     },
@@ -107,6 +116,9 @@ async function waitForDraft(value: BrowserElement): Promise<void> {
       timeoutMsg: "正式包没有生成第 1 版原声时间轴",
     },
   );
+  if (terminalFailure !== undefined) {
+    throw new Error(`正式包智能剪辑失败：${terminalFailure}；最后阶段：${lastStage}`);
+  }
   assert.equal(sawUnderstanding, true, "正式包没有展示素材理解进度");
 }
 
