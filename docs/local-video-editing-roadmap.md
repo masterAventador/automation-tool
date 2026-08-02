@@ -78,7 +78,7 @@
 | LE-17 | 工作台接真实网关 | `main.tsx` 生产组合根从 sessionStorage 草稿网关换成真实 Control Plane 网关；提交路径打通不再固定抛错；重写 `e2e-tauri/video-editing.spec.ts`，断言目标从"诚实展示不可用"改为真实出片；**同任务内必须重写前端 Timeline 契约**——`video-editing-dto.ts` 那份手写 zod 副本与新后端模型**整体不兼容，需按 `timeline.py` 重写而非逐点修补**（drift 由 LE-03 在 T2/T3/T4 改后端时造成，终审核基线 `d00f547` 确认此前前后端逐字同步）。LE-03 终审用真实 zod 探针实测：带转场的后端时间轴、带 `sourceInMs`/`sourceOutMs`/`gainDb` 的 clip、`narration`/`ambient`/`music` 三种轨道，**前端一律拒绝**。分歧至少七处：① `timelineClipSchema` 是 `z.strictObject` 且缺三个新字段，后端快照是硬报错不是静默忽略；② 仍用 `sourceArtifactId`（`ArtifactId`），后端已改指 `MaterialId`；③ 布局 refine 对所有轨道要求「不许重叠」，而新后端转场靠真实重叠实现；④ 无画面轨首尾相接、`visual.end == duration`、每种轨道至多一条等核心不变式；⑤ `transitionKindSchema` 仍含 `"cut"`；⑥ `timelineTrackKindSchema` 仍是单一音频轨；⑦ `MAX_TRACKS = 32`（应为 5）。2026-08-01 已按 `docs/development/LE-17.md` 拆为六项；T1～T6 已完成领域契约、Rust/Tauri 边界、真实前端网关、生产组合根接线、工作台真实状态/刷新语义、取消终态审查修复和双平台真实出片。最终提交 `904f2075` 在 macOS/Windows 各由同一非 ignored 正式 App 驱动得到 `1 passing`，ffprobe 均为 H.264 `720×1280@20`、20 帧、1 秒；完整 backend integration `460 passed, 17 skipped`，模块门禁与最终 Review 全部闭环，证据见 `docs/development/LE-17.md` | LE-06 | ✅ 已完成 |
 | LE-18 | 素材库界面 | 导入素材、展示 AI 描述与标签、**标注哪些素材有人说话并可试听/查看转写**、编辑描述、去重提示、缺失素材提示；缺失素材严格区分 `FILE_MISSING`、`FILE_UNREADABLE`、`FILE_CHANGED`，并保留 `UNDECODABLE` 稍后重试、`SOURCE_NOT_AT_REST` 等待写完与 `WORKSPACE_UNUSABLE` 本机暂存空间动作。T1～T7 已完成注册表幂等 forget、Control Plane 分页/受约束删除与引用投影、双平台冻结 Worker 四步导入/补偿、Rust/Tauri 原生协调、仅凭 Material ID 的本机 Range 预览、严格 DTO/gateway/正式工作台 UI，以及 macOS/Windows 同一 SHA 的正式 App 正常/失败纵向验收。真实旅程覆盖视频/音频/图片、去重、取消 picker、预览、人工描述、引用冲突、未引用素材删除和三类本机状态；完整 integration 与模块门禁、最终 Review 均已收口，证据见 `docs/development/LE-18.md` | LE-17 | ✅ 已完成 |
 | LE-19 | 智能剪辑入口 | 一句话输入 → 生成 Timeline 草稿落进工作台；"一键直出片"跳过审阅走同一生成器；进度与取消可见；**剪辑模块的产品形态在此最终确定，同任务内复核 `contracts/quality/user-facing-terminology.v1.json` 的 `video_editing_module` 条目与实际界面一致，并让当前已绿的 `check_user_facing_branding.py` 保持绿色**（见 §7 现状）。T1～T7、逐任务 Review 与专项验收全部完成；macOS/Windows 已在同一完整 SHA `3811a1918ebd16e005f29973cd0acd8ea46897b1` 从正式隐藏 Tauri App 用户入口完成缺配置失败、真实百炼草稿与一键直出片，真实 PostgreSQL、Timeline、EditingJob、Artifact、ffprobe、清理与 LE 结束完整集成均通过，证据见 `docs/development/LE-19.md` | LE-16,LE-18 | ✅ 已完成 |
-| LE-24 | 深度思考开关与耗时告知 | 智能剪辑入口的高级选项里增加一个总开关，统一控制素材理解、文案分句、语义匹配三处模型调用是否开启深度思考；默认关闭；用户偏好持久化并在下次进入时保持；**开关旁必须显示开启后预计多花的时间，该数字由实测得出，禁止估计或编造**——先用固定素材集实测开/关两种模式的端到端耗时差，若耗时随素材条数线性增长则按条数动态计算展示（如"约多花 3 秒 × 素材条数"），否则展示实测区间；实测数据与计算方式写入 `docs/development/LE-24.md`；用户可见文案无未解释术语，过 `check_user_facing_branding.py`；开关状态真实传达到模型请求参数，断言请求体中该字段随开关变化。T1/T2、单次正式 App 计时入口、三轮成对采样判型器与双平台执行前预检已完成；只剩会外发固定素材/提示词的 18 次真实成对观测、实测文案与正式验收 | LE-16,LE-19 | 🔍 待验收 |
+| LE-24 | 深度思考开关与耗时告知 | 智能剪辑入口的高级选项里增加一个总开关，统一控制素材理解、文案分句、语义匹配三处模型调用是否开启深度思考；默认关闭；用户偏好持久化并在下次进入时保持；**开关旁必须显示开启后预计多花的时间，该数字由实测得出，禁止估计或编造**——先用固定素材集实测开/关两种模式的端到端耗时差，若耗时随素材条数线性增长则按条数动态计算展示（如"约多花 3 秒 × 素材条数"），否则展示实测区间；实测数据与计算方式写入 `docs/development/LE-24.md`；用户可见文案无未解释术语，过 `check_user_facing_branding.py`；开关状态真实传达到模型请求参数，断言请求体中该字段随开关变化。T1～T4 已完成；macOS 真实正式 App 完成 18 次开/关成对观测，1/2/3 条素材的额外耗时中位数为 45.001/63.999/60.998 秒，不符合线性增长，因此页面始终显示实测区间“开启后预计约多花 45～64 秒。”；开关持久化、三处请求体、正式 Tauri/WebKit App 旅程、文案门禁、逐项 Review 和 LE 结束门禁均通过，证据见 `docs/development/LE-24.md` | LE-16,LE-19 | ✅ 已完成 |
 
 ### 3.7 字体（1 项）
 
@@ -99,14 +99,14 @@
 任务总数与各状态计数由 `scripts/check_local_editing_roadmap_counts.py` 守护，只在此处记录一次：
 
 - 任务总数：24
-- ✅ 已完成：14
-- 🔍 待验收：10
+- ✅ 已完成：15
+- 🔍 待验收：9
 - 🧪 RED / 🚧 实现中：0
 - ⬜ 未开始：0
 
 ## 5. 历史进度与当前下一步
 
-**24 项任务均已有实现；LE-19 已完成双平台同 SHA 的正式 App 真实模型纵向验收，LE-24 正在执行 18 次真实成对耗时观测，LE-22/LE-23 只待真实模型纵向验收。** 下文保留 LE-10～LE-18 的推进背景，
+**24 项任务均已有实现；LE-19 已完成双平台同 SHA 的正式 App 真实模型纵向验收，LE-24 已完成 18 次真实成对耗时观测与文案验收，当前进入 LE-22/LE-23 正式包真实模型纵向验收。** 下文保留 LE-10～LE-18 的推进背景，
 不再把其中“下一步进入 LE-17”的历史句子解释为当前状态。
 
 **LE-12 T1～T5 已完成；下一步进入 LE-17 工作台接真实网关。** LE-10 已交付从真实领域投影、绝对
