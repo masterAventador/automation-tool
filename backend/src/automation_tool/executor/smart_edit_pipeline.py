@@ -367,6 +367,7 @@ class LocalSmartEditGenerationPipeline:
                 artifacts=prepared.artifacts,
                 duration_ms=prepared.duration_ms,
                 options=MaterialUnderstandingOptions(enable_thinking=enable_thinking),
+                static_image=material.kind is MaterialKind.IMAGE,
             )
             require_source_unchanged(local.source, local.approved)
             _cancel(cancellation_requested)

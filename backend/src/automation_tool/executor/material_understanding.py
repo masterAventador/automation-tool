@@ -242,6 +242,7 @@ def understand_material_artifacts(
     artifacts: tuple[AdaptiveFrameArtifact, ...],
     duration_ms: int,
     options: MaterialUnderstandingOptions,
+    static_image: bool = False,
 ) -> MaterialUnderstandingResult:
     """Safely load LE-08 artifacts, call the adapter and parse its closed result."""
     if (
@@ -250,6 +251,8 @@ def understand_material_artifacts(
         or type(duration_ms) is not int
         or not 1 <= duration_ms <= _MAX_DURATION_MS
         or not isinstance(options, MaterialUnderstandingOptions)
+        or type(static_image) is not bool
+        or (static_image and (duration_ms != 1 or len(artifacts) != 1))
     ):
         _reject()
     extracted = read_adaptive_frame_artifacts(
@@ -270,13 +273,18 @@ def understand_material_artifacts(
     reply = adapter.understand(frames, options=options)
     if not isinstance(reply, MaterialUnderstandingReply) or reply.finish_reason != "stop":
         _reject()
-    return _parse_understanding_result(reply, duration_ms=duration_ms)
+    return _parse_understanding_result(
+        reply,
+        duration_ms=duration_ms,
+        static_image=static_image,
+    )
 
 
 def _parse_understanding_result(
     reply: MaterialUnderstandingReply,
     *,
     duration_ms: int,
+    static_image: bool,
 ) -> MaterialUnderstandingResult:
     try:
         document = decode_bounded_json_object(
@@ -299,9 +307,19 @@ def _parse_understanding_result(
                 "description",
             }:
                 _reject()
+            raw_start = raw_shot["startMs"]
+            raw_end = raw_shot["endMs"]
             shot = MaterialUnderstandingShot(
-                start_ms=cast(int, raw_shot["startMs"]),
-                end_ms=cast(int, raw_shot["endMs"]),
+                start_ms=cast(int, raw_start),
+                end_ms=(
+                    1
+                    if static_image
+                    and type(raw_start) is int
+                    and type(raw_end) is int
+                    and raw_start == 0
+                    and raw_end == 0
+                    else cast(int, raw_end)
+                ),
                 description=cast(str, raw_shot["description"]),
             )
             if shot.start_ms < previous_end or shot.end_ms > duration_ms:

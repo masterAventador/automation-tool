@@ -119,6 +119,44 @@ def test_real_le08_artifacts_are_read_and_converted_to_a_closed_result(
     assert [frame.jpeg_bytes for frame in frames] == [JPEG_ONE, JPEG_TWO]
 
 
+def test_static_image_accepts_the_models_zero_length_shot(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "frame-000001.jpg"
+    path.write_bytes(JPEG_ONE)
+    path.chmod(0o600)
+    artifacts = (
+        AdaptiveFrameArtifact(
+            filename=path.name,
+            timestamp_ms=0,
+            is_scene_cut=True,
+            byte_size=len(JPEG_ONE),
+        ),
+    )
+    adapter = RecordingAdapter(
+        _content(
+            shots=[
+                {
+                    "startMs": 0,
+                    "endMs": 0,
+                    "description": "静态产品图",
+                }
+            ]
+        )
+    )
+
+    result = understand_material_artifacts(
+        adapter,
+        output_directory=tmp_path,
+        artifacts=artifacts,
+        duration_ms=1,
+        options=MaterialUnderstandingOptions(),
+        static_image=True,
+    )
+
+    assert result.shots == (MaterialUnderstandingShot(0, 1, "静态产品图"),)
+
+
 def test_closed_result_cannot_be_constructed_with_overlapping_shots() -> None:
     with pytest.raises(MaterialUnderstandingRejected):
         MaterialUnderstandingResult(
