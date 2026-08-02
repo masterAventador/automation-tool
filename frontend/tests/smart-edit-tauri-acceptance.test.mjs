@@ -85,5 +85,7 @@ test("LE-19 owns one isolated real App smart-edit normal and failure journey", a
     );
   }
   assert.doesNotMatch(runner, /\[\s*str\(ffprobe\),\s*str\(ffprobe\),/u);
+  assert.doesNotMatch(runner, /from materials order by created_at/u);
+  assert.match(runner, /from materials order by material_id/u);
   assert.doesNotMatch(runner, /mock|stub|sessionStorage|localStorage/iu);
 });

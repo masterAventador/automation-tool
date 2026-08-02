@@ -190,7 +190,7 @@ async def assert_database_outcome(database_url: str) -> str:
                 await connection.execute(
                     text(
                         "select kind, ai_description, description_source "
-                        "from materials order by created_at"
+                        "from materials order by material_id"
                     )
                 )
             ).all()
