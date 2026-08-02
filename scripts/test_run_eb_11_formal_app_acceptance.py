@@ -223,7 +223,7 @@ class FormalLoginLifecycleTests(unittest.TestCase):
             profile_root = root / "embedded-browser-profiles"
             profile_id = "6d9221cb-e9dc-4359-9f6b-34f7fbc55316"
             profile = profile_root / "douyin" / profile_id
-            lock = profile / ".automation-tool-profile-lock-v1"
+            lock = profile.parent / f".automation-tool-profile-lease-v1-{profile_id}"
             marker = profile_root / "current-douyin-profile-v1"
             profile.mkdir(parents=True)
             profile_root.chmod(0o700)

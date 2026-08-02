@@ -20,9 +20,13 @@ test("B5-06 keeps Profile locking native, crash-safe, and absent from WebView co
   assert.match(common, /RecoveryRequired/u);
   assert.match(unix, /LOCK_EX\s*\|\s*libc::LOCK_NB/u);
   assert.match(windows, /LockFileEx/u);
-  assert.match(unix, /\.automation-tool-profile-lock-v1/u);
-  assert.match(windows, /\.automation-tool-profile-lock-v1/u);
-  assert.match(windows, /name != PROFILE_LOCK_FILE/u);
+  assert.match(unix, /\.automation-tool-profile-lease-v1-/u);
+  assert.match(windows, /\.automation-tool-profile-lease-v1-/u);
+  assert.doesNotMatch(unix, /\.automation-tool-profile-lock-v1/u);
+  assert.doesNotMatch(windows, /\.automation-tool-profile-lock-v1/u);
+  assert.match(unix, /lease_directory/u);
+  assert.match(windows, /lease_directory/u);
+  assert.match(windows, /require_safe_relative_name\(name\)/u);
   assert.match(windows, /FILE_SYNCHRONOUS_IO_NONALERT/u);
   assert.doesNotMatch(native, /tauri::command[\s\S]{0,300}(lock|unlock).*profile/u);
   assert.doesNotMatch(common, /force_unlock|recover_lock|clear_stale/u);

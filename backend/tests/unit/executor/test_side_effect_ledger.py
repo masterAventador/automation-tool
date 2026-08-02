@@ -148,7 +148,7 @@ def test_a7_07_side_effect_state_machine_is_closed_and_redacted() -> None:
             replace(valid, **invalid)
 
 
-def test_v4_ledger_migrates_to_exact_v8_without_losing_action_admission(
+def test_v4_ledger_migrates_to_exact_v9_without_losing_action_admission(
     tmp_path: Path,
 ) -> None:
     state_directory = tmp_path / "legacy-v4"

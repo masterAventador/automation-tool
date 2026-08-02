@@ -37,7 +37,6 @@ from automation_tool.protocol import (
 )
 
 _MESSAGE_DEADLINE = timedelta(seconds=30)
-_MAX_PENDING_OUTBOX = 1000
 _MISSING = object()
 
 type ExecutorCommandMessage = (
@@ -268,12 +267,21 @@ class ExecutorCommandProcessor:
 
     def _pending_outbox(self) -> tuple[ExecutorOutboundMessage, ...]:
         return tuple(
-            entry.message for entry in self._ledger.pending_outbox(limit=_MAX_PENDING_OUTBOX)
+            entry.message
+            for entry in self._ledger.outbox_for_delivery(
+                observed_at=self._now(),
+                recover_delivered=False,
+            )
         )
 
     def _recover_outbox(self) -> tuple[ExecutorOutboundMessage, ...]:
-        self._ledger.requeue_delivered_outbox()
-        return self._pending_outbox()
+        return tuple(
+            entry.message
+            for entry in self._ledger.outbox_for_delivery(
+                observed_at=self._now(),
+                recover_delivered=True,
+            )
+        )
 
     def _poll_controls(self) -> tuple[ExecutorOutboundMessage, ...]:
         return self._advance_controls(source_message_id=None)

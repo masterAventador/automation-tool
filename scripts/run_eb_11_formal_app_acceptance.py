@@ -95,7 +95,7 @@ USER_DATA_DIRECTORY_PATTERN: Final = re.compile(
     r"(?:^| )--user-data-dir=(?P<value>.*?)(?= --|$)"
 )
 CURRENT_DOUYIN_PROFILE_FILE: Final = "current-douyin-profile-v1"
-PROFILE_LOCK_FILE: Final = ".automation-tool-profile-lock-v1"
+PROFILE_LEASE_FILE_PREFIX: Final = ".automation-tool-profile-lease-v1-"
 PRIVATE_DIRECTORY_MODE: Final = 0o700
 DEFAULT_BROWSER_PROFILE_ROOTS: Final = (
     Path.home() / "Library/Application Support/Google/Chrome",
@@ -1270,11 +1270,11 @@ def require_safe_logout_cleanup(
     if old_profile.parent != expected_parent:
         raise AcceptanceFailed("EB-11 observed Profile escaped the App-owned root")
     staged_profile = old_profile.with_name(f".removing-{old_profile.name}")
+    profile_lease = old_profile.parent / f"{PROFILE_LEASE_FILE_PREFIX}{old_profile.name}"
     residual_paths = (
         old_profile,
-        old_profile / PROFILE_LOCK_FILE,
         staged_profile,
-        staged_profile / PROFILE_LOCK_FILE,
+        profile_lease,
         contract.profile_root / CURRENT_DOUYIN_PROFILE_FILE,
     )
     for path in residual_paths:
