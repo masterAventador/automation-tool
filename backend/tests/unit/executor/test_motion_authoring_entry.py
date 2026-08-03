@@ -24,6 +24,7 @@ import sys
 import threading
 from pathlib import Path
 from typing import Any, cast
+from unittest import mock
 
 import pytest
 
@@ -33,6 +34,7 @@ from automation_tool.executor.motion_authoring import (
     run_motion_authoring_entry,
 )
 from automation_tool.executor.motion_authoring.agent import (
+    SELECTABLE_CATALOG_PART_IDS,
     AuthoringWorkspace,
     MotionAuthoringAgent,
     MotionAuthoringRejected,
@@ -998,3 +1000,91 @@ def test_a_request_that_is_not_readable_json_answers_without_a_reason() -> None:
     code = serve_one_motion_authoring_request(io.BytesIO(b"\xff\xfe not json"), out)
 
     assert code != 0
+
+
+def test_per_shot_overrides_are_checked_against_the_selectable_catalog(
+    workspace: Path,
+) -> None:
+    """The field is `catalogPartOverrides`; anything it names must be a part that exists."""
+    model = _NeverCalledModel()
+    selectable = sorted(SELECTABLE_CATALOG_PART_IDS)[0]
+
+    cases: list[tuple[str, object]] = [
+        ("not a list", {"a": 1}),
+        ("more shots than a storyboard may have", [selectable] * 100),
+        ("every shot left to the model", [None, None]),
+        ("a part that is not text", [1]),
+        ("a part the catalog does not carry", ["a-part-nobody-froze"]),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(MotionAuthoringEntryRejected):
+            run_motion_authoring_entry(
+                _request(workspace, catalogPartOverrides=overrides), model_call=model
+            )
+        assert label
+
+    assert model.calls == 0
+
+
+def test_an_absolute_catalog_root_is_carried_through(workspace: Path, tmp_path: Path) -> None:
+    """A relative one would resolve against whatever directory the Executor sits in."""
+    catalog = tmp_path / "catalog"
+    catalog.mkdir()
+
+    def answering_nonsense(*_args: object, **_options: object) -> str:
+        return "not a json document"
+
+    # The root is accepted and the run goes on to the model, which is what the
+    # absolute-path branch leads to; the refusal then comes from the answer.
+    with pytest.raises(MotionAuthoringEntryRejected):
+        run_motion_authoring_entry(
+            _request(workspace, catalogRoot=str(catalog)),
+            model_call=answering_nonsense,
+        )
+
+
+def test_a_static_gate_reason_is_carried_only_when_every_code_is_declared() -> None:
+    closed = motion_authoring_entry._closed_wire_reason
+    prefix = motion_authoring_entry._STATIC_GATE_REASON_PREFIX
+    codes = sorted(motion_authoring_entry._STATIC_GATE_CODES)
+
+    assert closed(prefix + codes[0]) == prefix + codes[0]
+    assert closed(prefix + "+".join(codes[:2])) == prefix + "+".join(codes[:2])
+    assert closed(prefix + "+".join(reversed(codes[:2]))) is None, "unsorted codes"
+    assert closed(prefix + f"{codes[0]}+{codes[0]}") is None, "the same code twice"
+    assert closed(prefix + "a_code_nobody_declared") is None
+
+
+def test_the_refusal_contract_itself_must_be_readable_and_undrifted(tmp_path: Path) -> None:
+    """It decides what may cross the wire, so a broken one is not read around.
+
+    Loaded once at import and trusted afterwards, so the loader is driven
+    directly with the module's own path constant pointed at a written file.
+    """
+    complete = json.loads(
+        motion_authoring_entry._REFUSAL_CONTRACT_PATH.read_text(encoding="utf-8")
+    )
+
+    malformed = tmp_path / "broken.json"
+    malformed.write_text("{not json", encoding="utf-8")
+    drifted = tmp_path / "drifted.json"
+    drifted.write_text(
+        json.dumps({**complete, "schemaVersion": 2}), encoding="utf-8"
+    )
+    extra = tmp_path / "extra.json"
+    extra.write_text(
+        json.dumps({**complete, "somethingNobodyDeclared": True}), encoding="utf-8"
+    )
+
+    for label, path in [
+        ("no file at all", tmp_path / "absent.json"),
+        ("a document that will not parse", malformed),
+        ("another schema version", drifted),
+        ("a key the contract does not declare", extra),
+    ]:
+        with (
+            mock.patch.object(motion_authoring_entry, "_REFUSAL_CONTRACT_PATH", path),
+            pytest.raises(RuntimeError),
+        ):
+            motion_authoring_entry._load_refusal_contract()
+        assert label
