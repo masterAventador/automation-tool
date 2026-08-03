@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -16,6 +17,11 @@ from automation_tool.control_plane.application.bilibili_archive_publishing impor
     BilibiliPublishAttemptRecord,
     BilibiliPublishPhase,
 )
+from automation_tool.control_plane.domain.bilibili_open_api import (
+    BilibiliErrorCategory,
+    BilibiliPlatformRejection,
+    TokenRefresh,
+)
 from automation_tool.control_plane.domain.video_publishing import (
     PublishFailureCode,
     PublishJobId,
@@ -23,8 +29,12 @@ from automation_tool.control_plane.domain.video_publishing import (
 from automation_tool.control_plane.infrastructure.bilibili import (
     BilibiliApiCredentials,
     BilibiliGatewayEndpoints,
+    BilibiliTokenSnapshot,
     HttpxBilibiliAccessTokenProvider,
     HttpxBilibiliOpenApiGateway,
+)
+from automation_tool.control_plane.infrastructure.bilibili import (
+    token_provider as token_provider_module,
 )
 from automation_tool.control_plane.infrastructure.database import Database
 from automation_tool.control_plane.infrastructure.database.bilibili_publish_repository import (
@@ -197,3 +207,172 @@ async def test_store_rejects_non_prepared_record_on_create() -> None:
     )
     with pytest.raises(BilibiliArchivePublishRejected):
         await broken_store().create_prepared(record)
+
+
+def _provider_arguments() -> dict[str, Any]:
+    return {
+        "contract": CONTRACT,
+        "credentials": CREDENTIALS,
+        "access_token": "an-access-token",
+        "refresh_token": "a-refresh-token",
+        "expires_at_epoch_seconds": int(time.time()) + 3_600,
+    }
+
+
+def test_the_token_provider_refuses_anything_it_cannot_sign_with() -> None:
+    """Every one of these reaches the platform on an irreversible call."""
+    cases: list[tuple[str, dict[str, Any]]] = [
+        ("a contract that is not one", {"contract": "bilibili"}),
+        ("credentials that are not credentials", {"credentials": None}),
+        ("a timeout that is a bool", {"timeout_seconds": True}),
+        ("a timeout that is not a number", {"timeout_seconds": "30"}),
+        ("a timeout of zero", {"timeout_seconds": 0}),
+        ("a timeout past the ceiling", {"timeout_seconds": 601}),
+        ("an expiry that is not an int", {"expires_at_epoch_seconds": 1.0}),
+        ("an expiry before the epoch", {"expires_at_epoch_seconds": 0}),
+        ("an access token that is empty", {"access_token": ""}),
+        ("an access token carrying whitespace", {"access_token": "two words"}),
+        ("an access token with untrimmed space", {"access_token": " token"}),
+        ("a refresh token that is not text", {"refresh_token": None}),
+        ("a refresh token past the ceiling", {"refresh_token": "a" * 4_097}),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(BilibiliArchivePublishRejected):
+            HttpxBilibiliAccessTokenProvider(**{**_provider_arguments(), **overrides})
+        assert label
+
+
+@pytest.mark.asyncio
+async def test_a_token_that_is_not_near_expiry_is_used_as_it_is() -> None:
+    """Rotation is single-use; refreshing a token that is still good spends one for nothing."""
+    provider = HttpxBilibiliAccessTokenProvider(**_provider_arguments())
+    try:
+        assert await provider.current_access_token() == "an-access-token"
+        assert repr(provider) == "HttpxBilibiliAccessTokenProvider(<redacted>)"
+    finally:
+        await provider.aclose()
+
+
+def test_a_token_snapshot_must_describe_a_pair_that_could_exist() -> None:
+    complete: dict[str, Any] = {
+        "access_token": "an-access-token",
+        "refresh_token": "a-refresh-token",
+        "expires_at_epoch_seconds": 1_785_000_000,
+        "revision": 0,
+    }
+
+    cases: list[tuple[str, dict[str, Any]]] = [
+        ("an access token that is empty", {"access_token": ""}),
+        ("a refresh token carrying whitespace", {"refresh_token": "two words"}),
+        ("an expiry that is not an int", {"expires_at_epoch_seconds": 1.0}),
+        ("an expiry before the epoch", {"expires_at_epoch_seconds": 0}),
+        ("a revision that is not an int", {"revision": 1.0}),
+        ("a negative revision", {"revision": -1}),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(BilibiliArchivePublishRejected):
+            BilibiliTokenSnapshot(**{**complete, **overrides})
+        assert label
+
+    snapshot = BilibiliTokenSnapshot(**complete)
+    assert "an-access-token" not in repr(snapshot)
+    assert "a-refresh-token" not in repr(snapshot)
+    assert "<redacted>" in repr(snapshot)
+
+
+class _ScriptedClient:
+    """Stands in for the HTTP client so no refresh ever leaves the process."""
+
+    def __init__(self, *, content: bytes = b"{}", failure: BaseException | None = None) -> None:
+        self.content = content
+        self.failure = failure
+        self.calls: list[dict[str, Any]] = []
+
+    async def post(self, url: str, **options: Any) -> Any:
+        self.calls.append({"url": url, **options})
+        if self.failure is not None:
+            raise self.failure
+        return SimpleNamespace(content=self.content)
+
+    async def aclose(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_rotates_the_pair_and_counts_the_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Single-use rotation: the caller has to be able to see that it happened."""
+    provider = HttpxBilibiliAccessTokenProvider(**_provider_arguments())
+    client = _ScriptedClient()
+    monkeypatch.setattr(provider, "_client", client)
+    monkeypatch.setattr(
+        token_provider_module,
+        "parse_token_refresh",
+        lambda _contract, _payload: TokenRefresh(
+            access_token="rotated-access",
+            refresh_token="rotated-refresh",
+            expires_at_epoch_seconds=int(time.time()) + 7_200,
+        ),
+    )
+
+    assert await provider.refresh_access_token() == "rotated-access"
+
+    snapshot = provider.snapshot()
+    assert snapshot.access_token == "rotated-access"
+    assert snapshot.refresh_token == "rotated-refresh"
+    assert snapshot.revision == 1
+    # The secret never rides in the URL or the headers.
+    sent = client.calls[0]
+    assert "rotated" not in sent["url"]
+    assert sent["data"]["grant_type"] == CONTRACT.grant_type_refresh_token
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_that_cannot_be_completed_is_unavailable_not_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retryable and not-retryable differ; a gateway that did not answer is the first."""
+    import httpx2
+
+    cases: list[tuple[str, BaseException | None, bytes]] = [
+        ("the gateway did not answer", httpx2.HTTPError("connection reset"), b"{}"),
+        ("bytes that are not utf-8", None, b"\xff\xfe"),
+        ("a body that will not parse", None, b"{not json"),
+    ]
+    for label, failure, content in cases:
+        provider = HttpxBilibiliAccessTokenProvider(**_provider_arguments())
+        monkeypatch.setattr(
+            provider, "_client", _ScriptedClient(content=content, failure=failure)
+        )
+        with pytest.raises(BilibiliArchivePublishUnavailable):
+            await provider.refresh_access_token()
+        assert label
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_the_platform_refused_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A platform rejection and an unreadable answer both mean: no usable token."""
+    for label, parsed in [
+        (
+            "the platform said no",
+            BilibiliPlatformRejection(
+                code=-101,
+                category=BilibiliErrorCategory.AUTH_REJECTED,
+                failure_code=PublishFailureCode.PLATFORM_ERROR,
+            ),
+        ),
+        ("something that is not a refresh", object()),
+    ]:
+        provider = HttpxBilibiliAccessTokenProvider(**_provider_arguments())
+        monkeypatch.setattr(provider, "_client", _ScriptedClient())
+        monkeypatch.setattr(
+            token_provider_module,
+            "parse_token_refresh",
+            lambda _contract, _payload, _parsed=parsed: _parsed,
+        )
+        with pytest.raises(BilibiliArchivePublishUnavailable):
+            await provider.refresh_access_token()
+        assert label
