@@ -124,7 +124,6 @@ def resolve_audio_url(url: object, *, allowed_suffixes: Sequence[str]) -> str:
     """
     if type(url) is not str or not url:
         _reject("audio url must be a non-empty string")
-        raise AssertionError  # pragma: no cover
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme not in ("http", "https"):
         _reject(f"audio url scheme is not fetchable: {parsed.scheme or 'none'}")

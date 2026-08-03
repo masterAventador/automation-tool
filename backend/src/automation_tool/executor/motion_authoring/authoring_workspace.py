@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Final
+from typing import Final, Never
 
 
 class MotionAuthoringRejected(RuntimeError):
@@ -15,7 +15,7 @@ class MotionAuthoringPersistenceError(RuntimeError):
     """A workspace write failed after entering the authoring transaction."""
 
 
-def _reject(message: str) -> None:
+def _reject(message: str) -> Never:
     raise MotionAuthoringRejected(f"motion authoring rejected: {message}")
 
 
@@ -31,7 +31,6 @@ def _validate_relative(path: object) -> str:
 
     if type(path) is not str or not path:
         _reject("path must be a non-empty string")
-        raise AssertionError  # pragma: no cover
     if "\x00" in path or "\\" in path or path.startswith("/"):
         _reject("path must be a clean relative posix path")
     segments = path.split("/")

@@ -1199,3 +1199,32 @@ def test_a_run_that_never_confirmed_leaves_no_segment_behind() -> None:
 
     assert segments == ()
     assert speech_ms == 0
+
+
+def test_an_output_whose_identity_cannot_be_read_is_refused_before_ffmpeg_runs(
+    tmp_path: Path,
+) -> None:
+    """That stat is what pins the file ffmpeg is about to fill; without it there is
+    nothing to compare the finished output against."""
+    started: list[object] = []
+
+    def never_started(*args: object, **kwargs: object) -> object:
+        started.append(args)
+        raise AssertionError("ffmpeg must not start without a pinned output")
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(subprocess, "Popen", never_started)
+        monkeypatch.setattr(os, "fstat", _raise_io_error)
+        with pytest.raises(MaterialSpeechRejected):
+            pipeline._extract_pcm(
+                tmp_path / "ffmpeg",
+                tmp_path / "source.mp4",
+                tmp_path / "audio.pcm",
+                duration_ms=1,
+            )
+
+    assert started == []
+
+
+def _raise_io_error(descriptor: int) -> os.stat_result:
+    raise OSError("private stat failure")
