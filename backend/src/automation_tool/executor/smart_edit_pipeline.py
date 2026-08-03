@@ -223,8 +223,13 @@ class LocalSmartEditGenerationPipeline:
                     current,
                     cancellation_requested=cancellation_requested,
                 )
-                if current.ai_description is None:
-                    _reject()
+                # Unreachable by construction, and asserted rather than skipped:
+                # `_needs_understanding` is false only when a description
+                # already exists -- the domain refuses a user-owned material
+                # without one -- and when it is true the step above either
+                # produced one or refused. A change to either rule fails loudly
+                # here rather than handing selection a batch it cannot read.
+                assert current.ai_description is not None
                 enriched.append(current)
                 if current != value.material:
                     updates.append(SmartEditMaterialAnalysis.from_material(current))
