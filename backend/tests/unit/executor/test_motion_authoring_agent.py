@@ -3463,3 +3463,52 @@ class ModelAnswerShapeTests(unittest.TestCase):
                 agent = self._agent(workspace, ScriptedModel([reply]))
                 with self.subTest(label=label), self.assertRaises(MotionAuthoringRejected):
                     agent.author(_brief())
+
+
+class SlotProbeSelectionTests(unittest.TestCase):
+    """Which shots get measured, and what the probe has to answer with."""
+
+    def _agent(
+        self,
+        workspace: AuthoringWorkspace,
+        model: ScriptedModel,
+        probe: object,
+        catalog_root: Path,
+    ) -> MotionAuthoringAgent:
+        return MotionAuthoringAgent(
+            workspace=workspace,
+            tools=MotionAuthoringTools(workspace),
+            workflow=load_locked_authoring_workflow(
+                vendor_root=VENDOR_ROOT, contract_path=WORKFLOW_CONTRACT
+            ),
+            model_config=_model_config(),
+            model_call=model,
+            catalog_root=catalog_root,
+            slot_probe=cast(Any, probe),
+        )
+
+    def test_a_probe_that_answers_with_the_wrong_shape_is_refused(self) -> None:
+        """Its answer decides whether copy fits; anything unreadable is not read around."""
+
+        class _WrongCount:
+            def __call__(self, documents: tuple[Path, ...]) -> list[ProbeReading]:
+                return [FITS] * (len(documents) + 1)
+
+        class _WrongType:
+            def __call__(self, documents: tuple[Path, ...]) -> list[object]:
+                return ["not a reading"] * len(documents)
+
+        for label, probe in [
+            ("more readings than documents", _WrongCount()),
+            ("something that is not a reading", _WrongType()),
+        ]:
+            with TemporaryDirectory() as raw:
+                root = Path(raw)
+                workspace = _make_workspace(root / "job")
+                model = ScriptedModel(
+                    [_valid_model_payload(_valid_storyboard([_probe_beat()]))]
+                )
+                agent = self._agent(workspace, model, probe, _probe_catalog(root))
+                with self.subTest(label=label), self.assertRaises(MotionAuthoringRejected) as ctx:
+                    agent.author(_brief())
+                self.assertIn("failed to measure", str(ctx.exception))
