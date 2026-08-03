@@ -158,3 +158,99 @@ def test_a_lower_funnel_failure_does_not_retain_its_private_exception() -> None:
 
     assert factory.calls == 1
     assert captured.value.__context__ is None
+
+
+def test_a_speech_analysis_must_describe_one_coherent_reading() -> None:
+    """It is persisted onto the material, so a shape no analysis could produce is refused."""
+    cases: list[tuple[str, dict[str, object]]] = [
+        ("a speech flag that is not a bool", {"has_speech": 1}),
+        ("segments that are not a tuple", {"speech_segments_ms": [(0, 100)]}),
+        (
+            "silence carrying segments",
+            {"has_speech": False, "speech_segments_ms": ((0, 100),), "speech_transcript": None},
+        ),
+        (
+            "silence carrying a transcript",
+            {"has_speech": False, "speech_segments_ms": (), "speech_transcript": "话"},
+        ),
+        (
+            "speech with no segments",
+            {"has_speech": True, "speech_segments_ms": (), "speech_transcript": "话"},
+        ),
+        (
+            "speech with no transcript",
+            {"has_speech": True, "speech_segments_ms": ((0, 100),), "speech_transcript": None},
+        ),
+        (
+            "a transcript with untrimmed space",
+            {"has_speech": True, "speech_segments_ms": ((0, 100),), "speech_transcript": " 话 "},
+        ),
+        (
+            "a transcript carrying a control character",
+            {
+                "has_speech": True,
+                "speech_segments_ms": ((0, 100),),
+                "speech_transcript": "话\x00音",
+            },
+        ),
+        (
+            "a window that is not a pair of ints",
+            {
+                "has_speech": True,
+                "speech_segments_ms": (("0", 100),),
+                "speech_transcript": "话",
+            },
+        ),
+        (
+            "windows that run backwards",
+            {
+                "has_speech": True,
+                "speech_segments_ms": ((100, 200), (0, 50)),
+                "speech_transcript": "话",
+            },
+        ),
+        (
+            "a window that ends before it starts",
+            {
+                "has_speech": True,
+                "speech_segments_ms": ((100, 100),),
+                "speech_transcript": "话",
+            },
+        ),
+    ]
+    for label, overrides in cases:
+        arguments: dict[str, object] = {
+            "has_speech": True,
+            "speech_segments_ms": ((0, 100),),
+            "speech_transcript": "这段是真实原声。",
+        }
+        arguments.update(overrides)
+        with pytest.raises(MaterialSpeechRejected):
+            MaterialSpeechAnalysis(**arguments)  # type: ignore[arg-type]
+        assert label
+
+
+def test_speech_that_runs_past_the_material_is_refused() -> None:
+    """The windows are read back against the material's own length; they must fit in it."""
+    analyzer = RecordingAudibleAnalyzer(
+        MaterialSpeechAnalysis(
+            has_speech=True,
+            speech_segments_ms=((0, 9_500),),
+            speech_transcript="这段是真实原声。",
+        )
+    )
+
+    with pytest.raises(MaterialSpeechRejected):
+        analyze_material_speech(
+            _facts(has_audio=True),
+            audible_analyzer_factory=RecordingAnalyzerFactory(analyzer),
+        )
+
+
+def test_a_factory_that_builds_the_wrong_thing_is_refused() -> None:
+    """The factory is lazy on purpose; what it hands back is still checked."""
+    with pytest.raises(MaterialSpeechRejected):
+        analyze_material_speech(
+            _facts(has_audio=True),
+            audible_analyzer_factory=RecordingAnalyzerFactory(object()),
+        )
