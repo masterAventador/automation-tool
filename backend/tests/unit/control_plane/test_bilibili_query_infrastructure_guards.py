@@ -2,19 +2,38 @@
 
 from __future__ import annotations
 
-from typing import Any
+import http.server
+import threading
+from typing import Any, cast
 
 import pytest
 from test_bilibili_archive_publishing import CONTRACT
 
 from automation_tool.control_plane.application.bilibili_archive_publishing import (
     BilibiliArchivePublishRejected,
+    BilibiliGatewayUnreachable,
 )
 from automation_tool.control_plane.infrastructure.bilibili import (
     BilibiliApiCredentials,
     BilibiliQueryGatewayEndpoints,
     HttpxBilibiliArchiveQueryGateway,
 )
+
+
+class _RubbishHandler(http.server.BaseHTTPRequestHandler):
+    """Answers every GET with bytes that are neither UTF-8 nor JSON."""
+
+    def do_GET(self) -> None:
+        body = b"\xff\xfe not json"
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format: str, *args: Any) -> None:
+        return
+
 
 CREDENTIALS = BilibiliApiCredentials(
     client_id="fixture-client-id",
@@ -102,3 +121,30 @@ async def test_query_gateway_validates_untrusted_request_inputs() -> None:
 def test_query_gateway_has_no_submission_surface() -> None:
     assert not hasattr(HttpxBilibiliArchiveQueryGateway, "archive_add")
     assert not hasattr(HttpxBilibiliArchiveQueryGateway, "upload_init")
+
+
+@pytest.mark.asyncio
+async def test_query_gateway_refuses_a_reply_that_is_not_utf8_json() -> None:
+    """A reachable endpoint answering with rubbish is still an unusable gateway."""
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _RubbishHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = cast(tuple[str, int], server.server_address)
+    base = f"http://{host}:{port}"
+    gateway = HttpxBilibiliArchiveQueryGateway(
+        contract=CONTRACT,
+        credentials=CREDENTIALS,
+        endpoints=BilibiliQueryGatewayEndpoints(
+            archive_view_url=f"{base}/view", archive_viewlist_url=f"{base}/viewlist"
+        ),
+    )
+    try:
+        with pytest.raises(BilibiliGatewayUnreachable):
+            await gateway.archive_view(
+                access_token="fixture-access-token-000000000001", resource_id="BV17B4y1s7R1"
+            )
+    finally:
+        await gateway.aclose()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
