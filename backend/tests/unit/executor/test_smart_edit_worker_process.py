@@ -730,10 +730,18 @@ def test_prepare_refuses_a_result_document_beyond_the_size_ceiling(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Oversize the produced document, not the shared byte ceiling. Lowering
+    # `_MAX_DOCUMENT_BYTES` looks equivalent and is not: `_load_object` checks
+    # the *request* against the same constant, so the run would die reading its
+    # own input and never reach the result-size guard this is about -- the test
+    # would still pass, for the wrong reason.
     bootstrap = _bootstrap(tmp_path)
     _request_path(bootstrap)
     _install_success(monkeypatch)
-    monkeypatch.setattr("automation_tool.executor.smart_edit_worker_process._MAX_DOCUMENT_BYTES", 1)
+    monkeypatch.setattr(
+        "automation_tool.executor.smart_edit_worker_process._result_document",
+        lambda job_id, result: {"padding": "x" * (4 * 1024 * 1024 + 16)},
+    )
 
     with pytest.raises(LocalSmartEditWorkerRejected) as caught:
         _prepare(bootstrap)
@@ -926,3 +934,97 @@ def test_abort_reports_a_job_directory_it_cannot_remove(
 
     assert caught.value.code is LocalSmartEditFailureCode.WORKSPACE_UNUSABLE
     assert not staged.finalized
+
+
+def test_prepare_creates_the_state_registry_home_when_it_is_absent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_state_registry` owns creating its directory the first time through."""
+    bootstrap, staged = _staged(tmp_path, monkeypatch)
+    state = bootstrap.asset_root / "local-executor" / "state"
+    assert not state.exists()
+
+    commit_smart_edit_job(bootstrap, staged)
+
+    assert state.is_dir()
+
+
+def _install_silent_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    def generate(pipeline: _Pipeline, **_kwargs: object) -> SmartEditGenerationResult:
+        return replace(_result(), narration_registrations=())
+
+    monkeypatch.setattr(
+        "automation_tool.executor.smart_edit_worker_process.generate_smart_edit_timeline_draft",
+        generate,
+    )
+
+
+def test_commit_of_a_result_without_narration_just_clears_the_job(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No audio to publish means no durable move -- only the job goes away."""
+    bootstrap = _bootstrap(tmp_path)
+    _request_path(bootstrap)
+    _install_silent_result(monkeypatch)
+    staged = cast(LocalSmartEditStagedJob, _prepare(bootstrap))
+
+    commit_smart_edit_job(bootstrap, staged)
+
+    assert staged.finalized
+    assert not staged.job_root.exists()
+    assert not (bootstrap.asset_root / "local-executor" / "generated-materials").exists()
+
+
+def test_commit_without_narration_reports_a_job_it_cannot_clear(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bootstrap = _bootstrap(tmp_path)
+    _request_path(bootstrap)
+    _install_silent_result(monkeypatch)
+    staged = cast(LocalSmartEditStagedJob, _prepare(bootstrap))
+    monkeypatch.setattr(
+        "automation_tool.executor.smart_edit_worker_process._cleanup_job",
+        lambda job_root: False,
+    )
+
+    with pytest.raises(LocalSmartEditWorkerRejected) as caught:
+        commit_smart_edit_job(bootstrap, staged)
+
+    assert caught.value.code is LocalSmartEditFailureCode.COMMIT_FAILED
+    assert not staged.finalized
+
+
+def test_commit_reuses_an_existing_state_registry_home(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Second job on the same install: the directory is already there."""
+    bootstrap, staged = _staged(tmp_path, monkeypatch)
+    state = bootstrap.asset_root / "local-executor" / "state"
+    state.mkdir(parents=True, mode=0o700)
+
+    commit_smart_edit_job(bootstrap, staged)
+
+    assert staged.finalized
+
+
+def test_prepare_closes_the_response_descriptor_when_publishing_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A descriptor opened but never handed to `fdopen` must still be closed."""
+    bootstrap = _bootstrap(tmp_path)
+    _request_path(bootstrap)
+    _install_success(monkeypatch)
+    monkeypatch.setattr(
+        "automation_tool.executor.smart_edit_worker_process.os.fdopen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("cannot wrap")),
+    )
+
+    with pytest.raises(LocalSmartEditWorkerRejected) as caught:
+        _prepare(bootstrap)
+
+    assert caught.value.code is LocalSmartEditFailureCode.LOCAL_FAILED

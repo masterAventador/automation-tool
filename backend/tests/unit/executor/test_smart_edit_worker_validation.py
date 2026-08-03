@@ -526,8 +526,8 @@ class PipelineConstructionTests(unittest.TestCase):
             binary.chmod(0o700)
         model = (
             LocalEditingScriptModelConfiguration(
-                base_url="https://dashscope.example.com/compatible-mode/v1",
-                model_id="qwen-plus",
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                model_id="qwen3.7-max-2026-06-08",
                 api_key="sk-" + "x" * 32,
             )
             if with_model
@@ -594,3 +594,73 @@ class PipelineConstructionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class RemainingBranchTests(unittest.TestCase):
+    """The last few arms: nested rejections, the Windows split, fd cleanup."""
+
+    def test_a_nested_identifier_rejection_is_re_raised_not_swallowed(self) -> None:
+        """`_material` catches broad exceptions; its own code must pass through."""
+        with self.assertRaises(LocalSmartEditWorkerRejected):
+            _material(_material_document(materialId="not-a-uuid"))
+
+    def test_the_owner_only_chmod_is_skipped_on_windows(self) -> None:
+        """Windows carries its privacy in the ACL, so the POSIX chmod is skipped.
+
+        The follow-up revalidation is stubbed deliberately: under the patched
+        `os.name` it builds a `WindowsPath` from `abspath` and compares it with a
+        `PosixPath` from `resolve`, which can never match here. Leaving it in
+        would make this test fail for a reason that has nothing to do with chmod.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            target = Path(raw).resolve() / "jobs"
+
+            with (
+                mock.patch.object(os, "name", "nt"),
+                mock.patch.object(Path, "chmod") as chmod,
+                mock.patch(
+                    "automation_tool.executor.smart_edit_worker_process._require_private_directory"
+                ),
+            ):
+                _private_directory(target)
+
+            chmod.assert_not_called()
+            self.assertTrue(target.is_dir())
+
+    def test_a_pipeline_whose_registry_home_is_unusable_is_refused(self) -> None:
+        """`_state_registry` raises the worker's own type; it must propagate."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            bootstrap = PipelineConstructionTests()._bootstrap(root, with_model=True)
+            workspace = PipelineConstructionTests()._workspace(root)
+            state = bootstrap.asset_root / "local-executor" / "state"
+            state.parent.mkdir(parents=True, mode=0o700)
+            state.write_bytes(b"not a directory")
+
+            with self.assertRaises(LocalSmartEditWorkerRejected):
+                create_local_smart_edit_pipeline(bootstrap, workspace)
+
+    def test_a_registry_rejection_propagates_out_of_the_pipeline_builder(self) -> None:
+        """Patched directly: letting an adapter fail instead would take the
+        generic `except Exception` arm and prove nothing about re-raising."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            bootstrap = PipelineConstructionTests()._bootstrap(root, with_model=True)
+            workspace = PipelineConstructionTests()._workspace(root)
+
+            with (
+                mock.patch(
+                    "automation_tool.executor.smart_edit_worker_process._state_registry",
+                    side_effect=LocalSmartEditWorkerRejected(
+                        LocalSmartEditFailureCode.WORKSPACE_UNUSABLE
+                    ),
+                ),
+                self.assertRaises(LocalSmartEditWorkerRejected) as caught,
+            ):
+                create_local_smart_edit_pipeline(bootstrap, workspace)
+
+            self.assertIs(
+                caught.exception.code,
+                LocalSmartEditFailureCode.WORKSPACE_UNUSABLE,
+                "the registry's own code must survive, not become CONFIGURATION_MISSING",
+            )
