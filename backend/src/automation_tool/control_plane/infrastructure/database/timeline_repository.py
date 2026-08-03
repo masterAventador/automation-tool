@@ -415,11 +415,18 @@ class SqlAlchemyTimelineRepository:
                     if existing_timeline_id != timeline.timeline_id.uuid:
                         raise TimelineRevisionAlreadyStored
                 await session.execute(insert(timelines).values(**values))
-                if reference_values:
-                    await session.execute(
-                        insert(timeline_material_references),
-                        reference_values,
-                    )
+                # Never empty: a timeline must carry a picture track
+                # (`Timeline.__post_init__`) and a picture clip must name a
+                # material (`TimelineClip.__post_init__`), so at least one
+                # reference always exists. Asserted rather than guarded, because
+                # a guard here is a branch nothing can take -- and relaxing
+                # either domain rule must fail loudly instead of quietly storing
+                # a revision whose materials nothing records.
+                assert reference_values
+                await session.execute(
+                    insert(timeline_material_references),
+                    reference_values,
+                )
         except (
             TimelineDataRejected,
             TimelineMaterialMissing,

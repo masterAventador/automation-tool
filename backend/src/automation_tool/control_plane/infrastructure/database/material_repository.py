@@ -505,8 +505,14 @@ class SqlAlchemyMaterialRepository:
                                 raise MaterialSnapshotConflict
                             changed = current
                         else:
-                            if analysis.described_at is None:
-                                raise MaterialSnapshotConflict
+                            # Never absent here: this method's parameter type
+                            # refuses a model-owned description that carries no
+                            # timestamp, so the pair always arrives together.
+                            # Asserted rather than re-checked, because a check
+                            # nothing can fail is a branch nothing can take --
+                            # and relaxing the command must fail loudly instead
+                            # of storing an understanding nothing dated.
+                            assert analysis.described_at is not None
                             changed = current.with_ai_understanding(
                                 analysis.ai_description,
                                 analysis.ai_tags,

@@ -589,3 +589,151 @@ def test_a_visual_only_working_copy_skips_upstream_demo_placeholders(tmp_path: P
 
     assert entry in workspace.written
     assert not any(path.endswith("missing-demo.mp4") for path in workspace.written)
+
+
+def test_a_slot_whose_run_moved_into_another_element_fails_closed() -> None:
+    """Same text, different parent: the table's anchor no longer names this run."""
+    index = slot_index_of(PART_HTML, "Maya Chen")
+
+    with pytest.raises(SlotAnchorRejected):
+        render_part_working_copy(
+            PART_HTML,
+            slots=(PartSlot(index=index, original="Maya Chen", parent_tag="span"),),
+            copy={index: "张三"},
+            font_css=FONT_CSS,
+        )
+
+
+def test_copy_addressed_at_a_run_with_no_element_around_it_fails_closed() -> None:
+    """Bare text at the top of a document has nothing to carry the slot marker."""
+    bare = "Maya Chen<div>other</div>"
+    index = slot_index_of(bare, "Maya Chen")
+
+    with pytest.raises(SlotAnchorRejected):
+        render_part_working_copy(
+            bare,
+            slots=(PartSlot(index=index, original="Maya Chen", parent_tag=""),),
+            copy={index: "张三"},
+            font_css=FONT_CSS,
+        )
+
+
+def test_a_document_with_no_head_cannot_be_told_which_typefaces_to_use() -> None:
+    """The font rules have nowhere to go, and a silently unstyled part is worse."""
+    headless = "<html><body><div>Maya Chen</div></body></html>"
+    index = slot_index_of(headless, "Maya Chen")
+
+    with pytest.raises(SlotAnchorRejected):
+        render_part_working_copy(
+            headless,
+            slots=(PartSlot(index=index, original="Maya Chen", parent_tag="div"),),
+            copy={index: "张三"},
+            font_css=FONT_CSS,
+        )
+
+    # Without font rules there is nothing to place, so the same document passes.
+    assert render_part_working_copy(
+        headless,
+        slots=(PartSlot(index=index, original="Maya Chen", parent_tag="div"),),
+        copy={index: "张三"},
+        font_css="",
+    )
+
+
+def test_a_malformed_instance_key_is_refused_before_anything_is_written(
+    tmp_path: Path,
+) -> None:
+    """The key becomes a filename prefix; only a bounded slug may reach one."""
+    catalog = _catalog(tmp_path)
+    index = slot_index_of(CATALOG_PART_HTML, "Maya Chen")
+
+    for label, key in [
+        ("a path separator", "a/b"),
+        ("an upper-case letter", "Beat"),
+        ("a leading dash", "-beat"),
+        ("something too long", "b" * 65),
+        ("the empty string", ""),
+    ]:
+        workspace = _RecordingWorkspace(tmp_path / "job")
+        with pytest.raises(SlotAnchorRejected):
+            write_part_working_copy(
+                workspace=workspace,
+                catalog_root=catalog,
+                name="lt-bold-block",
+                slots=(PartSlot(index=index, original="Maya Chen", parent_tag="div"),),
+                copy={index: "张三"},
+                font_css=FONT_CSS,
+                instance_key=key,
+            )
+        assert workspace.written == {}, label
+
+
+def test_external_and_repeated_references_are_skipped_rather_than_copied(
+    tmp_path: Path,
+) -> None:
+    """Only files inside the catalog are copied, and each of them exactly once."""
+    catalog = _catalog(tmp_path)
+    part = catalog / "items" / "lt-bold-block" / "lt-bold-block.html"
+    part.write_text(
+        CATALOG_PART_HTML.replace(
+            "</head>",
+            # Nothing on the network and nothing inline may become a file, and
+            # the second mention of the same asset must not copy it twice.
+            '<img src="https://cdn.example.com/logo.png">'
+            '<img src="http://cdn.example.com/logo.png">'
+            '<img src="data:image/gif;base64,R0lGOD">'
+            '<a href="#top">top</a>'
+            "<style>.c{background:url(assets/grain.png)}</style></head>",
+        ),
+        encoding="utf-8",
+    )
+    workspace = _RecordingWorkspace(tmp_path / "job")
+    # Indexes come from the document as it now reads, not from the fixture it
+    # was derived from -- the added elements shifted every run after them.
+    index = slot_index_of(part.read_text(encoding="utf-8"), "Maya Chen")
+
+    write_part_working_copy(
+        workspace=workspace,
+        catalog_root=catalog,
+        name="lt-bold-block",
+        slots=(PartSlot(index=index, original="Maya Chen", parent_tag="div"),),
+        copy={index: "张三"},
+        font_css=FONT_CSS,
+    )
+
+    assert not any("cdn.example.com" in name for name in workspace.written)
+    assert not any(name.endswith("#top") for name in workspace.written)
+    grain = [name for name in workspace.written if name.endswith("grain.png")]
+    assert len(grain) == 1, "the asset named twice is copied once"
+
+
+def test_an_entry_outside_the_working_copy_directory_reaches_no_assets() -> None:
+    """The audit only speaks for documents this job wrote; anything else gets nothing."""
+    from automation_tool.executor.motion_authoring.part_workspace import working_copy_assets
+
+    assert working_copy_assets("composition.html", object()) == ()
+
+
+def test_a_component_part_takes_a_different_builder_than_a_visual_one(
+    tmp_path: Path,
+) -> None:
+    """One catalog file, two wrappers -- a component film is not a visual part film."""
+    catalog = _catalog(tmp_path)
+
+    def written_for(component: bool) -> dict[str, object]:
+        workspace = _RecordingWorkspace(tmp_path / f"job-{component}")
+        write_part_working_copy(
+            workspace=workspace,
+            catalog_root=catalog,
+            name="lt-bold-block",
+            slots=(),
+            copy={},
+            font_css=FONT_CSS,
+            component=component,
+            headline="本周销售增长",
+            body="三个要点带你看完",
+            items=("投放", "承接"),
+        )
+        return dict(workspace.written)
+
+    assert written_for(component=True) != written_for(component=False)

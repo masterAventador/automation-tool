@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import cast
@@ -233,3 +234,58 @@ def test_windows_verbatim_paths_are_native_before_playwright_receives_them(
         }
     ]
     assert page.navigations == [document.resolve().as_uri()]
+
+
+def test_the_probe_never_prints_the_browser_or_profile_it_owns(tmp_path: Path) -> None:
+    executable = tmp_path / "chromium"
+    executable.write_bytes(b"browser")
+
+    probe = PackagedSlotProbe(
+        browser_executable=executable,
+        profile_directory=tmp_path / SLOT_PROBE_PROFILE_DIRECTORY,
+        runtime=BrowserRuntime(lambda: cast(_Playwright, object())),
+    )
+
+    assert repr(probe) == "PackagedSlotProbe(<redacted>)"
+    assert str(executable) not in repr(probe)
+
+
+@pytest.mark.parametrize(
+    ("given", "expected"),
+    [
+        (r"\\?\C:\Program Files\chromium\chrome.exe", r"C:\Program Files\chromium\chrome.exe"),
+        (r"\\?\UNC\server\share\chromium\chrome.exe", r"\\server\share\chromium\chrome.exe"),
+        (r"C:\already\native\chrome.exe", r"C:\already\native\chrome.exe"),
+    ],
+)
+def test_the_windows_device_prefix_is_removed_before_playwright_sees_it(
+    given: str, expected: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Playwright rejects the verbatim form, so it is stripped on the way out.
+
+    The three shapes are stripped differently -- a plain verbatim path loses four
+    characters, a UNC one loses eight and gains back the two leading slashes, and
+    a path that was never prefixed is handed over untouched. Driving this on a
+    POSIX host means supplying the platform value rather than the platform: the
+    function reads `os.name` and does pure string work, so the string work is
+    what gets asserted. Real Windows behaviour stays with the Windows runner.
+    """
+    from automation_tool.executor.motion_authoring import slot_probe_browser
+
+    monkeypatch.setattr(os, "name", "nt")
+    # Built outside the patch: under `os.name == "nt"` `Path()` constructs a
+    # WindowsPath, which parses these strings by different rules than the
+    # PosixPath the assertion compares against.
+    result = slot_probe_browser._native_path_for_playwright(cast(Path, _RawPath(given)))
+
+    assert os.fspath(result) == expected
+
+
+class _RawPath:
+    """Something `os.fspath` reads as the exact string given, on any platform."""
+
+    def __init__(self, value: str) -> None:
+        self._value = value
+
+    def __fspath__(self) -> str:
+        return self._value

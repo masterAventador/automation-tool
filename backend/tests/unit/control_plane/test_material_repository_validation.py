@@ -11,7 +11,7 @@ from __future__ import annotations
 import inspect
 import traceback
 from datetime import UTC, datetime, timedelta, timezone
-from typing import cast
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
@@ -30,6 +30,9 @@ from automation_tool.control_plane.application.materials import (
     MaterialInUse,
     MaterialNotFound,
     MaterialPersistenceUnavailable,
+    MaterialSnapshotConflict,
+    SmartEditMaterialAnalysisWriteback,
+    SmartEditMaterialWriteback,
 )
 from automation_tool.control_plane.domain import (
     DescriptionSource,
@@ -855,3 +858,590 @@ def test_hydration_refuses_a_timestamp_it_cannot_trust(described_at: object) -> 
     """
     with pytest.raises(InvalidMaterialModel):
         repository_module._hydrate(hydration_row(described_at=described_at))
+
+
+class SequencedResult(StubResult):
+    """A result whose rows and rowcount are fixed per call rather than per session."""
+
+    def __init__(self, rows: list[RowMapping], rowcount: int) -> None:
+        super().__init__(rows[0] if rows else None, rowcount)
+        self._rows = rows
+
+    def all(self) -> list[RowMapping]:
+        return list(self._rows)
+
+
+class SequencedSession:
+    """Answers each `execute` from a queue, so one call can differ from the next.
+
+    `apply_smart_edit_writeback` runs several statements inside one transaction
+    and branches on what each returns. A single fixed answer cannot put it in
+    most of those branches; a queue can, and keeps every branch reachable
+    without a live PostgreSQL.
+    """
+
+    def __init__(self, answers: list[tuple[list[RowMapping], int]]) -> None:
+        self.answers = answers
+        self.calls = 0
+
+    async def execute(self, _statement: object, *_arguments: object) -> SequencedResult:
+        rows, rowcount = self.answers[min(self.calls, len(self.answers) - 1)]
+        self.calls += 1
+        return SequencedResult(rows, rowcount)
+
+
+class SequencedScope:
+    def __init__(self, session: SequencedSession) -> None:
+        self._session = session
+
+    async def __aenter__(self) -> SequencedSession:
+        return self._session
+
+    async def __aexit__(self, *_arguments: object) -> None:
+        return None
+
+
+class SequencedSessions:
+    def __init__(self, answers: list[tuple[list[RowMapping], int]]) -> None:
+        self.session = SequencedSession(answers)
+
+    def begin(self) -> SequencedScope:
+        return SequencedScope(self.session)
+
+
+def _narration() -> Material:
+    """One generated voiceover, in the exact shape the writeback command accepts."""
+    return Material(
+        material_id=MaterialId.new(),
+        kind=MaterialKind.AUDIO,
+        duration_ms=800,
+        width=None,
+        height=None,
+        content_digest="b" * 64,
+        has_audio=True,
+        audio_loudness_lufs=None,
+        has_speech=True,
+        speech_segments_ms=((0, 800),),
+        speech_transcript="旁白内容",
+        shot_boundaries_ms=(),
+        ai_description=None,
+        ai_tags=(),
+        description_source=DescriptionSource.AI,
+        described_at=None,
+    )
+
+
+def _integrity_error(constraint: str | None, *, on_cause: bool) -> IntegrityError:
+    """An IntegrityError shaped the way the driver really hands one over.
+
+    asyncpg puts the constraint name on the exception it raises; SQLAlchemy
+    sometimes wraps that one more time, leaving the name on `__cause__`. Both
+    shapes are read, so both are built here.
+    """
+    driver_error = Exception("le18_private_material_reference")
+    if on_cause:
+        cause = Exception()
+        if constraint is not None:
+            cause.constraint_name = constraint  # type: ignore[attr-defined]
+        driver_error.__cause__ = cause
+    elif constraint is not None:
+        driver_error.constraint_name = constraint  # type: ignore[attr-defined]
+    return IntegrityError("delete from materials", None, driver_error)
+
+
+def _repository(
+    sessions: object,
+) -> tuple[repository_module.SqlAlchemyMaterialRepository, Database]:
+    """A repository whose sessions come from a stand-in rather than a server.
+
+    The database object is real -- the repository refuses one it does not own --
+    and only the session factory is replaced, which is the same seam the tests
+    above use.
+    """
+    database = unreachable_database()
+    repository = repository_module.SqlAlchemyMaterialRepository(database)
+    object.__setattr__(database, "_sessions", sessions)
+    return repository, database
+
+
+@pytest.mark.asyncio
+async def test_the_three_write_paths_also_refuse_foreign_argument_types() -> None:
+    """Each of these builds a statement from its arguments; none may be built blind."""
+    repository, database = _repository(StubSessions(None))
+    installation_id = InstallationId.new()
+    material = make_material()
+    user_owned = material.with_user_description("人工写的描述")
+
+    with pytest.raises(MaterialDataRejected):
+        await repository.update_user_description(cast(Material, object()), installation_id)
+    with pytest.raises(MaterialDataRejected):
+        await repository.update_user_description(user_owned, cast(InstallationId, object()))
+    # An AI-owned description reaching the user-description writer would rewrite
+    # a person's field with a model's text, so the source is checked here too.
+    with pytest.raises(MaterialDataRejected):
+        await repository.update_user_description(material, installation_id)
+
+    with pytest.raises(MaterialDataRejected):
+        await repository.update_speech_analysis(cast(Material, object()), installation_id)
+    with pytest.raises(MaterialDataRejected):
+        await repository.update_speech_analysis(material, cast(InstallationId, object()))
+
+    with pytest.raises(MaterialDataRejected):
+        await repository.apply_smart_edit_writeback(cast(Any, object()), installation_id)
+
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_every_read_and_write_treats_an_unexpected_driver_error_as_unavailable() -> None:
+    """The catch-all exists because the driver's vocabulary is not ours to enumerate.
+
+    A refusal that let something else through would surface a driver exception --
+    with the connection string inside it -- to an HTTP caller.
+    """
+    installation_id = InstallationId.new()
+    material = make_material()
+    writeback = SmartEditMaterialWriteback(
+        analyses=(),
+        narrations=(_narration(),),
+    )
+    failure = RuntimeError(*LEAKED_TOKENS)
+
+    async def refused(call: object) -> None:
+        with pytest.raises(MaterialPersistenceUnavailable) as caught:
+            await cast(Any, call)
+        assert not any(token in str(caught.value) for token in LEAKED_TOKENS)
+        assert not any(
+            token in "".join(traceback.format_exception(caught.value)) for token in LEAKED_TOKENS
+        )
+
+    repository, database = _repository(FailingSessions(failure))
+    await refused(
+        repository.list_page(
+            installation_id=installation_id,
+            before_material_id=None,
+            limit=10,
+        )
+    )
+    await refused(repository.delete(material.material_id, installation_id))
+    await refused(repository.update_speech_analysis(material, installation_id))
+    await refused(repository.apply_smart_edit_writeback(writeback, installation_id))
+
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_a_delete_that_violates_an_unknown_constraint_is_not_read_as_in_use() -> None:
+    """Only the timeline reference means in-use; any other violation is a data problem."""
+    installation_id = InstallationId.new()
+    material = make_material()
+
+    repository, database = _repository(
+        FailingSessions(_integrity_error("some_other_constraint", on_cause=True))
+    )
+
+    with pytest.raises(MaterialDataRejected):
+        await repository.delete(material.material_id, installation_id)
+
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_a_delete_blocked_by_a_timeline_reference_reports_the_material_in_use() -> None:
+    """The name is read off the driver error itself when it is there, not only the cause."""
+    installation_id = InstallationId.new()
+    material = make_material()
+
+    repository, database = _repository(
+        FailingSessions(
+            _integrity_error(
+                "fk_timeline_material_references_material_owner",
+                on_cause=False,
+            )
+        )
+    )
+
+    with pytest.raises(MaterialInUse):
+        await repository.delete(material.material_id, installation_id)
+
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_a_speech_update_that_matched_no_row_is_not_found() -> None:
+    repository, database = _repository(StubSessions(None, rowcount=0))
+
+    with pytest.raises(MaterialNotFound):
+        await repository.update_speech_analysis(make_material(), InstallationId.new())
+
+    await database.close()
+
+
+def _analysis_writeback(
+    material: Material,
+    **overrides: object,
+) -> SmartEditMaterialAnalysisWriteback:
+    values: dict[str, object] = {
+        "material_id": material.material_id,
+        "content_digest": material.content_digest,
+        "has_speech": material.has_speech,
+        "speech_segments_ms": material.speech_segments_ms,
+        "speech_transcript": material.speech_transcript,
+        "shot_boundaries_ms": material.shot_boundaries_ms,
+        "ai_description": material.ai_description,
+        "ai_tags": material.ai_tags,
+        "description_source": material.description_source,
+        "described_at": material.described_at,
+    }
+    values.update(overrides)
+    return SmartEditMaterialAnalysisWriteback(**values)  # type: ignore[arg-type]
+
+
+def _stored_row(material: Material, installation_id: InstallationId) -> RowMapping:
+    """The row this material would be read back as, including its owner column."""
+    return hydration_row(
+        material_id=material.material_id.uuid,
+        installation_id=installation_id.uuid,
+        kind=material.kind.value,
+        duration_ms=material.duration_ms,
+        width=material.width,
+        height=material.height,
+        content_digest=material.content_digest,
+        has_audio=material.has_audio,
+        audio_loudness_lufs=material.audio_loudness_lufs,
+        has_speech=material.has_speech,
+        speech_segments_ms=[list(window) for window in material.speech_segments_ms],
+        speech_transcript=material.speech_transcript,
+        shot_boundaries_ms=list(material.shot_boundaries_ms),
+        ai_description=material.ai_description,
+        ai_tags=list(material.ai_tags),
+        description_source=material.description_source.value,
+        described_at=material.described_at,
+    )
+
+
+async def _writeback_refuses(
+    answers: list[tuple[list[RowMapping], int]],
+    writeback: object,
+    installation_id: InstallationId,
+    expected: type[Exception],
+) -> None:
+    repository, database = _repository(SequencedSessions(answers))
+    try:
+        with pytest.raises(expected):
+            await repository.apply_smart_edit_writeback(cast(Any, writeback), installation_id)
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_a_writeback_naming_a_material_that_is_not_stored_is_not_found() -> None:
+    """The lock read is also the existence check; a short result is a missing row."""
+    installation_id = InstallationId.new()
+    material = make_material()
+
+    await _writeback_refuses(
+        [([], 0)],
+        SmartEditMaterialWriteback(
+            analyses=(_analysis_writeback(material),),
+            narrations=(),
+        ),
+        installation_id,
+        MaterialNotFound,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_writeback_built_on_a_different_file_is_a_snapshot_conflict() -> None:
+    """The digest is the material's identity here: a different one is a different file."""
+    installation_id = InstallationId.new()
+    stored = make_material()
+    other_digest = "9f8e7d6c" * 8
+
+    await _writeback_refuses(
+        [([_stored_row(stored, installation_id)], 1)],
+        SmartEditMaterialWriteback(
+            analyses=(_analysis_writeback(stored, content_digest=other_digest),),
+            narrations=(),
+        ),
+        installation_id,
+        MaterialSnapshotConflict,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_model_writeback_cannot_overwrite_a_description_a_person_owns() -> None:
+    installation_id = InstallationId.new()
+    stored = make_material().with_user_description("人工写的描述")
+
+    await _writeback_refuses(
+        [([_stored_row(stored, installation_id)], 1)],
+        SmartEditMaterialWriteback(
+            analyses=(
+                _analysis_writeback(
+                    stored,
+                    description_source=DescriptionSource.AI,
+                    ai_description="模型写的描述",
+                    ai_tags=("产品",),
+                    described_at=DESCRIBED_AT,
+                ),
+            ),
+            narrations=(),
+        ),
+        installation_id,
+        MaterialDescriptionProtected,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_user_owned_writeback_must_match_what_is_stored_exactly() -> None:
+    """It claims to carry a person's fields unchanged, so any drift is a conflict."""
+    installation_id = InstallationId.new()
+    stored = make_material().with_user_description("人工写的描述")
+    row = _stored_row(stored, installation_id)
+
+    # Only two of the four fields it compares can differ: a writeback that claims
+    # `user` may carry neither model tags nor a description timestamp -- the
+    # domain refuses both -- so those two terms of the comparison cannot be
+    # reached from a command that exists.
+    cases: list[tuple[str, dict[str, object]]] = [
+        ("a different description", {"ai_description": "另一段描述"}),
+        ("different shot boundaries", {"shot_boundaries_ms": (0,)}),
+    ]
+    for label, overrides in cases:
+        await _writeback_refuses(
+            [([row], 1)],
+            SmartEditMaterialWriteback(
+                analyses=(_analysis_writeback(stored, **overrides),),
+                narrations=(),
+            ),
+            installation_id,
+            MaterialSnapshotConflict,
+        )
+        assert label
+
+    # The other way round: the writeback claims a person owns the description
+    # while the stored row says a model wrote it.
+    model_owned = make_material()
+    await _writeback_refuses(
+        [([_stored_row(model_owned, installation_id)], 1)],
+        SmartEditMaterialWriteback(
+            analyses=(
+                _analysis_writeback(
+                    model_owned.with_user_description("人工写的描述"),
+                    content_digest=model_owned.content_digest,
+                ),
+            ),
+            narrations=(),
+        ),
+        installation_id,
+        MaterialSnapshotConflict,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_model_writeback_with_no_description_must_find_none_stored() -> None:
+    """Writing "no understanding" over an existing one would silently drop it."""
+    installation_id = InstallationId.new()
+    described = make_material()
+    undescribed = Material(
+        **{
+            **{
+                field: getattr(described, field)
+                for field in (
+                    "material_id",
+                    "kind",
+                    "duration_ms",
+                    "width",
+                    "height",
+                    "content_digest",
+                    "has_audio",
+                    "audio_loudness_lufs",
+                    "has_speech",
+                    "speech_segments_ms",
+                    "speech_transcript",
+                    "shot_boundaries_ms",
+                )
+            },
+            "ai_description": None,
+            "ai_tags": (),
+            "description_source": DescriptionSource.AI,
+            "described_at": None,
+        }
+    )
+
+    await _writeback_refuses(
+        [([_stored_row(described, installation_id)], 1)],
+        SmartEditMaterialWriteback(
+            analyses=(_analysis_writeback(undescribed),),
+            narrations=(),
+        ),
+        installation_id,
+        MaterialSnapshotConflict,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_narration_already_registered_elsewhere_is_refused() -> None:
+    installation_id = InstallationId.new()
+    narration = _narration()
+    foreign_row = _stored_row(narration, InstallationId.new())
+
+    await _writeback_refuses(
+        [([], 0), ([foreign_row], 1)],
+        SmartEditMaterialWriteback(
+            analyses=(),
+            narrations=(narration,),
+        ),
+        installation_id,
+        MaterialAlreadyRegistered,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_narration_whose_bytes_are_already_in_the_library_is_refused() -> None:
+    """Same digest, different identifier: the file is already there under another id."""
+    installation_id = InstallationId.new()
+    narration = _narration()
+    existing = _narration()
+    row = _stored_row(existing, installation_id)
+
+    await _writeback_refuses(
+        [([], 0), ([row], 1)],
+        SmartEditMaterialWriteback(
+            analyses=(),
+            narrations=(narration,),
+        ),
+        installation_id,
+        MaterialAlreadyRegistered,
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_update_that_matched_no_row_ends_the_whole_writeback() -> None:
+    """The digest is in the WHERE clause, so no match means the file changed underneath."""
+    installation_id = InstallationId.new()
+    stored = make_material()
+
+    await _writeback_refuses(
+        [([_stored_row(stored, installation_id)], 0)],
+        SmartEditMaterialWriteback(
+            analyses=(_analysis_writeback(stored),),
+            narrations=(),
+        ),
+        installation_id,
+        MaterialSnapshotConflict,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_user_owned_writeback_that_matches_stores_only_the_speech_columns() -> None:
+    """The person's description is left exactly as it is; only speech is rewritten."""
+    installation_id = InstallationId.new()
+    stored = make_material().with_user_description("人工写的描述")
+    repository, database = _repository(
+        SequencedSessions([([_stored_row(stored, installation_id)], 1), ([], 1)])
+    )
+    try:
+        result = await repository.apply_smart_edit_writeback(
+            SmartEditMaterialWriteback(
+                analyses=(_analysis_writeback(stored),),
+                narrations=(),
+            ),
+            installation_id,
+        )
+    finally:
+        await database.close()
+
+    assert result == (stored,)
+
+
+@pytest.mark.asyncio
+async def test_a_model_writeback_with_no_description_over_none_stored_is_accepted() -> None:
+    """Nothing was understood before and nothing is now: not a conflict, just speech."""
+    installation_id = InstallationId.new()
+    described = make_material()
+    stored = Material(
+        material_id=described.material_id,
+        kind=described.kind,
+        duration_ms=described.duration_ms,
+        width=described.width,
+        height=described.height,
+        content_digest=described.content_digest,
+        has_audio=described.has_audio,
+        audio_loudness_lufs=described.audio_loudness_lufs,
+        has_speech=described.has_speech,
+        speech_segments_ms=described.speech_segments_ms,
+        speech_transcript=described.speech_transcript,
+        shot_boundaries_ms=described.shot_boundaries_ms,
+        ai_description=None,
+        ai_tags=(),
+        description_source=DescriptionSource.AI,
+        described_at=None,
+    )
+    repository, database = _repository(
+        SequencedSessions([([_stored_row(stored, installation_id)], 1), ([], 1)])
+    )
+    try:
+        result = await repository.apply_smart_edit_writeback(
+            SmartEditMaterialWriteback(
+                analyses=(_analysis_writeback(stored),),
+                narrations=(),
+            ),
+            installation_id,
+        )
+    finally:
+        await database.close()
+
+    assert result == (stored,)
+
+
+@pytest.mark.asyncio
+async def test_a_writeback_that_collides_on_insert_is_already_registered() -> None:
+    installation_id = InstallationId.new()
+    repository, database = _repository(
+        FailingSessions(_integrity_error("uq_materials_installation_digest", on_cause=False))
+    )
+    try:
+        with pytest.raises(MaterialAlreadyRegistered):
+            await repository.apply_smart_edit_writeback(
+                SmartEditMaterialWriteback(analyses=(), narrations=(_narration(),)),
+                installation_id,
+            )
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_a_speech_update_on_an_unreachable_database_is_unavailable() -> None:
+    """`OSError` rather than a SQLAlchemy error: the driver does not wrap a refused socket."""
+    repository, database = _repository(
+        FailingSessions(ConnectionRefusedError("Connect call failed"))
+    )
+    try:
+        with pytest.raises(MaterialPersistenceUnavailable) as caught:
+            await repository.update_speech_analysis(make_material(), InstallationId.new())
+    finally:
+        await database.close()
+
+    assert "Connect call failed" not in "".join(traceback.format_exception(caught.value))
+
+
+@pytest.mark.asyncio
+async def test_a_description_update_that_matched_nothing_but_found_the_row_is_unavailable() -> None:
+    """The row is there and unprotected, so nothing explains the UPDATE matching none.
+
+    Reporting "not found" would send the caller looking for a material that is
+    plainly there; reporting the protected error would blame a rule that does not
+    apply. Unavailable is the only honest answer left.
+    """
+    installation_id = InstallationId.new()
+    stored = make_material().with_user_description("人工写的描述")
+    repository, database = _repository(
+        StubSessions(_stored_row(stored, installation_id), rowcount=0)
+    )
+    try:
+        with pytest.raises(MaterialPersistenceUnavailable):
+            await repository.update_user_description(stored, installation_id)
+    finally:
+        await database.close()

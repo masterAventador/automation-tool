@@ -24,7 +24,7 @@ import math
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from unittest import mock
 
 from automation_tool.executor.motion_authoring import (
@@ -51,6 +51,7 @@ from automation_tool.executor.motion_authoring.agent import (
     AuthoringWorkspace,
     DesignArtifact,
     MotionAuthoringAgent,
+    MotionAuthoringPersistenceError,
     MotionAuthoringRejected,
     MotionAuthoringTools,
     MotionAuthoringUnavailable,
@@ -2403,3 +2404,162 @@ class NarrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class WorkspaceFailClosedTests(unittest.TestCase):
+    """The workspace's own refusals, reached directly rather than through a tool."""
+
+    def test_a_relative_path_that_is_not_text_is_refused(self) -> None:
+        with TemporaryDirectory() as raw:
+            workspace = _make_workspace(Path(raw))
+
+            for label, value in [
+                ("nothing", None),
+                ("bytes", b"a.html"),
+                ("a path object", Path("a.html")),
+                ("the empty string", ""),
+            ]:
+                with self.subTest(label=label), self.assertRaises(MotionAuthoringRejected):
+                    workspace.resolve(cast(str, value))
+
+    def test_a_link_planted_inside_that_points_out_is_refused_as_an_escape(self) -> None:
+        """`..` is refused by shape; a link is the way out that shape cannot see."""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            outside = root.parent / "outside"
+            outside.mkdir(exist_ok=True)
+            workspace = _make_workspace(root)
+            (workspace.root / "escape").symlink_to(outside)
+
+            with self.assertRaises(MotionAuthoringRejected):
+                workspace.resolve("escape/planted.html")
+
+            self.assertFalse((outside / "planted.html").exists())
+
+    def test_a_path_that_becomes_a_symlink_after_it_resolved_is_still_refused(self) -> None:
+        """The window this guards is between resolving a path and writing to it.
+
+        `resolve()` follows links, so a path that was already a link is either
+        rewritten to its target inside the workspace or refused for escaping it.
+        What is left is the race: the name is planted as a link *after* it
+        resolved clean. The plant is hung off `mkdir`, which is the last thing
+        the writer does before the check, because there is no other way into
+        that window from outside.
+        """
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root)
+            outside = root.parent / "outside.html"
+            target = workspace.root / "planted.html"
+            original_mkdir = Path.mkdir
+
+            def planting_mkdir(self: Path, *args: object, **options: object) -> None:
+                original_mkdir(self, *args, **options)  # type: ignore[arg-type]
+                if not target.exists() and not target.is_symlink():
+                    target.symlink_to(outside)
+
+            with (
+                mock.patch.object(Path, "mkdir", planting_mkdir),
+                self.assertRaises(MotionAuthoringRejected),
+            ):
+                workspace.write_text("planted.html", "<html></html>")
+
+            self.assertFalse(outside.exists(), "nothing may be written through the link")
+
+    def test_a_write_that_the_filesystem_refuses_rolls_back_what_was_authored(self) -> None:
+        """A half-written run is worse than none: the caller is told it failed."""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root)
+            kept = workspace.write_text("first.html", "<html></html>")
+
+            def refuse(_target: Path) -> object:
+                raise OSError(28, "No space left on device")
+
+            with self.assertRaises(MotionAuthoringPersistenceError):
+                workspace._write("second.html", refuse)
+
+            self.assertFalse(kept.exists(), "the earlier authored file is rolled back too")
+
+    def test_a_seeded_asset_is_never_treated_as_something_this_run_authored(self) -> None:
+        """Rolling back must not delete what the workspace was handed to begin with."""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root)
+            seeded = workspace.root / RUNTIME_ASSET
+
+            workspace.write_text(RUNTIME_ASSET, "/* rewritten */\n")
+            workspace.rollback_authored_files()
+
+            self.assertTrue(seeded.exists())
+
+    def test_rollback_passes_over_a_target_that_is_no_longer_a_regular_file(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root)
+            vanished = workspace.write_text("vanished.html", "<html></html>")
+            present = workspace.write_text("present.html", "<html></html>")
+            vanished.unlink()
+
+            workspace.rollback_authored_files()
+
+            self.assertFalse(present.exists())
+
+    def test_a_bytes_payload_that_is_not_bytes_is_refused(self) -> None:
+        with TemporaryDirectory() as raw:
+            workspace = _make_workspace(Path(raw))
+
+            for label, payload in [
+                ("text", "not bytes"),
+                ("a memoryview", memoryview(b"bytes")),
+                ("nothing", None),
+            ]:
+                with self.subTest(label=label), self.assertRaises(MotionAuthoringRejected):
+                    workspace.write_bytes("payload.bin", cast(bytes, payload))
+
+    def test_a_bytearray_payload_is_accepted_as_the_bytes_it_holds(self) -> None:
+        with TemporaryDirectory() as raw:
+            workspace = _make_workspace(Path(raw))
+
+            target = workspace.write_bytes("payload.bin", cast(bytes, bytearray(b"real bytes")))
+
+            self.assertEqual(target.read_bytes(), b"real bytes")
+
+    def test_rollback_skips_what_it_cannot_remove_instead_of_stopping(self) -> None:
+        """One undeletable file must not strand every other authored file."""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root)
+            first = workspace.write_text("first.html", "<html></html>")
+            second = workspace.write_text("second.html", "<html></html>")
+            original_unlink = Path.unlink
+
+            def refusing_unlink(self: Path, *args: object, **options: object) -> None:
+                if self == first:
+                    raise PermissionError("operation not permitted")
+                original_unlink(self)
+
+            with mock.patch.object(Path, "unlink", refusing_unlink):
+                workspace.rollback_authored_files()
+
+            self.assertTrue(first.exists())
+            self.assertFalse(second.exists())
+
+    def test_reading_back_anything_other_than_a_regular_file_is_refused(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root)
+            (root / "a-directory").mkdir()
+            # A link whose target does not exist: `resolve()` leaves the final
+            # segment alone, so the link itself is what gets checked. A link to
+            # an existing file inside the workspace is resolved away before this
+            # check ever sees it, which is why that case is not listed here.
+            (root / "dangling.html").symlink_to(root / "absent-target.html")
+
+            for label, relative in [
+                ("a directory", "a-directory"),
+                ("a dangling symlink", "dangling.html"),
+                ("nothing at all", "absent.html"),
+            ]:
+                with self.subTest(label=label), self.assertRaises(MotionAuthoringRejected):
+                    workspace.read_text(relative)
