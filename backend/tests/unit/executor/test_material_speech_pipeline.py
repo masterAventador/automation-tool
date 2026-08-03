@@ -1067,3 +1067,135 @@ def test_a_batch_reader_that_produced_nothing_is_refused(tmp_path: Path) -> None
 
     with pytest.raises(MaterialSpeechRejected):
         list(batches)
+
+
+def test_a_wav_larger_than_the_batch_ceiling_is_refused() -> None:
+    """The ceiling is what the paid boundary accepts; a bigger one is not sent."""
+    oversize = b"\x00\x00" * (pipeline.MAX_ASR_WAV_BYTES // 2 + 1)
+
+    with pytest.raises(MaterialSpeechRejected):
+        pipeline._pcm_wav(oversize)
+
+
+def test_reading_exactly_stops_when_the_file_does(tmp_path: Path) -> None:
+    """A short file is not padded and not retried; the caller compares the length."""
+    path = tmp_path / "audio.pcm"
+    path.write_bytes(b"\x00\x01\x02\x03")
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        assert pipeline._read_exact(descriptor, 4) == b"\x00\x01\x02\x03"
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        assert pipeline._read_exact(descriptor, 100) == b"\x00\x01\x02\x03"
+    finally:
+        os.close(descriptor)
+
+
+def test_the_pcm_identity_time_follows_the_platform_that_records_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows has a creation time and POSIX does not; each reads its own field.
+
+    Only one of these is reachable on a given host, so the platform value is
+    supplied and the field selection is what gets asserted.
+    """
+    path = tmp_path / "audio.pcm"
+    path.write_bytes(b"\x00\x00")
+    metadata = path.stat()
+
+    monkeypatch.setattr(os, "name", "posix")
+    assert pipeline._pcm_identity_time_ns(metadata) == metadata.st_ctime_ns
+
+    monkeypatch.setattr(os, "name", "nt")
+    expected = getattr(metadata, "st_birthtime_ns", metadata.st_ctime_ns)
+    assert pipeline._pcm_identity_time_ns(metadata) == expected
+
+
+def test_a_pcm_path_that_cannot_be_opened_at_all_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`os.open` succeeding and `os.fstat` failing leaves a descriptor to close."""
+    path = tmp_path / "audio.pcm"
+    path.write_bytes(b"\x00\x00" * 512)
+    real_fstat = os.fstat
+
+    def refusing_fstat(descriptor: int) -> os.stat_result:
+        del descriptor
+        raise OSError("bad file descriptor")
+
+    monkeypatch.setattr(os, "fstat", refusing_fstat)
+    with pytest.raises(MaterialSpeechRejected):
+        pipeline._open_stable_pcm(path, approved=None)
+    monkeypatch.setattr(os, "fstat", real_fstat)
+
+
+def test_a_batch_reader_that_cannot_seek_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anything the driver raises mid-read becomes one closed reason."""
+    path = tmp_path / "audio.pcm"
+    path.write_bytes(b"\x00\x00" * 512)
+
+    def refusing_lseek(*_args: object, **_options: object) -> int:
+        raise OSError("illegal seek")
+
+    monkeypatch.setattr(os, "lseek", refusing_lseek)
+
+    batches = pipeline._speech_audio_batches(
+        path,
+        segments=((0, 500),),
+        pcm_bytes=1_024,
+        duration_ms=1_000,
+        approved=None,
+    )
+
+    with pytest.raises(MaterialSpeechRejected):
+        list(batches)
+
+
+def test_an_output_the_extractor_cannot_create_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`os.open` failing outright leaves no descriptor to close on the way out."""
+    analyzer = LocalAudibleSpeechAnalyzer(**_analyzer_arguments(tmp_path))  # type: ignore[arg-type]
+    real_open = os.open
+
+    def refusing_open(path: str | os.PathLike[str], flags: int, mode: int = 0o777) -> int:
+        if os.fspath(path).endswith(pipeline._PCM_FILENAME):
+            raise OSError("permission denied")
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(os, "open", refusing_open)
+    monkeypatch.setattr(subprocess, "Popen", FinishedExtraction)
+
+    with pytest.raises(MaterialSpeechRejected):
+        analyzer.analyze(_facts())
+
+
+def test_detection_and_batching_close_nothing_when_nothing_opened(tmp_path: Path) -> None:
+    """The cleanup runs on every exit; with no descriptor there is nothing to close."""
+    absent = tmp_path / "absent.pcm"
+
+    with pytest.raises(MaterialSpeechRejected):
+        pipeline._detect_speech_segments(absent, SequencedVad([0.0]), duration_ms=1_000)
+
+    batches = pipeline._speech_audio_batches(
+        absent,
+        segments=((0, 500),),
+        pcm_bytes=1_024,
+        duration_ms=1_000,
+        approved=None,
+    )
+    with pytest.raises(MaterialSpeechRejected):
+        list(batches)
+
+
+def test_a_run_that_never_confirmed_leaves_no_segment_behind() -> None:
+    """Short bursts of noise reach the silence threshold without confirming anything."""
+    too_short_to_confirm = ([0.9] * 2 + [0.0] * 12) * 3
+
+    segments, speech_ms = pipeline._aggregate_probability_evidence(
+        too_short_to_confirm, duration_ms=10_000
+    )
+
+    assert segments == ()
+    assert speech_ms == 0
