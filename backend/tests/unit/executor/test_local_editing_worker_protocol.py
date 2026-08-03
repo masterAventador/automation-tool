@@ -6,14 +6,16 @@ import base64
 import hashlib
 import hmac
 import json
+from dataclasses import replace
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
 
 import automation_tool.executor.local_editing_worker as worker_protocol_module
 from automation_tool.executor.local_editing_worker import (
+    MAX_LOCAL_EDITING_WORKER_BOOTSTRAP_BYTES,
     LocalEditingCancelCommand,
     LocalEditingStartCommand,
     LocalEditingWorkerBootstrap,
@@ -26,6 +28,7 @@ from automation_tool.executor.local_editing_worker import (
     LocalMaterialStatusCommand,
     LocalMaterialWorkerFailureCode,
     LocalMaterialWorkerStatus,
+    _material_facts_document,
 )
 from automation_tool.executor.material_probe import (
     MaterialFacts,
@@ -625,3 +628,108 @@ def test_material_events_accept_every_probe_kind(
     actual = document["facts"]
     assert isinstance(actual, dict)
     assert {key: actual[key] for key in expected} == expected
+
+
+def _facts(**overrides: Any) -> MaterialFacts:
+    return replace(_material_facts(), **overrides)
+
+
+def test_probe_facts_are_projected_only_when_they_describe_one_coherent_file() -> None:
+    """The CP registers what this returns, so an incoherent shape is refused here.
+
+    Each case below is a file that could not exist: a picture with a running
+    time, a sound with a frame size, a level for something with no sound. Letting
+    any of them through would register a material nothing can later render.
+    """
+    image = _facts(
+        kind=ProbedMaterialKind.IMAGE,
+        duration_ms=None,
+        has_audio=False,
+        audio_loudness_lufs=None,
+    )
+    audio = _facts(kind=ProbedMaterialKind.AUDIO, width=None, height=None)
+
+    cases: list[tuple[str, object]] = [
+        ("something that is not probe facts", object()),
+        ("a kind from outside the closed set", _facts(kind=cast(Any, "video"))),
+        ("a digest that is not text", _facts(content_digest=cast(Any, b"cd" * 32))),
+        ("a digest of the wrong shape", _facts(content_digest="not a digest")),
+        ("an audio flag that is not a bool", _facts(has_audio=cast(Any, 1))),
+        ("a level that is not a float", _facts(audio_loudness_lufs=cast(Any, -18))),
+        ("a level that is not finite", _facts(audio_loudness_lufs=float("nan"))),
+        ("a level below the floor", _facts(audio_loudness_lufs=-70.5)),
+        ("a level above zero", _facts(audio_loudness_lufs=0.5)),
+        ("a picture with a running time", replace(image, duration_ms=1)),
+        ("a picture that claims sound", replace(image, has_audio=True)),
+        ("a picture with a level", replace(image, audio_loudness_lufs=-18.0)),
+        ("a sound with a frame width", replace(audio, width=720)),
+        ("a sound with a frame height", replace(audio, height=1280)),
+        ("a sound that claims no sound", replace(audio, has_audio=False)),
+        ("a video with no frame size", _facts(width=None, height=None)),
+        ("a video wider than the ceiling", _facts(width=1_000_000)),
+        ("a level on something with no sound", _facts(has_audio=False)),
+    ]
+    for label, facts in cases:
+        with pytest.raises(LocalEditingWorkerBootstrapRejected):
+            _material_facts_document(facts)
+        assert label
+
+    assert _material_facts_document(_material_facts())["hasAudio"] is True
+
+
+def test_a_material_failure_must_name_a_reason_from_the_closed_set(tmp_path: Path) -> None:
+    source = (tmp_path / "private source.mp4").resolve()
+
+    protocol = LocalEditingWorkerProtocol(_bootstrap(tmp_path), "2.0.0")
+    protocol.accept_command(_line(_import_document(source)))
+    with pytest.raises(LocalEditingWorkerBootstrapRejected):
+        protocol.material_import_failed(MATERIAL_ID, cast(Any, "unreadable"))
+    protocol.material_import_failed(MATERIAL_ID, LocalMaterialWorkerFailureCode.UNREADABLE)
+
+    protocol = LocalEditingWorkerProtocol(_bootstrap(tmp_path), "2.0.0")
+    protocol.accept_command(_line(_forget_document()))
+    with pytest.raises(LocalEditingWorkerBootstrapRejected):
+        protocol.material_forget_failed(MATERIAL_ID, cast(Any, "registry_unwritable"))
+    protocol.material_forget_failed(MATERIAL_ID, LocalMaterialWorkerFailureCode.REGISTRY_UNWRITABLE)
+
+    protocol = LocalEditingWorkerProtocol(_bootstrap(tmp_path), "2.0.0")
+    protocol.accept_command(_line(_status_document()))
+    with pytest.raises(LocalEditingWorkerBootstrapRejected):
+        protocol.material_status(MATERIAL_ID, cast(Any, "available"))
+    protocol.material_status(MATERIAL_ID, LocalMaterialWorkerStatus.AVAILABLE)
+
+
+def test_a_projection_that_cannot_be_serialised_is_still_a_worker_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing may leave this process except a line of the protocol.
+
+    The projection above narrows every value to a finite scalar, so today this
+    cannot happen -- which is exactly why the guard is worth pinning: were the
+    projection ever widened, the caller must still see a refusal rather than a
+    `TypeError` escaping into the pipe as an unparseable crash.
+    """
+    source = (tmp_path / "private source.mp4").resolve()
+    protocol = LocalEditingWorkerProtocol(_bootstrap(tmp_path), "2.0.0")
+    protocol.accept_command(_line(_import_document(source)))
+    monkeypatch.setattr(
+        "automation_tool.executor.local_editing_worker._material_facts_document",
+        lambda _facts: {"kind": object()},
+    )
+
+    with pytest.raises(LocalEditingWorkerBootstrapRejected):
+        protocol.material_imported(MATERIAL_ID, _material_facts())
+
+
+def test_a_material_event_larger_than_one_line_is_refused(tmp_path: Path) -> None:
+    """The reader on the other end frames on newlines and caps what it will read."""
+    protocol = LocalEditingWorkerProtocol(_bootstrap(tmp_path), "2.0.0")
+    protocol.accept_command(_line(_status_document()))
+
+    with pytest.raises(LocalEditingWorkerBootstrapRejected):
+        protocol._material_event(
+            "worker.material.status",
+            MATERIAL_ID,
+            str(MATERIAL_ID),
+            status="a" * (MAX_LOCAL_EDITING_WORKER_BOOTSTRAP_BYTES + 1),
+        )
