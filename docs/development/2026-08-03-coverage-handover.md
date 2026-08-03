@@ -23,6 +23,11 @@
 全库缺口从 **2,023** 降到 **523**（COV-01 后为 1,664，减 COV-02 的 768 与
 COV-03 已消除的 373）。
 
+**交接点是干净的**：分支最后一次提交后跑了完整 `pytest tests`（含 integration，
+真实 PostgreSQL），**7,118 passed / 21 skipped，退出码 0**；`ruff check`、
+`ruff format --check`、`mypy`(626 files) 全绿；`check_acceptance_evidence_depth.py`
+退出 0。接手时不必先修什么，直接往下做即可。
+
 ## 2. 接手第一件事：重新测一次
 
 不要相信这份文档里的数字，先自己测：
