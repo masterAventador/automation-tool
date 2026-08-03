@@ -22,6 +22,7 @@ import html
 import json
 import math
 import unittest
+import urllib.request
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, ClassVar, Literal, cast
@@ -3396,7 +3397,7 @@ class ModelTransportFailureTests(unittest.TestCase):
             raise failure
 
         with (
-            mock.patch.object(motion_authoring_agent.urllib.request, "urlopen", refusing_urlopen),
+            mock.patch.object(urllib.request, "urlopen", refusing_urlopen),
             self.assertRaises(MotionAuthoringRejected) as caught,
         ):
             call_video_creation_model(
