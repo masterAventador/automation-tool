@@ -468,8 +468,11 @@ def _globally_uniform_indices(timestamps: tuple[int, ...], limit: int) -> tuple[
             ):
                 best_previous_cost = previous_cost
                 best_previous_index = previous_index
-            if best_previous_cost < 0:
-                continue
+            # Unreachable by construction: the previous row always fills the
+            # lowest index this row reads, so the running best is set on the
+            # first iteration. Asserted rather than skipped so that a change to
+            # either range fails loudly instead of quietly costing from -1.
+            assert best_previous_cost >= 0
             distance = abs(timestamps[candidate_index] * target_denominator - target_numerator)
             current_costs[candidate_index] = best_previous_cost + distance
             parents[candidate_index] = best_previous_index
