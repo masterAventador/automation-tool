@@ -342,9 +342,7 @@ async def test_a_refresh_that_cannot_be_completed_is_unavailable_not_rejected(
     ]
     for label, failure, content in cases:
         provider = HttpxBilibiliAccessTokenProvider(**_provider_arguments())
-        monkeypatch.setattr(
-            provider, "_client", _ScriptedClient(content=content, failure=failure)
-        )
+        monkeypatch.setattr(provider, "_client", _ScriptedClient(content=content, failure=failure))
         with pytest.raises(BilibiliArchivePublishUnavailable):
             await provider.refresh_access_token()
         assert label
