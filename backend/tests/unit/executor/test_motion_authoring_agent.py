@@ -2599,6 +2599,12 @@ class PackagedContractLoaderTests(unittest.TestCase):
             {"items": [{"name": "only-one"}]},
         ),
         (
+            "brief seconds ceiling",
+            "_DURATION_CONTRACT_PATH",
+            "_load_maximum_duration_seconds",
+            {"schemaVersion": 1, "policy": "fail_closed", "briefSecondsMaximum": 0},
+        ),
+        (
             "model call",
             "_MODEL_CALL_CONTRACT_PATH",
             "_load_model_stream_idle_timeout_seconds",
@@ -3147,3 +3153,117 @@ class LockedItemDurationTests(unittest.TestCase):
         )
 
         self.assertEqual(capped, float(motion_authoring_agent.CATALOG_SEGMENT_SECONDS_MAXIMUM))
+
+
+class StreamAccumulatorTests(unittest.TestCase):
+    """Folding an SSE stream into assistant content, and refusing what it cannot fold."""
+
+    @staticmethod
+    def _lines(*payloads: str) -> list[bytes]:
+        return [f"data: {payload}".encode() for payload in payloads]
+
+    @staticmethod
+    def _delta(content: str) -> str:
+        return json.dumps({"choices": [{"delta": {"content": content}}]})
+
+    def test_a_stream_that_ends_without_a_done_marker_is_still_folded(self) -> None:
+        """Not every gateway sends `[DONE]`; running out of lines ends the stream too."""
+        content = motion_authoring_agent._accumulate_stream_content(
+            self._lines(self._delta("你"), self._delta("好")),
+            max_bytes=1_000,
+        )
+
+        self.assertEqual(content, "你好")
+
+    def test_everything_that_is_not_assistant_content_is_passed_over(self) -> None:
+        """Comments, reasoning phases and malformed frames must not end up in the answer."""
+        lines = [
+            b": keep-alive",
+            b"",
+            b"data: not json",
+            b"data: " + json.dumps({"choices": []}).encode(),
+            b"data: " + json.dumps({"choices": [{"delta": {"reasoning_content": "thinking"}}]}).encode(),
+            b"data: " + json.dumps({"choices": [{"delta": {"content": ""}}]}).encode(),
+            b"data: " + self._delta("answer").encode(),
+            b"data: [DONE]",
+            b"data: " + self._delta("after the end").encode(),
+        ]
+
+        content = motion_authoring_agent._accumulate_stream_content(lines, max_bytes=1_000)
+
+        self.assertEqual(content, "answer")
+
+    def test_a_stream_past_its_budget_is_stopped_rather_than_accumulated(self) -> None:
+        with self.assertRaises(MotionAuthoringRejected):
+            motion_authoring_agent._accumulate_stream_content(
+                self._lines(self._delta("x" * 100)), max_bytes=10
+            )
+
+    def test_a_stream_that_carried_no_content_at_all_is_refused(self) -> None:
+        """Empty is not a valid answer: something has to be there to parse."""
+        with self.assertRaises(MotionAuthoringRejected):
+            motion_authoring_agent._accumulate_stream_content([b"data: [DONE]"], max_bytes=1_000)
+
+
+class ToolSurfaceReflectionTests(unittest.TestCase):
+    def test_private_and_reflection_names_are_not_part_of_the_surface(self) -> None:
+        """The allowlist is about what a model may call, not about every attribute."""
+        with TemporaryDirectory() as raw:
+            tools = MotionAuthoringTools(_make_workspace(Path(raw)))
+
+            surface = motion_authoring_agent._tool_callables(tools)
+
+            self.assertEqual(surface, frozenset(ALLOWED_TOOLS))
+            self.assertFalse(any(name.startswith("_") for name in surface))
+
+
+class LintFindingDeduplicationTests(unittest.TestCase):
+    def test_the_same_finding_twice_is_reported_once(self) -> None:
+        """The report is bounded and stable; a document repeating a fault repeats no line."""
+        twice = VALID_COMPOSITION.replace(
+            './runtime/gsap.min.js"></script>',
+            './runtime/unknown.js"></script><script src="./runtime/unknown.js"></script>',
+        )
+
+        result = lint_composition(
+            twice,
+            allowed_assets=frozenset({RUNTIME_ASSET}),
+            max_bytes=200_000,
+            entry_path=COMPOSITION_PATH,
+        )
+
+        details = [finding.detail for finding in result.findings]
+        self.assertEqual(len(details), len(set(details)))
+
+
+class LockedComponentMetadataTests(unittest.TestCase):
+    def test_a_component_document_that_cannot_be_parsed_is_refused(self) -> None:
+        """The catalog says which components ship; each has to be readable and measurable."""
+        catalog = json.loads(
+            motion_authoring_agent._MOTION_CATALOG_PATH.read_text(encoding="utf-8")
+        )
+        component = next(
+            item for item in catalog["items"] if str(item.get("type", "")) == "component"
+        )
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            directory = root / str(component["path"])
+            directory.mkdir(parents=True)
+            # Present and readable, and declaring no stage the renderer can use.
+            (directory / f"{component['name']}.html").write_text(
+                "<!doctype html><html><body></body></html>", encoding="utf-8"
+            )
+
+            with (
+                mock.patch.object(motion_authoring_agent, "AUTHORING_VENDOR_ROOT", root),
+                self.assertRaises(MotionAuthoringRejected),
+            ):
+                motion_authoring_agent._load_locked_component_metadata()
+
+    def test_a_short_component_set_is_refused(self) -> None:
+        """25 is the contract; a set that lost one silently loses those shots."""
+        with (
+            mock.patch.object(motion_authoring_agent, "_LOCKED_CATALOG_ITEMS", ()),
+            self.assertRaises(MotionAuthoringRejected),
+        ):
+            motion_authoring_agent._load_locked_component_metadata()
