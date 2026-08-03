@@ -276,28 +276,50 @@ def test_speech_analysis_moves_as_one_triplet_and_preserves_every_other_fact() -
     assert cleared.speech_transcript is None
 
 
+def _speech(**overrides: object) -> Material:
+    """A video whose speech facts are complete except for what a test overrides.
+
+    The transcript matters: it is validated before the segment loop, so a case
+    that leaves it out is refused for having no transcript and never reaches the
+    rule it means to test. Three cases below did exactly that.
+    """
+    return _video(
+        has_audio=True,
+        has_speech=True,
+        speech_transcript="这是素材中的真实原声。",
+        **overrides,
+    )
+
+
 def test_speech_segments_must_be_ordered_and_disjoint() -> None:
     with pytest.raises(InvalidMaterialModel):
-        _video(has_audio=True, has_speech=True, speech_segments_ms=((4_000, 9_000), (500, 3_000)))
+        _speech(speech_segments_ms=((4_000, 9_000), (500, 3_000)))
     with pytest.raises(InvalidMaterialModel):
-        _video(has_audio=True, has_speech=True, speech_segments_ms=((0, 5_000), (3_000, 8_000)))
+        _speech(speech_segments_ms=((0, 5_000), (3_000, 8_000)))
 
 
 def test_speech_segment_must_not_be_empty_or_reversed() -> None:
     with pytest.raises(InvalidMaterialModel):
-        _video(has_audio=True, has_speech=True, speech_segments_ms=((1_000, 1_000),))
+        _speech(speech_segments_ms=((1_000, 1_000),))
     with pytest.raises(InvalidMaterialModel):
-        _video(has_audio=True, has_speech=True, speech_segments_ms=((3_000, 1_000),))
+        _speech(speech_segments_ms=((3_000, 1_000),))
 
 
 def test_speech_segment_must_not_exceed_the_material_duration() -> None:
     with pytest.raises(InvalidMaterialModel):
-        _video(
-            duration_ms=5_000,
-            has_audio=True,
-            has_speech=True,
-            speech_segments_ms=((0, 6_000),),
-        )
+        _speech(duration_ms=5_000, speech_segments_ms=((0, 6_000),))
+
+
+def test_a_speech_window_that_is_not_a_pair_of_ints_is_rejected() -> None:
+    for label, segments in [
+        ("a window that is not a tuple", ([0, 1_000],)),
+        ("a window with one end", ((0,),)),
+        ("a window with three ends", ((0, 1_000, 2_000),)),
+        ("an end that is not an int", ((0, 1_000.0),)),
+    ]:
+        with pytest.raises(InvalidMaterialModel):
+            _speech(speech_segments_ms=segments)
+        assert label
 
 
 def test_image_with_audio_is_rejected() -> None:
@@ -518,3 +540,58 @@ def test_the_guard_does_not_depend_on_the_calling_verb() -> None:
 
     digest = "a" * 64
     assert _SHA256_PATTERN.match(digest + "\n") is None
+
+
+def test_the_audio_and_speech_flags_must_be_actual_booleans() -> None:
+    """Every rule below branches on these two; a truthy stand-in would read as yes."""
+    for label, overrides in [
+        ("audio", {"has_audio": 1}),
+        ("speech", {"has_audio": True, "has_speech": 1}),
+    ]:
+        with pytest.raises(InvalidMaterialModel):
+            _video(**overrides)
+        assert label
+
+
+def test_a_loudness_reading_outside_the_measurable_range_is_rejected() -> None:
+    """LUFS is a real measurement with a real ceiling; anything else is not one."""
+    for label, loudness in [
+        ("a reading that is not a float", -18),
+        ("a reading below the floor", -70.5),
+        ("a reading above zero", 0.5),
+    ]:
+        with pytest.raises(InvalidMaterialModel):
+            _video(has_audio=True, audio_loudness_lufs=loudness)
+        assert label
+
+    assert _video(has_audio=True, audio_loudness_lufs=-18.0).audio_loudness_lufs == -18.0
+
+
+def test_speech_must_come_with_between_one_and_the_maximum_windows() -> None:
+    from automation_tool.control_plane.domain.material import MAX_SPEECH_SEGMENTS
+
+    with pytest.raises(InvalidMaterialModel):
+        _video(has_audio=True, has_speech=True, speech_segments_ms=())
+
+    with pytest.raises(InvalidMaterialModel):
+        _video(
+            duration_ms=MAX_MATERIAL_DURATION_MS,
+            has_audio=True,
+            has_speech=True,
+            speech_transcript="真实原声",
+            speech_segments_ms=tuple(
+                (index * 2, index * 2 + 1) for index in range(MAX_SPEECH_SEGMENTS + 1)
+            ),
+        )
+
+
+def test_an_absent_description_cannot_carry_tags_or_a_timestamp() -> None:
+    """Description, tags and timestamp move together; two thirds of them is torn."""
+    cases: list[tuple[str, dict[str, object]]] = [
+        ("tags with no description", {"ai_tags": ("室内",)}),
+        ("a timestamp with no description", {"described_at": datetime.now(UTC)}),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(InvalidMaterialModel):
+            _video(ai_description=None, **overrides)
+        assert label
