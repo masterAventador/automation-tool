@@ -3421,3 +3421,31 @@ class ModelTransportFailureTests(unittest.TestCase):
 
         self.assertIn("transport failed", str(rejected))
         self.assertNotIn(self._CONFIG.api_key, str(rejected))
+
+
+class ModelAnswerShapeTests(unittest.TestCase):
+    """What the model hands back before anything is read out of it."""
+
+    def _agent(self, workspace: AuthoringWorkspace, model: ScriptedModel) -> MotionAuthoringAgent:
+        return MotionAuthoringAgent(
+            workspace=workspace,
+            tools=MotionAuthoringTools(workspace),
+            workflow=load_locked_authoring_workflow(
+                vendor_root=VENDOR_ROOT, contract_path=WORKFLOW_CONTRACT
+            ),
+            model_config=_model_config(),
+            model_call=model,
+        )
+
+    def test_an_answer_that_is_not_a_json_object_is_refused(self) -> None:
+        """A list parses fine and carries none of the keys the next step reads."""
+        for label, reply in [
+            ("not json at all", "sorry, I cannot do that"),
+            ("json that is not an object", "[1, 2]"),
+            ("json that is a bare string", '"a design"'),
+        ]:
+            with TemporaryDirectory() as raw:
+                workspace = _make_workspace(Path(raw))
+                agent = self._agent(workspace, ScriptedModel([reply]))
+                with self.subTest(label=label), self.assertRaises(MotionAuthoringRejected):
+                    agent.author(_brief())
