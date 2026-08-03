@@ -1082,3 +1082,81 @@ def test_the_refusal_contract_itself_must_be_readable_and_undrifted(tmp_path: Pa
         ):
             motion_authoring_entry._load_refusal_contract()
         assert label
+
+
+def test_the_narrator_writes_each_beat_into_the_workspace_and_measures_it(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Beat length comes from the file that was actually written, never from the model."""
+    seen: list[object] = []
+    synthesized: list[dict[str, object]] = []
+    measured: list[Path] = []
+
+    class _RecordingAgent:
+        def __init__(self, **keywords: object) -> None:
+            seen.append(keywords.get("narrator"))
+
+        def author(self, _brief: object) -> None:
+            raise AssertionError("the recording agent never authors")
+
+    class _Synthesized:
+        def __init__(self, relative_path: str) -> None:
+            self.relative_path = relative_path
+
+    def fake_synthesize(
+        config: object, text: str, *, workspace: object, relative_path: str
+    ) -> _Synthesized:
+        synthesized.append({"text": text, "relative_path": relative_path})
+        return _Synthesized(relative_path)
+
+    def fake_measure(path: Path, *, ffprobe: object) -> float:
+        measured.append(path)
+        assert ffprobe is not None
+        return 2.5
+
+    monkeypatch.setattr(motion_authoring_entry, "MotionAuthoringAgent", _RecordingAgent)
+    monkeypatch.setattr(motion_authoring_entry, "synthesize_voiceover", fake_synthesize)
+    monkeypatch.setattr(motion_authoring_entry, "measure_audio_seconds", fake_measure)
+
+    with pytest.raises(AssertionError, match="recording agent never authors"):
+        run_motion_authoring_entry(
+            _request(workspace, ffprobeExecutable=str(workspace / "ffprobe")),
+            model_call=_NeverCalledModel(),
+        )
+    narrator = seen[0]
+    assert callable(narrator)
+
+    relative_path, seconds = narrator("beat-01", "这一拍的旁白")
+
+    assert relative_path == "narration/beat-01.wav"
+    assert seconds == 2.5
+    assert synthesized == [{"text": "这一拍的旁白", "relative_path": "narration/beat-01.wav"}]
+    assert measured == [workspace / "narration/beat-01.wav"]
+
+
+def test_an_authored_film_is_written_to_stdout_and_reported_as_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The App reads one document off stdout; the exit code only says whether to trust it."""
+    authored = {
+        "schemaVersion": 1,
+        "status": "authored",
+        "entryHtml": "index.html",
+        "allowedAssets": ["runtime/gsap.min.js"],
+        "frameCount": 90,
+        "framesPerSecond": 30,
+        "durationSeconds": 3.0,
+        "aspectRatio": "16:9",
+        "segments": [],
+    }
+    monkeypatch.setattr(
+        motion_authoring_entry,
+        "run_motion_authoring_entry",
+        lambda *_args, **_keywords: authored,
+    )
+    output = io.StringIO()
+
+    code = motion_authoring_entry.serve_one_motion_authoring_request(io.BytesIO(b"{}"), output)
+
+    assert code == 0
+    assert json.loads(output.getvalue()) == authored

@@ -25,6 +25,7 @@ import unittest
 import urllib.request
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from typing import Any, ClassVar, Literal, cast
 from unittest import mock
 
@@ -3509,3 +3510,100 @@ class SlotProbeSelectionTests(unittest.TestCase):
                 with self.subTest(label=label), self.assertRaises(MotionAuthoringRejected) as ctx:
                     agent.author(_brief())
                 self.assertIn("failed to measure", str(ctx.exception))
+
+
+class StaticGateFailureTests(unittest.TestCase):
+    """A composition this machine produced itself must pass its own static gates.
+
+    There is deliberately no repair round here: the document is deterministic
+    output from the template and the beat timings, so a failure is a defect in
+    one of those - nothing a further model round can see, let alone fix.
+    """
+
+    class _FailingResult:
+        ok = False
+        findings: ClassVar[tuple[str, ...]] = ()
+
+        def codes(self) -> set[str]:
+            return {"composition_invalid"}
+
+    def _tools_failing(self, workspace: AuthoringWorkspace, gate: str) -> MotionAuthoringTools:
+        tools = MotionAuthoringTools(workspace)
+        setattr(tools, gate, lambda *_args, **_keywords: self._FailingResult())
+        return tools
+
+    def test_a_composition_that_fails_a_static_gate_is_refused_without_a_repair_round(
+        self,
+    ) -> None:
+        for gate in ("lint", "check"):
+            with TemporaryDirectory() as raw:
+                root = Path(raw)
+                workspace = _make_workspace(root)
+                model = ScriptedModel([_valid_model_payload()])
+                agent = MotionAuthoringAgent(
+                    workspace=workspace,
+                    tools=self._tools_failing(workspace, gate),
+                    workflow=load_locked_authoring_workflow(
+                        vendor_root=VENDOR_ROOT, contract_path=WORKFLOW_CONTRACT
+                    ),
+                    model_config=_model_config(),
+                    model_call=model,
+                )
+                with self.subTest(gate=gate), self.assertRaises(MotionAuthoringRejected) as ctx:
+                    agent.author(_brief())
+                self.assertIn("composition failed static gates", str(ctx.exception))
+                self.assertIn("composition_invalid", str(ctx.exception))
+                self.assertEqual(len(model.calls), 1)
+
+
+class _RecordingProbe:
+    """Records what it was handed; a call at all would already be the defect."""
+
+    def __init__(self, calls: list[object]) -> None:
+        self._calls = calls
+
+    def __call__(self, documents: tuple[Path, ...]) -> list[ProbeReading]:
+        self._calls.append(documents)
+        return []
+
+
+class UnfilledSlotJudgingTests(unittest.TestCase):
+    """Only the slots this film wrote into are judged against the part's own copy.
+
+    A slot the film left alone still holds the part's frozen copy, whose
+    overflow *is* the baseline - measuring it against itself would be a browser
+    session spent to compare a document with a copy of itself.
+    """
+
+    def test_a_segment_whose_slots_this_film_never_filled_is_not_measured(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root)
+            probe_calls: list[object] = []
+            agent = MotionAuthoringAgent(
+                workspace=workspace,
+                tools=MotionAuthoringTools(workspace),
+                workflow=load_locked_authoring_workflow(
+                    vendor_root=VENDOR_ROOT, contract_path=WORKFLOW_CONTRACT
+                ),
+                model_config=_model_config(),
+                model_call=ScriptedModel([_valid_model_payload()]),
+                slot_probe=_RecordingProbe(probe_calls),
+            )
+            film = cast(
+                Any,
+                SimpleNamespace(
+                    segments=(
+                        SimpleNamespace(
+                            beat_id="beat-01",
+                            part="headline",
+                            slot_budgets=(SimpleNamespace(index=0),),
+                        ),
+                    )
+                ),
+            )
+            catalog = cast(Any, SimpleNamespace(root=root, slot_table={"parts": []}))
+
+            agent._require_copy_fits_measured(film, catalog, {}, lambda _family: "")
+
+            self.assertEqual(probe_calls, [])

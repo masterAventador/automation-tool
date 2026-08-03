@@ -2308,7 +2308,11 @@ class MotionAuthoringAgent:
         # One cheap repair round (PC-14): measured overflow is the one failure
         # a further model round can actually fix — the fix is shorter copy, a
         # few dozen bytes, not the 13KB document rewrite T92 removed.
-        for repair_rounds_left in (1, 0):
+        # `while` rather than a two-element `for`: the loop has no normal exit.
+        # It ends by rendering (break) or by refusing, and writing it as a
+        # sequence would leave an exhausted-iterator path that cannot happen.
+        repair_rounds_left = 1
+        while True:
             composition_html = _compose(design, storyboard, duration_seconds=brief.duration_seconds)
             composition_path = self._tools.write_composition(COMPOSITION_PATH, composition_html)
             lint = self._tools.lint(composition_path)
@@ -2350,6 +2354,7 @@ class MotionAuthoringAgent:
                 repaired = StoryboardArtifact.from_payload(data["storyboard"])
                 require_repair_changed_only_copy(storyboard, repaired)
                 storyboard = self._tools.write_storyboard(data["storyboard"])
+                repair_rounds_left -= 1
         submission = self._tools.submit_render_job(
             entry_html=composition_path,
             allowed_assets=allowed_assets,
