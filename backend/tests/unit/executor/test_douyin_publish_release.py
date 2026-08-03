@@ -9,7 +9,7 @@ reports success without the works list agreeing is a lie. Both are asserted.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, cast
 
@@ -56,6 +56,7 @@ from automation_tool.executor.rpa.douyin.publish_release import (
     DouyinPublishConfirmation,
     DouyinPublishRelease,
     DouyinPublishReleaseEvidence,
+    DouyinPublishReleaseReceipt,
     DouyinPublishReleaseRejected,
     DouyinPublishReleaseState,
 )
@@ -669,3 +670,141 @@ def test_the_contract_pins_every_outcome_the_code_can_produce() -> None:
     assert set(contract["localCommand"]["resultStates"]) == set(
         PUBLISH_DISPATCH_RESULT_FOR_STATE.values()
     )
+
+
+def _receipt_values(**overrides: Any) -> dict[str, Any]:
+    values: dict[str, Any] = {
+        "publish_job_id": JOB_ID,
+        "state": DouyinPublishReleaseState.NOT_DISPATCHED,
+        "evidence": DouyinPublishReleaseEvidence.SURFACE_LOST,
+        "dispatch_state": None,
+        "dispatch_revision": None,
+        "replayed": False,
+    }
+    values.update(overrides)
+    return values
+
+
+def test_a_release_receipt_must_describe_an_outcome_that_could_have_happened() -> None:
+    """The four shapes are the whole vocabulary; a mixed one would claim two things."""
+    cases: list[tuple[str, dict[str, Any]]] = [
+        ("a job id that is not one", {"publish_job_id": "not-a-job"}),
+        ("a state from outside the set", {"state": "not_dispatched"}),
+        ("evidence from outside the set", {"evidence": "surface_lost"}),
+        ("another flow version", {"flow_version": "douyin-publish-release.v0"}),
+        ("another selector version", {"selector_version": "douyin-publish-page.v0"}),
+        ("a replay flag that is not a bool", {"replayed": 0}),
+        (
+            "not dispatched yet carrying a dispatch revision",
+            {"dispatch_state": SideEffectState.DISPATCHED, "dispatch_revision": 2},
+        ),
+        (
+            "verified without the settled revision",
+            {
+                "state": DouyinPublishReleaseState.VERIFIED,
+                "evidence": DouyinPublishReleaseEvidence.WORK_LISTED,
+                "dispatch_state": SideEffectState.VERIFIED,
+                "dispatch_revision": 2,
+            },
+        ),
+        (
+            "a replay flag that disagrees with its evidence",
+            {
+                "state": DouyinPublishReleaseState.VERIFIED,
+                "evidence": DouyinPublishReleaseEvidence.WORK_LISTED,
+                "dispatch_state": SideEffectState.VERIFIED,
+                "dispatch_revision": 3,
+                "replayed": True,
+            },
+        ),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(DouyinPublishReleaseRejected):
+            DouyinPublishReleaseReceipt(**_receipt_values(**overrides))
+        assert label
+
+
+def test_only_a_verified_release_counts_as_published() -> None:
+    """Anything else leaves the circuit open: the operator has to look before retrying."""
+    unsettled = DouyinPublishReleaseReceipt(**_receipt_values())
+    assert unsettled.published is False
+    assert unsettled.circuit_open is True
+
+    settled = DouyinPublishReleaseReceipt(
+        **_receipt_values(
+            state=DouyinPublishReleaseState.VERIFIED,
+            evidence=DouyinPublishReleaseEvidence.WORK_LISTED,
+            dispatch_state=SideEffectState.VERIFIED,
+            dispatch_revision=3,
+            replayed=False,
+        )
+    )
+    assert settled.published is True
+    assert settled.circuit_open is False
+
+
+def test_neither_the_release_nor_its_clock_prints_anything_private(tmp_path: Path) -> None:
+    from automation_tool.executor.rpa.douyin.publish_release import SystemPublishReleaseClock
+
+    page = publish_page()
+    opened = ledger_for(tmp_path)
+    assert repr(release(page, opened)) == "DouyinPublishRelease(<redacted>)"
+
+    assert repr(SystemPublishReleaseClock()) == "SystemPublishReleaseClock()"
+
+
+def test_a_release_built_on_a_policy_it_cannot_use_is_refused(tmp_path: Path) -> None:
+    """The interval and the action budget are what keep this from becoming a flood."""
+    page = publish_page()
+    opened = ledger_for(tmp_path)
+    with pytest.raises(DouyinPublishReleaseRejected):
+        DouyinPublishRelease(
+            window=window(page),
+            lease=BrowserSurfaceLeaseManager(),
+            ledger=opened,
+            clock=Clock(),
+            policy=cast(Any, object()),
+            confirmation_gate=SideEffectConfirmationGate(),
+        )
+
+
+def test_a_fingerprint_is_only_built_from_a_real_content_digest() -> None:
+    from automation_tool.executor.rpa.douyin.publish_release import (
+        publish_verification_fingerprint,
+    )
+
+    assert len(publish_verification_fingerprint("a" * 64)) == 32
+    for label, value in [("not a digest", "not-a-digest"), ("too short", "a" * 63)]:
+        with pytest.raises(DouyinPublishReleaseRejected):
+            publish_verification_fingerprint(value)
+        assert label
+
+
+def test_a_clock_that_answers_with_a_useless_moment_is_refused(tmp_path: Path) -> None:
+    """Every rate-limit decision is made against this, so a naive moment cannot be one."""
+    page = publish_page()
+    opened = ledger_for(tmp_path)
+
+    class _Naive:
+        def now(self) -> datetime:
+            return datetime(2026, 7, 25, 8, 0)
+
+    class _Offset:
+        def now(self) -> datetime:
+            return datetime(2026, 7, 25, 8, 0, tzinfo=timezone(timedelta(hours=8)))
+
+    class _Exploding:
+        def now(self) -> datetime:
+            raise RuntimeError("clock defect")
+
+    for label, clock in [
+        ("a moment with no zone", _Naive()),
+        ("a moment in another zone", _Offset()),
+        ("a clock that raises", _Exploding()),
+    ]:
+        releasing = release(page, opened, clock=cast(Any, clock))
+        with pytest.raises(DouyinPublishReleaseRejected):
+            releasing._now()
+        assert label
+
+    assert release(page, opened, clock=Clock())._now().tzinfo is UTC
