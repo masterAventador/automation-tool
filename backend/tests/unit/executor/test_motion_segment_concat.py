@@ -35,6 +35,8 @@ from automation_tool.executor.motion_authoring.segment_concat import (
     concat_listing,
     join_segments,
     normalisation_filter,
+    normalise_segment,
+    probe_segment,
     require_joinable,
 )
 
@@ -159,3 +161,158 @@ def test_a_concat_list_quotes_every_path_the_demuxer_reads(tmp_path: Path) -> No
 
     assert listing.splitlines()[0] == f"file '{tmp_path / 'a b.mp4'}'"
     assert "'\\''" in listing.splitlines()[1]
+
+
+def _probe_stub(path: Path, document: str) -> Path:
+    return _stub(path, f"echo '{document}'")
+
+
+_ON_CANVAS = (
+    '{"streams":[{"width":1920,"height":1080,"avg_frame_rate":"30/1",'
+    '"pix_fmt":"yuv420p","nb_read_frames":"144"}]}'
+)
+
+
+def test_a_segment_the_probe_cannot_read_is_refused(tmp_path: Path) -> None:
+    """A non-zero probe means the file is not measurable, which is not "assume fine"."""
+    segment = tmp_path / "a.mp4"
+    segment.write_bytes(b"segment")
+    ffprobe = _stub(tmp_path / "ffprobe", "exit 1")
+
+    with pytest.raises(SegmentMismatch) as failure:
+        probe_segment(segment, ffprobe=ffprobe)
+
+    assert "a.mp4" in str(failure.value)
+
+
+def test_a_probe_answering_something_unreadable_is_refused(tmp_path: Path) -> None:
+    """Exit zero and nonsense on stdout is a shape the real toolchain produces."""
+    segment = tmp_path / "a.mp4"
+    segment.write_bytes(b"segment")
+
+    for label, document in [
+        ("no streams at all", '{"streams":[]}'),
+        ("a stream missing a field", '{"streams":[{"width":1920}]}'),
+        (
+            "a frame rate with no denominator",
+            '{"streams":[{"width":1920,"height":1080,"avg_frame_rate":"30",'
+            '"pix_fmt":"yuv420p","nb_read_frames":"144"}]}',
+        ),
+        (
+            "a frame count that is not a number",
+            '{"streams":[{"width":1920,"height":1080,"avg_frame_rate":"30/1",'
+            '"pix_fmt":"yuv420p","nb_read_frames":"many"}]}',
+        ),
+    ]:
+        ffprobe = _probe_stub(tmp_path / f"ffprobe-{abs(hash(label))}", document)
+        with pytest.raises(SegmentMismatch):
+            probe_segment(segment, ffprobe=ffprobe)
+        assert label
+
+
+def test_a_segment_that_cannot_be_brought_onto_the_canvas_is_refused(tmp_path: Path) -> None:
+    source = tmp_path / "a.mp4"
+    source.write_bytes(b"segment")
+    ffmpeg = _stub(tmp_path / "ffmpeg", "exit 1")
+
+    with pytest.raises(SegmentMismatch) as failure:
+        normalise_segment(source, tmp_path / "out.mp4", canvas=CANVAS, ffmpeg=ffmpeg)
+
+    assert "a.mp4" in str(failure.value)
+
+
+def test_a_join_the_encoder_refuses_is_not_read_as_an_empty_film(tmp_path: Path) -> None:
+    segments = [tmp_path / "a.mp4"]
+    segments[0].write_bytes(b"segment")
+    ffmpeg = _stub(tmp_path / "ffmpeg", "exit 1")
+    ffprobe = _probe_stub(tmp_path / "ffprobe", _ON_CANVAS)
+
+    with pytest.raises(SegmentMismatch):
+        join_segments(
+            segments,
+            tmp_path / "film.mp4",
+            canvas=CANVAS,
+            ffmpeg=ffmpeg,
+            ffprobe=ffprobe,
+            expected_frames=144,
+        )
+
+
+def test_a_join_that_landed_off_the_canvas_is_refused_even_with_the_right_frames(
+    tmp_path: Path,
+) -> None:
+    """The exact silent failure this module documents: right count, wrong pixels."""
+    segments = [tmp_path / "a.mp4"]
+    segments[0].write_bytes(b"segment")
+    ffmpeg = _stub(
+        tmp_path / "ffmpeg",
+        'for value do output="$value"; done; touch "$output"; exit 0',
+    )
+    ffprobe = _probe_stub(
+        tmp_path / "ffprobe",
+        '{"streams":[{"width":1080,"height":1920,"avg_frame_rate":"30/1",'
+        '"pix_fmt":"yuv420p","nb_read_frames":"144"}]}',
+    )
+
+    with pytest.raises(SegmentMismatch) as failure:
+        join_segments(
+            segments,
+            tmp_path / "film.mp4",
+            canvas=CANVAS,
+            ffmpeg=ffmpeg,
+            ffprobe=ffprobe,
+            expected_frames=144,
+        )
+
+    assert "1080x1920" in str(failure.value)
+
+
+def test_a_join_that_measures_right_is_returned(tmp_path: Path) -> None:
+    segments = [tmp_path / "a.mp4"]
+    segments[0].write_bytes(b"segment")
+    ffmpeg = _stub(
+        tmp_path / "ffmpeg",
+        'for value do output="$value"; done; touch "$output"; exit 0',
+    )
+    ffprobe = _probe_stub(tmp_path / "ffprobe", _ON_CANVAS)
+
+    joined = join_segments(
+        segments,
+        tmp_path / "film.mp4",
+        canvas=CANVAS,
+        ffmpeg=ffmpeg,
+        ffprobe=ffprobe,
+        expected_frames=144,
+    )
+
+    assert joined.width == 1920
+    assert joined.frames == 144
+
+
+def test_a_segment_the_encoder_accepts_lands_where_it_was_asked_to(tmp_path: Path) -> None:
+    source = tmp_path / "a.mp4"
+    source.write_bytes(b"segment")
+    destination = tmp_path / "out.mp4"
+    ffmpeg = _stub(
+        tmp_path / "ffmpeg",
+        'for value do output="$value"; done; touch "$output"; exit 0',
+    )
+
+    normalise_segment(source, destination, canvas=CANVAS, ffmpeg=ffmpeg)
+
+    assert destination.is_file()
+
+
+def test_joining_nothing_is_refused_before_any_tool_runs(tmp_path: Path) -> None:
+    """`ffmpeg` given an empty concat list writes a zero-length file and exits 0."""
+    missing = tmp_path / "never-invoked"
+
+    with pytest.raises(SegmentMismatch):
+        join_segments(
+            [],
+            tmp_path / "film.mp4",
+            canvas=CANVAS,
+            ffmpeg=missing,
+            ffprobe=missing,
+            expected_frames=0,
+        )

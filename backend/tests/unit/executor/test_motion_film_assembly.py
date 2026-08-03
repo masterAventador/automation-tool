@@ -94,11 +94,12 @@ def assemble(
     slot_table: Mapping[str, object] = SLOTS,
     part_durations: Mapping[str, float] = DURATIONS,
     font_css_for: Callable[[str], str] = lambda _text: "@font-face{}",
+    catalog_root: Path | None = None,
 ) -> AssembledFilm:
     return assemble_film(
         beats=beats,
         workspace=_Workspace() if workspace is None else workspace,
-        catalog_root=_catalog(tmp_path),
+        catalog_root=_catalog(tmp_path) if catalog_root is None else catalog_root,
         slot_table=slot_table,
         slot_budget=BUDGET,
         part_durations=part_durations,
@@ -385,3 +386,180 @@ def test_every_segment_carries_the_budget_its_copy_has_to_fit(tmp_path: Path) ->
     assert budgets[0].index == 1
     assert budgets[0].usable_width_px == 366
     assert budgets[0].baseline_overflows_y is True
+
+
+def test_a_film_with_no_beats_is_refused() -> None:
+    """An empty film is a blank stretch every downstream gate happily accepts."""
+    with pytest.raises(AssemblyRejected):
+        assemble_film(
+            beats=(),
+            workspace=_Workspace(),
+            catalog_root=Path("/nonexistent"),
+            slot_table=SLOTS,
+            slot_budget=BUDGET,
+            part_durations=DURATIONS,
+            part_dimensions=DIMENSIONS,
+            part_types={"lt-bold-block": "block"},
+            template_canvas=TEMPLATE_CANVAS,
+            frames_per_second=30,
+            segment_frames_maximum=600,
+            font_css_for=lambda _text: "",
+        )
+
+
+_MALFORMED_CONTRACTS: list[tuple[str, dict[str, object]]] = [
+    ("parts is not a list", {"parts": {}}),
+    ("no parts key at all", {}),
+    ("a part that is not an object", {"parts": ["lt-bold-block"]}),
+    ("a part with no name", {"parts": [{"slots": []}]}),
+    ("a part whose slots are not a list", {"parts": [{"name": "lt-bold-block", "slots": {}}]}),
+    (
+        "the same part twice",
+        {
+            "parts": [
+                {"name": "lt-bold-block", "slots": []},
+                {"name": "lt-bold-block", "slots": []},
+            ]
+        },
+    ),
+    (
+        "a slot that is not an object",
+        {"parts": [{"name": "lt-bold-block", "slots": ["1"]}]},
+    ),
+]
+
+
+@pytest.mark.parametrize(("label", "contract"), _MALFORMED_CONTRACTS)
+def test_a_malformed_slot_table_is_refused(
+    label: str, contract: dict[str, object], tmp_path: Path
+) -> None:
+    """The table is what says which run each piece of copy lands in; a broken one
+    cannot be read around."""
+    with pytest.raises(AssemblyRejected):
+        assemble(
+            [BeatPlan(beat_id="b1", part="lt-bold-block", copy={1: "张三"}, voice_seconds=None)],
+            tmp_path,
+            slot_table=contract,
+        )
+    assert label
+
+
+def test_a_slot_entry_missing_any_of_its_three_anchors_is_refused(tmp_path: Path) -> None:
+    complete = {"index": 1, "original": "Maya Chen", "parentTag": "div"}
+    catalog = _catalog(tmp_path)
+
+    cases: list[tuple[str, dict[str, object]]] = [
+        ("an index that is not an int", {"index": "1"}),
+        ("an original that is not text", {"original": 1}),
+        ("a parent tag that is not text", {"parentTag": None}),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(AssemblyRejected):
+            assemble(
+                [
+                    BeatPlan(
+                        beat_id="b1",
+                        part="lt-bold-block",
+                        copy={1: "张三"},
+                        voice_seconds=None,
+                    )
+                ],
+                tmp_path,
+                catalog_root=catalog,
+                slot_table={
+                    "parts": [{"name": "lt-bold-block", "slots": [{**complete, **overrides}]}]
+                },
+            )
+        assert label
+
+
+@pytest.mark.parametrize(("label", "contract"), _MALFORMED_CONTRACTS)
+def test_a_malformed_slot_budget_is_refused(
+    label: str, contract: dict[str, object], tmp_path: Path
+) -> None:
+    """Without the budget nothing knows whether the copy fits the frame it lands in."""
+    with pytest.raises(AssemblyRejected):
+        assemble_film(
+            beats=[
+                BeatPlan(beat_id="b1", part="lt-bold-block", copy={1: "张三"}, voice_seconds=None)
+            ],
+            workspace=_Workspace(),
+            catalog_root=_catalog(tmp_path),
+            slot_table=SLOTS,
+            slot_budget=contract,
+            part_durations=DURATIONS,
+            part_dimensions=DIMENSIONS,
+            part_types={"lt-bold-block": "block"},
+            template_canvas=TEMPLATE_CANVAS,
+            frames_per_second=30,
+            segment_frames_maximum=600,
+            font_css_for=lambda _text: "@font-face{}",
+        )
+    assert label
+
+
+def test_a_budget_entry_missing_any_of_its_measurements_is_refused(tmp_path: Path) -> None:
+    complete: dict[str, object] = {
+        "index": 1,
+        "original": "Maya Chen",
+        "usableWidthPx": 366,
+        "fontSizePx": 58,
+        "baselineOverflowsX": False,
+        "baselineOverflowsY": True,
+    }
+    catalog = _catalog(tmp_path)
+
+    cases: list[tuple[str, dict[str, object]]] = [
+        ("an index that is not an int", {"index": "1"}),
+        ("a width that is not an int", {"usableWidthPx": 366.0}),
+        ("a font size that is not an int", {"fontSizePx": "58"}),
+        ("an overflow flag that is not a bool", {"baselineOverflowsX": 0}),
+        ("the other overflow flag that is not a bool", {"baselineOverflowsY": 1}),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(AssemblyRejected):
+            assemble_film(
+                beats=[
+                    BeatPlan(
+                        beat_id="b1",
+                        part="lt-bold-block",
+                        copy={1: "张三"},
+                        voice_seconds=None,
+                    )
+                ],
+                workspace=_Workspace(),
+                catalog_root=catalog,
+                slot_table=SLOTS,
+                slot_budget={
+                    "parts": [{"name": "lt-bold-block", "slots": [{**complete, **overrides}]}]
+                },
+                part_durations=DURATIONS,
+                part_dimensions=DIMENSIONS,
+                part_types={"lt-bold-block": "block"},
+                template_canvas=TEMPLATE_CANVAS,
+                frames_per_second=30,
+                segment_frames_maximum=600,
+                font_css_for=lambda _text: "@font-face{}",
+            )
+        assert label
+
+
+def test_a_beat_naming_a_part_with_no_declared_type_is_refused(tmp_path: Path) -> None:
+    """The type decides which builder wraps it; without one there is nothing to pick."""
+    with pytest.raises(AssemblyRejected):
+        assemble_film(
+            beats=[
+                BeatPlan(beat_id="b1", part="lt-bold-block", copy={1: "张三"}, voice_seconds=None)
+            ],
+            workspace=_Workspace(),
+            catalog_root=_catalog(tmp_path),
+            slot_table=SLOTS,
+            slot_budget=BUDGET,
+            part_durations=DURATIONS,
+            part_dimensions=DIMENSIONS,
+            part_types={},
+            template_canvas=TEMPLATE_CANVAS,
+            frames_per_second=30,
+            segment_frames_maximum=600,
+            font_css_for=lambda _text: "@font-face{}",
+        )
