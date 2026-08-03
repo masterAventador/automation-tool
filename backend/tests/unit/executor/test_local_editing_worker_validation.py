@@ -19,18 +19,25 @@ import tempfile
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 from unittest import mock
 from uuid import UUID
 
 from automation_tool.executor.local_editing_worker import (
+    LocalEditingWorkerBootstrap,
     LocalEditingWorkerFailureCode,
+    LocalMaterialForgetCommand,
+    LocalMaterialStatusCommand,
+    LocalMaterialWorkerFailureCode,
+    LocalMaterialWorkerStatus,
 )
 from automation_tool.executor.local_editing_worker_process import (
     LocalEditingRenderCancelled,
     LocalEditingRenderDiagnosticCode,
     LocalEditingRenderRejected,
+    LocalMaterialOperationRejected,
     _load_request,
+    _material_registry,
     _materials,
     _object,
     _optional_uuid,
@@ -39,7 +46,10 @@ from automation_tool.executor.local_editing_worker_process import (
     _track,
     _transition,
     _uuid,
+    execute_local_material_forget,
+    execute_local_material_status,
 )
+from automation_tool.executor.material_probe import PackagedMediaTools
 from automation_tool.executor.visual_render_execution import (
     VisualRenderExecutionRejected,
     VisualRenderExecutionRejection,
@@ -364,6 +374,144 @@ class RenderFailureMappingTests(unittest.TestCase):
             set(VisualRenderExecutionRejection),
             "a rejection with no mapping would raise KeyError inside the worker",
         )
+
+
+def _bootstrap(root: Path) -> LocalEditingWorkerBootstrap:
+    asset_root = root / "app-data"
+    asset_root.mkdir(mode=0o700)
+    tools = root / "tools"
+    tools.mkdir(mode=0o700)
+    for name in ("ffmpeg", "ffprobe"):
+        binary = tools / name
+        binary.write_bytes(b"#!/bin/sh\nexit 0\n")
+        binary.chmod(0o700)
+    return LocalEditingWorkerBootstrap(
+        asset_root=asset_root,
+        media_tools=PackagedMediaTools(
+            ffmpeg_path=tools / "ffmpeg",
+            ffprobe_path=tools / "ffprobe",
+        ),
+        _session_token=b"x" * 32,
+    )
+
+
+class MaterialRegistryHomeTests(unittest.TestCase):
+    def test_the_state_directory_is_created_owner_only(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            bootstrap = _bootstrap(Path(raw).resolve())
+
+            _material_registry(bootstrap)
+
+            state = bootstrap.asset_root / "local-executor" / "state"
+            self.assertTrue(state.is_dir())
+            self.assertEqual(state.lstat().st_mode & 0o077, 0)
+
+    def test_an_existing_state_directory_is_reused(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            bootstrap = _bootstrap(Path(raw).resolve())
+            (bootstrap.asset_root / "local-executor" / "state").mkdir(parents=True, mode=0o700)
+
+            _material_registry(bootstrap)
+
+    def test_a_state_directory_that_cannot_be_created_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            bootstrap = _bootstrap(Path(raw).resolve())
+
+            with (
+                mock.patch.object(Path, "mkdir", side_effect=OSError("read-only")),
+                self.assertRaises(LocalMaterialOperationRejected) as caught,
+            ):
+                _material_registry(bootstrap)
+
+            self.assertIs(
+                caught.exception.code,
+                LocalMaterialWorkerFailureCode.REGISTRY_UNWRITABLE,
+            )
+
+    def test_a_state_directory_whose_mode_cannot_be_set_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            bootstrap = _bootstrap(Path(raw).resolve())
+
+            with (
+                mock.patch.object(Path, "chmod", side_effect=OSError("denied")),
+                self.assertRaises(LocalMaterialOperationRejected) as caught,
+            ):
+                _material_registry(bootstrap)
+
+            self.assertIs(
+                caught.exception.code,
+                LocalMaterialWorkerFailureCode.REGISTRY_UNWRITABLE,
+            )
+
+
+class MaterialCommandTests(unittest.TestCase):
+    def test_forgetting_an_unregistered_material_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            bootstrap = _bootstrap(Path(raw).resolve())
+
+            execute_local_material_forget(
+                bootstrap, LocalMaterialForgetCommand(material_id=UUID(_UUID_A))
+            )
+
+    def test_forget_refuses_a_bootstrap_or_command_of_the_wrong_type(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            bootstrap = _bootstrap(Path(raw).resolve())
+            command = LocalMaterialForgetCommand(material_id=UUID(_UUID_A))
+
+            for label, args in [
+                ("bad bootstrap", (cast(Any, object()), command)),
+                ("bad command", (bootstrap, cast(Any, object()))),
+            ]:
+                with (
+                    self.subTest(label=label),
+                    self.assertRaises(LocalMaterialOperationRejected) as caught,
+                ):
+                    execute_local_material_forget(*args)
+                self.assertIs(
+                    caught.exception.code,
+                    LocalMaterialWorkerFailureCode.UNUSABLE_IDENTIFIER,
+                )
+
+    def test_status_reports_an_unregistered_material(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            bootstrap = _bootstrap(Path(raw).resolve())
+
+            status = execute_local_material_status(
+                bootstrap, LocalMaterialStatusCommand(material_id=UUID(_UUID_A))
+            )
+
+            self.assertIs(status, LocalMaterialWorkerStatus.NOT_REGISTERED)
+
+    def test_status_never_raises_for_a_wrong_type(self) -> None:
+        """Status is a query: it answers with a closed value, it does not fail."""
+        with tempfile.TemporaryDirectory() as raw:
+            bootstrap = _bootstrap(Path(raw).resolve())
+            command = LocalMaterialStatusCommand(material_id=UUID(_UUID_A))
+
+            for label, args in [
+                ("bad bootstrap", (cast(Any, object()), command)),
+                ("bad command", (bootstrap, cast(Any, object()))),
+            ]:
+                with self.subTest(label=label):
+                    self.assertIs(
+                        execute_local_material_status(*args),
+                        LocalMaterialWorkerStatus.UNUSABLE_IDENTIFIER,
+                    )
+
+    def test_status_translates_a_registry_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            bootstrap = _bootstrap(Path(raw).resolve())
+
+            with mock.patch.object(
+                Path,
+                "mkdir",
+                side_effect=OSError("read-only"),
+            ):
+                status = execute_local_material_status(
+                    bootstrap, LocalMaterialStatusCommand(material_id=UUID(_UUID_A))
+                )
+
+            self.assertIs(status, LocalMaterialWorkerStatus.REGISTRY_UNWRITABLE)
 
 
 if __name__ == "__main__":
