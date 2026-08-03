@@ -3231,6 +3231,20 @@ class ToolSurfaceReflectionTests(unittest.TestCase):
             self.assertEqual(surface, frozenset(ALLOWED_TOOLS))
             self.assertFalse(any(name.startswith("_") for name in surface))
 
+    def test_a_public_attribute_that_cannot_be_called_is_not_a_tool(self) -> None:
+        """The surface is what a model may invoke, not every name it could read."""
+
+        class _WithData:
+            version = "1.0"
+
+            def write_composition(self) -> None:
+                return None
+
+        self.assertEqual(
+            motion_authoring_agent._tool_callables(_WithData()),
+            frozenset({"write_composition"}),
+        )
+
 
 class LintFindingDeduplicationTests(unittest.TestCase):
     def test_the_same_finding_twice_is_reported_once(self) -> None:
