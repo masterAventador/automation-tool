@@ -3,8 +3,7 @@
 用户可操作：否
 证据类型：分层实现
 
-> 状态：🚧 实现中。388 → **13**。十二个模块已收口到 0，`agent.py` 剩 7、
-> `entry.py` 剩 6。
+> 状态：✅ 已完成。388 → **0**。
 > 上游计划：`docs/development/2026-08-03-backend-coverage-debt-plan.md`
 > 前置：[COV-02](COV-02.md)
 > 分支：`coverage/backend-100`
@@ -16,8 +15,8 @@ COV-02 收口后重新测量 `automation_tool.executor.motion_authoring`，精�
 
 | 模块 | 起点 | 现在 |
 |---|---:|---:|
-| `agent.py` | 123 | 7 |
-| `entry.py` | 55 | 6 |
+| `agent.py` | 123 | **0** |
+| `entry.py` | 55 | **0** |
 | `voiceover.py` | 52 | **0** |
 | `part_typography.py` | 34 | **0** |
 | `film_assembly.py` | 24 | **0** |
@@ -144,3 +143,28 @@ U+0085、U+2029 七种分隔符逐一量过，都不漂。
   `serve_one_motion_authoring_request` 的成功路径（它不接受 `model_call` 参数，
   会真的调模型；现有的子进程测试是另一条路，可以从那里接）；
 
+
+## 收口补记（2026-08-04）
+
+最后 11 点分成两类。
+
+**能测的直接补。** `entry.py` 的旁白闭包此前从未被调用过：把它从
+`MotionAuthoringAgent` 的构造参数里捞出来，替换掉模块里的
+`synthesize_voiceover` 与 `measure_audio_seconds`，再直接调用它——断言落在
+「写进了 `narration/<beat>.wav`」和「长度来自写出来的那个文件」。成片成功
+时把文档写到 stdout 并以 0 退出这条路同理，此前所有用例走的都是拒绝路径。
+
+`agent.py` 的静态门禁失败用一个 `lint` / `check` 恒返回失败的工具面制造，
+断言拒绝原因里带 `composition failed static gates`，并且**模型只被调用过
+一次**——这条闸的意义就是不给修复轮。
+
+**不能测的改结构。** 修复轮原本写成 `for repair_rounds_left in (1, 0)`，
+而这个循环没有正常出口：要么出片 `break`，要么在 `repair_rounds_left` 为 0
+时拒绝。写成序列就留下一条「迭代耗尽」的弧，永远走不到。改成
+`while True` + 计数器，那条弧在语法上就不存在了。
+
+`_require_copy_fits_measured` 里 `if not budgets: continue` 这一支，前一轮
+判定为「模型造不出来」。它守的其实是**这个方法自己的两个入参之间的一致
+性**：`film` 与 `copies` 是分别传进来的。所以直接调用该方法、传一个有槽位
+预算但没有任何填充副本的片段——文档里写的「只判定本片填过的槽」正是这个
+行为，断言探针一次都没被调用。
