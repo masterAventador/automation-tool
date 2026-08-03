@@ -3085,9 +3085,12 @@ class SelectableCatalogDriftTests(unittest.TestCase):
                     {
                         "schemaVersion": 1,
                         "policy": "fail_closed",
-                        # Well-formed, and about parts the locked catalog does
-                        # not carry -- so nothing here grades what is selectable.
-                        "parts": [{"name": "a-part-nobody-froze", "grade": "usable"}],
+                        # Well-formed and complete -- every key the reader takes
+                        # is here -- and about a part the locked catalog does not
+                        # carry, so nothing here grades what is selectable. A
+                        # sample missing a key instead would be caught one check
+                        # earlier, as "the contract is unreadable".
+                        "items": [{"name": "a-part-nobody-froze", "batch": "bm-16"}],
                     }
                 ),
                 encoding="utf-8",
@@ -3095,6 +3098,17 @@ class SelectableCatalogDriftTests(unittest.TestCase):
 
             with (
                 mock.patch.object(motion_authoring_agent, "_MOTION_PART_USABILITY_PATH", path),
+                self.assertRaises(MotionAuthoringRejected),
+            ):
+                motion_authoring_agent._load_selectable_catalog_parts()
+
+            # One check earlier: a contract that is not there at all.
+            with (
+                mock.patch.object(
+                    motion_authoring_agent,
+                    "_MOTION_PART_USABILITY_PATH",
+                    Path(raw) / "absent.json",
+                ),
                 self.assertRaises(MotionAuthoringRejected),
             ):
                 motion_authoring_agent._load_selectable_catalog_parts()
@@ -3336,3 +3350,26 @@ class ClipIntervalTests(unittest.TestCase):
 
         self.assertTrue(well_formed)
         self.assertEqual([identifier for _s, _e, identifier in intervals], ["earlier", "later"])
+
+
+class AuthorEntryTests(unittest.TestCase):
+    def test_authoring_refuses_a_brief_that_is_not_one(self) -> None:
+        """Configured, so the unavailable arm is past; what is left is the type."""
+        with TemporaryDirectory() as raw:
+            workspace = _make_workspace(Path(raw))
+            agent = MotionAuthoringAgent(
+                workspace=workspace,
+                tools=MotionAuthoringTools(workspace),
+                workflow=load_locked_authoring_workflow(
+                    vendor_root=VENDOR_ROOT, contract_path=WORKFLOW_CONTRACT
+                ),
+                model_config=VideoCreationModelConfig(
+                    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    model_id="qwen3-max-2026-01-25",
+                    api_key="sk-" + "a" * 40,
+                ),
+                model_call=ScriptedModel([]),
+            )
+
+            with self.assertRaises(MotionAuthoringRejected):
+                agent.author(cast(MotionBrief, object()))
