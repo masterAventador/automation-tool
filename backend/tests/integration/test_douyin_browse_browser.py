@@ -32,7 +32,8 @@ def candidate(target_id: str) -> DouyinCandidate:
 
 
 def test_production_runtime_browses_fake_profiles_headlessly_without_sending_and_closes(
-    tmp_path: Path, staged_embedded_chromium: Path,
+    tmp_path: Path,
+    staged_embedded_chromium: Path,
 ) -> None:
     profile = tmp_path / "automation-tool-a7-10-profile"
     create_private_profile_directory(profile)

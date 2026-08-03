@@ -233,7 +233,7 @@ def test_platform_session_values_and_transitions_fail_closed_at_every_boundary(
     )
     for overrides in invalid_values:
         with pytest.raises(ExecutorLedgerRejected):
-            LocalPlatformSession(**(valid | overrides))  # type: ignore[arg-type]
+            LocalPlatformSession(**(valid | overrides))
 
     opened = ledger(tmp_path / "session-boundaries")
     with pytest.raises(ExecutorLedgerRejected):
@@ -241,7 +241,7 @@ def test_platform_session_values_and_transitions_fail_closed_at_every_boundary(
     with pytest.raises(ExecutorLedgerRejected):
         opened.record_platform_session(
             platform="douyin",
-            state="missing",  # type: ignore[arg-type]
+            state="missing",
             observed_at=NOW,
         )
     first = opened.record_platform_session(
@@ -703,10 +703,13 @@ def test_expired_never_sent_outbox_stays_durable_without_blocking_capacity(
     )
     opened.enqueue_outbox(source_message_id=str(first_source.message_id), message=first)
 
-    assert opened.outbox_for_delivery(
-        observed_at=first.deadline_at,
-        recover_delivered=True,
-    ) == ()
+    assert (
+        opened.outbox_for_delivery(
+            observed_at=first.deadline_at,
+            recover_delivered=True,
+        )
+        == ()
+    )
     with sqlite3.connect(opened.database_path) as connection:
         assert connection.execute(
             "SELECT delivered FROM executor_outbox WHERE message_id = ?",
@@ -771,10 +774,11 @@ def test_outbox_delivery_scans_long_history_in_bounded_ordinal_pages(
     def traced_connect() -> sqlite3.Connection:
         connection = connect()
         connection.set_trace_callback(
-            lambda statement: selects.append(statement)
-            if "FROM executor_outbox" in statement
-            and "WHERE expired = 0" in statement
-            else None
+            lambda statement: (
+                selects.append(statement)
+                if "FROM executor_outbox" in statement and "WHERE expired = 0" in statement
+                else None
+            )
         )
         return connection
 
@@ -914,9 +918,7 @@ def test_newer_or_corrupt_schema_and_symlink_paths_fail_closed(tmp_path: Path) -
     state_directory = tmp_path / "state"
     opened = ledger(state_directory)
     with sqlite3.connect(opened.database_path) as connection:
-        connection.execute(
-            f"PRAGMA user_version = {EXECUTOR_LEDGER_SCHEMA_VERSION + 1}"
-        )
+        connection.execute(f"PRAGMA user_version = {EXECUTOR_LEDGER_SCHEMA_VERSION + 1}")
     with pytest.raises(ExecutorLedgerRejected):
         ledger(state_directory)
 

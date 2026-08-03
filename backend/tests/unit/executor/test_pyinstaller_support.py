@@ -172,7 +172,6 @@ def test_materialization_rejects_a_link_created_after_copy(
     assert late_link.is_symlink()
 
 
-
 DRIVER_BIN = "playwright/driver/package/bin"
 
 

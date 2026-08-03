@@ -44,8 +44,9 @@ would be the same misplacement risk that module refuses everywhere else.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Final, Mapping, Sequence
+from typing import Final
 
 from .slot_budget import SlotBudget, SlotOverflow, require_within_budget
 
@@ -93,6 +94,7 @@ class ProbeReading:
     slots: Mapping[int, Sequence[int]]
     stage: tuple[int, int]
 
+
 # The rounding grace the frozen budget probe already applies horizontally.
 _WIDTH_GRACE_PX: Final = 1
 # The measured CJK-versus-Latin line-box difference is 11–12% of the type
@@ -127,9 +129,7 @@ def _excesses(measurement: Sequence[int]) -> tuple[int, int]:
     )
 
 
-def _measurement(
-    reading: ProbeReading, budget: SlotBudget, document: str
-) -> Sequence[int]:
+def _measurement(reading: ProbeReading, budget: SlotBudget, document: str) -> Sequence[int]:
     measurement = reading.slots.get(budget.index)
     if measurement is None:
         raise SlotProbeUnmeasured(
@@ -159,7 +159,10 @@ def _stage_escapes(
         round(max(budget.font_size_px for budget in budgets) * _LINE_BOX_GRACE_RATIO),
     )
     findings = []
-    for axis, direction, grace in ((0, "horizontally", _WIDTH_GRACE_PX), (1, "vertically", grace_y)):
+    for axis, direction, grace in (
+        (0, "horizontally", _WIDTH_GRACE_PX),
+        (1, "vertically", grace_y),
+    ):
         if substituted.stage[axis] > original.stage[axis] + grace:
             findings.append(
                 f"copy pushes the part beyond its own stage {direction}; the "
@@ -184,9 +187,7 @@ def require_no_new_overflow(
     offences: list[str] = []
     for budget in budgets:
         original_x, original_y = _excesses(_measurement(original, budget, "original"))
-        substituted_x, substituted_y = _excesses(
-            _measurement(substituted, budget, "substituted")
-        )
+        substituted_x, substituted_y = _excesses(_measurement(substituted, budget, "substituted"))
         vertical_grace = max(1, round(budget.font_size_px * _LINE_BOX_GRACE_RATIO))
         try:
             require_within_budget(

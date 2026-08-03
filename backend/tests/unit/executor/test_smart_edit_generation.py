@@ -250,9 +250,10 @@ def test_one_relevant_static_image_covers_a_low_scoring_script_sentence() -> Non
     )
 
     assert isinstance(outcome, SmartEditGenerationResult)
-    assert tuple(
-        paragraph.visual_material_id for paragraph in outcome.draft.paragraphs
-    ) == (image.material_id.uuid, image.material_id.uuid)
+    assert tuple(paragraph.visual_material_id for paragraph in outcome.draft.paragraphs) == (
+        image.material_id.uuid,
+        image.material_id.uuid,
+    )
 
 
 @pytest.mark.parametrize(

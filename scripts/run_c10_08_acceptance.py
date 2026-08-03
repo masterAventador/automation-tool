@@ -365,7 +365,7 @@ def main(recovery_probe: RecoveryProbe | None = None) -> None:
                 f"APP_VERSION={app_version}",
                 "--build-arg",
                 f"VCS_REF={revision}",
-                str(BACKEND_ROOT),
+                str(REPOSITORY_ROOT),
             ]
         )
         run(

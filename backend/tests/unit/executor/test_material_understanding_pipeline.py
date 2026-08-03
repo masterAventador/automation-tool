@@ -11,6 +11,7 @@ import pytest
 
 from automation_tool.executor.adaptive_frame_extraction import AdaptiveFrameArtifact
 from automation_tool.executor.material_understanding import (
+    MaterialUnderstandingFrame,
     MaterialUnderstandingOptions,
     MaterialUnderstandingRejected,
     MaterialUnderstandingReply,
@@ -27,11 +28,13 @@ class RecordingAdapter:
     def __init__(self, content: str, *, finish_reason: str = "stop") -> None:
         self.content = content
         self.finish_reason = finish_reason
-        self.calls: list[object] = []
+        self.calls: list[
+            tuple[tuple[MaterialUnderstandingFrame, ...], MaterialUnderstandingOptions]
+        ] = []
 
     def understand(
         self,
-        frames: object,
+        frames: tuple[MaterialUnderstandingFrame, ...],
         *,
         options: MaterialUnderstandingOptions,
     ) -> MaterialUnderstandingReply:

@@ -172,11 +172,11 @@ class ProductionDouyinDiscoveryOperation:
         ledger: ExecutorLedger,
         browser_authority: BrowserLaunchAuthority,
         runtime_factory: Callable[[], _Runtime] = BrowserRuntime,
-        search_factory: Callable[[BrowserWindow, object], _Search] = DouyinSearchExecution,  # type: ignore[assignment]
+        search_factory: Callable[[BrowserWindow, object], _Search] = DouyinSearchExecution,
         scroll_factory: Callable[
             [BrowserWindow, object, DouyinSearchExecutionObservation, Callable[[], bool]],
             _Scroll,
-        ] = DouyinBoundedScroll,  # type: ignore[assignment]
+        ] = DouyinBoundedScroll,
         extraction_factory: Callable[[BrowserWindow, int, int], _Extraction] = _default_extraction,
         page_drift_artifacts: PageDriftArtifactStore | None = None,
         browser_diagnostic_artifacts: BrowserDiagnosticArtifactStore | None = None,

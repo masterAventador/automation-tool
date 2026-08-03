@@ -69,7 +69,15 @@ pub(crate) enum DesktopLogEvent {
     StartupLocalCheckRejected,
     ControlPlaneHealthCheckStarted,
     ControlPlaneServiceHealthCompleted,
+    #[cfg_attr(
+        all(feature = "desktop-e2e", not(feature = "control-plane-e2e")),
+        allow(dead_code)
+    )]
     ControlPlaneRegistrationCompleted,
+    #[cfg_attr(
+        all(feature = "desktop-e2e", not(feature = "control-plane-e2e")),
+        allow(dead_code)
+    )]
     ControlPlaneInstallationAccessCompleted,
     ControlPlaneHealthCheckCompleted,
     ControlPlaneHealthCheckRejected,

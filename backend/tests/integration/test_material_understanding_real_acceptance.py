@@ -16,7 +16,7 @@ from sqlalchemy import delete, insert, select
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, os.fspath(REPOSITORY_ROOT / "scripts"))
-from run_le_13_acceptance import (  # noqa: E402
+from run_le_13_acceptance import (  # type: ignore[import-not-found]  # noqa: E402
     TOOLCHAIN_ROOT_ENVIRONMENT,
     read_bailian_api_key,
 )

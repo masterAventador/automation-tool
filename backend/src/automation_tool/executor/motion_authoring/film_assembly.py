@@ -35,6 +35,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypedDict
 
 from .film_timeline import (
     RenderCost,
@@ -115,6 +116,92 @@ class AssemblyRejected(RuntimeError):
     """
 
 
+class _FrozenSlot(TypedDict):
+    index: int
+    original: str
+    parentTag: str
+
+
+class _FrozenBudget(TypedDict):
+    index: int
+    usableWidthPx: int
+    fontSizePx: int
+    baselineOverflowsX: bool
+    baselineOverflowsY: bool
+
+
+def _slot_records(contract: Mapping[str, object]) -> dict[str, tuple[_FrozenSlot, ...]]:
+    parts = contract.get("parts")
+    if not isinstance(parts, list):
+        raise AssemblyRejected("the part slot contract is malformed")
+    records: dict[str, tuple[_FrozenSlot, ...]] = {}
+    for part in parts:
+        if not isinstance(part, dict):
+            raise AssemblyRejected("the part slot contract is malformed")
+        name = part.get("name")
+        slots = part.get("slots")
+        if not isinstance(name, str) or not isinstance(slots, list) or name in records:
+            raise AssemblyRejected("the part slot contract is malformed")
+        normalized: list[_FrozenSlot] = []
+        for slot in slots:
+            if not isinstance(slot, dict):
+                raise AssemblyRejected("the part slot contract is malformed")
+            index = slot.get("index")
+            original = slot.get("original")
+            parent_tag = slot.get("parentTag")
+            if (
+                type(index) is not int
+                or not isinstance(original, str)
+                or not isinstance(parent_tag, str)
+            ):
+                raise AssemblyRejected("the part slot contract is malformed")
+            normalized.append(_FrozenSlot(index=index, original=original, parentTag=parent_tag))
+        records[name] = tuple(normalized)
+    return records
+
+
+def _budget_records(contract: Mapping[str, object]) -> dict[str, tuple[_FrozenBudget, ...]]:
+    parts = contract.get("parts")
+    if not isinstance(parts, list):
+        raise AssemblyRejected("the part slot budget contract is malformed")
+    records: dict[str, tuple[_FrozenBudget, ...]] = {}
+    for part in parts:
+        if not isinstance(part, dict):
+            raise AssemblyRejected("the part slot budget contract is malformed")
+        name = part.get("name")
+        slots = part.get("slots")
+        if not isinstance(name, str) or not isinstance(slots, list) or name in records:
+            raise AssemblyRejected("the part slot budget contract is malformed")
+        normalized: list[_FrozenBudget] = []
+        for slot in slots:
+            if not isinstance(slot, dict):
+                raise AssemblyRejected("the part slot budget contract is malformed")
+            index = slot.get("index")
+            width = slot.get("usableWidthPx")
+            font_size = slot.get("fontSizePx")
+            overflows_x = slot.get("baselineOverflowsX")
+            overflows_y = slot.get("baselineOverflowsY")
+            if (
+                type(index) is not int
+                or type(width) is not int
+                or type(font_size) is not int
+                or type(overflows_x) is not bool
+                or type(overflows_y) is not bool
+            ):
+                raise AssemblyRejected("the part slot budget contract is malformed")
+            normalized.append(
+                _FrozenBudget(
+                    index=index,
+                    usableWidthPx=width,
+                    fontSizePx=font_size,
+                    baselineOverflowsX=overflows_x,
+                    baselineOverflowsY=overflows_y,
+                )
+            )
+        records[name] = tuple(normalized)
+    return records
+
+
 def assemble_film(
     *,
     beats: Sequence[BeatPlan],
@@ -135,20 +222,15 @@ def assemble_film(
     if not beats:
         raise AssemblyRejected("a film needs at least one beat")
 
-    slots_by_part = {
-        part["name"]: part["slots"] for part in slot_table["parts"]  # type: ignore[index]
-    }
-    budget_by_part = {
-        part["name"]: part["slots"] for part in slot_budget["parts"]  # type: ignore[index]
-    }
+    slots_by_part = _slot_records(slot_table)
+    budget_by_part = _budget_records(slot_budget)
 
     for beat in beats:
         if beat.part is None:
             continue
         if beat.part not in part_durations or beat.part not in part_dimensions:
             raise AssemblyRejected(
-                f"beat {beat.beat_id!r} names {beat.part!r}, which the catalog does "
-                "not carry"
+                f"beat {beat.beat_id!r} names {beat.part!r}, which the catalog does not carry"
             )
         if beat.part not in part_types:
             raise AssemblyRejected(
@@ -214,8 +296,7 @@ def assemble_film(
                     # already gets.
                     source_start_millis=round(beat.start_seconds * 1000),
                     source_end_millis=round(
-                        (beat.start_seconds + (beat.declared_seconds or planned.seconds))
-                        * 1000
+                        (beat.start_seconds + (beat.declared_seconds or planned.seconds)) * 1000
                     ),
                 )
             )
@@ -268,9 +349,7 @@ def assemble_film(
                 # here is only that the span is now stated rather than inferred
                 # from whatever the page happened to declare.
                 source_start_millis=0,
-                source_end_millis=round(
-                    (part_durations.get(beat.part) or planned.seconds) * 1000
-                ),
+                source_end_millis=round((part_durations.get(beat.part) or planned.seconds) * 1000),
                 slot_budgets=tuple(
                     SlotBudget(
                         index=entry_["index"],

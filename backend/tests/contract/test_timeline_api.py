@@ -323,7 +323,7 @@ def test_original_audio_mode_round_trips_and_is_required_only_for_ambient() -> N
     assert response.status_code == 201
     assert response.json()["tracks"][1]["clips"][0] == ambient_clip
     stored = repository.revisions[PROJECT_ID][0].tracks[1].clips[0]
-    assert stored.original_audio_mode.value == "fixed_volume"  # type: ignore[union-attr]
+    assert stored.original_audio_mode.value == "fixed_volume"
 
     for value in (None, "duck", 1):
         rejected = {**draft, "tracks": [*cast(list[object], draft["tracks"])]}

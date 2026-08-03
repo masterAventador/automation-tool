@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -157,9 +158,11 @@ def test_composer_maps_one_video_and_one_normalized_aac_after_caption_inputs(
     assert command.has_audio is True
     assert command.audio_input_material_ids == (audio_id,)
     assert command.argv.count("-i") == 3
-    assert command.argv.index(os.fspath(visual_source.source_path)) < command.argv.index(
-        os.fspath(caption_path)
-    ) < command.argv.index(os.fspath(audio_path))
+    assert (
+        command.argv.index(os.fspath(visual_source.source_path))
+        < command.argv.index(os.fspath(caption_path))
+        < command.argv.index(os.fspath(audio_path))
+    )
     assert "[2:a]atrim=" in command.filter_complex
     assert command.argv.count("-map") == 2
     assert "[audio_out]" in command.argv
@@ -257,9 +260,9 @@ def test_composer_rejects_invalid_plan_visual_command_and_audio_binding(
     audio_path.write_bytes(b"audio")
 
     with pytest.raises(AudiovisualRenderRejected) as invalid:
-        compile_audiovisual_ffmpeg_command(  # type: ignore[arg-type]
+        compile_audiovisual_ffmpeg_command(
             tools,
-            object(),
+            cast(LocalEditingVisualRenderPlan, object()),
             (visual_source,),
             audio_plan,
             (AudioRenderSourceBinding(audio_id, audio_path, True),),

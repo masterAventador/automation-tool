@@ -117,7 +117,8 @@ def discovery_command() -> str:
 
 
 def test_formal_discover_command_captures_bounded_drift_and_handoffs_headlessly(
-    tmp_path: Path, staged_embedded_chromium: Path,
+    tmp_path: Path,
+    staged_embedded_chromium: Path,
 ) -> None:
     RoutedRuntime.instances.clear()
     profile = tmp_path / "automation-tool-d6-14-profile"

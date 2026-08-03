@@ -17,6 +17,7 @@ import { TauriStartupEnvironmentGateway } from "./platform/tauri/startup-environ
 import { TauriAppUpdateGateway } from "./platform/tauri/app-update-gateway";
 import { TauriAccountSessionGateway } from "./platform/tauri/account-session-gateway";
 import { TauriModelServiceGateway } from "./platform/tauri/model-service-gateway";
+import { TauriBilibiliServiceGateway } from "./platform/tauri/bilibili-service-gateway";
 import { TauriMaterialVideoStudioGateway } from "./platform/tauri/material-video-studio-gateway";
 import { TauriPublishWorkspaceGateway } from "./platform/tauri/publish-workspace-gateway";
 import { TauriVideoEditingGateway } from "./platform/tauri/video-editing-gateway";
@@ -45,6 +46,7 @@ const platformAdapter = new TauriPlatformAdapter();
 const platformSessionGateway = new TauriPlatformSessionGateway();
 const appUpdateGateway = new TauriAppUpdateGateway();
 const modelServiceGateway = new TauriModelServiceGateway();
+const bilibiliServiceGateway = new TauriBilibiliServiceGateway();
 const materialVideoStudioGateway = new TauriMaterialVideoStudioGateway();
 const publishWorkspaceGateway = new TauriPublishWorkspaceGateway();
 const videoEditingGateway = new TauriVideoEditingGateway();
@@ -72,6 +74,7 @@ createRoot(root).render(
       platformSessionGateway={platformSessionGateway}
       appUpdateGateway={appUpdateGateway}
       modelServiceGateway={modelServiceGateway}
+      bilibiliServiceGateway={bilibiliServiceGateway}
       materialVideoStudioGateway={materialVideoStudioGateway}
       publishWorkspaceGateway={publishWorkspaceGateway}
       videoEditingGateway={videoEditingGateway}

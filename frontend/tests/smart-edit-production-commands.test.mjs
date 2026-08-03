@@ -30,13 +30,13 @@ test("smart edit exposes three fixed path-free production commands", () => {
 
 test("only production-capable handlers expose smart edit", () => {
   const plainDesktopHandler = rust.match(
-    /#\[cfg\(all\(not\(feature = "control-plane-e2e"\), feature = "desktop-e2e"\)\)\]\n    let builder = builder\.invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\);/u,
+    /#\[cfg\(all\(not\(feature = "control-plane-e2e"\), feature = "desktop-e2e"\)\)\]\n {4}let builder = builder\.invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\);/u,
   )?.[1];
   const productionHandler = rust.match(
-    /#\[cfg\(all\(not\(feature = "control-plane-e2e"\), not\(feature = "desktop-e2e"\)\)\)\]\n    let builder = builder\.invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\);/u,
+    /#\[cfg\(all\(not\(feature = "control-plane-e2e"\), not\(feature = "desktop-e2e"\)\)\)\]\n {4}let builder = builder\.invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\);/u,
   )?.[1];
   const controlPlaneHandler = rust.match(
-    /#\[cfg\(feature = "control-plane-e2e"\)\]\n    let builder = builder\.invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\);/u,
+    /#\[cfg\(feature = "control-plane-e2e"\)\]\n {4}let builder = builder\.invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\);/u,
   )?.[1];
   assert.ok(plainDesktopHandler);
   assert.ok(productionHandler);

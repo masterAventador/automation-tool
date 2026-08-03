@@ -43,7 +43,7 @@ def policy(**changes: Any) -> ActionRiskPolicy:
         "consecutive_failure_threshold": 3,
     }
     values.update(changes)
-    return ActionRiskPolicy(**values)  # type: ignore[arg-type]
+    return ActionRiskPolicy(**values)
 
 
 def test_policy_is_explicit_immutable_and_scoped_by_installation_platform_action() -> None:
@@ -67,7 +67,7 @@ def test_policy_is_explicit_immutable_and_scoped_by_installation_platform_action
         "version",
     }
     with pytest.raises(FrozenInstanceError):
-        value.daily_action_limit = 51  # type: ignore[misc]
+        value.daily_action_limit = 51
 
 
 def test_scope_distinguishes_installations_and_actions_without_free_form_values() -> None:
@@ -102,7 +102,7 @@ def test_policy_has_no_uncalibrated_operational_defaults() -> None:
         if field.default is MISSING and field.default_factory is MISSING
     } >= required
     with pytest.raises(TypeError):
-        ActionRiskPolicy(scope=scope())  # type: ignore[call-arg]
+        ActionRiskPolicy(scope=scope())
 
 
 @pytest.mark.parametrize("seconds", (1, MAX_TASK_INTERVAL_SECONDS))

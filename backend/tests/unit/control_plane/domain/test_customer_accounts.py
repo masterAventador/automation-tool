@@ -20,7 +20,7 @@ def test_login_names_are_ascii_case_insensitive_and_canonical() -> None:
     assert "alice" not in repr(login_name).lower()
 
     with pytest.raises(FrozenInstanceError):
-        login_name.value = "changed"  # type: ignore[misc]
+        login_name.value = "changed"
 
 
 @pytest.mark.parametrize(

@@ -198,9 +198,7 @@ _ENTRY_REASON_TOKENS: Final = {
     "workspace is not a usable render workspace": "workspace_unusable",
     "catalog root is missing": "catalog_root_missing",
     "catalog root must be an absolute path the App resolved": "catalog_root_not_absolute",
-    "catalog part overrides are not the declared shape": (
-        "catalog_part_overrides_shape_invalid"
-    ),
+    "catalog part overrides are not the declared shape": ("catalog_part_overrides_shape_invalid"),
     "browser executable is missing": "browser_executable_missing",
     "browser executable must be an absolute path the App authorized": (
         "browser_executable_not_absolute"
@@ -281,7 +279,10 @@ _AGENT_FIXED_REJECTION_BODIES: Final = frozenset(
         "frame count out of range",
         "headline is out of range",
         "items are out of range",
+        "locked component metadata drifted",
+        "locked component source is unreadable",
         "locked motion catalog drifted",
+        "locked motion catalog has no part duration",
         "locked motion catalog is unreadable",
         "motion part usability contract drifted",
         "motion part usability contract is unreadable",
@@ -318,6 +319,7 @@ _AGENT_FIXED_REJECTION_BODIES: Final = frozenset(
         "refusing to write through a symlink",
         "render canvas contract drifted",
         "render canvas contract is unreadable",
+        "selectable motion catalog drifted",
         "script beats must match storyboard beats one to one",
         "script has an unexpected key set",
         "script must be an object",
@@ -524,8 +526,7 @@ def _catalog_part_overrides(
         or len(payload) > MAX_STORYBOARD_BEATS
         or (payload and not any(part is not None for part in payload))
         or any(
-            part is not None
-            and (type(part) is not str or part not in SELECTABLE_CATALOG_PART_IDS)
+            part is not None and (type(part) is not str or part not in SELECTABLE_CATALOG_PART_IDS)
             for part in payload
         )
     ):
@@ -589,9 +590,7 @@ def _narrator_for(
     reads on the App side.
     """
     config = voiceover_config_from_catalog(
-        catalog_path=AUTHORING_WORKFLOW_CONTRACT.with_name(
-            "bailian-model-catalog.v1.json"
-        ),
+        catalog_path=AUTHORING_WORKFLOW_CONTRACT.with_name("bailian-model-catalog.v1.json"),
         api_key=api_key,
     )
 
@@ -676,9 +675,7 @@ def run_motion_authoring_entry(
                 )
             ),
             narrator=(
-                None
-                if ffprobe is None
-                else _narrator_for(workspace, model.api_key, ffprobe)
+                None if ffprobe is None else _narrator_for(workspace, model.api_key, ffprobe)
             ),
         )
         result = agent.author(brief)

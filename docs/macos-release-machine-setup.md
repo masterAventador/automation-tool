@@ -241,15 +241,16 @@ done
 hdiutil detach "$MP"
 ```
 
-五类资源的参考计数（2026-07-27，两台机器逐项一致）：
+六类资源的参考计数（2026-07-31，`main@4b04408` 正式包）：
 
 | 资源 | 文件数 |
 | --- | --- |
 | embedded-browser | 336 |
-| local-executor | 293 |
+| local-executor | 344 |
 | material-video-worker | 2107 |
 | media-toolchain | 8 |
 | motion-video-worker | 4 |
+| motion-catalog | 338 |
 
 执行器里应该是 `_internal/libpython3.12.dylib`。**如果你在那里看到 `Python.framework`，说明第二节那条没做对**——这次的包能签出来只是因为侥幸，下次就未必。
 

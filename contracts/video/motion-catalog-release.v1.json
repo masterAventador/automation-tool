@@ -22,7 +22,7 @@
     },
     "motionAssetOverlay": {
       "path": "contracts/quality/motion-asset-overlay.v1.json",
-      "sha256": "cdea8048a2fee99410c152249654c5a6918fc9779d409d07ade921ce085b63c8"
+      "sha256": "055c7190e71882e94257e2f3b7bc530e7c5b455cf3108cf8a0cba42b20bfd06f"
     }
   },
   "trademarkScan": {

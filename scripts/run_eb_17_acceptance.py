@@ -37,11 +37,15 @@ from eb_17_clean_machine import (  # noqa: E402
     require_no_new_browser,
     scan_package_for_system_browser_references,
 )
+from release_assembly import (  # noqa: E402
+    ReleaseAssemblyRejected,
+    require_packaged_browser,
+)
 
 STAGING_CONTRACT = REPOSITORY_ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
 DEFAULT_PACKAGE = (
     REPOSITORY_ROOT
-    / ".local/eb-16/run/cargo-target/release/bundle/macos/自动化运营工具.app"
+    / ".local/release/cargo-target/release/bundle/macos/自动化运营工具.app"
 )
 
 # 运行期要盯住的位置：上游浏览器下载缓存，以及系统浏览器的安装根。
@@ -111,15 +115,19 @@ def require_a_system_browser_is_present() -> str:
 
 def packaged_browser(application: Path, target_id: str) -> Path:
     """解析包内 Chromium 的可执行文件，走生产的同一份发行物 Manifest。"""
-    manifest = application / "Contents/Resources/embedded-browser/distribution-manifest.v1.json"
-    if not manifest.is_file():
-        fail(f"package carries no distribution manifest: {manifest}")
+    try:
+        browser_root = require_packaged_browser(
+            application=application,
+            target_id=target_id,
+            platform="macos",
+        )
+    except ReleaseAssemblyRejected as error:
+        fail(str(error))
+    manifest = browser_root / "distribution-manifest.v1.json"
     document = json.loads(manifest.read_text(encoding="utf-8"))
     if document.get("target") != target_id:
         fail(f"package targets {document.get('target')!r}, not {target_id!r}")
-    executable = (
-        application / "Contents/Resources/embedded-browser" / document["executable"]
-    )
+    executable = browser_root / document["executable"]
     if not executable.is_file():
         fail(f"packaged browser executable is missing: {executable}")
     return executable

@@ -14,6 +14,7 @@ import secrets
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -134,7 +135,7 @@ def seeded_user(database_url: str) -> UUID:
                 )
         finally:
             await database.close()
-        return user_id
+        return cast(UUID, user_id)
 
     return asyncio.run(seed())
 

@@ -132,13 +132,13 @@ def _response_payload_is_valid(response: TaskCommandResultEnvelope) -> bool:
         TaskCommandResponseType.TASK_ACCEPT.value,
         TaskCommandResponseType.ACTION_ACCEPT.value,
     }:
-        return response.payload == {"accepted": True}
+        return bool(response.payload == {"accepted": True})
     if response.message_type in {
         TaskCommandResponseType.TASK_REJECT.value,
         TaskCommandResponseType.ACTION_REJECT.value,
     }:
-        return response.payload == {"accepted": False}
-    return response.payload == {"acknowledged": True}
+        return bool(response.payload == {"accepted": False})
+    return bool(response.payload == {"acknowledged": True})
 
 
 def _response_matches_command(

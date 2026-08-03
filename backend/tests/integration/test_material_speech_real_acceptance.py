@@ -15,8 +15,8 @@ from sqlalchemy import delete, insert, select
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, os.fspath(REPOSITORY_ROOT / "scripts"))
-from run_le_13_acceptance import read_bailian_api_key  # noqa: E402
-from run_le_14_acceptance import (  # noqa: E402
+from run_le_13_acceptance import read_bailian_api_key  # type: ignore[import-not-found]  # noqa: E402,I001
+from run_le_14_acceptance import (  # type: ignore[import-not-found]  # noqa: E402
     SECRET_PATH_ENVIRONMENT,
     TOOLCHAIN_ROOT_ENVIRONMENT,
     VOICE_PATH_ENVIRONMENT,
@@ -188,6 +188,7 @@ async def test_real_speech_is_transcribed_and_atomically_written_to_postgresql(
     assert result.has_speech is True
     assert result.speech_segments_ms
     assert result.speech_transcript
+    assert facts.duration_ms is not None
     assert all(
         0 <= start_ms < end_ms <= facts.duration_ms
         for start_ms, end_ms in result.speech_segments_ms

@@ -385,6 +385,35 @@ Tauri 侧 `VideoMediaToolchain` 只解析 `resource_dir/media-toolchain` 的锁�
 FFmpeg 8.1.2 与 x264 锁定源码、双平台原生构建、能力矩阵、GPL 对应源码和真实编码烟测
 详见 `video-media-toolchain-supply-chain.md`。
 
+### 6.6 内置浏览器、Browser Use 与页面租约
+
+Tauri/Rust 是内置 Chromium 发行物、运营浏览器进程和私有 Profile 的唯一所有者。
+`operations` 使用持久 Profile；页面分析等一次性受控执行使用独立的 temporary Profile，
+视频逐帧渲染再使用自己的无登录进程。三类进程不能共享 Profile、Context 或启动参数，
+React 只消费封闭状态和业务结果，不能取得浏览器路径、Profile 路径、Cookie、CDP 地址或
+页面原始内容。
+
+同一运营页面需要在确定性 Playwright 控制与 Browser Use 能力之间交接时，必须经过
+`BrowserSurfaceLease`。租约管理器先暂停当前所有者，再签发随机 loopback CDP 接管能力；
+接管者断开并释放后才能恢复原所有者。接管失败、过期或连接状态不确定时进入
+`reclaim_required`，双方都不能继续操作，只有资源所有者完成进程级回收后才能重新开放
+页面。现有发布预检仍由受控 Playwright 页面对象执行；Browser Use 的模型执行能力不得
+绕过相同的内容脱敏、一次性高风险确认和页面租约边界。
+
+### 6.7 两种视频制作链路
+
+视频制作页只通过 `TauriMaterialVideoStudioGateway` 提交“智能素材成片”和“品牌动效
+成片”，不直连 localhost Worker，也不传递本机路径或密钥。两条链路都由 Tauri/Rust 的
+`LocalVideoOrchestrator` 启动并回收受管 Worker，为每次任务创建 UUIDv4 `RenderJob`
+私有工作区；完成后只把通过摘要、配额、链接与目录身份复验的结果导入为无路径
+`Artifact`，React 仅按稳定 ID 查询进度、预览和导出。
+
+- 智能素材成片由内嵌素材制作 Worker 完成素材理解、脚本和时间轴到本机成片的闭环；
+- 品牌动效成片由受控编排、语音合成、Node 动效渲染和 FFmpeg/ffprobe 组合完成，旁白实际
+  时长可以拉长画面时间轴；
+- 两条链路共享同一套已校验 Chromium 与媒体工具发行物，但 Worker 进程、会话、任务目录
+  和 checkpoint 相互隔离，失败、取消、崩溃恢复与 App 退出都由各自受管进程树清理。
+
 B5-01 已冻结原外部浏览器会话的历史迁移边界。当前 Profile 只能从 Tauri `app_data_dir/browser-profiles/douyin/<canonical UUIDv4 profile_id>` 派生，不能由 React、服务端、平台账号文本或任意路径输入决定；B5-05 负责私有权限、symlink/reparse point 与稳定 identity，B5-06/B5-07 负责跨进程单实例锁和真实 headed 浏览器资源所有权。登录健康只由真实页面检测产生 `missing/healthy/expired/risk/unknown`，只有 `healthy` 关闭熔断；等待扫码/确认和人工接管是本地平台工作流，不是 automation-tool 产品登录。
 
 旧 `SocialOperationsRuntime`、进程内账号表、`EncryptedCookieVault`、`.cookie-key`、`SOC1`、tenant/RBAC/Entitlement 全部不迁移。浏览器持久 Profile 是 Cookie/站点数据的唯一来源，React、Tauri IPC、Executor 账本和 Control Plane 都没有 Cookie 导入导出接口。B5-14 注销必须先持久熔断并阻止新任务，安全停止关联动作、关闭浏览器并释放 Profile 锁，最后才定向删除目标目录和递增 `session_revision`；停止失败或最终副作用不确定时保留 Profile 并进入可诊断/`OUTCOME_UNCERTAIN` 状态。

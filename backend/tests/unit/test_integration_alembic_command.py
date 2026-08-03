@@ -17,12 +17,13 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import ModuleType
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 CONFTEST = BACKEND_ROOT / "tests" / "integration" / "conftest.py"
 
 
-def _load_integration_conftest():
+def _load_integration_conftest() -> ModuleType:
     specification = importlib.util.spec_from_file_location(
         "automation_tool_integration_conftest", CONFTEST
     )
@@ -47,6 +48,5 @@ def test_no_bare_console_script_survives_in_the_command() -> None:
     command = _load_integration_conftest().alembic_command("current")
 
     assert "alembic" not in command[:1], (
-        "a bare console script name in argv[0] is the PATH dependency this "
-        "test exists to prevent"
+        "a bare console script name in argv[0] is the PATH dependency this test exists to prevent"
     )

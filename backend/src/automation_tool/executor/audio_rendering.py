@@ -201,9 +201,7 @@ def _compile_validated_audio_filter_graph(
     fixed = _mix(parts, fixed_labels, "ambient_fixed")
     final_labels: list[str] = []
     if narration is not None and duckable is not None:
-        parts.append(
-            f"[{narration}]asplit=2[narration_mix][narration_sidechain]"
-        )
+        parts.append(f"[{narration}]asplit=2[narration_mix][narration_sidechain]")
         parts.append(
             f"[{duckable}][narration_sidechain]sidechaincompress="
             f"threshold={AUDIO_DUCK_THRESHOLD}:ratio={AUDIO_DUCK_RATIO}:"
@@ -220,8 +218,7 @@ def _compile_validated_audio_filter_graph(
 
     final_mix = cast(str, _mix(parts, final_labels, "audio_mix"))
     parts.append(
-        f"[{final_mix}]apad=whole_dur={total_seconds},"
-        f"atrim=end={total_seconds}[audio_out]"
+        f"[{final_mix}]apad=whole_dur={total_seconds},atrim=end={total_seconds}[audio_out]"
     )
     return CompiledAudioFilterGraph(tuple(material_ids), ";".join(parts), "audio_out")
 

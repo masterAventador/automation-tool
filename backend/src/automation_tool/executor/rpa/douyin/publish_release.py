@@ -125,12 +125,8 @@ _POST_DISPATCH_EVIDENCE: Final = frozenset(
     }
 )
 _WORKS_LIST_HANDOFF: Final = {
-    DouyinPublishPageState.LOGIN_REQUIRED: (
-        DouyinPublishReleaseEvidence.WORKS_LIST_LOGIN_REQUIRED
-    ),
-    DouyinPublishPageState.RISK_CHALLENGE: (
-        DouyinPublishReleaseEvidence.WORKS_LIST_RISK_CHALLENGE
-    ),
+    DouyinPublishPageState.LOGIN_REQUIRED: (DouyinPublishReleaseEvidence.WORKS_LIST_LOGIN_REQUIRED),
+    DouyinPublishPageState.RISK_CHALLENGE: (DouyinPublishReleaseEvidence.WORKS_LIST_RISK_CHALLENGE),
 }
 
 
@@ -213,8 +209,7 @@ class DouyinPublishReleaseReceipt:
             and (
                 (self.dispatch_state is SideEffectState.DISPATCHED and self.dispatch_revision == 2)
                 or (
-                    self.dispatch_state is SideEffectState.UNCERTAIN
-                    and self.dispatch_revision == 3
+                    self.dispatch_state is SideEffectState.UNCERTAIN and self.dispatch_revision == 3
                 )
             )
             and self.replayed is (self.evidence is DouyinPublishReleaseEvidence.REPLAY_UNCERTAIN)

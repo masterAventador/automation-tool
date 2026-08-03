@@ -15,12 +15,12 @@ from automation_tool.protocol import (
     SKIPPED_ACTION_RESULT_EVIDENCE,
     SUCCESS_ACTION_RESULT_EVIDENCE,
     UNCERTAIN_ACTION_RESULT_EVIDENCE,
-    ActionResultEvidence,
     DouyinCandidateRejected,
     DouyinCandidateSummary,
 )
-
-TaskTargetResultEvidence = ActionResultEvidence
+from automation_tool.protocol import (
+    ActionResultEvidence as TaskTargetResultEvidence,
+)
 
 
 class InvalidTaskTargetResult(ValueError):
@@ -49,9 +49,12 @@ class TaskTargetResultStatus(StrEnum):
 
 _STATUS_EVIDENCE = {
     TaskTargetResultStatus.PENDING: frozenset(
-        {ActionResultEvidence.AWAITING_EXECUTION, ActionResultEvidence.ACTION_PENDING}
+        {
+            TaskTargetResultEvidence.AWAITING_EXECUTION,
+            TaskTargetResultEvidence.ACTION_PENDING,
+        }
     ),
-    TaskTargetResultStatus.RUNNING: frozenset({ActionResultEvidence.ACTION_IN_PROGRESS}),
+    TaskTargetResultStatus.RUNNING: frozenset({TaskTargetResultEvidence.ACTION_IN_PROGRESS}),
     TaskTargetResultStatus.SUCCEEDED: SUCCESS_ACTION_RESULT_EVIDENCE,
     TaskTargetResultStatus.SKIPPED: SKIPPED_ACTION_RESULT_EVIDENCE,
     TaskTargetResultStatus.FAILED: FAILED_ACTION_RESULT_EVIDENCE,
@@ -102,22 +105,22 @@ class TaskTargetResult:
             (self.status in _ACTION_REQUIRED and isinstance(self.action_id, ActionId))
             or (
                 self.status is TaskTargetResultStatus.SKIPPED
-                and self.evidence is ActionResultEvidence.ACTION_CANCELLED
+                and self.evidence is TaskTargetResultEvidence.ACTION_CANCELLED
                 and isinstance(self.action_id, ActionId)
             )
             or (
                 self.status is TaskTargetResultStatus.PENDING
-                and self.evidence is ActionResultEvidence.ACTION_PENDING
+                and self.evidence is TaskTargetResultEvidence.ACTION_PENDING
                 and isinstance(self.action_id, ActionId)
             )
             or (
                 self.status is TaskTargetResultStatus.PENDING
-                and self.evidence is ActionResultEvidence.AWAITING_EXECUTION
+                and self.evidence is TaskTargetResultEvidence.AWAITING_EXECUTION
                 and self.action_id is None
             )
             or (
                 self.status is TaskTargetResultStatus.SKIPPED
-                and self.evidence is not ActionResultEvidence.ACTION_CANCELLED
+                and self.evidence is not TaskTargetResultEvidence.ACTION_CANCELLED
                 and self.action_id is None
             )
         )

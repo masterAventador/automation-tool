@@ -7,6 +7,7 @@ import stat
 import threading
 from collections import OrderedDict
 from collections.abc import Callable
+from contextlib import suppress
 from enum import StrEnum
 from pathlib import Path
 from typing import BinaryIO, Never
@@ -174,10 +175,8 @@ class LocalMaterialPreviewLease:
             if self._closed:
                 return
             self._closed = True
-            try:
+            with suppress(OSError):
                 self._stream.close()
-            except OSError:
-                pass
 
     def _require_unchanged(self) -> None:
         try:
@@ -263,10 +262,8 @@ class LocalMaterialPreviewSource:
             opened = os.fstat(stream.fileno())
         except OSError:
             if stream is not None:
-                try:
+                with suppress(OSError):
                     stream.close()
-                except OSError:
-                    pass
             try:
                 MaterialPathRegistry(state_directory=self._state_directory).resolve(material_id)
             except MaterialPathRegistryRejected as error:

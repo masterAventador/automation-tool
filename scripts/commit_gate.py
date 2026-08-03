@@ -200,6 +200,152 @@ def _link_build_inputs(checkout: Path) -> None:
         _link_directory(modules, REPOSITORY_ROOT / "frontend" / "node_modules")
 
 
+def _run_checkout_command(arguments: list[str], checkout: Path) -> None:
+    completed = subprocess.run(
+        arguments,
+        cwd=checkout,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise RuntimeError(
+            f"{' '.join(arguments)} failed in the slow checkout"
+            + (f": {detail}" if detail else "")
+        )
+
+
+def _initialize_slow_checkout_repository(checkout: Path) -> None:
+    """Give archive-only tests disposable Git metadata for the same bytes.
+
+    Several source-transfer tests deliberately ask ``git archive`` or
+    ``git ls-files`` what ships. The outer checkout came from ``git archive``
+    and therefore has no ``.git`` directory of its own. Initialising a new
+    repository *before* adding ignored runtimes and build products preserves
+    the exact committed source bytes while making those source-transfer
+    questions meaningful inside the disposable tree.
+    """
+    if (checkout / ".git").exists():
+        raise RuntimeError("the slow checkout unexpectedly already contains .git")
+    _run_checkout_command(["git", "init", "--quiet"], checkout)
+    # The fast TypeScript tier has already linked ``node_modules`` into this
+    # same checkout. A symlink itself is not matched by a trailing-slash
+    # ``node_modules/`` ignore rule, so an unrestricted ``git add --all`` would
+    # commit an absolute host link. The nested checkout self-test then (rightly)
+    # refuses to extract that archive. Keep the runtime available on disk while
+    # excluding it from the disposable source snapshot.
+    _run_checkout_command(
+        [
+            "git",
+            "add",
+            "--all",
+            "--",
+            ".",
+            ":(exclude)frontend/node_modules",
+        ],
+        checkout,
+    )
+    # The fast tier adds this ignored runtime after `git archive` extracts the
+    # commit. A directory-shaped ignore (`node_modules/`) does not match the
+    # symlink itself, so source-identity checks would otherwise mistake the
+    # gate's absolute host link for an untracked release input. Keep the link
+    # usable by later render tests while excluding this one gate-owned path
+    # from the disposable repository's source inventory.
+    info_exclude = checkout / ".git" / "info" / "exclude"
+    existing = info_exclude.read_text(encoding="utf-8")
+    marker = "/frontend/node_modules\n"
+    if marker not in existing:
+        info_exclude.write_text(existing + marker, encoding="utf-8")
+    _run_checkout_command(
+        [
+            "git",
+            "-c",
+            "user.name=Commit Gate",
+            "-c",
+            "user.email=commit-gate@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "isolated committed snapshot",
+        ],
+        checkout,
+    )
+
+
+def _link_slow_runtime_inputs(checkout: Path, source_root: Path) -> None:
+    """Expose installed environments as ignored, reconstructible runtimes."""
+    for relative in (
+        Path("backend/.venv"),
+        Path("tools/browser-use-contract/.venv"),
+    ):
+        source = source_root / relative
+        if not source.is_dir():
+            raise RuntimeError(f"slow-tier runtime is missing: {source}")
+        destination = checkout / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            raise RuntimeError(f"slow checkout runtime already exists: {destination}")
+        _link_directory(destination, source)
+
+
+def _copy_offline_motion_catalog(checkout: Path, source_root: Path) -> None:
+    """Copy the digest-locked download cache without linking writes to it."""
+    relative = Path(".local/offline-motion-deps/catalog")
+    source = source_root / relative
+    if not source.is_dir():
+        raise RuntimeError(
+            f"slow-tier build input is missing: {source}; "
+            "run python3 scripts/build_offline_motion_catalog.py"
+        )
+    links = [path for path in source.rglob("*") if path.is_symlink()]
+    if links:
+        raise RuntimeError(
+            "slow-tier offline catalog contains a link: "
+            f"{links[0].relative_to(source).as_posix()}"
+        )
+    destination = checkout / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source, destination)
+
+
+def _build_slow_motion_release(checkout: Path, source_root: Path) -> None:
+    """Rebuild the release with the commit's code, never copy the host result."""
+    python = _host_interpreter(source_root / "backend" / ".venv")
+    completed = subprocess.run(
+        [
+            os.fspath(python),
+            "scripts/build_motion_catalog_release.py",
+        ],
+        cwd=checkout,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise RuntimeError(
+            "slow tier could not reconstruct the motion catalog release"
+            + (f": {detail}" if detail else "")
+        )
+
+
+def prepare_slow_checkout(
+    checkout: Path,
+    *,
+    source_root: Path = REPOSITORY_ROOT,
+    build_release: Callable[[Path], None] | None = None,
+) -> None:
+    """Prepare only ignored/reconstructible inputs for aggregate script tests."""
+    _initialize_slow_checkout_repository(checkout)
+    _link_slow_runtime_inputs(checkout, source_root)
+    _copy_offline_motion_catalog(checkout, source_root)
+    if build_release is None:
+        _build_slow_motion_release(checkout, source_root)
+    else:
+        build_release(checkout)
+
+
 def _node_tool(name: str) -> str | None:
     """Resolve a Node CLI, which is a `.cmd` shim rather than an `.exe`.
 
@@ -549,6 +695,7 @@ def _materialize_vendor_sources(
 def run_script_test_check(checkout: Path) -> CheckResult:
     """Run every standalone Python test from the commit under inspection."""
     try:
+        prepare_slow_checkout(checkout)
         vendor_baseline = _materialize_vendor_sources(checkout)
         vendor_revisions = _locked_vendor_revisions(checkout)
     except (OSError, RuntimeError) as error:

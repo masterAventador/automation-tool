@@ -60,18 +60,24 @@ def test_customer_demo_has_no_anonymous_business_write_operation() -> None:
         if operation["security"] == [{"AppSession": []}]
     }
     assert app_business_writes == {
+        "applySmartEditMaterialWriteback",
+        "cancelBilibiliPublishSession",
         "cancelTask",
         "confirmTaskTargetPreview",
         "createEditingProject",
         "createTask",
+        "deleteEditingMaterial",
         "emergencyStopTask",
         "pauseTask",
+        "prepareBilibiliPublish",
         "prepareDouyinPlatformSessionLogout",
         "registerEditingMaterial",
         "replaceTaskTargetExclusions",
         "resumeTask",
         "saveEditingProjectTimeline",
         "startTaskDiscovery",
+        "submitBilibiliPublish",
         "submitEditingJob",
         "updateEditingMaterialDescription",
+        "uploadBilibiliPublishVideo",
     }

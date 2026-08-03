@@ -333,7 +333,7 @@ def test_continuous_inbound_messages_cannot_starve_the_initial_health_heartbeat(
             self.received += 1
             if self.received >= 20:
                 stop.set()
-            return expired_offer().model_dump_json()
+            return str(expired_offer().model_dump_json())
 
     elapsed = count()
     monkeypatch.setattr(

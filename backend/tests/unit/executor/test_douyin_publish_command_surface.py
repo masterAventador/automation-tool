@@ -9,6 +9,8 @@ from queue import Queue
 from typing import Any, cast
 
 import pytest
+from pydantic import SecretStr, ValidationError
+
 from automation_tool.executor.authentication import (
     LocalSessionAuthenticationRejected,
     LocalSessionAuthenticator,
@@ -38,7 +40,6 @@ from automation_tool.executor.rpa.douyin.publish_release import (
     DouyinPublishReleaseEvidence,
     DouyinPublishReleaseState,
 )
-from pydantic import SecretStr, ValidationError
 
 TOKEN = "".join(f"{value:02x}" for value in range(32))
 COMMAND_ID = "123e4567-e89b-42d3-a456-426614174005"
@@ -423,25 +424,17 @@ def test_publish_operation_exposes_its_surface_lease_and_redacted_repr(tmp_path:
 def test_publish_operation_rejects_unusable_construction(tmp_path: Any) -> None:
     opened = publish_ledger(tmp_path)
     with pytest.raises(PlatformCommandRejected):
-        DouyinPublishPreflightCommandOperation(
-            ledger=opened, runtime_factory=cast(Any, object())
-        )
+        DouyinPublishPreflightCommandOperation(ledger=opened, runtime_factory=cast(Any, object()))
     with pytest.raises(PlatformCommandRejected):
-        DouyinPublishPreflightCommandOperation(
-            ledger=opened, browser_authority=cast(Any, object())
-        )
+        DouyinPublishPreflightCommandOperation(ledger=opened, browser_authority=cast(Any, object()))
     with pytest.raises(PlatformCommandRejected):
-        DouyinPublishPreflightCommandOperation(
-            ledger=opened, surface_lease=cast(Any, object())
-        )
+        DouyinPublishPreflightCommandOperation(ledger=opened, surface_lease=cast(Any, object()))
     with pytest.raises(PlatformCommandRejected):
         # A publish operation without a durable ledger could not enforce
         # at-most-once, so it must not be constructible at all.
         DouyinPublishPreflightCommandOperation(ledger=cast(Any, object()))
     with pytest.raises(PlatformCommandRejected):
-        DouyinPublishPreflightCommandOperation(
-            ledger=opened, publish_policy=cast(Any, object())
-        )
+        DouyinPublishPreflightCommandOperation(ledger=opened, publish_policy=cast(Any, object()))
 
 
 def publish_proof(**overrides: Any) -> str:
@@ -927,9 +920,7 @@ def test_the_approval_terms_are_bound_into_the_result_proof() -> None:
         ("target_account", "别人的账号"),
         ("state", "publish_blocked"),
     ):
-        assert (
-            source.proof_for_command_result(**{**baseline, field: tampered}) != proof
-        ), field
+        assert source.proof_for_command_result(**{**baseline, field: tampered}) != proof, field
 
 
 def test_a_result_without_approval_terms_keeps_its_existing_binding() -> None:
@@ -1014,4 +1005,3 @@ def test_a_result_frame_without_pending_terms_carries_none() -> None:
 
 def publish_frame() -> bytes:
     return json.dumps(publish_payload()).encode("utf-8") + b"\n"
-

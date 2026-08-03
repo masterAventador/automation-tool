@@ -170,11 +170,7 @@ class LocalEditingTimelineDraft:
             tuple(paragraph.sequence for paragraph in validated)
             != tuple(range(1, len(validated) + 1))
             or any(
-                sum(
-                    paragraph.visual_material_id == material_id
-                    for paragraph in validated
-                )
-                > 1
+                sum(paragraph.visual_material_id == material_id for paragraph in validated) > 1
                 and any(
                     paragraph.visual_material_id == material_id
                     and paragraph.visual_source_in_ms is not None

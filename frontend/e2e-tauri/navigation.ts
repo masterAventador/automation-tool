@@ -97,9 +97,19 @@ export async function waitForStartup(
  * many words next to the badge.
  */
 export async function openWorkbenchSection(name: string): Promise<void> {
-  await browser
-    .$(`//*[@role='menuitem'][.//*[normalize-space()='${name}'] or normalize-space()='${name}']`)
-    .click();
+  const item = await browser.$(
+    `//*[@role='menuitem'][.//*[normalize-space()='${name}'] or normalize-space()='${name}']`,
+  );
+  await item.click();
+  await browser.waitUntil(
+    async () =>
+      ((await item.getAttribute("class")) ?? "").includes("ant-menu-item-selected"),
+    {
+      timeout: 10_000,
+      interval: 100,
+      timeoutMsg: `App did not settle on ${name}`,
+    },
+  );
 }
 
 /**

@@ -34,7 +34,9 @@ _BROWSER_INSTALLER_DIRECTORY = ("playwright", "driver", "package", "bin")
 _BROWSER_INSTALLER_PREFIXES = ("reinstall_", "install_")
 
 
-def remove_browser_installer_scripts(entries: list[tuple]) -> list[tuple]:
+def remove_browser_installer_scripts[PackageEntry: tuple[object, ...]](
+    entries: list[PackageEntry],
+) -> list[PackageEntry]:
     """Drop the upstream scripts that download and install a system browser.
 
     The product may never discover, choose, download or fall back to a system
@@ -48,12 +50,11 @@ def remove_browser_installer_scripts(entries: list[tuple]) -> list[tuple]:
     happen to be named install-something. The driver itself always stays; the
     executor drives the embedded browser through it.
     """
-    kept: list[tuple] = []
+    kept: list[PackageEntry] = []
     for entry in entries:
         parts = Path(str(entry[0]).replace("\\", "/")).parts
         in_driver_bin = any(
-            parts[index : index + len(_BROWSER_INSTALLER_DIRECTORY)]
-            == _BROWSER_INSTALLER_DIRECTORY
+            parts[index : index + len(_BROWSER_INSTALLER_DIRECTORY)] == _BROWSER_INSTALLER_DIRECTORY
             for index in range(len(parts))
         )
         name = parts[-1] if parts else ""

@@ -622,9 +622,7 @@ class _SilentPlanner:
             len(self.selection_materials) == 1
             and self.selection_materials[0].kind is SegmentSelectionMaterialKind.IMAGE
             and all(len(sentence.candidates) == 1 for sentence in self.matches.sentences)
-            and any(
-                sentence.candidates[0].qualified for sentence in self.matches.sentences
-            )
+            and any(sentence.candidates[0].qualified for sentence in self.matches.sentences)
         ):
             reusable_static_id = self.selection_materials[0].material_id
         paragraphs: list[NarratedParagraphDraft] = []

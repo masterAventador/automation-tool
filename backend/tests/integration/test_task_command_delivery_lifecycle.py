@@ -674,7 +674,7 @@ async def test_repository_validation_response_mapping_and_stale_operations_fail_
 
         with pytest.raises(TaskCommandDeliveryRejected):
             await repository.expire_due(
-                installation_id=str(installation_id),  # type: ignore[arg-type]
+                installation_id=str(installation_id),
                 now=NOW,
             )
         with pytest.raises(TaskCommandDeliveryRejected):

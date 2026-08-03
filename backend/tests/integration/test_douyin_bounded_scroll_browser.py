@@ -24,7 +24,8 @@ RESULT_DOCUMENT = (FIXTURE_ROOT / "results-infinite-scroll.html").read_text(enco
 
 
 def test_production_search_then_bounded_scroll_uses_headless_browser_and_closes(
-    tmp_path: Path, staged_embedded_chromium: Path,
+    tmp_path: Path,
+    staged_embedded_chromium: Path,
 ) -> None:
     profile = tmp_path / "automation-tool-d6-05-profile"
     create_private_profile_directory(profile)

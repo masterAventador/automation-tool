@@ -48,8 +48,9 @@ import urllib.request
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from itertools import pairwise
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Never
 
 from automation_tool.executor.motion_authoring.authoring_workspace import (
     AuthoringWorkspace,
@@ -90,7 +91,7 @@ class MotionAuthoringUnavailable(RuntimeError):
     """The one-sentence path was invoked without a configured model."""
 
 
-def _reject(message: str) -> None:
+def _reject(message: str) -> Never:
     raise MotionAuthoringRejected(f"motion authoring rejected: {message}")
 
 
@@ -153,6 +154,12 @@ TEMPLATE_CANVAS: Final[dict[str, int]] = {
 }
 
 
+def _string_keyed_object(value: object) -> dict[str, Any] | None:
+    if not isinstance(value, dict) or any(type(key) is not str for key in value):
+        return None
+    return {key: item for key, item in value.items() if isinstance(key, str)}
+
+
 def _load_json_document(path: Path) -> dict[str, Any]:
     """One packaged contract, or a refusal that names it.
 
@@ -161,11 +168,17 @@ def _load_json_document(path: Path) -> dict[str, Any]:
     packaging gate.
     """
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise MotionAuthoringRejected(
             f"motion authoring rejected: packaged contract is unreadable: {path.name}"
         ) from error
+    document = _string_keyed_object(value)
+    if document is None:
+        raise MotionAuthoringRejected(
+            f"motion authoring rejected: packaged contract is unreadable: {path.name}"
+        )
+    return document
 
 
 def _load_catalog_segment_seconds_maximum() -> int:
@@ -241,10 +254,7 @@ class PartsCatalog:
             return {}
         slots = self._slots_by_part.get(beat.catalog_parts[0], ())
         available = [text for text in (beat.headline, beat.body, *beat.items) if text]
-        return {
-            slot["index"]: text
-            for slot, text in zip(slots, available, strict=False)
-        }
+        return {slot["index"]: text for slot, text in zip(slots, available, strict=False)}
 
     def assets_for(self, entry_html: str, workspace: AuthoringWorkspace) -> tuple[str, ...]:
         """Everything the working copy of this part needs, as the sandbox lists it.
@@ -688,7 +698,7 @@ def require_repair_changed_only_copy(before: StoryboardArtifact, after: Storyboa
     """
     if len(before.beats) != len(after.beats):
         _reject("repair round altered more than copy")
-    for original, revised in zip(before.beats, after.beats):
+    for original, revised in zip(before.beats, after.beats, strict=True):
         if (
             original.beat_id != revised.beat_id
             or original.purpose != revised.purpose
@@ -1194,12 +1204,12 @@ def _clip_findings(html: str, *, duration_seconds: int) -> list[LintFinding]:
     if not intervals:
         return []
     findings: list[LintFinding] = []
-    for (_, earlier_end, earlier_id), (later_start, _, later_id) in zip(intervals, intervals[1:]):
+    for (_, earlier_end, earlier_id), (later_start, _, later_id) in pairwise(intervals):
         if later_start < earlier_end - _TOLERANCE:
             findings.append(LintFinding("clip_overlap", f"{earlier_id} overlaps {later_id}"))
     covered = abs(intervals[0][0]) <= _TOLERANCE and all(
         abs(later_start - earlier_end) <= _TOLERANCE
-        for (_, earlier_end, _), (later_start, _, _) in zip(intervals, intervals[1:])
+        for (_, earlier_end, _), (later_start, _, _) in pairwise(intervals)
     )
     if not covered or abs(intervals[-1][1] - float(duration_seconds)) > _TOLERANCE:
         findings.append(
@@ -1412,7 +1422,10 @@ class MotionAuthoringTools:
         return storyboard
 
     def write_composition(self, relative_path: str, html: str) -> str:
-        _require(type(html) is str and html, "composition html must be a non-empty string")
+        _require(
+            type(html) is str and bool(html),
+            "composition html must be a non-empty string",
+        )
         self._workspace.write_text(relative_path, html)
         return _validate_relative(relative_path)
 
@@ -1575,10 +1588,19 @@ def load_video_creation_model_config(
     base_url = secret.get("openAiCompatibleBaseUrl") or catalog.get("base_url")
     purposes = catalog.get("purposes")
     _require(isinstance(purposes, list), "catalog purposes missing")
-    creative = next((item for item in purposes if item.get("id") == "video_creative"), None)
+    creative = next(
+        (
+            item
+            for item in purposes
+            if isinstance(item, dict) and item.get("id") == "video_creative"
+        ),
+        None,
+    )
     _require(isinstance(creative, dict), "video_creative purpose missing")
+    assert isinstance(creative, dict)
     model_id = creative.get("default_model_id")
     _require(isinstance(model_id, str) and bool(model_id), "video model id missing")
+    assert isinstance(model_id, str)
     return VideoCreationModelConfig(base_url=base_url, model_id=model_id, api_key=api_key)
 
 
@@ -2000,8 +2022,11 @@ class MotionAuthoringAgent:
         except json.JSONDecodeError:
             _reject("model output was not JSON")
             raise AssertionError from None  # pragma: no cover
-        _require(isinstance(data, dict), "model output must be a JSON object")
-        return data
+        document = _string_keyed_object(data)
+        if document is None:
+            _reject("model output must be a JSON object")
+            raise AssertionError from None  # pragma: no cover
+        return document
 
     def _segments_for(
         self,
@@ -2270,7 +2295,7 @@ class MotionAuthoringAgent:
                 "script beats must match storyboard beats one to one",
             )
             narration = {}
-            for beat, line in zip(storyboard.beats, script.beats):
+            for beat, line in zip(storyboard.beats, script.beats, strict=True):
                 try:
                     audio, seconds = self._narrator(beat.beat_id, line)
                 except Exception:
@@ -2352,6 +2377,7 @@ __all__ = [
     "AUTHORING_WORKFLOW_CONTRACT",
     "BRIEF_ASPECT_RATIOS",
     "BRIEF_LANGUAGES",
+    "COMPOSITION_PATH",
     "MAX_BRAND_ASSETS",
     "MAX_BRIEF_CHARS",
     "MAX_DURATION_SECONDS",
@@ -2367,7 +2393,6 @@ __all__ = [
     "MotionAuthoringPersistenceError",
     "MotionAuthoringRejected",
     "MotionAuthoringTools",
-    "COMPOSITION_PATH",
     "MotionAuthoringUnavailable",
     "MotionBrief",
     "RenderJobSubmission",

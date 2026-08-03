@@ -27,11 +27,6 @@ import { openVideoEditing } from "./navigation";
 
 const HARNESS = "/harness.html?health=available";
 
-const SOURCE_ARTIFACTS = [
-  "6f1a2b3c-4d5e-4f60-8a1b-2c3d4e5f6071",
-  "7a2b3c4d-5e6f-4071-9b2c-3d4e5f607182",
-];
-
 /**
  * The 转场 control in a timeline clip row.
  *
@@ -47,7 +42,6 @@ test.describe("片段行的转场下拉和它旁边的输入框长得一样", ()
     await page.goto(HARNESS);
     await openVideoEditing(page);
     await page.getByLabel("剪辑项目标题").fill("转场控件验收项目");
-    await page.getByLabel("输入素材引用").fill(SOURCE_ARTIFACTS.join("\n"));
     await page.getByRole("button", { name: "创建剪辑项目" }).click();
     await expect(page.getByText("已创建剪辑项目：转场控件验收项目")).toBeVisible();
     await page.getByRole("tab", { name: "时间轴编辑" }).click();

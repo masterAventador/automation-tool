@@ -13,7 +13,7 @@ import pytest
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, os.fspath(REPOSITORY_ROOT / "scripts"))
 
-from video_runtime_cache import cache_root  # noqa: E402
+from video_runtime_cache import cache_root  # type: ignore[import-not-found]  # noqa: E402
 
 from automation_tool.executor import script_voiceover as script_voiceover_module  # noqa: E402
 from automation_tool.executor.material_probe import (  # noqa: E402

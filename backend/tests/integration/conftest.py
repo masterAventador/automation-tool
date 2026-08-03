@@ -5,7 +5,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 import pytest
 
@@ -17,9 +17,11 @@ sys.path.insert(0, os.fspath(REPOSITORY_ROOT))
 from scripts.acceptance_postgres import (  # type: ignore[import-not-found]  # noqa: E402
     managed_test_postgres,
 )
-from scripts.process_inspection import (  # type: ignore[import-not-found]  # noqa: E402, F401
-    process_ids_matching,
-    terminate_process,
+from scripts.process_inspection import (  # type: ignore[import-not-found]  # noqa: E402
+    process_ids_matching as process_ids_matching,
+)
+from scripts.process_inspection import (  # noqa: E402
+    terminate_process as terminate_process,
 )
 
 
@@ -127,13 +129,13 @@ def postgresql_url() -> Iterator[str]:
 
 
 sys.path.insert(0, os.fspath(REPOSITORY_ROOT / "scripts"))
-from build_embedded_chromium_staging import (  # noqa: E402
+from build_embedded_chromium_staging import (  # type: ignore[import-not-found]  # noqa: E402
     CHROMIUM_CONTRACT,
     DEFAULT_ARCHIVES,
     build_staging,
     load_staging_contract,
 )
-from run_bm_04_acceptance import current_target_id  # noqa: E402
+from run_bm_04_acceptance import current_target_id  # type: ignore[import-not-found]  # noqa: E402
 
 
 @pytest.fixture(scope="session")
@@ -164,4 +166,7 @@ def staged_embedded_chromium(tmp_path_factory: pytest.TempPathFactory) -> Path:
         archive_sha256=target.archive_sha256,
         output=tmp_path_factory.mktemp("automation-tool-eb11-chromium") / "staging",
     )
-    return (result.output / Path(*target.executable.split("/"))).resolve(strict=True)
+    return cast(
+        Path,
+        (result.output / Path(*target.executable.split("/"))).resolve(strict=True),
+    )

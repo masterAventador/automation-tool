@@ -22,6 +22,8 @@ import { AccountSessionGate } from "../features/account-session/AccountSessionGa
 import type { AccountSessionGateway } from "../features/account-session/account-session-gateway";
 import type { ModelServiceGateway } from "../features/settings/model-service-gateway";
 import { ModelServiceSettings } from "../features/settings/ModelServiceSettings";
+import type { BilibiliServiceGateway } from "../features/settings/bilibili-service-gateway";
+import { BilibiliServiceSettings } from "../features/settings/BilibiliServiceSettings";
 import type { MaterialVideoStudioGateway } from "../features/video-studio/material-video-studio-gateway";
 import type { VideoEditingGateway } from "../features/video-editing/video-editing-gateway";
 import type { MaterialLibraryGateway } from "../features/video-editing/material-library-gateway";
@@ -44,6 +46,7 @@ interface AppProps {
   appUpdateGateway?: AppUpdateGateway;
   accountSessionGateway?: AccountSessionGateway;
   modelServiceGateway?: ModelServiceGateway;
+  bilibiliServiceGateway?: BilibiliServiceGateway;
   materialVideoStudioGateway?: MaterialVideoStudioGateway;
   videoEditingGateway?: VideoEditingGateway;
   materialLibraryGateway?: MaterialLibraryGateway;
@@ -67,6 +70,7 @@ export function App({
   appUpdateGateway,
   accountSessionGateway,
   modelServiceGateway,
+  bilibiliServiceGateway,
   materialVideoStudioGateway,
   videoEditingGateway,
   materialLibraryGateway,
@@ -87,6 +91,7 @@ export function App({
       platformSessionGateway={platformSessionGateway}
       appUpdateGateway={appUpdateGateway}
       modelServiceGateway={modelServiceGateway}
+      bilibiliServiceGateway={bilibiliServiceGateway}
       materialVideoStudioGateway={materialVideoStudioGateway}
       videoEditingGateway={videoEditingGateway}
       materialLibraryGateway={materialLibraryGateway}
@@ -106,6 +111,9 @@ export function App({
             )}
             {modelServiceGateway === undefined ? null : (
               <ModelServiceSettings gateway={modelServiceGateway} />
+            )}
+            {bilibiliServiceGateway === undefined ? null : (
+              <BilibiliServiceSettings gateway={bilibiliServiceGateway} />
             )}
             {platformAdapter === undefined ? null : (
               <Diagnostics platform={platformAdapter} />

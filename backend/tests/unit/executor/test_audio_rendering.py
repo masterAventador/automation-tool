@@ -563,10 +563,10 @@ def test_binding_rejects_invalid_plan_or_input_index(
     first_input_index: object,
 ) -> None:
     with pytest.raises(AudioRenderBindingRejected) as error:
-        bind_audio_render_inputs(  # type: ignore[arg-type]
-            plan_value,
+        bind_audio_render_inputs(
+            cast(LocalEditingAudioRenderPlan, plan_value),
             (),
-            first_input_index=first_input_index,
+            first_input_index=cast(int, first_input_index),
         )
 
     assert error.value.code is AudioRenderBindingRejection.INVALID_PLAN

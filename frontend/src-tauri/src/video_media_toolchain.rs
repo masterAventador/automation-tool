@@ -7,6 +7,7 @@ use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
+use std::process::{Command, Stdio};
 
 const TOOLCHAIN_DIRECTORY: &str = "media-toolchain";
 const MANIFEST_FILE: &str = "manifest.json";
@@ -205,6 +206,46 @@ impl VideoMediaToolchain {
     pub fn package_root(&self) -> &Path {
         &self.root
     }
+
+    /// Read the encoded container duration with the verified packaged
+    /// `ffprobe`. Bilibili requires whole seconds; rounding up guarantees the
+    /// declared duration never understates a partial final second.
+    pub fn probe_duration_seconds(&self, video: &Path) -> Result<u32, VideoMediaToolchainError> {
+        let metadata = fs::metadata(video)?;
+        if !metadata.is_file() || metadata.len() == 0 {
+            return Err(VideoMediaToolchainError::Invalid(
+                "publish video is invalid",
+            ));
+        }
+        let output = Command::new(&self.ffprobe)
+            .args([
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+            ])
+            .arg(video)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()?;
+        if !output.status.success() || output.stdout.len() > 128 {
+            return Err(VideoMediaToolchainError::Invalid(
+                "publish video duration is unavailable",
+            ));
+        }
+        let value = std::str::from_utf8(&output.stdout)
+            .ok()
+            .and_then(|raw| raw.trim().parse::<f64>().ok())
+            .filter(|duration| duration.is_finite() && *duration > 0.0)
+            .map(f64::ceil)
+            .filter(|duration| *duration <= f64::from(u32::MAX))
+            .ok_or(VideoMediaToolchainError::Invalid(
+                "publish video duration is invalid",
+            ))?;
+        Ok(value as u32)
+    }
 }
 
 fn release_target_id() -> &'static str {
@@ -379,4 +420,45 @@ fn assert_executable(_path: &Path, target_id: &str) -> Result<(), VideoMediaTool
         }
     }
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::VideoMediaToolchain;
+
+    static SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+    #[test]
+    fn publish_duration_uses_the_verified_probe_and_rounds_up_partial_seconds() {
+        let root = std::env::temp_dir().join(format!(
+            "automation-tool-bilibili-duration-{}-{}",
+            std::process::id(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).expect("temporary root");
+        let ffprobe = root.join("ffprobe");
+        fs::write(&ffprobe, b"#!/bin/sh\nprintf '36.07\\n'\n").expect("probe");
+        fs::set_permissions(&ffprobe, fs::Permissions::from_mode(0o700)).expect("probe executable");
+        let video = root.join("video.mp4");
+        fs::write(&video, b"encoded-video").expect("video");
+        let toolchain = VideoMediaToolchain {
+            root: root.clone(),
+            ffmpeg: root.join("ffmpeg"),
+            ffprobe,
+            target_id: "macos-arm64".to_owned(),
+        };
+
+        assert_eq!(
+            toolchain.probe_duration_seconds(&video).expect("duration"),
+            37
+        );
+        fs::write(toolchain.ffprobe_path(), b"#!/bin/sh\nprintf 'NaN\\n'\n")
+            .expect("invalid probe");
+        assert!(toolchain.probe_duration_seconds(&video).is_err());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
 }

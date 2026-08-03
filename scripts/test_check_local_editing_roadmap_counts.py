@@ -8,6 +8,8 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+import pytest
+
 _SCRIPT = Path(__file__).resolve().parent / "check_local_editing_roadmap_counts.py"
 _LEDGER = Path(__file__).resolve().parents[1] / "docs/local-video-editing-roadmap.md"
 
@@ -162,10 +164,14 @@ def test_status_cross_check_mismatch_fails(tmp_path: Path) -> None:
     """
     broken = tmp_path / "roadmap.md"
     text = _LEDGER.read_text(encoding="utf-8")
-    assert _DONE_COUNT.search(text) is not None
-    assert _NOT_STARTED_COUNT.search(text) is not None
-    text = _DONE_COUNT.sub("- ✅ 已完成：24", text)
-    text = _NOT_STARTED_COUNT.sub("- ⬜ 未开始：0", text)
+    done_match = _DONE_COUNT.search(text)
+    pending_match = _PENDING_ACCEPT_COUNT.search(text)
+    assert done_match is not None and pending_match is not None
+    done = int(done_match.group(1))
+    pending = int(pending_match.group(1))
+    assert done > 0
+    text = _DONE_COUNT.sub(f"- ✅ 已完成：{done - 1}", text)
+    text = _PENDING_ACCEPT_COUNT.sub(f"- 🔍 待验收：{pending + 1}", text)
     broken.write_text(text, encoding="utf-8")
     result = _run(broken)
     assert result.returncode != 0
@@ -220,3 +226,7 @@ def test_an_unescaped_pipe_inside_a_cell_fails(tmp_path: Path) -> None:
     result = _run(broken)
     assert result.returncode != 0
     assert "格" in result.stdout + result.stderr
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "-q"]))

@@ -246,7 +246,7 @@ async def test_service_maps_invalid_clock_ids_results_and_repository_errors() ->
         with pytest.raises(ActionExecutionOrchestrationRejected):
             await ActionExecutionOrchestrationService(
                 repository=RecordingRepository(expected), limits=limits()
-            ).advance(invalid_installation, invalid_executor)  # type: ignore[arg-type]
+            ).advance(invalid_installation, invalid_executor)
 
     for repository_result, expected_error in (
         (ActionExecutionOrchestrationRejected(), ActionExecutionOrchestrationRejected),

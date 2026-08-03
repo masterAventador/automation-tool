@@ -35,8 +35,8 @@ const AVAILABILITY_COLORS: Record<PublishPlatformState["availability"], string> 
  */
 function publishBlockedHint(title: string, description: string): string {
   const missing = [
-    isPublishableCopy(title) ? null : "标题",
-    isPublishableCopy(description) ? null : "简介",
+    isPublishableCopy(title, 80) ? null : "标题",
+    isPublishableCopy(description, 250) ? null : "简介",
   ].filter((field): field is string => field !== null);
   return `请先填写上面的${missing.join("和")}，然后才能发布。`;
 }
@@ -46,6 +46,7 @@ const OUTCOME_TONES: Record<
   "success" | "warning" | "info"
 > = {
   published: "success",
+  submitted: "success",
   outcome_uncertain: "warning",
   not_published: "info",
   handed_off: "warning",
@@ -153,7 +154,9 @@ export function PublishWorkspace({
   const outcome = snapshot.outcome;
   // Everything a publish needs before a platform button is worth offering.
   const publishable =
-    selectedVideo !== undefined && isPublishableCopy(title) && isPublishableCopy(description);
+    selectedVideo !== undefined &&
+    isPublishableCopy(title, 80) &&
+    isPublishableCopy(description, 250);
   const publishRequest = (platform: PublishPlatform) => ({
     platform,
     artifactId: selectedVideo!.artifactId,
@@ -197,14 +200,14 @@ export function PublishWorkspace({
             <Input
               aria-label="标题"
               placeholder="给这条视频起个标题"
-              maxLength={256}
+              maxLength={80}
               value={title}
               onChange={(event) => setTitle(event.target.value)}
             />
             <Input.TextArea
               aria-label="简介"
               placeholder="写一句简介，观众会先看到它"
-              maxLength={256}
+              maxLength={250}
               rows={3}
               value={description}
               onChange={(event) => setDescription(event.target.value)}

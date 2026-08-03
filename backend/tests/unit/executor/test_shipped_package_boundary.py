@@ -27,10 +27,7 @@ from pathlib import Path
 
 import pytest
 
-_PACKAGE_INIT = (
-    Path(__file__).resolve().parents[3]
-    / "src/automation_tool/executor/__init__.py"
-)
+_PACKAGE_INIT = Path(__file__).resolve().parents[3] / "src/automation_tool/executor/__init__.py"
 # Names whose presence in a customer's installation would be a defect. They are
 # matched as substrings so a renamed variant is caught too.
 _TEST_DOUBLE_MARKERS = ("Fake", "Mock", "Stub", "Dummy")
@@ -44,8 +41,7 @@ def _exported_names() -> tuple[str, ...]:
         if isinstance(node, ast.ImportFrom):
             exported.extend(alias.asname or alias.name for alias in node.names)
         elif isinstance(node, ast.Assign) and any(
-            isinstance(target, ast.Name) and target.id == "__all__"
-            for target in node.targets
+            isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets
         ):
             exported.extend(
                 element.value

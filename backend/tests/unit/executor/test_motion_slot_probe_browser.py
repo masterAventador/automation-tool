@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import cast
 
 import pytest
 
-from automation_tool.executor.browser_runtime import BrowserRuntime
+from automation_tool.executor.browser_runtime import BrowserRuntime, _Playwright
 from automation_tool.executor.motion_authoring.slot_overflow_probe import (
     SLOT_PROBE_JS,
     ProbeReading,
@@ -123,7 +124,7 @@ def _fixture(
     probe = PackagedSlotProbe(
         browser_executable=executable,
         profile_directory=workspace / SLOT_PROBE_PROFILE_DIRECTORY,
-        runtime=BrowserRuntime(lambda: playwright),
+        runtime=BrowserRuntime(lambda: cast(_Playwright, playwright)),
     )
     return probe, page, context, chromium, playwright, workspace
 
@@ -141,9 +142,7 @@ def test_every_document_is_measured_by_one_headless_browser_session(
     tmp_path: Path,
 ) -> None:
     reading = {"12": [205, 347, 35, 32]}
-    probe, page, context, chromium, playwright, workspace = _fixture(
-        tmp_path, [reading, reading]
-    )
+    probe, page, context, chromium, playwright, workspace = _fixture(tmp_path, [reading, reading])
     first, second = _documents(tmp_path, 2)
 
     results = probe((first, second))
@@ -151,9 +150,9 @@ def test_every_document_is_measured_by_one_headless_browser_session(
     # 一次启动、无头、私有 Profile 建在工作区下——不是每份文档一个浏览器。
     assert len(chromium.calls) == 1
     assert chromium.calls[0]["headless"] is True
-    assert chromium.calls[0]["user_data_dir"] == (
-        workspace / SLOT_PROBE_PROFILE_DIRECTORY
-    ).resolve()
+    assert (
+        chromium.calls[0]["user_data_dir"] == (workspace / SLOT_PROBE_PROFILE_DIRECTORY).resolve()
+    )
     assert page.navigations == [first.resolve().as_uri(), second.resolve().as_uri()]
     expected = ProbeReading(slots={12: (205, 347, 35, 32)}, stage=(1920, 1080))
     assert results == [expected, expected]
@@ -221,7 +220,7 @@ def test_windows_verbatim_paths_are_native_before_playwright_receives_them(
     probe = PackagedSlotProbe(
         browser_executable=verbatim(executable),
         profile_directory=verbatim(workspace / SLOT_PROBE_PROFILE_DIRECTORY),
-        runtime=BrowserRuntime(lambda: playwright),
+        runtime=BrowserRuntime(lambda: cast(_Playwright, playwright)),
     )
 
     probe((verbatim(document),))

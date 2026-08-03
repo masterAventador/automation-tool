@@ -164,6 +164,16 @@ class FontRequestUnmet(RuntimeError):
     """
 
 
+def _object_entries(
+    document: Mapping[str, object],
+    field: str,
+) -> tuple[Mapping[str, object], ...]:
+    raw = document.get(field)
+    if not isinstance(raw, list) or any(not isinstance(entry, dict) for entry in raw):
+        raise FontRequestUnmet(f"a packaged typography contract has invalid {field}")
+    return tuple(entry for entry in raw if isinstance(entry, dict))
+
+
 def _family_names(stack: str) -> set[str]:
     names: set[str] = set()
     for candidate in stack.split(","):
@@ -201,12 +211,26 @@ def requested_faces(text: str) -> frozenset[tuple[str, int]]:
 
 def family_policies(contract: Mapping[str, object]) -> dict[str, FamilyPolicy]:
     policies: dict[str, FamilyPolicy] = {}
-    for entry in contract["families"]:  # type: ignore[index]
-        policies[entry["family"]] = FamilyPolicy(
-            entry["policy"],
-            entry.get("replacement"),
-            entry.get("reason", ""),
-            entry.get("visualDifference", ""),
+    for entry in _object_entries(contract, "families"):
+        family = entry.get("family")
+        policy = entry.get("policy")
+        replacement = entry.get("replacement")
+        reason = entry.get("reason", "")
+        visual_difference = entry.get("visualDifference", "")
+        if (
+            not isinstance(family, str)
+            or policy not in POLICIES
+            or (replacement is not None and not isinstance(replacement, str))
+            or not isinstance(reason, str)
+            or not isinstance(visual_difference, str)
+        ):
+            raise FontRequestUnmet("a packaged typography family policy is invalid")
+        assert isinstance(policy, str)
+        policies[family] = FamilyPolicy(
+            policy,
+            replacement,
+            reason,
+            visual_difference,
         )
     return policies
 
@@ -218,9 +242,17 @@ def packaged_weights(lock: Mapping[str, object]) -> dict[str, frozenset[int]]:
     downloaded cannot be declared against by accident.
     """
     weights: dict[str, set[int]] = {}
-    for sheet in lock["stylesheets"]:  # type: ignore[index]
-        for face in sheet["faces"]:
-            weights.setdefault(face["family"], set()).add(int(face["weight"]))
+    for sheet in _object_entries(lock, "stylesheets"):
+        for face in _object_entries(sheet, "faces"):
+            family = face.get("family")
+            raw_weight = face.get("weight")
+            if not isinstance(family, str) or not isinstance(raw_weight, (int, str)):
+                raise FontRequestUnmet("a packaged typography face is invalid")
+            try:
+                weight = int(raw_weight)
+            except ValueError as error:
+                raise FontRequestUnmet("a packaged typography face weight is invalid") from error
+            weights.setdefault(family, set()).add(weight)
     return {family: frozenset(values) for family, values in weights.items()}
 
 
@@ -258,10 +290,18 @@ def face_artifact(
 ) -> tuple[PackagedFaceArtifact, ...]:
     """The locked woff2 paths and exact ranges for one family and weight."""
     matches: list[tuple[bool, PackagedFaceArtifact]] = []
-    for sheet in lock["stylesheets"]:  # type: ignore[index]
-        for face in sheet["faces"]:
-            if face["family"] == source_family and int(face["weight"]) == weight:
-                path = face["artifactPath"]
+    for sheet in _object_entries(lock, "stylesheets"):
+        for face in _object_entries(sheet, "faces"):
+            family = face.get("family")
+            raw_weight = face.get("weight")
+            if not isinstance(raw_weight, (int, str)):
+                raise FontRequestUnmet("a packaged typography face weight is invalid")
+            try:
+                face_weight = int(raw_weight)
+            except ValueError as error:
+                raise FontRequestUnmet("a packaged typography face weight is invalid") from error
+            if family == source_family and face_weight == weight:
+                path = face.get("artifactPath")
                 unicode_range = face.get("unicodeRange")
                 if not isinstance(path, str) or not isinstance(unicode_range, str):
                     raise FontRequestUnmet("a packaged font face has no path or unicode range")

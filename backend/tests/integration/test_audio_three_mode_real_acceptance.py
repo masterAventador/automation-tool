@@ -161,9 +161,7 @@ def _frequency_amplitude(
 
 def test_three_real_modes_have_distinct_reproducible_levels(tmp_path: Path) -> None:
     tools = _tools()
-    project_id, timeline_id, visual_id, narration_id, ambient_id = (
-        uuid4() for _ in range(5)
-    )
+    project_id, timeline_id, visual_id, narration_id, ambient_id = (uuid4() for _ in range(5))
     visual_path = tmp_path / "visual.png"
     Image.new("RGB", (320, 180), (25, 65, 125)).save(visual_path)
     narration_path = tmp_path / "narration.wav"

@@ -177,3 +177,7 @@ def test_contract_cannot_redirect_download_packaging_or_provider(
 
     with pytest.raises(silero_vad_assets.SileroVadAssetContractRejected):
         silero_vad_assets.load_silero_vad_contract(contract_path)
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "-q"]))

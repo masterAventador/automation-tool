@@ -72,9 +72,7 @@ def slot_index_of(html: str, text: str) -> int:
         enumerate_text_nodes,
     )
 
-    matches = [
-        node.index for node in enumerate_text_nodes(html) if node.text.strip() == text
-    ]
+    matches = [node.index for node in enumerate_text_nodes(html) if node.text.strip() == text]
     return matches[0]
 
 
@@ -164,19 +162,14 @@ def test_a_run_that_carries_indentation_keeps_it() -> None:
     index = slot_index_of(PART_HTML, "Host · Neuroscientist")
     result = render_part_working_copy(
         PART_HTML,
-        slots=(
-            PartSlot(index=index, original="Host · Neuroscientist", parent_tag="div"),
-        ),
+        slots=(PartSlot(index=index, original="Host · Neuroscientist", parent_tag="div"),),
         copy={index: "主播·神经科学家"},
         font_css=FONT_CSS,
     )
 
     # The opening tag now carries PC-14's measurement mark; the whitespace this
     # test is about is the part after it, asserted verbatim.
-    assert (
-        f'<div class="lt-tag" data-motion-slot="{index}">\n  主播·神经科学家\n</div>'
-        in result
-    )
+    assert f'<div class="lt-tag" data-motion-slot="{index}">\n  主播·神经科学家\n</div>' in result
 
 
 def test_copy_addressed_at_a_run_no_slot_declared_fails_closed() -> None:
@@ -223,7 +216,7 @@ class _RecordingWorkspace:
 CATALOG_PART_HTML = PART_HTML.replace(
     "</head>",
     '<script src="../../offline-deps/js/gsap.min.js"></script>'
-    '<style>.b{background:url(assets/grain.png)}</style></head>',
+    "<style>.b{background:url(assets/grain.png)}</style></head>",
 )
 
 
@@ -246,7 +239,7 @@ def _catalog(tmp_path: Path) -> Path:
     return root
 
 
-def test_the_working_copy_keeps_the_layout_the_part_references(tmp_path) -> None:
+def test_the_working_copy_keeps_the_layout_the_part_references(tmp_path: Path) -> None:
     """`../../offline-deps/...` has to keep resolving.
 
     Every part reaches its shared dependencies with a path relative to the
@@ -275,7 +268,7 @@ def test_the_working_copy_keeps_the_layout_the_part_references(tmp_path) -> None
     assert "catalog/items/lt-bold-block/assets/grain.png" in workspace.written
 
 
-def test_the_written_document_carries_the_copy_and_the_font_rules(tmp_path) -> None:
+def test_the_written_document_carries_the_copy_and_the_font_rules(tmp_path: Path) -> None:
     catalog = _catalog(tmp_path)
     workspace = _RecordingWorkspace(tmp_path / "job")
     index = slot_index_of(CATALOG_PART_HTML, "Maya Chen")
@@ -295,7 +288,7 @@ def test_the_written_document_carries_the_copy_and_the_font_rules(tmp_path) -> N
 
 
 def test_a_transition_working_copy_replaces_demo_scenes_with_the_beat(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     catalog = tmp_path / "motion-catalog"
     part = catalog / "items" / "glitch"
@@ -325,14 +318,12 @@ def test_a_transition_working_copy_replaces_demo_scenes_with_the_beat(
     )
 
     document = workspace.written[entry].decode("utf-8")
-    assert document.index("data-motion-transition-content") < document.index(
-        "window.__timelines"
-    )
+    assert document.index("data-motion-transition-content") < document.index("window.__timelines")
     assert "新品发布" in document
     assert "旧方案切换到新方案" in document
 
 
-def test_a_part_the_catalog_does_not_carry_fails_closed(tmp_path) -> None:
+def test_a_part_the_catalog_does_not_carry_fails_closed(tmp_path: Path) -> None:
     catalog = _catalog(tmp_path)
     workspace = _RecordingWorkspace(tmp_path / "job")
 
@@ -347,12 +338,10 @@ def test_a_part_the_catalog_does_not_carry_fails_closed(tmp_path) -> None:
         )
 
 
-def test_the_read_only_catalog_is_never_written_to(tmp_path) -> None:
+def test_the_read_only_catalog_is_never_written_to(tmp_path: Path) -> None:
     """The whole design rests on the release tree staying byte-identical."""
     catalog = _catalog(tmp_path)
-    before = {
-        path: path.read_bytes() for path in sorted(catalog.rglob("*")) if path.is_file()
-    }
+    before = {path: path.read_bytes() for path in sorted(catalog.rglob("*")) if path.is_file()}
     workspace = _RecordingWorkspace(tmp_path / "job")
     index = slot_index_of(CATALOG_PART_HTML, "Maya Chen")
 
@@ -365,13 +354,11 @@ def test_the_read_only_catalog_is_never_written_to(tmp_path) -> None:
         font_css=FONT_CSS,
     )
 
-    after = {
-        path: path.read_bytes() for path in sorted(catalog.rglob("*")) if path.is_file()
-    }
+    after = {path: path.read_bytes() for path in sorted(catalog.rglob("*")) if path.is_file()}
     assert after == before
 
 
-def test_only_the_shared_files_the_document_asks_for_are_copied(tmp_path) -> None:
+def test_only_the_shared_files_the_document_asks_for_are_copied(tmp_path: Path) -> None:
     """The sandbox allowlist has 128 slots and the shared tree has 125 files.
 
     Copying `offline-deps` wholesale spends the whole budget before the part's
@@ -407,13 +394,11 @@ def test_only_the_shared_files_the_document_asks_for_are_copied(tmp_path) -> Non
     assert len(written) < 10
 
 
-def test_a_reference_pointing_outside_the_catalog_is_refused(tmp_path) -> None:
+def test_a_reference_pointing_outside_the_catalog_is_refused(tmp_path: Path) -> None:
     catalog = _catalog(tmp_path)
     part = catalog / "items" / "lt-bold-block"
     (part / "lt-bold-block.html").write_text(
-        CATALOG_PART_HTML.replace(
-            "</head>", '<script src="../../../escape.js"></script></head>'
-        ),
+        CATALOG_PART_HTML.replace("</head>", '<script src="../../../escape.js"></script></head>'),
         encoding="utf-8",
     )
     workspace = _RecordingWorkspace(tmp_path / "job")
@@ -508,7 +493,7 @@ def test_the_caption_sharing_the_text_is_never_marked() -> None:
 # reference-driven copying already solved for the product (PC-05). One traversal,
 # used by both — a second implementation in the sweep would be the错位替换 this
 # module refuses everywhere else.
-def test_referenced_assets_walks_the_same_graph_the_copy_does(tmp_path) -> None:
+def test_referenced_assets_walks_the_same_graph_the_copy_does(tmp_path: Path) -> None:
     from automation_tool.executor.motion_authoring.part_workspace import (
         referenced_assets,
     )
@@ -540,7 +525,7 @@ def test_referenced_assets_walks_the_same_graph_the_copy_does(tmp_path) -> None:
     }
 
 
-def test_referenced_assets_refuses_a_reference_leaving_the_catalog(tmp_path) -> None:
+def test_referenced_assets_refuses_a_reference_leaving_the_catalog(tmp_path: Path) -> None:
     from automation_tool.executor.motion_authoring.part_workspace import (
         referenced_assets,
     )
@@ -556,7 +541,7 @@ def test_referenced_assets_refuses_a_reference_leaving_the_catalog(tmp_path) -> 
         )
 
 
-def test_referenced_assets_can_skip_a_dead_reference_when_told_to(tmp_path) -> None:
+def test_referenced_assets_can_skip_a_dead_reference_when_told_to(tmp_path: Path) -> None:
     """The sweep's policy, stated as a parameter rather than a second traversal.
 
     The release tree carries parts whose documents reference files that never
@@ -578,20 +563,16 @@ def test_referenced_assets_can_skip_a_dead_reference_when_told_to(tmp_path) -> N
     with pytest.raises(SlotAnchorRejected):
         referenced_assets(html, catalog_root=catalog, origin=part)
 
-    assets = referenced_assets(
-        html, catalog_root=catalog, origin=part, on_missing="skip"
-    )
+    assets = referenced_assets(html, catalog_root=catalog, origin=part, on_missing="skip")
     assert set(assets) == {"items/demo/poster.png"}
 
 
-def test_a_visual_only_working_copy_skips_upstream_demo_placeholders(tmp_path) -> None:
+def test_a_visual_only_working_copy_skips_upstream_demo_placeholders(tmp_path: Path) -> None:
     """A dead sample URL must not make a visual-only catalog choice crash."""
     catalog = _catalog(tmp_path)
     part = catalog / "items" / "lt-bold-block"
     (part / "lt-bold-block.html").write_text(
-        CATALOG_PART_HTML.replace(
-            "</body>", '<video src="missing-demo.mp4"></video></body>'
-        ),
+        CATALOG_PART_HTML.replace("</body>", '<video src="missing-demo.mp4"></video></body>'),
         encoding="utf-8",
     )
     workspace = _RecordingWorkspace(tmp_path / "job")

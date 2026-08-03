@@ -46,6 +46,7 @@ from cq_03_concurrent_isolation import (  # noqa: E402
     ConcurrentIsolationRejected,
     directory_fingerprint,
     require_disjoint_profiles,
+    require_isolated_transition,
     require_untouched,
 )
 from gate_prerequisites import PrerequisiteMissing, by_name, require  # noqa: E402
@@ -131,6 +132,20 @@ class BrowserLine:
             except subprocess.TimeoutExpired:
                 continue
 
+    def crash(self) -> None:
+        """模拟该业务线自己的 Chromium 进程树硬崩溃。"""
+        if self.process is None or self.process.poll() is not None:
+            return
+        group = os.getpgid(self.process.pid)
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(group, signal.SIGKILL)
+        try:
+            self.process.wait(timeout=10)
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError(
+                f"the {self.name} process group survived SIGKILL"
+            ) from error
+
 
 def seed_operations_profile(profile: Path) -> None:
     """造一个"已登录"的运营 Profile，内容静止。
@@ -156,6 +171,50 @@ def processes_from(marker: str) -> list[int]:
         if head.isdigit():
             pids.append(int(head))
     return pids
+
+
+def liveness(lines: list[BrowserLine]) -> dict[str, bool]:
+    return {line.name: line.alive() for line in lines}
+
+
+def require_transition(
+    *,
+    lines: list[BrowserLine],
+    before: dict[str, bool],
+    stopped: set[str],
+    scenario: str,
+) -> None:
+    try:
+        require_isolated_transition(
+            before=before,
+            after=liveness(lines),
+            stopped=stopped,
+            scenario=scenario,
+        )
+    except ConcurrentIsolationRejected as error:
+        fail(str(error))
+
+
+def start_lines(lines: list[BrowserLine]) -> None:
+    threads = [threading.Thread(target=line.start) for line in lines]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+    time.sleep(SETTLE_SECONDS)
+    dead = [name for name, alive in liveness(lines).items() if not alive]
+    if dead:
+        fail(f"concurrent browser lines failed to start: {dead}")
+
+
+def stop_lines(lines: list[BrowserLine], *, crash: bool) -> None:
+    action = BrowserLine.crash if crash else BrowserLine.stop
+    threads = [threading.Thread(target=action, args=(line,)) for line in lines]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    time.sleep(SETTLE_SECONDS)
 
 
 def main() -> int:
@@ -203,61 +262,95 @@ def main() -> int:
 
         lines = [BrowserLine(name, executable, profiles[name]) for name in LINE_NAMES]
         operations, browser_use, render = lines
-
-        # --- 阶段一：运营 Profile 静止，另外两条线并发跑 -----------------------
-        #
-        # 这是真正要防的事：用户没在做 RPA，但平台登录态就在磁盘上；此时跑渲染或
-        # Browser Use，两者的输入（生成的 HTML、网页内容 + 模型输出）都不可信，
-        # 绝不能碰到那个 Profile。
-        #
-        # 第一版判据是"三条线一起跑，运营 Profile 不变"——那是错的：运营浏览器
-        # 自己在跑，它当然一直在写自己的缓存、会话和数据库，一跑就是几十个文件变化。
-        # 把运营线的**浏览器**停下、只留 Profile，才问得出"别人有没有碰它"。
-        seed_operations_profile(operations.profile)
-        before = directory_fingerprint(operations.profile)
-        # 落空防护：指纹为空时"未被碰过"是空对空，什么都没证明。
-        if not before:
-            fail("the operations profile fingerprint is empty — the comparison proves nothing")
-
-        announce("Operations profile is at rest; starting the other two lines concurrently")
-        threads = [threading.Thread(target=line.start) for line in (browser_use, render)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(timeout=60)
-        time.sleep(SETTLE_SECONDS)
-        for line in (browser_use, render):
-            if not line.alive():
-                fail(f"the {line.name} line died during the concurrent run")
-
         try:
-            require_untouched(
-                operations.profile, before, directory_fingerprint(operations.profile)
+            # --- 阶段一：运营 Profile 静止，另外两条线并发跑 -------------------
+            #
+            # 这是真正要防的事：用户没在做 RPA，但平台登录态就在磁盘上；此时跑
+            # 渲染或 Browser Use，两者的输入都不可信，绝不能碰到那个 Profile。
+            seed_operations_profile(operations.profile)
+            before_profile = directory_fingerprint(operations.profile)
+            if not before_profile:
+                fail(
+                    "the operations profile fingerprint is empty — "
+                    "the comparison proves nothing"
+                )
+
+            announce(
+                "Operations profile is at rest; starting the other two lines concurrently"
             )
-        except ConcurrentIsolationRejected as error:
-            fail(str(error))
-        announce("Neither line touched the operations profile — byte for byte unchanged")
+            start_lines([browser_use, render])
+            try:
+                require_untouched(
+                    operations.profile,
+                    before_profile,
+                    directory_fingerprint(operations.profile),
+                )
+            except ConcurrentIsolationRejected as error:
+                fail(str(error))
+            announce(
+                "Neither line touched the operations profile — byte for byte unchanged"
+            )
 
-        # --- 阶段二：三条线同时在跑，验证进程树互相独立 -----------------------
-        operations.start()
-        time.sleep(SETTLE_SECONDS)
-        for line in lines:
-            if not line.alive():
-                fail(f"the {line.name} line is not running in the three-way phase")
-        announce("All three lines are running at the same time")
+            # --- 阶段二：三条线同时在跑，逐项验证生命周期隔离 -----------------
+            operations.start()
+            time.sleep(SETTLE_SECONDS)
+            if not operations.alive():
+                fail("the operations line is not running in the three-way phase")
+            announce("All three lines are running at the same time")
 
-        announce("Killing the Browser Use line; the other two must survive")
-        browser_use.stop()
-        time.sleep(SETTLE_SECONDS)
-        if browser_use.alive():
-            fail("the Browser Use line refused to stop")
-        for survivor in (operations, render):
-            if not survivor.alive():
-                fail(f"killing one line took down {survivor.name} — the trees are not independent")
-        announce("Killing one line left the other two running")
+            before_cancel = liveness(lines)
+            announce("Cancelling the Browser Use line; the other two must survive")
+            browser_use.stop()
+            time.sleep(SETTLE_SECONDS)
+            require_transition(
+                lines=lines,
+                before=before_cancel,
+                stopped={"browser_use"},
+                scenario="user cancellation",
+            )
+            announce("User cancellation left the other two lines running")
 
-        for line in lines:
-            line.stop()
+            browser_use.start()
+            time.sleep(SETTLE_SECONDS)
+            before_crash = liveness(lines)
+            announce("Crashing the render line; the other two must survive")
+            render.crash()
+            time.sleep(SETTLE_SECONDS)
+            require_transition(
+                lines=lines,
+                before=before_crash,
+                stopped={"render"},
+                scenario="worker crash",
+            )
+            announce("A render crash left operations and Browser Use running")
+
+            render.start()
+            time.sleep(SETTLE_SECONDS)
+            before_emergency_stop = liveness(lines)
+            announce("Triggering the global emergency stop")
+            stop_lines(lines, crash=True)
+            require_transition(
+                lines=lines,
+                before=before_emergency_stop,
+                stopped=set(LINE_NAMES),
+                scenario="global emergency stop",
+            )
+            announce("The emergency stop removed all three process trees")
+
+            announce("Restarting all three lines for the App-exit cleanup")
+            start_lines(lines)
+            before_app_exit = liveness(lines)
+            stop_lines(lines, crash=False)
+            require_transition(
+                lines=lines,
+                before=before_app_exit,
+                stopped=set(LINE_NAMES),
+                scenario="App exit",
+            )
+            announce("App exit gracefully removed all three process trees")
+        finally:
+            for line in lines:
+                line.stop()
 
     deadline = time.monotonic() + 30
     leftover = [pid for pid in processes_from(os.fspath(executable)) if pid not in preexisting]
@@ -271,8 +364,9 @@ def main() -> int:
 
     print(
         "CQ-03 acceptance passed: three lines shared one packaged Chromium binary with "
-        "disjoint profiles and independent process trees; killing one left the others "
-        "running, the operations profile was never touched, and nothing was left behind"
+        "disjoint profiles and independent process trees; cancellation and a worker crash "
+        "left the other lines running, emergency stop and App exit removed every tree, "
+        "the operations profile was never touched, and nothing was left behind"
     )
     return 0
 

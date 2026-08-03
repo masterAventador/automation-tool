@@ -24,7 +24,7 @@ from uuid import UUID, uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-sys.path.insert(0, str(ROOT / "backend" / "src"))
+sys.path.insert(0, str(ROOT / "backend/src"))
 
 from automation_tool.executor.local_editing_worker import (  # noqa: E402
     LocalMaterialWorkerFailureCode,

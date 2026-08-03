@@ -1,13 +1,14 @@
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
+use std::path::Path;
 use std::sync::OnceLock;
 use std::time::Duration;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use regex::Regex;
-use reqwest::header::{ACCEPT, AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE};
+use reqwest::header::{ACCEPT, AUTHORIZATION, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::redirect::Policy;
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
@@ -31,6 +32,7 @@ const DEFAULT_LOCAL_CONTROL_PLANE_ORIGIN: &str = "http://127.0.0.1:8765";
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const IDEMPOTENCY_KEY_HEADER: &str = "idempotency-key";
 const LAST_EVENT_ID_HEADER: &str = "last-event-id";
+const BILIBILI_PUBLISH_SESSION_HEADER: &str = "x-bilibili-publish-session";
 const MAX_RESPONSE_LENGTH: usize = 64 * 1024;
 const MAX_SSE_RESPONSE_LENGTH: usize = 512 * 1024;
 const MAX_SSE_FRAME_LENGTH: usize = 64 * 1024;
@@ -103,6 +105,10 @@ enum ControlPlaneOperation {
     LogoutAccountSession,
     ChangeAccountPassword,
     RecoverAccountPassword,
+    PrepareBilibiliPublish,
+    UploadBilibiliPublishVideo,
+    SubmitBilibiliPublish,
+    CancelBilibiliPublishSession,
 }
 
 impl ControlPlaneOperation {
@@ -158,14 +164,18 @@ impl ControlPlaneOperation {
             | Self::LoginAccountSession
             | Self::RefreshAccountSession
             | Self::ChangeAccountPassword
-            | Self::RecoverAccountPassword => "POST",
+            | Self::RecoverAccountPassword
+            | Self::PrepareBilibiliPublish
+            | Self::SubmitBilibiliPublish => "POST",
             Self::ReconcileEditingJob => "PATCH",
             Self::UpdateEditingMaterialDescription
             | Self::SaveEditingProjectTimeline
-            | Self::ReplaceTaskTargetExclusions => "PUT",
+            | Self::ReplaceTaskTargetExclusions
+            | Self::UploadBilibiliPublishVideo => "PUT",
             Self::LogoutAccountSession
             | Self::RevokeAccountInstallation
-            | Self::DeleteEditingMaterial => "DELETE",
+            | Self::DeleteEditingMaterial
+            | Self::CancelBilibiliPublishSession => "DELETE",
         }
     }
 
@@ -237,6 +247,16 @@ impl ControlPlaneOperation {
             Self::LogoutAccountSession => "/api/v1/account-sessions/current",
             Self::ChangeAccountPassword => "/api/v1/account-password/changes",
             Self::RecoverAccountPassword => "/api/v1/account-password/recovery",
+            Self::PrepareBilibiliPublish => "/api/v1/publishing/bilibili/jobs/{publish_job_id}",
+            Self::UploadBilibiliPublishVideo => {
+                "/api/v1/publishing/bilibili/jobs/{publish_job_id}/video"
+            }
+            Self::SubmitBilibiliPublish => {
+                "/api/v1/publishing/bilibili/jobs/{publish_job_id}/submission"
+            }
+            Self::CancelBilibiliPublishSession => {
+                "/api/v1/publishing/bilibili/jobs/{publish_job_id}/session"
+            }
         }
     }
 
@@ -291,7 +311,11 @@ impl ControlPlaneOperation {
             Self::LogoutAccountSession
             | Self::ChangeAccountPassword
             | Self::RecoverAccountPassword
-            | Self::DeleteEditingMaterial => 204,
+            | Self::DeleteEditingMaterial
+            | Self::CancelBilibiliPublishSession => 204,
+            Self::PrepareBilibiliPublish => 201,
+            Self::UploadBilibiliPublishVideo => 200,
+            Self::SubmitBilibiliPublish => 202,
         }
     }
 
@@ -331,6 +355,7 @@ impl ControlPlaneOperation {
                 | Self::ApplySmartEditMaterialWriteback
                 | Self::DeleteEditingMaterial
                 | Self::ReconcileEditingJob
+                | Self::SubmitBilibiliPublish
         )
     }
 }
@@ -373,8 +398,13 @@ enum ControlPlaneRequestTarget<'a> {
         cursor: Option<&'a str>,
         limit: u16,
     },
+    #[cfg_attr(
+        all(feature = "desktop-e2e", not(feature = "control-plane-e2e")),
+        allow(dead_code)
+    )]
     EditingMaterialDigest(&'a str),
     EditingJob(&'a str),
+    BilibiliPublishJob(&'a str),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -497,6 +527,111 @@ pub struct AccountDevice {
 #[serde(deny_unknown_fields)]
 struct AccountDeviceListResponse {
     devices: Vec<AccountDevice>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum BilibiliPublishPhase {
+    Prepared,
+    VideoUploaded,
+    Dispatched,
+    Submitted,
+    Failed,
+    OutcomeUncertain,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BilibiliPublishResponse {
+    publish_job_id: String,
+    phase: BilibiliPublishPhase,
+    request_digest: String,
+    resource_id: Option<String>,
+    replayed: bool,
+    session_token: Option<String>,
+    credential_rotation: Option<crate::bilibili_service_settings::BilibiliCredentialRotation>,
+}
+
+pub struct BilibiliPublishControlResult {
+    phase: BilibiliPublishPhase,
+    resource_id: Option<String>,
+    replayed: bool,
+    session_token: Option<Zeroizing<String>>,
+    credential_rotation: Option<crate::bilibili_service_settings::BilibiliCredentialRotation>,
+}
+
+impl std::fmt::Debug for BilibiliPublishControlResult {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("BilibiliPublishControlResult")
+            .field("phase", &self.phase)
+            .field("resource_id", &self.resource_id)
+            .field("replayed", &self.replayed)
+            .finish_non_exhaustive()
+    }
+}
+
+impl BilibiliPublishControlResult {
+    pub const fn phase(&self) -> BilibiliPublishPhase {
+        self.phase
+    }
+
+    pub fn resource_id(&self) -> Option<&str> {
+        self.resource_id.as_deref()
+    }
+
+    pub const fn replayed(&self) -> bool {
+        self.replayed
+    }
+
+    pub fn session_token(&self) -> Option<&str> {
+        self.session_token.as_deref().map(|value| value.as_str())
+    }
+
+    pub fn into_session_token(mut self) -> Option<Zeroizing<String>> {
+        self.session_token.take()
+    }
+
+    pub fn credential_rotation(
+        &self,
+    ) -> Option<&crate::bilibili_service_settings::BilibiliCredentialRotation> {
+        self.credential_rotation.as_ref()
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BilibiliCredentialRequest<'a> {
+    client_id: &'a str,
+    app_secret: &'a str,
+    access_token: &'a str,
+    refresh_token: &'a str,
+    expires_at_epoch_seconds: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BilibiliMaterialRequest<'a> {
+    size_bytes: u64,
+    duration_seconds: u32,
+    sha256: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BilibiliArchiveRequest<'a> {
+    title: &'a str,
+    tid: u32,
+    tag: &'a str,
+    description: &'a str,
+    no_reprint: u8,
+}
+
+#[derive(Serialize)]
+struct PrepareBilibiliPublishRequest<'a> {
+    credential: BilibiliCredentialRequest<'a>,
+    material: BilibiliMaterialRequest<'a>,
+    archive: BilibiliArchiveRequest<'a>,
 }
 
 #[derive(Serialize)]
@@ -663,6 +798,10 @@ struct SmartEditMaterialWritebackResponse {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(
+    all(feature = "desktop-e2e", not(feature = "control-plane-e2e")),
+    allow(dead_code)
+)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct EditingMaterialRegistrationRequest {
     material_id: String,
@@ -1409,6 +1548,201 @@ impl ControlPlaneClient {
         parse_device_session(&response_body, capability)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub async fn prepare_bilibili_publish<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        publish_job_id: &str,
+        size_bytes: u64,
+        duration_seconds: u32,
+        sha256: &str,
+        title: &str,
+        description: &str,
+        credential: &crate::bilibili_service_settings::BilibiliServiceCredential,
+    ) -> Result<BilibiliPublishControlResult, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_canonical_uuid_v4(publish_job_id)?;
+        if size_bytes == 0
+            || duration_seconds == 0
+            || !is_lower_hex_digest(sha256)
+            || require_safe_exact_text(title, 80).is_err()
+            || require_safe_exact_text(description, 250).is_err()
+        {
+            return Err(protocol_invalid());
+        }
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let request = PrepareBilibiliPublishRequest {
+            credential: BilibiliCredentialRequest {
+                client_id: credential.client_id(),
+                app_secret: credential.app_secret(),
+                access_token: credential.access_token(),
+                refresh_token: credential.refresh_token(),
+                expires_at_epoch_seconds: credential.expires_at_epoch_seconds(),
+            },
+            material: BilibiliMaterialRequest {
+                size_bytes,
+                duration_seconds,
+                sha256,
+            },
+            archive: BilibiliArchiveRequest {
+                title,
+                tid: credential.tid(),
+                tag: credential.tag(),
+                description,
+                no_reprint: credential.no_reprint(),
+            },
+        };
+        let payload = Zeroizing::new(serde_json::to_vec(&request).map_err(|_| protocol_invalid())?);
+        let response = self
+            .execute_bilibili_json(
+                ControlPlaneOperation::PrepareBilibiliPublish,
+                session.token(),
+                publish_job_id,
+                None,
+                Some(payload.as_slice()),
+            )
+            .await?;
+        let result = parse_bilibili_publish_response(&response, publish_job_id)?;
+        if result.phase() != BilibiliPublishPhase::Prepared || result.session_token().is_none() {
+            return Err(protocol_invalid());
+        }
+        Ok(result)
+    }
+
+    pub async fn upload_bilibili_publish_video<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        publish_job_id: &str,
+        publish_session: &str,
+        path: &Path,
+        expected_size_bytes: u64,
+    ) -> Result<BilibiliPublishControlResult, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_canonical_uuid_v4(publish_job_id)?;
+        require_bilibili_publish_session(publish_session)?;
+        if expected_size_bytes == 0 {
+            return Err(protocol_invalid());
+        }
+        let metadata = tokio::fs::metadata(path).await.map_err(|_| {
+            ControlPlaneError::new(ControlPlaneErrorCode::StorageUnavailable, false)
+        })?;
+        if !metadata.is_file() || metadata.len() != expected_size_bytes {
+            return Err(ControlPlaneError::new(
+                ControlPlaneErrorCode::StorageUnavailable,
+                false,
+            ));
+        }
+        let file = tokio::fs::File::open(path).await.map_err(|_| {
+            ControlPlaneError::new(ControlPlaneErrorCode::StorageUnavailable, false)
+        })?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let request_id = new_request_id()?;
+        let request_path = request_path(
+            ControlPlaneOperation::UploadBilibiliPublishVideo,
+            Some(ControlPlaneRequestTarget::BilibiliPublishJob(
+                publish_job_id,
+            )),
+        )?;
+        let request = self
+            .client
+            .put(format!("{}{request_path}", self.origin))
+            .timeout(Duration::from_secs(2 * 60 * 60))
+            .header(ACCEPT, "application/json")
+            .header(CONTENT_TYPE, "video/mp4")
+            .header(CONTENT_LENGTH, expected_size_bytes.to_string())
+            .header(REQUEST_ID_HEADER, &request_id)
+            .header(AUTHORIZATION, format!("Bearer {}", session.token()))
+            .header(BILIBILI_PUBLISH_SESSION_HEADER, publish_session)
+            .body(reqwest::Body::wrap_stream(
+                tokio_util::io::ReaderStream::new(file),
+            ));
+        let response = self
+            .send_bilibili_request(
+                ControlPlaneOperation::UploadBilibiliPublishVideo,
+                &request_id,
+                request,
+            )
+            .await?;
+        let result = parse_bilibili_publish_response(&response, publish_job_id)?;
+        if result.phase() != BilibiliPublishPhase::VideoUploaded || result.session_token().is_some()
+        {
+            return Err(protocol_invalid());
+        }
+        Ok(result)
+    }
+
+    pub async fn submit_bilibili_publish<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        publish_job_id: &str,
+        publish_session: &str,
+    ) -> Result<BilibiliPublishControlResult, ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_canonical_uuid_v4(publish_job_id)?;
+        require_bilibili_publish_session(publish_session)?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response = self
+            .execute_bilibili_json(
+                ControlPlaneOperation::SubmitBilibiliPublish,
+                session.token(),
+                publish_job_id,
+                Some(publish_session),
+                None,
+            )
+            .await?;
+        let result = parse_bilibili_publish_response(&response, publish_job_id)?;
+        if result.session_token().is_some()
+            || !matches!(
+                result.phase(),
+                BilibiliPublishPhase::Dispatched
+                    | BilibiliPublishPhase::Submitted
+                    | BilibiliPublishPhase::Failed
+                    | BilibiliPublishPhase::OutcomeUncertain
+            )
+        {
+            return Err(protocol_invalid());
+        }
+        Ok(result)
+    }
+
+    pub async fn cancel_bilibili_publish_session<S>(
+        &self,
+        vault: &DeviceCredentialVault<S>,
+        publish_job_id: &str,
+        publish_session: &str,
+    ) -> Result<(), ControlPlaneError>
+    where
+        S: SecretStore,
+    {
+        require_canonical_uuid_v4(publish_job_id)?;
+        require_bilibili_publish_session(publish_session)?;
+        let session = self
+            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
+            .await?;
+        let response = self
+            .execute_bilibili_json(
+                ControlPlaneOperation::CancelBilibiliPublishSession,
+                session.token(),
+                publish_job_id,
+                Some(publish_session),
+                None,
+            )
+            .await?;
+        require_empty_response(response.as_slice())
+    }
+
     pub async fn revoke_device_credential<S>(
         &self,
         vault: &DeviceCredentialVault<S>,
@@ -1458,6 +1792,10 @@ impl ControlPlaneClient {
         parse_editing_project_list(&body)
     }
 
+    #[cfg_attr(
+        all(feature = "desktop-e2e", not(feature = "control-plane-e2e")),
+        allow(dead_code)
+    )]
     pub(crate) async fn find_editing_material_by_digest<S>(
         &self,
         vault: &DeviceCredentialVault<S>,
@@ -1520,6 +1858,10 @@ impl ControlPlaneClient {
         parse_editing_material_list(&body)
     }
 
+    #[cfg_attr(
+        all(feature = "desktop-e2e", not(feature = "control-plane-e2e")),
+        allow(dead_code)
+    )]
     pub(crate) async fn register_editing_material<S>(
         &self,
         vault: &DeviceCredentialVault<S>,
@@ -2571,6 +2913,90 @@ impl ControlPlaneClient {
         result
     }
 
+    async fn execute_bilibili_json(
+        &self,
+        operation: ControlPlaneOperation,
+        bearer: &str,
+        publish_job_id: &str,
+        publish_session: Option<&str>,
+        body: Option<&[u8]>,
+    ) -> Result<Zeroizing<Vec<u8>>, ControlPlaneError> {
+        let request_id = new_request_id()?;
+        let path = request_path(
+            operation,
+            Some(ControlPlaneRequestTarget::BilibiliPublishJob(
+                publish_job_id,
+            )),
+        )?;
+        let url = format!("{}{path}", self.origin);
+        let mut request = match operation.method() {
+            "POST" => self.client.post(url),
+            "PUT" => self.client.put(url),
+            "DELETE" => self.client.delete(url),
+            _ => return Err(protocol_invalid()),
+        }
+        .header(ACCEPT, "application/json")
+        .header(REQUEST_ID_HEADER, &request_id)
+        .header(AUTHORIZATION, format!("Bearer {bearer}"));
+        if let Some(token) = publish_session {
+            request = request.header(BILIBILI_PUBLISH_SESSION_HEADER, token);
+        }
+        if let Some(payload) = body {
+            request = request
+                .header(CONTENT_TYPE, "application/json")
+                .body(payload.to_vec());
+        }
+        self.send_bilibili_request(operation, &request_id, request)
+            .await
+    }
+
+    async fn send_bilibili_request(
+        &self,
+        operation: ControlPlaneOperation,
+        request_id: &str,
+        request: reqwest::RequestBuilder,
+    ) -> Result<Zeroizing<Vec<u8>>, ControlPlaneError> {
+        let result = async {
+            let mut response = request
+                .send()
+                .await
+                .map_err(|_| transport_error(operation))?;
+            let metadata = ResponseMetadata {
+                status: response.status().as_u16(),
+                request_id: header_text(response.headers(), REQUEST_ID_HEADER),
+                content_type: header_text(response.headers(), CONTENT_TYPE.as_str()),
+                cache_control: header_text(response.headers(), CACHE_CONTROL.as_str()),
+            };
+            validate_response_metadata(operation, request_id, &metadata)?;
+            if response
+                .content_length()
+                .is_some_and(|length| length > MAX_RESPONSE_LENGTH as u64)
+            {
+                return Err(protocol_invalid());
+            }
+            let mut body = Zeroizing::new(Vec::new());
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|_| transport_error(operation))?
+            {
+                if body.len() + chunk.len() > MAX_RESPONSE_LENGTH {
+                    return Err(protocol_invalid());
+                }
+                body.extend_from_slice(&chunk);
+            }
+            Ok(body)
+        }
+        .await;
+        if let Err(error) = &result {
+            crate::app_logging::record_failure(
+                crate::app_logging::DesktopLogEvent::ControlPlaneRequestFailed,
+                error,
+            );
+        }
+        result
+    }
+
     async fn execute_without_logging(
         &self,
         operation: ControlPlaneOperation,
@@ -2842,6 +3268,16 @@ fn request_path(
             Ok(format!("/api/v1/tasks/{task_id}/events"))
         }
         (
+            operation @ (ControlPlaneOperation::PrepareBilibiliPublish
+            | ControlPlaneOperation::UploadBilibiliPublishVideo
+            | ControlPlaneOperation::SubmitBilibiliPublish
+            | ControlPlaneOperation::CancelBilibiliPublishSession),
+            Some(ControlPlaneRequestTarget::BilibiliPublishJob(publish_job_id)),
+        ) => {
+            require_canonical_uuid_v4(publish_job_id)?;
+            Ok(operation.path().replace("{publish_job_id}", publish_job_id))
+        }
+        (
             ControlPlaneOperation::ListTasks
             | ControlPlaneOperation::ListEditingProjects
             | ControlPlaneOperation::GetEditingProject
@@ -2867,7 +3303,11 @@ fn request_path(
             | ControlPlaneOperation::ResumeTask
             | ControlPlaneOperation::CancelTask
             | ControlPlaneOperation::EmergencyStopTask
-            | ControlPlaneOperation::RevokeAccountInstallation,
+            | ControlPlaneOperation::RevokeAccountInstallation
+            | ControlPlaneOperation::PrepareBilibiliPublish
+            | ControlPlaneOperation::UploadBilibiliPublishVideo
+            | ControlPlaneOperation::SubmitBilibiliPublish
+            | ControlPlaneOperation::CancelBilibiliPublishSession,
             _,
         )
         | (_, Some(_)) => Err(protocol_invalid()),
@@ -3290,6 +3730,35 @@ fn parse_account_device(body: &[u8]) -> Result<AccountDevice, ControlPlaneError>
     let device: AccountDevice = parse_exact_json(body)?;
     validate_account_device(&device)?;
     Ok(device)
+}
+
+fn parse_bilibili_publish_response(
+    body: &[u8],
+    expected_publish_job_id: &str,
+) -> Result<BilibiliPublishControlResult, ControlPlaneError> {
+    let response: BilibiliPublishResponse = parse_exact_json(body)?;
+    require_canonical_uuid_v4(expected_publish_job_id)?;
+    if response.publish_job_id != expected_publish_job_id
+        || !is_lower_hex_digest(&response.request_digest)
+        || response
+            .resource_id
+            .as_deref()
+            .is_some_and(|value| !is_bilibili_resource_id(value))
+        || (response.resource_id.is_some()
+            != matches!(response.phase, BilibiliPublishPhase::Submitted))
+    {
+        return Err(protocol_invalid());
+    }
+    if let Some(token) = response.session_token.as_deref() {
+        require_bilibili_publish_session(token)?;
+    }
+    Ok(BilibiliPublishControlResult {
+        phase: response.phase,
+        resource_id: response.resource_id,
+        replayed: response.replayed,
+        session_token: response.session_token.map(Zeroizing::new),
+        credential_rotation: response.credential_rotation,
+    })
 }
 
 fn require_login_input(login_name: &str, password: &str) -> Result<(), ControlPlaneError> {
@@ -3967,6 +4436,31 @@ fn require_safe_exact_text(
         return Err(protocol_invalid());
     }
     Ok(())
+}
+
+fn is_lower_hex_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+}
+
+fn is_bilibili_resource_id(value: &str) -> bool {
+    value.len() == 12
+        && value.starts_with("BV")
+        && value[2..].bytes().all(|byte| byte.is_ascii_alphanumeric())
+}
+
+fn require_bilibili_publish_session(value: &str) -> Result<(), ControlPlaneError> {
+    if (32..=128).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        Ok(())
+    } else {
+        Err(protocol_invalid())
+    }
 }
 
 fn require_action_message_template(value: &str) -> Result<(), ControlPlaneError> {
@@ -4974,6 +5468,10 @@ impl EditingProjectListPage {
     }
 }
 
+#[cfg_attr(
+    all(feature = "desktop-e2e", not(feature = "control-plane-e2e")),
+    allow(dead_code)
+)]
 impl EditingMaterialRegistrationRequest {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
@@ -5305,6 +5803,10 @@ impl EditingMaterialSnapshot {
         self.has_audio
     }
 
+    #[cfg_attr(
+        all(feature = "desktop-e2e", not(feature = "control-plane-e2e")),
+        allow(dead_code)
+    )]
     pub(crate) fn content_digest(&self) -> &str {
         &self.content_digest
     }
@@ -5813,17 +6315,18 @@ mod tests {
 
     use super::{
         new_request_id, parse_account_device, parse_account_device_list, parse_account_session,
-        parse_created_task, parse_device_session, parse_douyin_platform_session,
-        parse_douyin_platform_session_logout_prepare, parse_editing_job,
-        parse_editing_material_list, parse_editing_project, parse_editing_timeline,
-        parse_health_response, parse_installation_access, parse_installation_registration,
-        parse_registration_challenge, parse_revoked_credential, parse_rotated_credential,
-        parse_sse_frame, parse_system_version_response, parse_task_control, parse_task_discovery,
-        parse_task_list, parse_task_snapshot_body, parse_task_target_preview,
-        parse_task_target_results, parse_workbench_metrics, parse_workbench_status, request_path,
-        require_idempotency_key, require_list_cursor, require_preview_cursor, required_credential,
-        sse_frame_end, transport_error, validate_preview_command, validate_response_metadata,
-        validated_demo_origin, validated_loopback_origin, ControlPlaneErrorCode,
+        parse_bilibili_publish_response, parse_created_task, parse_device_session,
+        parse_douyin_platform_session, parse_douyin_platform_session_logout_prepare,
+        parse_editing_job, parse_editing_material_list, parse_editing_project,
+        parse_editing_timeline, parse_health_response, parse_installation_access,
+        parse_installation_registration, parse_registration_challenge, parse_revoked_credential,
+        parse_rotated_credential, parse_sse_frame, parse_system_version_response,
+        parse_task_control, parse_task_discovery, parse_task_list, parse_task_snapshot_body,
+        parse_task_target_preview, parse_task_target_results, parse_workbench_metrics,
+        parse_workbench_status, request_path, require_idempotency_key, require_list_cursor,
+        require_preview_cursor, required_credential, sse_frame_end, transport_error,
+        validate_preview_command, validate_response_metadata, validated_demo_origin,
+        validated_loopback_origin, BilibiliPublishPhase, ControlPlaneErrorCode,
         ControlPlaneOperation, ControlPlaneRequestTarget, DemoBootstrap, DeviceSessionCapability,
         DouyinSearchExposureAction, DouyinSearchExposureTaskDefinition, EditingJobStatus,
         EditingTimelineDraft, ResponseMetadata, SmartEditNarrationMaterialRequest,
@@ -6340,6 +6843,30 @@ mod tests {
                 "/api/v1/account-password/recovery",
                 204,
             ),
+            (
+                ControlPlaneOperation::PrepareBilibiliPublish,
+                "POST",
+                "/api/v1/publishing/bilibili/jobs/{publish_job_id}",
+                201,
+            ),
+            (
+                ControlPlaneOperation::UploadBilibiliPublishVideo,
+                "PUT",
+                "/api/v1/publishing/bilibili/jobs/{publish_job_id}/video",
+                200,
+            ),
+            (
+                ControlPlaneOperation::SubmitBilibiliPublish,
+                "POST",
+                "/api/v1/publishing/bilibili/jobs/{publish_job_id}/submission",
+                202,
+            ),
+            (
+                ControlPlaneOperation::CancelBilibiliPublishSession,
+                "DELETE",
+                "/api/v1/publishing/bilibili/jobs/{publish_job_id}/session",
+                204,
+            ),
         ];
 
         for (operation, method, path, success_status) in operations {
@@ -6515,6 +7042,22 @@ mod tests {
             (
                 ControlPlaneOperation::RecoverAccountPassword,
                 "recoverAccountPassword",
+            ),
+            (
+                ControlPlaneOperation::PrepareBilibiliPublish,
+                "prepareBilibiliPublish",
+            ),
+            (
+                ControlPlaneOperation::UploadBilibiliPublishVideo,
+                "uploadBilibiliPublishVideo",
+            ),
+            (
+                ControlPlaneOperation::SubmitBilibiliPublish,
+                "submitBilibiliPublish",
+            ),
+            (
+                ControlPlaneOperation::CancelBilibiliPublishSession,
+                "cancelBilibiliPublishSession",
             ),
         ];
         let app_operations = operations
@@ -8922,6 +9465,87 @@ mod tests {
     }
 
     #[test]
+    fn bilibili_publish_responses_bind_jobs_sessions_phases_and_resource_ids() {
+        let prepared = serde_json::json!({
+            "publishJobId": IDENTIFIER,
+            "phase": "prepared",
+            "requestDigest": "a".repeat(64),
+            "resourceId": null,
+            "replayed": false,
+            "sessionToken": "b".repeat(32),
+            "credentialRotation": {
+                "accessToken": "rotated-access",
+                "refreshToken": "rotated-refresh",
+                "expiresAtEpochSeconds": 1_900_000_000_u64
+            }
+        });
+        let parsed = parse_bilibili_publish_response(
+            &serde_json::to_vec(&prepared).expect("response JSON"),
+            IDENTIFIER,
+        )
+        .expect("valid prepared response");
+        assert_eq!(parsed.phase(), BilibiliPublishPhase::Prepared);
+        assert_eq!(
+            parsed.session_token(),
+            Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        );
+        assert!(format!("{parsed:?}").contains("Prepared"));
+        assert!(!format!("{parsed:?}").contains("rotated-access"));
+
+        let submitted = serde_json::json!({
+            "publishJobId": IDENTIFIER,
+            "phase": "submitted",
+            "requestDigest": "c".repeat(64),
+            "resourceId": "BV17B4y1s7R1",
+            "replayed": true,
+            "sessionToken": null,
+            "credentialRotation": null
+        });
+        let parsed = parse_bilibili_publish_response(
+            &serde_json::to_vec(&submitted).expect("response JSON"),
+            IDENTIFIER,
+        )
+        .expect("valid submitted response");
+        assert_eq!(parsed.phase(), BilibiliPublishPhase::Submitted);
+        assert_eq!(parsed.resource_id(), Some("BV17B4y1s7R1"));
+        assert!(parsed.replayed());
+
+        for invalid in [
+            {
+                let mut value = prepared.clone();
+                value["publishJobId"] = serde_json::json!("7f7eaf60-abf6-4ef7-b067-cf85a9fbb7bc");
+                value
+            },
+            {
+                let mut value = prepared.clone();
+                value["sessionToken"] = serde_json::json!("too-short");
+                value
+            },
+            {
+                let mut value = submitted.clone();
+                value["resourceId"] = serde_json::json!("av17000");
+                value
+            },
+            {
+                let mut value = prepared.clone();
+                value["resourceId"] = serde_json::json!("BV17B4y1s7R1");
+                value
+            },
+            {
+                let mut value = prepared.clone();
+                value["accessToken"] = serde_json::json!("unexpected");
+                value
+            },
+        ] {
+            assert!(parse_bilibili_publish_response(
+                &serde_json::to_vec(&invalid).expect("invalid response JSON"),
+                IDENTIFIER,
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
     fn transport_failure_marks_only_stateful_or_issuing_operations_uncertain() {
         for operation in [
             ControlPlaneOperation::CompleteInstallationRegistration,
@@ -8935,6 +9559,7 @@ mod tests {
             ControlPlaneOperation::LogoutAccountSession,
             ControlPlaneOperation::ChangeAccountPassword,
             ControlPlaneOperation::RecoverAccountPassword,
+            ControlPlaneOperation::SubmitBilibiliPublish,
         ] {
             let error = transport_error(operation);
             assert_eq!(error.code(), ControlPlaneErrorCode::OutcomeUncertain);

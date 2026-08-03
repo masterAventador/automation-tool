@@ -23,6 +23,7 @@ from cq_03_concurrent_isolation import (  # noqa: E402
     ConcurrentIsolationRejected,
     directory_fingerprint,
     require_disjoint_profiles,
+    require_isolated_transition,
     require_untouched,
 )
 
@@ -104,6 +105,88 @@ class UntouchedProfileTests(unittest.TestCase):
         self.assertIsNone(directory_fingerprint(missing))
         with self.assertRaises(ConcurrentIsolationRejected):
             require_untouched(missing, None, directory_fingerprint(self.profile))
+
+
+class IsolatedLifecycleTransitionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.running = {
+            "operations": True,
+            "browser_use": True,
+            "render": True,
+        }
+
+    def test_stopping_one_line_while_the_other_two_survive_passes(self) -> None:
+        require_isolated_transition(
+            before=self.running,
+            after={
+                "operations": True,
+                "browser_use": False,
+                "render": True,
+            },
+            stopped={"browser_use"},
+            scenario="user cancellation",
+        )
+
+    def test_a_cancel_that_takes_down_a_survivor_is_refused(self) -> None:
+        with self.assertRaisesRegex(
+            ConcurrentIsolationRejected, "operations unexpectedly stopped"
+        ):
+            require_isolated_transition(
+                before=self.running,
+                after={
+                    "operations": False,
+                    "browser_use": False,
+                    "render": True,
+                },
+                stopped={"browser_use"},
+                scenario="user cancellation",
+            )
+
+    def test_a_crashed_target_that_remains_alive_is_refused(self) -> None:
+        with self.assertRaisesRegex(
+            ConcurrentIsolationRejected, "render is still running"
+        ):
+            require_isolated_transition(
+                before=self.running,
+                after=self.running,
+                stopped={"render"},
+                scenario="worker crash",
+            )
+
+    def test_a_predead_baseline_is_refused(self) -> None:
+        with self.assertRaisesRegex(
+            ConcurrentIsolationRejected, "browser_use was not running before"
+        ):
+            require_isolated_transition(
+                before={**self.running, "browser_use": False},
+                after={
+                    "operations": True,
+                    "browser_use": False,
+                    "render": True,
+                },
+                stopped={"browser_use"},
+                scenario="user cancellation",
+            )
+
+    def test_missing_or_unknown_lines_are_refused(self) -> None:
+        with self.assertRaisesRegex(
+            ConcurrentIsolationRejected, "line set changed"
+        ):
+            require_isolated_transition(
+                before=self.running,
+                after={"operations": True, "browser_use": False},
+                stopped={"browser_use"},
+                scenario="user cancellation",
+            )
+        with self.assertRaisesRegex(
+            ConcurrentIsolationRejected, "unknown stopped lines"
+        ):
+            require_isolated_transition(
+                before=self.running,
+                after=self.running,
+                stopped={"publisher"},
+                scenario="user cancellation",
+            )
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 import secrets
 from datetime import UTC, datetime, timedelta
+from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -52,7 +53,7 @@ async def create_installation(database: Database) -> UUID:
                 device_public_key=secrets.token_bytes(32),
             )
         )
-    return installation_id
+    return cast(UUID, installation_id)
 
 
 def credential_values(

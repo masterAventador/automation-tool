@@ -141,7 +141,11 @@ class StubSession:
         self._row = row
         self._scalar = scalar
 
-    async def execute(self, _statement: object) -> StubResult:
+    async def execute(
+        self,
+        _statement: object,
+        _parameters: object = None,
+    ) -> StubResult:
         return StubResult(self._row, self._scalar)
 
 
@@ -175,7 +179,11 @@ class ScriptedSession:
     def __init__(self, results: list[StubResult]) -> None:
         self._results = results
 
-    async def execute(self, _statement: object) -> StubResult:
+    async def execute(
+        self,
+        _statement: object,
+        _parameters: object = None,
+    ) -> StubResult:
         return self._results.pop(0)
 
 
@@ -955,6 +963,7 @@ async def test_an_identity_claim_loser_distinguishes_each_database_state() -> No
                         )
                     ),
                     StubResult(None),
+                    StubResult(None),
                 ]
             ),
         )
@@ -1076,9 +1085,12 @@ def test_original_audio_mode_round_trips_as_a_closed_enum(
     assert ambient is not None
     assert ambient.clips[0].original_audio_mode is mode
     documents = repository_module._column_values(hydrated)["tracks"]
-    assert cast(list[dict[str, object]], documents)[2]["clips"][0][  # type: ignore[index]
-        "original_audio_mode"
-    ] == mode.value
+    assert (
+        cast(list[dict[str, object]], documents)[2]["clips"][0][  # type: ignore[index]
+            "original_audio_mode"
+        ]
+        == mode.value
+    )
 
 
 @pytest.mark.parametrize("stored", ["duck", 1, True, {}])

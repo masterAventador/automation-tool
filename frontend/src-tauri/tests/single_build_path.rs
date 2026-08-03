@@ -72,6 +72,12 @@ const REVIEWED_INLINE_FEATURE_BRANCHES: &[(&str, &str)] = &[
     // directory. It is an output location, not a dependency lookup, so it
     // cannot hide a missing resource from the startup gate.
     ("lib.rs", "export_diagnostics"),
+    // LE-18 replaces only the interactive file-picker answer with an explicit
+    // acceptance fixture and remembers that fixture for the authenticated
+    // preview probe. Production still enters the same import transaction and
+    // neither branch supplies or bypasses a packaged runtime dependency.
+    ("lib.rs", "pick_editing_material"),
+    ("lib.rs", "import_editing_material"),
 ];
 
 /// Function names compiled differently per feature, each with the reason the

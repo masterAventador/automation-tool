@@ -77,9 +77,7 @@ def render_part_working_copy(
 
     for index in copy:
         if index not in declared:
-            raise SlotAnchorRejected(
-                f"copy addresses text run {index}, which no slot declares"
-            )
+            raise SlotAnchorRejected(f"copy addresses text run {index}, which no slot declares")
 
     for slot in slots:
         node = nodes.get(slot.index)
@@ -88,9 +86,7 @@ def render_part_working_copy(
                 f"the document has no text run {slot.index}; it has {len(nodes)}"
             )
         if node.text.strip() != slot.original:
-            raise SlotAnchorRejected(
-                f"text run {slot.index} no longer reads the frozen original"
-            )
+            raise SlotAnchorRejected(f"text run {slot.index} no longer reads the frozen original")
         if node.parent_tag != slot.parent_tag:
             raise SlotAnchorRejected(
                 f"text run {slot.index} moved to a <{node.parent_tag}> element"
@@ -103,8 +99,11 @@ def render_part_working_copy(
     # run it belongs to, and running the two passes separately would leave the
     # second one working against offsets the first had already moved.
     edits = [
-        (nodes[index].start, nodes[index].end,
-         _substituted(html[nodes[index].start : nodes[index].end], copy[index]))
+        (
+            nodes[index].start,
+            nodes[index].end,
+            _substituted(html[nodes[index].start : nodes[index].end], copy[index]),
+        )
         for index in copy
     ]
     edits.extend(_slot_marks(nodes, declared, copy, html))
@@ -143,8 +142,7 @@ def _slot_marks(
         span = (node.parent_open_start, node.parent_open_end)  # type: ignore[attr-defined]
         if span[0] < 0:
             raise SlotAnchorRejected(
-                f"text run {index} has no element to mark; a slot always sits "
-                "inside one"
+                f"text run {index} has no element to mark; a slot always sits inside one"
             )
         by_element.setdefault(span, []).append(index)
 
@@ -245,9 +243,7 @@ def write_part_working_copy(
     part_directory = catalog_root / "items" / name
     documents = sorted(part_directory.glob("*.html"))
     if len(documents) != 1:
-        raise SlotAnchorRejected(
-            f"the catalog carries no single document for part {name!r}"
-        )
+        raise SlotAnchorRejected(f"the catalog carries no single document for part {name!r}")
     document = documents[0]
 
     source = document.read_text(encoding="utf-8")
@@ -273,13 +269,9 @@ def write_part_working_copy(
         copy=copy,
         font_css=font_css,
     )
-    if instance_key is not None and re.fullmatch(
-        r"[a-z0-9][a-z0-9-]{0,63}", instance_key
-    ) is None:
+    if instance_key is not None and re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", instance_key) is None:
         raise SlotAnchorRejected("part working-copy instance key is malformed")
-    entry_name = (
-        f"{instance_key}-{document.name}" if instance_key is not None else document.name
-    )
+    entry_name = f"{instance_key}-{document.name}" if instance_key is not None else document.name
     entry = f"{directory}/items/{name}/{entry_name}"
     workspace.write_text(entry, rendered)  # type: ignore[attr-defined]
     _copy_referenced(
@@ -337,9 +329,7 @@ def referenced_assets(
             try:
                 relative = target.relative_to(catalog_root.resolve())
             except ValueError:
-                raise SlotAnchorRejected(
-                    f"a reference leaves the catalog: {reference}"
-                ) from None
+                raise SlotAnchorRejected(f"a reference leaves the catalog: {reference}") from None
             if target in seen:
                 continue
             seen.add(target)
@@ -391,18 +381,16 @@ def working_copy_assets(entry_html: str, workspace: object) -> tuple[str, ...]:
         # blocked; they must not pull another shot's files into this segment.
         on_missing="skip",
     )
-    return tuple(
-        sorted(f"{WORKING_COPY_DIRECTORY}/{relative}" for relative in assets)
-    )
+    return tuple(sorted(f"{WORKING_COPY_DIRECTORY}/{relative}" for relative in assets))
 
 
 __all__ = [
     "BASELINE_COPY_DIRECTORY",
     "PART_TO_CATALOG_ROOT",
-    "PartSlot",
     "SHARED_DEPENDENCIES",
-    "SlotAnchorRejected",
     "WORKING_COPY_DIRECTORY",
+    "PartSlot",
+    "SlotAnchorRejected",
     "referenced_assets",
     "render_part_working_copy",
     "working_copy_assets",

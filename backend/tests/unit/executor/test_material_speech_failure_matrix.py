@@ -34,6 +34,7 @@ from automation_tool.executor.material_speech_transcription import (
     BailianSpeechTranscriptionConfig,
     SpeechTranscriptionRejected,
 )
+from automation_tool.executor.silero_vad import CHUNK_SAMPLES
 
 API_KEY = "sk-private-speech-failure-matrix-key"
 PRIVATE_MARKER = "/Users/operator/private/background-passerby.mp4"
@@ -165,7 +166,7 @@ def test_music_and_environment_without_confirmed_speech_stay_out_of_asr(
         duration_ms: int,
     ) -> os.stat_result:
         assert duration_ms == 640
-        output.write_bytes(b"\0\0" * pipeline.CHUNK_SAMPLES * len(probabilities))
+        output.write_bytes(b"\0\0" * CHUNK_SAMPLES * len(probabilities))
         return output.stat()
 
     monkeypatch.setattr(pipeline, "_extract_pcm", extract)
@@ -209,7 +210,7 @@ def test_dialect_and_noisy_unicode_transcript_is_preserved(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    transcript = "侬好，今朝风噪蛮大。\nLet's keep going.\t嗯"  # noqa: RUF001
+    transcript = "侬好，今朝风噪蛮大。\nLet's keep going.\t嗯"
     analyzer, asr = _analyzer(
         tmp_path,
         monkeypatch,

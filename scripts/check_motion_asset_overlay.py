@@ -213,6 +213,14 @@ def verify_file(record: dict, asset_root: Path) -> None:
             raise CheckError("font embedding rights are incomplete")
         if record["sha256"] != record.get("bm12LockedSha256"):
             raise CheckError("font digest differs from the BM-12 verified artifact")
+        license_relative = canonical_relative(record.get("licensePath"))
+        license_path = asset_root / license_relative
+        if not license_path.is_file() or license_path.is_symlink():
+            raise CheckError("font license is missing, linked or not regular")
+        if license_path.stat().st_size != record.get("licenseTextBytes"):
+            raise CheckError("font license byte count drifted")
+        if sha256_file(license_path) != record.get("licenseTextSha256"):
+            raise CheckError("font license digest drifted")
     elif category == "music_sfx":
         if record.get("syncUseAllowed") is not True:
             raise CheckError(f"audio sync rights are incomplete: {record['id']}")
@@ -265,11 +273,17 @@ def verify_overlay(overlay_path: Path, asset_root: Path, rights_path: Path) -> d
             raise CheckError(f"symlink is not allowed in the asset tree: {path}")
         if path.is_file():
             on_disk.add(path.relative_to(asset_root).as_posix())
-    if on_disk != path_set:
+    companion_paths = {
+        canonical_relative(asset.get("licensePath")).as_posix()
+        for asset in assets
+        if asset["category"] == "font"
+    }
+    declared_paths = path_set | companion_paths
+    if on_disk != declared_paths:
         raise CheckError(
             "asset tree has missing or undeclared files: "
-            f"missing={sorted(path_set - on_disk)[:5]}, "
-            f"extra={sorted(on_disk - path_set)[:5]}"
+            f"missing={sorted(declared_paths - on_disk)[:5]}, "
+            f"extra={sorted(on_disk - declared_paths)[:5]}"
         )
 
     generated_roles = {

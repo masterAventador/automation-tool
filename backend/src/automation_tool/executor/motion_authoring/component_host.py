@@ -221,18 +221,16 @@ def component_film_metadata(*, name: str, source: str) -> ComponentFilmMetadata:
     width = re.search(r"data-width=[\"']([0-9]+)", source, flags=re.IGNORECASE)
     height = re.search(r"data-height=[\"']([0-9]+)", source, flags=re.IGNORECASE)
     if duration is None or width is None or height is None:
-        raise ComponentHostRejected(
-            f"{name}: complete component has no declared capture metadata"
-        )
+        raise ComponentHostRejected(f"{name}: complete component has no declared capture metadata")
     duration_seconds = float(duration.group(1))
     canvas_width = int(width.group(1))
     canvas_height = int(height.group(1))
-    if duration_seconds <= 0 or not (16 <= canvas_width <= 7680) or not (
-        16 <= canvas_height <= 4320
+    if (
+        duration_seconds <= 0
+        or not (16 <= canvas_width <= 7680)
+        or not (16 <= canvas_height <= 4320)
     ):
-        raise ComponentHostRejected(
-            f"{name}: complete component capture metadata is out of range"
-        )
+        raise ComponentHostRejected(f"{name}: complete component capture metadata is out of range")
     return ComponentFilmMetadata(
         duration_seconds=duration_seconds,
         width=canvas_width,
@@ -242,9 +240,7 @@ def component_film_metadata(*, name: str, source: str) -> ComponentFilmMetadata:
 
 def _complete_document(source: str) -> str:
     backdrop = (
-        "<style data-motion-component-backdrop>"
-        "html,body{background:#10151d!important}"
-        "</style>"
+        "<style data-motion-component-backdrop>html,body{background:#10151d!important}</style>"
     )
     if not re.search(r"</head\s*>", source, flags=re.IGNORECASE):
         raise ComponentHostRejected("complete component document has no closing head")
@@ -365,7 +361,11 @@ def _transition_film_content(
   setAll('.bp-name,#title-main,#outro-main,#title-h1,#outro-h2,.card-title', sceneA, sizes.sceneA);
   setAll('#title-card .category,#outro-card .category', sceneA, sizes.sceneA);
   setAll('.bp-prompt,#title-count,#title-sub,#outro-tag,.card-sub', sceneB, sizes.sceneB);
-  setAll('.bp-desc,.info-desc,#title-label,#outro-label,.subtitle,.info-cat,#info-text', detail, sizes.detail);
+  setAll(
+    '.bp-desc,.info-desc,#title-label,#outro-label,.subtitle,.info-cat,#info-text',
+    detail,
+    sizes.detail
+  );
   setAll('.info-name', sceneA, sizes.sceneA);
 }})();
 </script>
@@ -455,18 +455,14 @@ def _copy_markup(
     safe_body = escape_untrusted_text(body)
     item_markup = (
         '<ul class="motion-component-list">'
-        + "".join(
-            f"<li>{escape_untrusted_text(item)}</li>" for item in items if item
-        )
+        + "".join(f"<li>{escape_untrusted_text(item)}</li>" for item in items if item)
         + "</ul>"
         if any(items)
         else ""
     )
     target = f" {host.target_class}" if host.target_class else ""
     if host.kind == "cards":
-        labels = list(items[:4]) or [
-            copy for copy in (headline, body, headline, body) if copy
-        ]
+        labels = list(items[:4]) or [copy for copy in (headline, body, headline, body) if copy]
         labels = labels[:4]
         while len(labels) < 4:
             labels.append(labels[-1] if labels else headline)
@@ -475,7 +471,7 @@ def _copy_markup(
         cards = "".join(
             f'<div class="parallax-{effect}-card" data-{prefix}-row="{index // 2}" '
             f'data-{prefix}-col="{index % 2}"'
-            f'{" data-" + prefix + "-focus=\"true\"" if index == 3 else ""}>'
+            f"{' data-' + prefix + '-focus="true"' if index == 3 else ''}>"
             f'<span data-motion-copy-boundary style="font-size:'
             f'{_fitted_font_size(label, maximum=52, width=320, lines=4)}px">'
             f"{escape_untrusted_text(label)}</span></div>"
@@ -491,11 +487,7 @@ def _copy_markup(
             '<div class="motion-component-cards-heading motion-component-copy">'
             f'<div style="font-size:{heading_size}px">'
             f"{escape_untrusted_text(headline)}</div>"
-            + (
-                f'<div class="motion-component-cards-body">{safe_body}</div>'
-                if body
-                else ""
-            )
+            + (f'<div class="motion-component-cards-body">{safe_body}</div>' if body else "")
             + "</div>"
         )
         return (
@@ -535,9 +527,7 @@ def _copy_markup(
         f'<div class="motion-component-kicker motion-component-copy">{safe_body}</div>'
         f'<div class="motion-component-hero motion-component-copy{target}" '
         f'data-motion-copy-boundary style="font-size:{font_size}px">'
-        f"{escape_untrusted_text(headline)}</div>"
-        + item_markup
-        + "</div>"
+        f"{escape_untrusted_text(headline)}</div>" + item_markup + "</div>"
     )
 
 

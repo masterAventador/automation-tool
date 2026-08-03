@@ -65,9 +65,7 @@ def test_audio_plan_is_versioned_path_free_and_allows_no_audio() -> None:
         for field in fields(model)
     }
     assert not any(
-        token in name
-        for name in names
-        for token in ("path", "argv", "codec", "has_audio")
+        token in name for name in names for token in ("path", "argv", "codec", "has_audio")
     )
 
 

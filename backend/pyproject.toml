@@ -93,6 +93,10 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "RUF", "SIM", "UP"]
+# Chinese product copy, prompts, and test rationale use full-width punctuation
+# intentionally; the ambiguous-Unicode family is useful for identifiers but
+# treats normal Chinese prose as an error.
+ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.format]
 docstring-code-format = true

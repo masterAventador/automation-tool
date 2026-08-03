@@ -153,9 +153,7 @@ def downgrade() -> None:
             nullable=False,
             server_default=sa.text("now()"),
         ),
-        sa.CheckConstraint(
-            "timeline_revision >= 1", name="ck_editing_output_lineages_revision"
-        ),
+        sa.CheckConstraint("timeline_revision >= 1", name="ck_editing_output_lineages_revision"),
         sa.CheckConstraint(
             "provider_id ~ '^[a-z0-9_]{2,64}$'",
             name="ck_editing_output_lineages_provider",
@@ -172,12 +170,8 @@ def downgrade() -> None:
             "cost_source in ('estimated', 'billed')",
             name="ck_editing_output_lineages_cost_source",
         ),
-        sa.CheckConstraint(
-            "cost_currency = 'CNY'", name="ck_editing_output_lineages_currency"
-        ),
-        sa.CheckConstraint(
-            "cost_billed_minutes >= 1", name="ck_editing_output_lineages_minutes"
-        ),
+        sa.CheckConstraint("cost_currency = 'CNY'", name="ck_editing_output_lineages_currency"),
+        sa.CheckConstraint("cost_billed_minutes >= 1", name="ck_editing_output_lineages_minutes"),
         sa.CheckConstraint(
             "cost_tier_id ~ '^[a-z0-9][a-z0-9_-]{0,63}$'",
             name="ck_editing_output_lineages_tier",

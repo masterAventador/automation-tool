@@ -218,7 +218,7 @@ async def test_receive_rejects_future_observation_expired_wire_and_wrong_type() 
     )
     for candidate in invalid:
         with pytest.raises(PlatformSessionHealthRejected):
-            await service.receive(candidate)  # type: ignore[arg-type]
+            await service.receive(candidate)
     assert repository.pending is None
 
 
@@ -278,7 +278,7 @@ def test_typed_health_values_reject_malformed_fields_and_expose_circuit_state() 
     )
     for overrides in invalid:
         with pytest.raises(PlatformSessionHealthRejected):
-            PlatformSessionHealthProjection(**(valid | overrides))  # type: ignore[arg-type]
+            PlatformSessionHealthProjection(**(valid | overrides))
 
     pending = PendingPlatformSessionHealth(
         installation_id=installation_id,
@@ -288,7 +288,7 @@ def test_typed_health_values_reject_malformed_fields_and_expose_circuit_state() 
         observed_at=OBSERVED_AT,
         received_at=NOW,
     )
-    projection = PlatformSessionHealthProjection(**valid)  # type: ignore[arg-type]
+    projection = PlatformSessionHealthProjection(**valid)
     assert pending.circuit_open is True
     assert projection.circuit_open is True
 
@@ -320,7 +320,7 @@ def test_logout_gate_rejects_every_malformed_field() -> None:
     )
     for overrides in invalid:
         with pytest.raises(PlatformSessionHealthRejected):
-            PlatformSessionLogoutGate(**(valid | overrides))  # type: ignore[arg-type]
+            PlatformSessionLogoutGate(**(valid | overrides))
 
 
 @pytest.mark.asyncio

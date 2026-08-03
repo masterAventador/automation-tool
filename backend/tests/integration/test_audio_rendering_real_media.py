@@ -160,9 +160,7 @@ def test_real_graph_outputs_one_exact_48khz_stereo_timeline(tmp_path: Path) -> N
     )
     metadata = json.loads(probe.stdout)
 
-    assert metadata["streams"] == [
-        {"codec_type": "audio", "sample_rate": "48000", "channels": 2}
-    ]
+    assert metadata["streams"] == [{"codec_type": "audio", "sample_rate": "48000", "channels": 2}]
     assert float(metadata["format"]["duration"]) == pytest.approx(1.0, abs=0.001)
     print(
         "audioGraphReceipt="

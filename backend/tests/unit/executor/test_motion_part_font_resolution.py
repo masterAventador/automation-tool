@@ -24,6 +24,7 @@ machine and fine on another, which is the class of drift BM-16 exists to remove.
 from __future__ import annotations
 
 import pytest
+
 from automation_tool.executor.motion_authoring.part_typography import (
     FamilyPolicy,
     FontRequestUnmet,
@@ -57,7 +58,7 @@ LOCK = {
 CHINESE_ARTIFACT = "fonts/noto-sans-sc.woff2"
 
 
-def contract(families: list[dict]) -> dict:
+def contract(families: list[dict[str, object]]) -> dict[str, object]:
     return {"chineseFace": {"artifactPath": CHINESE_ARTIFACT}, "families": families}
 
 

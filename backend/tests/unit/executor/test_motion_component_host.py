@@ -90,7 +90,7 @@ window.attachMotionBlur = function (selector, timeline) {
         items=(),
     )
 
-    assert '../../offline-deps/js/gsap-3.14.2/gsap.min.js' in document
+    assert "../../offline-deps/js/gsap-3.14.2/gsap.min.js" in document
     assert "window.gsap.timeline({paused:true})" in document
     assert "window.attachMotionBlur('.motion-blur-target', timeline" in document
     assert "window.__timelines['motion-component-host'] = timeline" in document
@@ -282,8 +282,7 @@ def test_a_transition_block_binds_the_beat_to_both_real_scenes_before_capture() 
     ) in document
     assert "data-motion-transition-copy-line" in document
     assert (
-        "setAll('.bp-prompt,#title-count,#title-sub,#outro-tag,.card-sub', "
-        "sceneB, sizes.sceneB)"
+        "setAll('.bp-prompt,#title-count,#title-sub,#outro-tag,.card-sub', sceneB, sizes.sceneB)"
     ) in document
 
 
@@ -329,10 +328,11 @@ def test_transition_detail_keeps_its_role_size_when_it_matches_scene_b() -> None
     )
 
     assert "const fit = (element, value, size)" in document
-    assert (
-        "setAll('.bp-desc,.info-desc,#title-label,#outro-label,.subtitle,.info-cat,#info-text', "
-        "detail, sizes.detail)"
-    ) in document
+    assert re.search(
+        r"setAll\(\s*'\.bp-desc,\.info-desc,#title-label,#outro-label,"
+        r"\.subtitle,\.info-cat,#info-text',\s*detail,\s*sizes\.detail\s*\)",
+        document,
+    )
 
 
 def test_an_unknown_fragment_component_is_rejected_fail_closed() -> None:

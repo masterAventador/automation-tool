@@ -28,7 +28,10 @@ from pathlib import Path
 
 import pytest
 
-from automation_tool.executor.motion_authoring.agent import AuthoringWorkspace
+from automation_tool.executor.motion_authoring.agent import (
+    AuthoringWorkspace,
+    MotionAuthoringRejected,
+)
 from automation_tool.executor.motion_authoring.voiceover import (
     MAX_VOICEOVER_BYTES,
     VoiceoverConfig,
@@ -61,8 +64,11 @@ def _workspace(tmp_path: Path) -> AuthoringWorkspace:
 class _Gateway:
     """A stand-in for the service, so these tests never reach the network."""
 
-    def __init__(self, url: str = "http://x.oss-cn-beijing.aliyuncs.com/a.wav?sig=1",
-                 audio: bytes = b"RIFF....WAVE") -> None:
+    def __init__(
+        self,
+        url: str = "http://x.oss-cn-beijing.aliyuncs.com/a.wav?sig=1",
+        audio: bytes = b"RIFF....WAVE",
+    ) -> None:
         self.url = url
         self.audio = audio
         self.fetched: list[str] = []
@@ -86,13 +92,8 @@ def test_the_catalog_config_builds_from_a_key_the_request_carried() -> None:
         voiceover_config_from_catalog,
     )
 
-    catalog = (
-        Path(__file__).resolve().parents[4]
-        / "contracts/video/bailian-model-catalog.v1.json"
-    )
-    config = voiceover_config_from_catalog(
-        catalog_path=catalog, api_key="sk-" + "a" * 40
-    )
+    catalog = Path(__file__).resolve().parents[4] / "contracts/video/bailian-model-catalog.v1.json"
+    config = voiceover_config_from_catalog(catalog_path=catalog, api_key="sk-" + "a" * 40)
     assert config.base_url.startswith("https://")
     assert config.model_id
     assert config.audio_host_suffixes
@@ -162,7 +163,7 @@ def test_synthesis_writes_the_audio_inside_the_workspace(tmp_path: Path) -> None
 
 
 def test_a_path_escaping_the_workspace_is_refused(tmp_path: Path) -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(MotionAuthoringRejected):
         synthesize_voiceover(
             _config(),
             "x",
@@ -234,9 +235,7 @@ def test_the_catalog_declares_a_voiceover_purpose_with_its_own_endpoint() -> Non
     declared beside them instead of being a literal in the code.
     """
     catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
-    purpose = next(
-        entry for entry in catalog["purposes"] if entry["id"] == "voiceover"
-    )
+    purpose = next(entry for entry in catalog["purposes"] if entry["id"] == "voiceover")
     assert purpose["api_mode"] == "dashscope_native"
     assert purpose["base_url"] == "https://dashscope.aliyuncs.com/api/v1"
     assert purpose["default_model_id"] in purpose["allowed_model_ids"]
@@ -253,6 +252,7 @@ def test_the_config_is_built_from_the_catalog_and_the_secret(tmp_path: Path) -> 
 
 
 def test_no_secret_means_no_voiceover_rather_than_a_hidden_default(tmp_path: Path) -> None:
-    assert load_voiceover_config(
-        catalog_path=CATALOG_PATH, secret_path=tmp_path / "absent.json"
-    ) is None
+    assert (
+        load_voiceover_config(catalog_path=CATALOG_PATH, secret_path=tmp_path / "absent.json")
+        is None
+    )

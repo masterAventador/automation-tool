@@ -289,7 +289,7 @@ def test_text_boundaries_allow_layout_but_reject_controls_and_wrong_id_type() ->
     assert "\n" in with_layout.prompt and "\t" in with_layout.prompt
     with pytest.raises(InvalidVideoDomainModel):
         ContentBrief(
-            ArtifactId.new(),  # type: ignore[arg-type]
+            ArtifactId.new(),
             brief.prompt,
             brief.language,
             brief.target_duration_ms,
@@ -430,7 +430,7 @@ def test_render_job_rejects_wrong_ids_overlap_and_time_regression() -> None:
         {"created_at": NOW, "updated_at": datetime(2026, 7, 22, tzinfo=UTC)},
     ):
         with pytest.raises(InvalidVideoDomainModel):
-            RenderJob(**(values | changes))  # type: ignore[arg-type]
+            RenderJob(**(values | changes))
 
 
 def test_the_guard_does_not_depend_on_the_calling_verb() -> None:

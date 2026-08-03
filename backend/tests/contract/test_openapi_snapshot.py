@@ -62,12 +62,12 @@ def test_control_plane_system_fixtures_match_the_same_openapi_models() -> None:
     assert version.version == health.version
 
     openapi = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
-    assert openapi["paths"]["/api/v1/health"]["get"]["responses"]["200"][
-        "content"
-    ]["application/json"]["schema"] == {"$ref": "#/components/schemas/HealthResponse"}
-    assert openapi["paths"]["/api/v1/version"]["get"]["responses"]["200"][
-        "content"
-    ]["application/json"]["schema"] == {"$ref": "#/components/schemas/VersionResponse"}
+    assert openapi["paths"]["/api/v1/health"]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/HealthResponse"}
+    assert openapi["paths"]["/api/v1/version"]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/VersionResponse"}
 
 
 def test_openapi_cli_writes_and_reports_drift(

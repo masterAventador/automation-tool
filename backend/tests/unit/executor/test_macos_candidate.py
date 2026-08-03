@@ -6,12 +6,14 @@ import subprocess
 from pathlib import Path
 
 import pytest
+
 from automation_tool.executor import macos_candidate
 from automation_tool.executor.macos_candidate import (
     MacOSExecutorCandidateRejected,
     audit_macos_executor_candidate,
     build_macos_executor_candidate,
 )
+from automation_tool.executor.silero_vad import SileroVadUnavailable
 
 # This module audits the *macOS* candidate, and several of its fixtures are
 # POSIX artefacts rather than incidental spellings: a permission bit that
@@ -93,7 +95,7 @@ def test_audit_rejects_a_candidate_that_fails_the_silero_runtime_gate(
     monkeypatch.setattr(macos_candidate, "_verify_code_signatures", lambda paths: None)
 
     def reject(_bundle: Path) -> None:
-        raise macos_candidate.SileroVadUnavailable()
+        raise SileroVadUnavailable()
 
     monkeypatch.setattr(macos_candidate, "audit_packaged_silero_vad_runtime", reject)
     with pytest.raises(MacOSExecutorCandidateRejected):
@@ -538,7 +540,7 @@ def test_a_failed_pyinstaller_run_carries_its_own_reason(
             stderr=b"",
         )
 
-    monkeypatch.setattr(macos_candidate.subprocess, "run", failing_run)
+    monkeypatch.setattr(subprocess, "run", failing_run)
 
     with pytest.raises(MacOSExecutorCandidateRejected) as captured:
         macos_candidate._run_pyinstaller(
@@ -558,7 +560,7 @@ def test_a_pyinstaller_run_that_says_nothing_still_reports_that_it_said_nothing(
     def silent_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         return subprocess.CompletedProcess(args=[], returncode=1, stdout=b"", stderr=b"")
 
-    monkeypatch.setattr(macos_candidate.subprocess, "run", silent_run)
+    monkeypatch.setattr(subprocess, "run", silent_run)
 
     with pytest.raises(MacOSExecutorCandidateRejected) as captured:
         macos_candidate._run_pyinstaller(

@@ -21,9 +21,7 @@ _COMMAND_AUTHENTICATION_DOMAIN = b"automation-tool.local-executor-command.v1\0"
 _COMMAND_RESULT_AUTHENTICATION_DOMAIN = b"automation-tool.local-executor-result.v1\0"
 _COMMAND_PROOF_PREFIX = "atlcp1."
 _PUBLISH_COMMAND_AUTHENTICATION_DOMAIN = b"automation-tool.local-executor-publish-command.v1\0"
-_PUBLISH_DISPATCH_AUTHENTICATION_DOMAIN = (
-    b"automation-tool.local-executor-publish-dispatch.v1\0"
-)
+_PUBLISH_DISPATCH_AUTHENTICATION_DOMAIN = b"automation-tool.local-executor-publish-dispatch.v1\0"
 _ALLOWED_COMMANDS = frozenset(("douyin.login.open", "douyin.login.recheck"))
 _ALLOWED_SESSION_COMMANDS = frozenset(("douyin.logout.complete", "douyin.publish.release"))
 _ALLOWED_PUBLISH_COMMANDS = frozenset(("douyin.publish.preflight",))
@@ -316,10 +314,7 @@ class LocalSessionAuthenticator:
         if confirmation_id is None or target_account is None:
             raise LocalSessionAuthenticationRejected
         _require_uuid_v4(confirmation_id)
-        if (
-            not _bounded_text(target_account)
-            or len(target_account) > MAX_RESULT_ACCOUNT_CHARACTERS
-        ):
+        if not _bounded_text(target_account) or len(target_account) > MAX_RESULT_ACCOUNT_CHARACTERS:
             raise LocalSessionAuthenticationRejected
         return self._proof(
             _COMMAND_RESULT_AUTHENTICATION_DOMAIN,

@@ -161,10 +161,7 @@ class SideEffectConfirmationGate:
         self._pending[confirmation_id] = _PendingSideEffect(
             action=action, target_account=target_account, content_hash=content_hash
         )
-        summary = (
-            f"即将执行 {action}，目标账号 {target_account}，"
-            f"内容摘要 {content_hash[:12]}…"
-        )
+        summary = f"即将执行 {action}，目标账号 {target_account}，内容摘要 {content_hash[:12]}…"
         return SideEffectApproval(confirmation_id=confirmation_id, summary=summary)
 
     def authorize_dispatch(self, confirmation_id: str, *, confirmed: bool) -> str:

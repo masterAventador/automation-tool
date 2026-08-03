@@ -91,9 +91,7 @@ def test_the_tolerance_rides_on_top_of_the_baselines_own_excess() -> None:
 def test_an_extra_wrapped_line_is_overflow_and_names_the_budget() -> None:
     """多折一行（+34px ≈ 一倍字号）远超容差，必须点名槽号、宽度与字号。"""
     with pytest.raises(SlotProbeRejected) as caught:
-        require_no_new_overflow(
-            FROZEN, BOTH_FIT, _reading({13: FITS, 15: (200, 300, 94, 60)})
-        )
+        require_no_new_overflow(FROZEN, BOTH_FIT, _reading({13: FITS, 15: (200, 300, 94, 60)}))
     message = str(caught.value)
     assert "15" in message and "520" in message and "34" in message
     assert "vertically" in message
@@ -102,13 +100,9 @@ def test_an_extra_wrapped_line_is_overflow_and_names_the_budget() -> None:
 def test_one_pixel_of_width_is_rounding_but_two_is_overflow() -> None:
     """冻结预算的探针就是 +1 判的（measure-motion-part-slots.mjs），运行期换一把
     更严的尺子会把同一个槽判出不同结果。"""
-    require_no_new_overflow(
-        FROZEN, BOTH_FIT, _reading({13: (367, 366, 60, 60), 15: FITS})
-    )
+    require_no_new_overflow(FROZEN, BOTH_FIT, _reading({13: (367, 366, 60, 60), 15: FITS}))
     with pytest.raises(SlotProbeRejected) as caught:
-        require_no_new_overflow(
-            FROZEN, BOTH_FIT, _reading({13: (368, 366, 60, 60), 15: FITS})
-        )
+        require_no_new_overflow(FROZEN, BOTH_FIT, _reading({13: (368, 366, 60, 60), 15: FITS}))
     assert "horizontally" in str(caught.value)
 
 
@@ -128,9 +122,7 @@ def test_copy_that_pushes_the_part_beyond_its_stage_is_overflow() -> None:
 
 def test_stage_growth_within_the_line_box_grace_is_not_escape() -> None:
     """中文行框差同样会把文档撑高几像素；容差随本篇最大字号走（58px → 9px）。"""
-    require_no_new_overflow(
-        FROZEN, BOTH_FIT, _reading({13: FITS, 15: FITS}, stage=(1921, 1088))
-    )
+    require_no_new_overflow(FROZEN, BOTH_FIT, _reading({13: FITS, 15: FITS}, stage=(1921, 1088)))
 
 
 def test_a_stage_already_escaped_by_the_original_is_tolerated() -> None:

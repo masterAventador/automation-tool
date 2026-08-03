@@ -47,7 +47,7 @@ import urllib.request
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Never
 
 from automation_tool.executor.motion_authoring.authoring_workspace import (
     AuthoringWorkspace,
@@ -68,7 +68,7 @@ class VoiceoverRejected(RuntimeError):
     """A boundary of the voiceover path was violated."""
 
 
-def _reject(message: str) -> None:
+def _reject(message: str) -> Never:
     raise VoiceoverRejected(f"voiceover rejected: {message}")
 
 
@@ -140,7 +140,7 @@ def _post_json(url: str, body: bytes, headers: dict[str, str], timeout: int) -> 
     request = urllib.request.Request(url, data=body, method="POST", headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.read()
+            return bytes(response.read())
     except OSError as error:
         # Never surface the key or the upstream body; keep the reason bounded,
         # and keep "did not answer" distinct from "answered something wrong".
@@ -154,7 +154,7 @@ def _post_json(url: str, body: bytes, headers: dict[str, str], timeout: int) -> 
 def _get_bytes(url: str, timeout: int) -> bytes:
     try:
         with urllib.request.urlopen(url, timeout=timeout) as response:
-            return response.read(MAX_VOICEOVER_BYTES + 1)
+            return bytes(response.read(MAX_VOICEOVER_BYTES + 1))
     except OSError as error:
         raise VoiceoverRejected("voiceover rejected: audio download failed") from error
 
@@ -298,6 +298,7 @@ def voiceover_config_from_catalog(*, catalog_path: Path, api_key: str) -> Voiceo
         _reject("config shape invalid")
     purposes = catalog.get("purposes")
     _require(isinstance(purposes, list), "catalog purposes missing")
+    assert isinstance(purposes, list)
     purpose = next(
         (item for item in purposes if isinstance(item, dict) and item.get("id") == "voiceover"),
         None,
@@ -306,16 +307,20 @@ def voiceover_config_from_catalog(*, catalog_path: Path, api_key: str) -> Voiceo
     assert isinstance(purpose, dict)  # narrowed by the check above
     _require(purpose.get("api_mode") == "dashscope_native", "voiceover api mode drifted")
     suffixes = purpose.get("audio_host_suffixes")
-    _require(
-        isinstance(suffixes, list) and bool(suffixes),
-        "voiceover audio host suffixes missing",
-    )
+    if (
+        not isinstance(suffixes, list)
+        or not suffixes
+        or any(not isinstance(suffix, str) for suffix in suffixes)
+    ):
+        _reject("voiceover audio host suffixes missing")
+    assert isinstance(suffixes, list)
+    suffix_values = tuple(suffix for suffix in suffixes if isinstance(suffix, str))
     return VoiceoverConfig(
         base_url=purpose.get("base_url", ""),
         model_id=purpose.get("default_model_id", ""),
         api_key=api_key,
         voice=purpose.get("default_voice", "Cherry"),
-        audio_host_suffixes=tuple(suffixes),
+        audio_host_suffixes=suffix_values,
     )
 
 

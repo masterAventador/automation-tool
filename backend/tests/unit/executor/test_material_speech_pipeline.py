@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import io
 import os
+import shutil
+import subprocess
+import time
 import wave
 from pathlib import Path
 from types import SimpleNamespace
-from typing import ClassVar
+from typing import ClassVar, cast
 
 import pytest
 
@@ -56,9 +59,9 @@ class RecordingAsr:
 
 class FinishedExtraction:
     def __init__(self, argv: list[str], **kwargs: object) -> None:
-        assert kwargs["stdin"] is pipeline.subprocess.DEVNULL
-        assert kwargs["stdout"] is pipeline.subprocess.DEVNULL
-        assert kwargs["stderr"] is pipeline.subprocess.DEVNULL
+        assert kwargs["stdin"] is subprocess.DEVNULL
+        assert kwargs["stdout"] is subprocess.DEVNULL
+        assert kwargs["stderr"] is subprocess.DEVNULL
         self.argv = argv
         self.returncode = 0
         output = Path(argv[-1])
@@ -104,7 +107,8 @@ class RunningExtraction:
         self.wait_calls += 1
         if self.returncode is not None:
             return self.returncode
-        raise pipeline.subprocess.TimeoutExpired(self.argv, timeout)
+        assert timeout is not None
+        raise subprocess.TimeoutExpired(self.argv, timeout)
 
     def poll(self) -> int | None:
         return self.returncode
@@ -151,7 +155,7 @@ def test_only_extracted_wav_audio_crosses_the_asr_boundary(
         started.append(process)
         return process
 
-    monkeypatch.setattr(pipeline.subprocess, "Popen", start)
+    monkeypatch.setattr(subprocess, "Popen", start)
     vad = SequencedVad([0.9] * 10 + [0.0] * 10)
     asr = RecordingAsr()
     analyzer = LocalAudibleSpeechAnalyzer(
@@ -227,7 +231,7 @@ def test_the_t1_lazy_factory_constructs_the_concrete_lower_funnel_once(
     source = tmp_path / "factory-source.mp4"
     source.write_bytes(PRIVATE_VIDEO_BYTES)
     source, approved = approve_source(source)
-    monkeypatch.setattr(pipeline.subprocess, "Popen", FinishedExtraction)
+    monkeypatch.setattr(subprocess, "Popen", FinishedExtraction)
     vad = SequencedVad([0.9] * 10 + [0.0] * 10)
     asr = RecordingAsr()
     factory = LocalAudibleSpeechAnalyzerFactory(
@@ -301,7 +305,7 @@ def test_no_confirmed_speech_never_calls_asr(
     source = tmp_path / "ambient-only.mp4"
     source.write_bytes(PRIVATE_VIDEO_BYTES)
     source, approved = approve_source(source)
-    monkeypatch.setattr(pipeline.subprocess, "Popen", FinishedExtraction)
+    monkeypatch.setattr(subprocess, "Popen", FinishedExtraction)
     vad = SequencedVad([0.9] * 7 + [0.0] * 13)
     asr = RecordingAsr()
 
@@ -387,7 +391,7 @@ def test_transcription_limit_stops_before_a_third_asr_request(
     source = tmp_path / "bounded-transcript-source.mp4"
     source.write_bytes(PRIVATE_VIDEO_BYTES)
     source, approved = approve_source(source)
-    monkeypatch.setattr(pipeline.subprocess, "Popen", FinishedExtraction)
+    monkeypatch.setattr(subprocess, "Popen", FinishedExtraction)
     wav = pipeline._pcm_wav(b"\0\0" * 16)
     batch = SpeechAudioBatch(wav_bytes=wav, duration_ms=1)
     monkeypatch.setattr(
@@ -453,9 +457,12 @@ def test_windows_pcm_identity_uses_stable_birth_time(
     }
     descriptor = SimpleNamespace(**shared, st_ctime_ns=100)
     path = SimpleNamespace(**shared, st_ctime_ns=50)
-    monkeypatch.setattr(pipeline.os, "name", "nt")
+    monkeypatch.setattr(os, "name", "nt")
 
-    assert pipeline._same_pcm_file(descriptor, path)
+    assert pipeline._same_pcm_file(
+        cast(os.stat_result, descriptor),
+        cast(os.stat_result, path),
+    )
 
 
 def test_pcm_reader_requests_binary_mode(
@@ -473,8 +480,8 @@ def test_pcm_reader_requests_binary_mode(
         opened_with.append(flags)
         return native_open(path, flags & ~binary_flag)
 
-    monkeypatch.setattr(pipeline.os, "O_BINARY", binary_flag, raising=False)
-    monkeypatch.setattr(pipeline.os, "open", open_without_test_flag)
+    monkeypatch.setattr(os, "O_BINARY", binary_flag, raising=False)
+    monkeypatch.setattr(os, "open", open_without_test_flag)
 
     descriptor, _metadata = pipeline._open_stable_pcm(pcm, approved=approved)
     os.close(descriptor)
@@ -491,17 +498,14 @@ def test_output_at_the_exact_limit_is_accepted(tmp_path: Path) -> None:
             super().__init__(argv, **kwargs)
             Path(argv[-1]).write_bytes(b"\x00" * limit)
 
-    original = pipeline.subprocess.Popen
-    try:
-        pipeline.subprocess.Popen = ExactLimitExtraction  # type: ignore[assignment]
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(subprocess, "Popen", ExactLimitExtraction)
         pipeline._extract_pcm(
             tmp_path / "ffmpeg",
             tmp_path / "source.mp4",
             output,
             duration_ms=1,
         )
-    finally:
-        pipeline.subprocess.Popen = original
 
     assert output.stat().st_size == limit
 
@@ -513,7 +517,7 @@ def test_output_at_limit_plus_one_is_killed_and_reaped(
     limit = pipeline._pcm_output_limit(1)
     RunningExtraction.instances.clear()
     monkeypatch.setattr(RunningExtraction, "payload", b"\x00" * (limit + 1))
-    monkeypatch.setattr(pipeline.subprocess, "Popen", RunningExtraction)
+    monkeypatch.setattr(subprocess, "Popen", RunningExtraction)
 
     with pytest.raises(MaterialSpeechRejected):
         pipeline._extract_pcm(
@@ -541,7 +545,7 @@ def test_extraction_rejects_a_replaced_output_inode(
             output.unlink()
             output.write_bytes(payload)
 
-    monkeypatch.setattr(pipeline.subprocess, "Popen", ReplacingExtraction)
+    monkeypatch.setattr(subprocess, "Popen", ReplacingExtraction)
 
     with pytest.raises(MaterialSpeechRejected):
         pipeline._extract_pcm(
@@ -558,9 +562,9 @@ def test_timeout_kills_and_reaps_the_child(
 ) -> None:
     RunningExtraction.instances.clear()
     monkeypatch.setattr(RunningExtraction, "payload", b"\x00\x00")
-    monkeypatch.setattr(pipeline.subprocess, "Popen", RunningExtraction)
+    monkeypatch.setattr(subprocess, "Popen", RunningExtraction)
     moments = iter((0.0, 31.0))
-    monkeypatch.setattr(pipeline.time, "monotonic", lambda: next(moments))
+    monkeypatch.setattr(time, "monotonic", lambda: next(moments))
 
     with pytest.raises(MaterialSpeechRejected):
         pipeline._extract_pcm(
@@ -583,9 +587,9 @@ def test_cleanup_failure_cannot_replace_a_successful_business_result(
     source = tmp_path / "cleanup-source.mp4"
     source.write_bytes(PRIVATE_VIDEO_BYTES)
     source, approved = approve_source(source)
-    monkeypatch.setattr(pipeline.subprocess, "Popen", FinishedExtraction)
+    monkeypatch.setattr(subprocess, "Popen", FinishedExtraction)
     monkeypatch.setattr(
-        pipeline.shutil,
+        shutil,
         "rmtree",
         lambda _path: (_ for _ in ()).throw(OSError("cleanup failed")),
     )

@@ -3,7 +3,7 @@
 import uvicorn
 from fastapi import FastAPI
 
-from automation_tool.control_plane import create_app
+from automation_tool.control_plane.bootstrap.app import create_app
 from automation_tool.control_plane.bootstrap.local_provisioning import (
     local_app_data_directory,
     provision_local_registration_bootstrap,

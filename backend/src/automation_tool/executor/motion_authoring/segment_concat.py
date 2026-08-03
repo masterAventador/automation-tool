@@ -25,9 +25,10 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Sequence
+from typing import Final
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,9 +103,7 @@ def canvas_filter(canvas: FilmCanvas) -> str:
     )
 
 
-def require_joinable(
-    streams: Sequence[SegmentStream], canvas: FilmCanvas
-) -> int:
+def require_joinable(streams: Sequence[SegmentStream], canvas: FilmCanvas) -> int:
     """The film's total frame count, or a refusal naming what is off-canvas."""
     if not streams:
         raise SegmentMismatch("a film needs at least one segment")
@@ -162,9 +161,7 @@ def probe_segment(path: Path, *, ffprobe: Path) -> SegmentStream:
             frames=int(stream["nb_read_frames"]),
         )
     except (KeyError, IndexError, ValueError, ZeroDivisionError) as error:
-        raise SegmentMismatch(
-            f"ffprobe answered something unreadable about {path.name}"
-        ) from error
+        raise SegmentMismatch(f"ffprobe answered something unreadable about {path.name}") from error
 
 
 def concat_listing(segments: Sequence[Path]) -> str:
@@ -181,9 +178,7 @@ def concat_listing(segments: Sequence[Path]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def normalise_segment(
-    source: Path, destination: Path, *, canvas: FilmCanvas, ffmpeg: Path
-) -> None:
+def normalise_segment(source: Path, destination: Path, *, canvas: FilmCanvas, ffmpeg: Path) -> None:
     """Re-encode one segment onto the canvas."""
     completed = subprocess.run(
         [

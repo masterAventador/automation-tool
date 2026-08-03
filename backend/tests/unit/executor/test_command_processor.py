@@ -282,12 +282,9 @@ def test_recovery_reaches_valid_messages_after_more_than_one_historical_batch(
             active_deadline = ordinal == 1001
             message = batch[0].model_copy(
                 update={
-                    "message_id": UUID(
-                        f"923e4567-e89b-42d3-a456-{ordinal:012d}"
-                    ),
+                    "message_id": UUID(f"923e4567-e89b-42d3-a456-{ordinal:012d}"),
                     "idempotency_key": f"executor-recovery-history:{ordinal}",
-                    "deadline_at": NOW
-                    + timedelta(seconds=90 if active_deadline else 30),
+                    "deadline_at": NOW + timedelta(seconds=90 if active_deadline else 30),
                 }
             )
             envelope = message.model_dump_json()

@@ -424,6 +424,20 @@ B5-13/B5-14 的本机命令复用 E4-06 的每次启动 256-bit 本机会话，�
 
 MVP 不使用 AI 页面理解、stealth 或验证码识别。
 
+### 8.4 Browser Use 受控执行边界
+
+`browser_use` 是页面理解能力的受控 Provider 边界，不是第二套浏览器所有权。内置 Chromium
+仍由 App/Executor 启动：日常平台操作固定使用 `operations` 持久 Profile；无需登录态的
+一次性分析固定使用独立 `temporary Profile`，结束即清理，不能读取或复制运营登录数据。
+当前发布预检和页面动作仍由版本化 Playwright 页面对象确定性执行；接入模型 Agent 时也
+只能消费经过脱敏的页面事实，不能自行发现浏览器、连接任意 CDP 或持久化页面内容。
+
+必须复用运营页面时，唯一入口是 `BrowserSurfaceLease`：原控制器先暂停，租约再签发
+随机 loopback CDP 接管能力，并以 token、deadline 和连接状态约束释放。接管者断开前不能
+恢复 `operations`；失败、超时或状态不确定时两侧都 fail closed，资源所有者回收进程并
+重建可信页面后才能继续。密码、Cookie、Profile 路径和原始网页内容不进入模型输入、普通
+日志、Control Plane 或 React；高风险副作用还必须有绑定本次动作的单次用户确认。
+
 ## 9. 产品账号、安装实例与设备认证
 
 P9 本地 MVP 暂不要求产品账号，只使用已实现的 Installation 服务认证；任何客户 Demo 必须先完成 U9 账号体系，并让业务访问同时受产品账号与账号所属 Installation 约束。
@@ -919,6 +933,20 @@ EditingJob、PublishJob 三个状态机互不嵌套，只通过 Artifact 谱系�
 供应商（首期阿里云 IMS/ICE）DTO 不进入领域层，依赖方向为
 剪辑页面 → 剪辑领域 → Provider Adapter 单向。`VideoEditingProvider`
 契约由 VE-02 定义；本任务不建表、不加 API、不做 UI。
+
+### 17.1 两种视频制作执行链
+
+Control Plane 领域只认识 `material_montage_v1` 和 `motion_composition_v1` 两个稳定内部
+路由，以及共享的 Brief、Storyboard、Timeline、RenderJob 和 Artifact 语义；它不负责
+启动本机 Worker，也不接收本机路径、Profile、端口、密钥或供应商任务 ID。设备侧由
+Tauri/Rust 的 `LocalVideoOrchestrator` 执行这两个路由，并由
+`VideoJobWorkspaceStore` 为每个任务分配、复验和清理隔离工作区。
+
+`material_montage_v1` 连接内嵌素材制作 Worker，`motion_composition_v1` 连接受控编排、
+语音与动效渲染 Worker。两者可以共享安装包内已校验的 Chromium 和媒体工具链，但不能
+共享 Worker 会话、任务目录、checkpoint 或运行中状态。Worker 输出只有在大小、摘要、
+媒体类型、目录身份和链接边界全部通过后才原子导入 Artifact；取消、崩溃和 App 退出由
+设备侧受管进程树收口，Control Plane 始终只接收路径无关的任务与产物事实。
 
 ## 18. 错误模型
 

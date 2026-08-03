@@ -7,7 +7,6 @@ from fastapi.testclient import TestClient
 from httpx2 import Response
 from pydantic import ValidationError
 
-from automation_tool.control_plane import create_app
 from automation_tool.control_plane.api.errors import (
     AppError,
     TimelineRevisionConflictDetails,
@@ -16,6 +15,7 @@ from automation_tool.control_plane.api.errors import (
 from automation_tool.control_plane.application.executor_connection_registry import (
     ExecutorConnectionRegistry,
 )
+from automation_tool.control_plane.bootstrap.app import create_app
 
 
 def assert_error_response(
@@ -59,6 +59,8 @@ def test_factory_returns_isolated_apps_with_explicit_lifespan() -> None:
     assert second.state.task_event_convergence_service is None
     assert first.state.task_event_stream_service is None
     assert second.state.task_event_stream_service is None
+    assert first.state.bilibili_publishing_runtime is None
+    assert second.state.bilibili_publishing_runtime is None
     assert first.state.lifecycle_state == "created"
     assert second.state.lifecycle_state == "created"
 
@@ -67,6 +69,14 @@ def test_factory_returns_isolated_apps_with_explicit_lifespan() -> None:
         assert second.state.lifecycle_state == "created"
 
     assert first.state.lifecycle_state == "stopped"
+
+
+def test_bilibili_publishing_routes_are_part_of_the_production_api_surface() -> None:
+    schema = create_app(database=None).openapi()
+
+    assert "/api/v1/publishing/bilibili/jobs/{publish_job_id}" in schema["paths"]
+    assert "/api/v1/publishing/bilibili/jobs/{publish_job_id}/video" in schema["paths"]
+    assert "/api/v1/publishing/bilibili/jobs/{publish_job_id}/submission" in schema["paths"]
 
 
 def test_lifespan_tolerates_an_unavailable_registry_during_shutdown() -> None:
@@ -123,11 +133,20 @@ def test_timeline_revision_conflict_has_the_only_public_details_shape() -> None:
     }
 
 
+def test_timeline_revision_conflict_can_report_an_empty_current_revision() -> None:
+    details = TimelineRevisionConflictDetails(
+        kind="timeline_revision_conflict.v1",
+        currentRevision=0,
+    )
+
+    assert details.current_revision == 0
+
+
 @pytest.mark.parametrize(
     "details",
     [
         {"kind": "other", "currentRevision": 3},
-        {"kind": "timeline_revision_conflict.v1", "currentRevision": 0},
+        {"kind": "timeline_revision_conflict.v1", "currentRevision": -1},
         {"kind": "timeline_revision_conflict.v1", "currentRevision": True},
         {
             "kind": "timeline_revision_conflict.v1",

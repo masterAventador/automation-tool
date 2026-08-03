@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+
 from automation_tool.executor import windows_candidate
+from automation_tool.executor.silero_vad import SileroVadUnavailable
 from automation_tool.executor.windows_candidate import (
     WindowsExecutorCandidateRejected,
     audit_windows_executor_candidate,
@@ -74,7 +76,7 @@ def test_audit_rejects_a_candidate_that_fails_the_silero_runtime_gate(
     bundle = _candidate(tmp_path)
 
     def reject(_bundle: Path) -> None:
-        raise windows_candidate.SileroVadUnavailable()
+        raise SileroVadUnavailable()
 
     monkeypatch.setattr(windows_candidate, "audit_packaged_silero_vad_runtime", reject)
     with pytest.raises(WindowsExecutorCandidateRejected):
@@ -353,7 +355,7 @@ def test_a_failed_pyinstaller_run_carries_its_own_reason(
             stderr=b"PyInstaller traceback\n",
         )
 
-    monkeypatch.setattr(windows_candidate.subprocess, "run", failing_run)
+    monkeypatch.setattr(subprocess, "run", failing_run)
 
     with pytest.raises(WindowsExecutorCandidateRejected) as captured:
         windows_candidate._run_pyinstaller(

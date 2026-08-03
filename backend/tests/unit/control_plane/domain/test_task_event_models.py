@@ -76,7 +76,7 @@ def test_safe_task_event_message_accepts_only_bounded_redacted_single_line_text(
             assert value not in str(captured.value)
 
     with pytest.raises(InvalidTaskEventModel):
-        SafeTaskEventMessage(123)  # type: ignore[arg-type]
+        SafeTaskEventMessage(123)
 
 
 def test_snapshot_projection_is_strongly_typed_bounded_and_immutable() -> None:
@@ -91,7 +91,7 @@ def test_snapshot_projection_is_strongly_typed_bounded_and_immutable() -> None:
     assert projection.task_id == task_id
     assert projection.last_event_sequence == 11
     with pytest.raises(FrozenInstanceError):
-        projection.revision = 8  # type: ignore[misc]
+        projection.revision = 8
 
     invalid_values: tuple[dict[str, object], ...] = (
         {"task_id": "task"},
@@ -113,4 +113,4 @@ def test_snapshot_projection_is_strongly_typed_bounded_and_immutable() -> None:
     for overrides in invalid_values:
         values = baseline | overrides
         with pytest.raises(InvalidTaskEventModel):
-            TaskSnapshotProjection(**values)  # type: ignore[arg-type]
+            TaskSnapshotProjection(**values)

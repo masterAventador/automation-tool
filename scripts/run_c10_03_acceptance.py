@@ -317,7 +317,7 @@ def main() -> None:
                     f"APP_VERSION={app_version}",
                     "--build-arg",
                     f"VCS_REF={revision}",
-                    str(BACKEND_ROOT),
+                    str(REPOSITORY_ROOT),
                 ]
             )
             run(["docker", "volume", "create", secret_volume])

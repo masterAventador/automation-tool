@@ -58,7 +58,10 @@ def test_a_shot_with_no_narration_is_as_long_as_its_motion() -> None:
 
 def test_a_part_with_no_declared_motion_is_as_long_as_the_line() -> None:
     """The 25 components declare no duration; upstream gives them none."""
-    assert shot_seconds(Shot(part="caption-kinetic-slam", motion_seconds=None, voice_seconds=4.0)) == 4.0
+    assert (
+        shot_seconds(Shot(part="caption-kinetic-slam", motion_seconds=None, voice_seconds=4.0))
+        == 4.0
+    )
 
 
 def test_a_shot_with_neither_is_refused() -> None:
@@ -160,9 +163,7 @@ def test_the_fixed_cost_is_paid_once_per_segment_not_once_per_film() -> None:
     the real wait.
     """
     shots = [Shot(part=f"p{n}", motion_seconds=6.0, voice_seconds=None) for n in range(20)]
-    plan = plan_film(
-        shots, frames_per_second=FPS, segment_frames_maximum=SEGMENT_FRAMES_MAXIMUM
-    )
+    plan = plan_film(shots, frames_per_second=FPS, segment_frames_maximum=SEGMENT_FRAMES_MAXIMUM)
 
     # 20 * (30 + 180 * 0.4) = 20 * 102
     assert estimate_render_cost(plan, COST) == pytest.approx(2040.0)
@@ -180,9 +181,7 @@ def test_a_film_far_past_the_old_ceiling_is_planned_rather_than_refused() -> Non
     route A.
     """
     shots = [Shot(part=f"p{n}", motion_seconds=10.0, voice_seconds=None) for n in range(9)]
-    plan = plan_film(
-        shots, frames_per_second=FPS, segment_frames_maximum=SEGMENT_FRAMES_MAXIMUM
-    )
+    plan = plan_film(shots, frames_per_second=FPS, segment_frames_maximum=SEGMENT_FRAMES_MAXIMUM)
 
     assert plan.total_seconds == pytest.approx(90.0)
     assert plan.total_frames == 2700

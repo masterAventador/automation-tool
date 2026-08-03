@@ -111,18 +111,14 @@ def test_a_film_longer_than_the_renderer_can_capture_never_reaches_the_model(
 ) -> None:
     model = _NeverCalledModel()
     with pytest.raises(MotionAuthoringEntryRejected):
-        run_motion_authoring_entry(
-            _request(workspace, durationSeconds=10_000), model_call=model
-        )
+        run_motion_authoring_entry(_request(workspace, durationSeconds=10_000), model_call=model)
     assert model.calls == 0
 
 
 def test_a_request_that_is_not_the_declared_shape_is_refused(workspace: Path) -> None:
     model = _NeverCalledModel()
     with pytest.raises(MotionAuthoringEntryRejected):
-        run_motion_authoring_entry(
-            {"workspace": str(workspace), "brief": BRIEF}, model_call=model
-        )
+        run_motion_authoring_entry({"workspace": str(workspace), "brief": BRIEF}, model_call=model)
     assert model.calls == 0
 
 
@@ -146,9 +142,7 @@ def test_an_empty_browser_executable_is_refused_before_the_model(
 ) -> None:
     model = _NeverCalledModel()
     with pytest.raises(MotionAuthoringEntryRejected) as caught:
-        run_motion_authoring_entry(
-            _request(workspace, browserExecutable=""), model_call=model
-        )
+        run_motion_authoring_entry(_request(workspace, browserExecutable=""), model_call=model)
     assert caught.value.rejection_reason == "browser_executable_missing"
     assert model.calls == 0
 
@@ -175,7 +169,7 @@ def test_the_authorized_browser_reaches_the_agent_as_a_probe(
         _request(workspace, browserExecutable=str(workspace / "chromium")),
         _request(workspace),
     ):
-        with pytest.raises(Exception):
+        with pytest.raises(AssertionError, match="recording agent never authors"):
             run_motion_authoring_entry(request, model_call=_NeverCalledModel())
     with_field, without_field = seen
     assert callable(with_field)
@@ -202,9 +196,7 @@ def test_an_empty_ffprobe_executable_is_refused_before_the_model(
 ) -> None:
     model = _NeverCalledModel()
     with pytest.raises(MotionAuthoringEntryRejected) as caught:
-        run_motion_authoring_entry(
-            _request(workspace, ffprobeExecutable=""), model_call=model
-        )
+        run_motion_authoring_entry(_request(workspace, ffprobeExecutable=""), model_call=model)
     assert caught.value.rejection_reason == "ffprobe_executable_missing"
     assert model.calls == 0
 
@@ -228,7 +220,7 @@ def test_the_ffprobe_path_reaches_the_agent_as_a_narrator(
         _request(workspace, ffprobeExecutable=str(workspace / "ffprobe")),
         _request(workspace),
     ):
-        with pytest.raises(Exception):
+        with pytest.raises(AssertionError, match="recording agent never authors"):
             run_motion_authoring_entry(request, model_call=_NeverCalledModel())
     with_field, without_field = seen
     assert callable(with_field)
@@ -244,9 +236,7 @@ def test_a_workspace_outside_the_request_is_refused(tmp_path: Path) -> None:
     """
     model = _NeverCalledModel()
     with pytest.raises(MotionAuthoringEntryRejected):
-        run_motion_authoring_entry(
-            _request(tmp_path, workspace="relative/path"), model_call=model
-        )
+        run_motion_authoring_entry(_request(tmp_path, workspace="relative/path"), model_call=model)
     assert model.calls == 0
 
 
@@ -500,9 +490,7 @@ def test_every_fixed_upstream_rejection_has_its_own_closed_reason_token() -> Non
     # reason: a template defect answered as a generic refusal would tell the
     # user to rewrite a sentence that was never involved.
     gate_tokens = {
-        classifier(
-            f"motion authoring rejected: composition failed static gates: ['{code}']"
-        )
+        classifier(f"motion authoring rejected: composition failed static gates: ['{code}']")
         for code in (
             "canvas_mismatch",
             "clip_coverage",
@@ -535,9 +523,7 @@ def test_every_fixed_upstream_rejection_has_its_own_closed_reason_token() -> Non
         is not None
     )
     assert (
-        classifier(
-            "motion authoring rejected: composition failed static gates: ['user_supplied']"
-        )
+        classifier("motion authoring rejected: composition failed static gates: ['user_supplied']")
         is None
     )
 
@@ -646,6 +632,7 @@ def test_a_model_service_failure_is_never_answered_as_a_refusal_of_the_brief(
     still carries its own closed reason, so nothing is lost for the day the App
     reads it.
     """
+
     def raise_model_service_failure(*_args: object, **_kwargs: object) -> dict[str, object]:
         raise MotionAuthoringEntryRejected(reason)
 
@@ -654,9 +641,7 @@ def test_a_model_service_failure_is_never_answered_as_a_refusal_of_the_brief(
     )
     output = io.StringIO()
 
-    assert (
-        motion_authoring_entry.serve_one_motion_authoring_request(io.BytesIO(b"{}"), output) != 0
-    )
+    assert motion_authoring_entry.serve_one_motion_authoring_request(io.BytesIO(b"{}"), output) != 0
     answer = json.loads(output.getvalue())
     assert motion_authoring_entry.parse_motion_authoring_refusal(answer) is None
     assert answer["status"] != "rejected"
@@ -706,19 +691,14 @@ def test_the_shared_contract_declares_which_findings_are_not_refusals() -> None:
     }
     assert outcomes["model_timed_out"] == {"video_creation_model_timed_out"}
     assert "video_creation_model_unavailable" in outcomes["model_configuration_required"]
-    assert (
-        "agent_pinned_workflow_file_is_missing_or_a_symlink"
-        in outcomes["installation_damaged"]
-    )
+    assert "agent_pinned_workflow_file_is_missing_or_a_symlink" in outcomes["installation_damaged"]
     assert "request_shape_invalid" in outcomes["app_request_invalid"]
 
 
 @pytest.mark.parametrize(
     ("name", "reason"),
     sorted(
-        (name, reason)
-        for name, reasons in _non_refusal_outcomes().items()
-        for reason in reasons
+        (name, reason) for name, reasons in _non_refusal_outcomes().items() for reason in reasons
     )
     if getattr(motion_authoring_entry, "_NON_REFUSAL_OUTCOMES", None)
     else [("missing", "missing")],
@@ -741,9 +721,7 @@ def test_every_non_refusal_finding_is_answered_with_its_own_status(
     monkeypatch.setattr(motion_authoring_entry, "run_motion_authoring_entry", raise_finding)
     output = io.StringIO()
 
-    assert (
-        motion_authoring_entry.serve_one_motion_authoring_request(io.BytesIO(b"{}"), output) != 0
-    )
+    assert motion_authoring_entry.serve_one_motion_authoring_request(io.BytesIO(b"{}"), output) != 0
     answer = json.loads(output.getvalue())
     assert answer["status"] == name
     assert answer["rejectionReason"] == reason

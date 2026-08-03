@@ -46,6 +46,8 @@ from automation_tool.protocol.local_rendering import (
     LocalEditingVisualRenderPlan,
 )
 
+type PopenBytes = subprocess.Popen[bytes]
+
 
 def _executable(directory: Path, name: str) -> Path:
     path = directory / name
@@ -508,10 +510,13 @@ def test_render_timeout_stops_the_real_child_before_returning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     original = subprocess.Popen
-    children: list[subprocess.Popen[bytes]] = []
+    children: list[PopenBytes] = []
 
-    def capture_child(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
-        child = original(*args, **kwargs)  # type: ignore[arg-type]
+    def capture_child(*args: object, **kwargs: object) -> PopenBytes:
+        child = cast(
+            PopenBytes,
+            original(*args, **kwargs),  # type: ignore[call-overload]
+        )
         children.append(child)
         return child
 

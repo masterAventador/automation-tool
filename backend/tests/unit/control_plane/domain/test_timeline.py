@@ -608,11 +608,7 @@ def test_a_visual_clip_carries_no_level_of_its_own() -> None:
     [TimelineTrackKind.NARRATION, TimelineTrackKind.AMBIENT, TimelineTrackKind.MUSIC],
 )
 def test_an_audible_track_states_a_level_for_every_clip(kind: TimelineTrackKind) -> None:
-    mode = (
-        OriginalAudioMode.AUTO_DUCK
-        if kind is TimelineTrackKind.AMBIENT
-        else None
-    )
+    mode = OriginalAudioMode.AUTO_DUCK if kind is TimelineTrackKind.AMBIENT else None
     TimelineTrack(
         "sound",
         kind,

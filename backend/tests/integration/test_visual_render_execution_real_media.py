@@ -48,7 +48,9 @@ def _tools() -> PackagedMediaTools:
     )
 
 
-def _request(tmp_path: Path) -> tuple[
+def _request(
+    tmp_path: Path,
+) -> tuple[
     LocalEditingVisualRenderPlan,
     tuple[VisualRenderSourceBinding, ...],
     tuple[os.stat_result, ...],
@@ -340,9 +342,7 @@ def test_real_public_execution_combines_video_images_transitions_and_caption(
             ),
             source_path=path,
         )
-        for sequence, (material_id, path) in enumerate(
-            zip(material_ids, paths, strict=True)
-        )
+        for sequence, (material_id, path) in enumerate(zip(material_ids, paths, strict=True))
     )
     caption_plan = LocalEditingCaptionRenderPlan(
         project_id=project_id,

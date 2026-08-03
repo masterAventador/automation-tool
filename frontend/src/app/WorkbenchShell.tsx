@@ -51,6 +51,8 @@ import { AppUpdateCenter } from "../features/app-updates/AppUpdateCenter";
 import type { AppUpdateGateway } from "../features/app-updates/contracts";
 import { ModelServiceSettings } from "../features/settings/ModelServiceSettings";
 import type { ModelServiceGateway } from "../features/settings/model-service-gateway";
+import { BilibiliServiceSettings } from "../features/settings/BilibiliServiceSettings";
+import type { BilibiliServiceGateway } from "../features/settings/bilibili-service-gateway";
 import {
   motionRunAttention,
   useMotionRun,
@@ -364,6 +366,26 @@ const shellModelServiceGateway: ModelServiceGateway = {
   },
 };
 
+const shellBilibiliServiceGateway: BilibiliServiceGateway = {
+  async getSettings() {
+    return {
+      provider: "bilibili",
+      providerLabel: "B站开放平台",
+      configured: false,
+      targetAccount: null,
+      tid: null,
+      tag: null,
+      noReprint: null,
+    };
+  },
+  async configure() {
+    throw new Error("Bilibili service configuration is unavailable");
+  },
+  async clear() {
+    throw new Error("Bilibili service configuration is unavailable");
+  },
+};
+
 /// Without a real bridge the page must say it cannot read the state, not
 /// invent one: a fabricated "ready" would offer a publish nothing can carry out.
 const shellPublishWorkspaceGateway: PublishWorkspaceGateway = {
@@ -454,6 +476,7 @@ interface WorkbenchShellProps {
   readonly platformSessionGateway?: PlatformSessionGateway | undefined;
   readonly appUpdateGateway?: AppUpdateGateway | undefined;
   readonly modelServiceGateway?: ModelServiceGateway | undefined;
+  readonly bilibiliServiceGateway?: BilibiliServiceGateway | undefined;
   readonly materialVideoStudioGateway?: MaterialVideoStudioGateway | undefined;
   readonly videoEditingGateway?: VideoEditingGateway | undefined;
   readonly materialLibraryGateway?: MaterialLibraryGateway | undefined;
@@ -481,6 +504,7 @@ export function WorkbenchShell({
   platformSessionGateway = shellPlatformSessionGateway,
   appUpdateGateway = shellAppUpdateGateway,
   modelServiceGateway = shellModelServiceGateway,
+  bilibiliServiceGateway = shellBilibiliServiceGateway,
   materialVideoStudioGateway = shellMaterialVideoStudioGateway,
   videoEditingGateway = shellVideoEditingGateway,
   materialLibraryGateway,
@@ -746,6 +770,7 @@ export function WorkbenchShell({
                 <Space orientation="vertical" size="large" className="settings-stack">
                   <AppUpdateCenter gateway={appUpdateGateway} showSettings />
                   <ModelServiceSettings gateway={modelServiceGateway} />
+                  <BilibiliServiceSettings gateway={bilibiliServiceGateway} />
                   <Diagnostics platform={platformAdapter} />
                   <div className="settings-legal-entry">
                     <Button

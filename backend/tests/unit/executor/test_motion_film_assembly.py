@@ -15,11 +15,13 @@ template composition on the template's stage, which is what "本机 4 layout 模
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 import pytest
 
 from automation_tool.executor.motion_authoring.film_assembly import (
+    AssembledFilm,
     AssemblyRejected,
     BeatPlan,
     assemble_film,
@@ -84,26 +86,32 @@ DURATIONS = {"lt-bold-block": 4.8}
 DIMENSIONS = {"lt-bold-block": (1920, 1080)}
 
 
-def assemble(beats, tmp_path, **overrides):
-    arguments = {
-        "beats": beats,
-        "workspace": _Workspace(),
-        "catalog_root": _catalog(tmp_path),
-        "slot_table": SLOTS,
-        "slot_budget": BUDGET,
-        "part_durations": DURATIONS,
-        "part_dimensions": DIMENSIONS,
-        "part_types": {"lt-bold-block": "block"},
-        "template_canvas": TEMPLATE_CANVAS,
-        "frames_per_second": 30,
-        "segment_frames_maximum": 600,
-        "font_css_for": lambda text: "@font-face{}",
-    }
-    arguments.update(overrides)
-    return assemble_film(**arguments)
+def assemble(
+    beats: Sequence[BeatPlan],
+    tmp_path: Path,
+    *,
+    workspace: object | None = None,
+    slot_table: Mapping[str, object] = SLOTS,
+    part_durations: Mapping[str, float] = DURATIONS,
+    font_css_for: Callable[[str], str] = lambda _text: "@font-face{}",
+) -> AssembledFilm:
+    return assemble_film(
+        beats=beats,
+        workspace=_Workspace() if workspace is None else workspace,
+        catalog_root=_catalog(tmp_path),
+        slot_table=slot_table,
+        slot_budget=BUDGET,
+        part_durations=part_durations,
+        part_dimensions=DIMENSIONS,
+        part_types={"lt-bold-block": "block"},
+        template_canvas=TEMPLATE_CANVAS,
+        frames_per_second=30,
+        segment_frames_maximum=600,
+        font_css_for=font_css_for,
+    )
 
 
-def test_a_beat_that_named_a_part_renders_on_that_parts_stage(tmp_path) -> None:
+def test_a_beat_that_named_a_part_renders_on_that_parts_stage(tmp_path: Path) -> None:
     film = assemble(
         [BeatPlan(beat_id="b1", part="lt-bold-block", copy={1: "张三"}, voice_seconds=None)],
         tmp_path,
@@ -116,7 +124,7 @@ def test_a_beat_that_named_a_part_renders_on_that_parts_stage(tmp_path) -> None:
     assert segment.frames == 144
 
 
-def test_a_beat_that_named_no_part_falls_back_to_the_template(tmp_path) -> None:
+def test_a_beat_that_named_no_part_falls_back_to_the_template(tmp_path: Path) -> None:
     """Mixing is the point: the template still carries beats no part fits."""
     film = assemble(
         [BeatPlan(beat_id="b1", part=None, copy={}, voice_seconds=5.0)],
@@ -128,7 +136,7 @@ def test_a_beat_that_named_no_part_falls_back_to_the_template(tmp_path) -> None:
     assert film.segments[0].frames == 150
 
 
-def test_a_film_mixes_part_segments_and_template_segments(tmp_path) -> None:
+def test_a_film_mixes_part_segments_and_template_segments(tmp_path: Path) -> None:
     film = assemble(
         [
             BeatPlan(beat_id="b1", part="lt-bold-block", copy={1: "张三"}, voice_seconds=None),
@@ -141,7 +149,7 @@ def test_a_film_mixes_part_segments_and_template_segments(tmp_path) -> None:
     assert film.total_frames == 144 + 90
 
 
-def test_each_template_shot_samples_its_own_stretch_of_the_composition(tmp_path) -> None:
+def test_each_template_shot_samples_its_own_stretch_of_the_composition(tmp_path: Path) -> None:
     """The defect that made the first real film play the same footage twice.
 
     A template segment loads the whole composition — one document that draws
@@ -157,10 +165,22 @@ def test_each_template_shot_samples_its_own_stretch_of_the_composition(tmp_path)
     """
     film = assemble(
         [
-            BeatPlan(beat_id="b1", part=None, copy={}, voice_seconds=None, declared_seconds=6.0,
-                     start_seconds=0.0),
-            BeatPlan(beat_id="b2", part=None, copy={}, voice_seconds=None, declared_seconds=6.0,
-                     start_seconds=6.0),
+            BeatPlan(
+                beat_id="b1",
+                part=None,
+                copy={},
+                voice_seconds=None,
+                declared_seconds=6.0,
+                start_seconds=0.0,
+            ),
+            BeatPlan(
+                beat_id="b2",
+                part=None,
+                copy={},
+                voice_seconds=None,
+                declared_seconds=6.0,
+                start_seconds=6.0,
+            ),
         ],
         tmp_path,
     )
@@ -175,7 +195,7 @@ def test_each_template_shot_samples_its_own_stretch_of_the_composition(tmp_path)
 
 
 def test_a_template_window_stays_inside_the_beat_even_when_the_line_runs_long(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     """镜头变长不等于这一镜在 composition 上占的地方变大。
 
@@ -190,10 +210,22 @@ def test_a_template_window_stays_inside_the_beat_even_when_the_line_runs_long(
     """
     film = assemble(
         [
-            BeatPlan(beat_id="b1", part=None, copy={}, voice_seconds=8.0,
-                     declared_seconds=6.0, start_seconds=0.0),
-            BeatPlan(beat_id="b2", part=None, copy={}, voice_seconds=None,
-                     declared_seconds=6.0, start_seconds=6.0),
+            BeatPlan(
+                beat_id="b1",
+                part=None,
+                copy={},
+                voice_seconds=8.0,
+                declared_seconds=6.0,
+                start_seconds=0.0,
+            ),
+            BeatPlan(
+                beat_id="b2",
+                part=None,
+                copy={},
+                voice_seconds=None,
+                declared_seconds=6.0,
+                start_seconds=6.0,
+            ),
         ],
         tmp_path,
     )
@@ -207,7 +239,7 @@ def test_a_template_window_stays_inside_the_beat_even_when_the_line_runs_long(
     assert (second.source_start_millis, second.source_end_millis) == (6000, 12000)
 
 
-def test_a_part_segment_samples_its_own_document_from_the_start(tmp_path) -> None:
+def test_a_part_segment_samples_its_own_document_from_the_start(tmp_path: Path) -> None:
     """A part is its own composition, so its window is its own timeline."""
     film = assemble(
         [BeatPlan(beat_id="b1", part="lt-bold-block", copy={1: "张三"}, voice_seconds=None)],
@@ -219,7 +251,7 @@ def test_a_part_segment_samples_its_own_document_from_the_start(tmp_path) -> Non
     assert segment.source_end_millis == round(DURATIONS["lt-bold-block"] * 1000)
 
 
-def test_narration_longer_than_the_motion_lengthens_the_shot(tmp_path) -> None:
+def test_narration_longer_than_the_motion_lengthens_the_shot(tmp_path: Path) -> None:
     """PC-08's rule, reaching the render request that is actually sent."""
     film = assemble(
         [BeatPlan(beat_id="b1", part="lt-bold-block", copy={1: "张三"}, voice_seconds=8.0)],
@@ -229,7 +261,7 @@ def test_narration_longer_than_the_motion_lengthens_the_shot(tmp_path) -> None:
     assert film.segments[0].frames == 240
 
 
-def test_a_long_visual_timeline_is_compressed_into_one_complete_capture(tmp_path) -> None:
+def test_a_long_visual_timeline_is_compressed_into_one_complete_capture(tmp_path: Path) -> None:
     """Keep the full 24s source window without asking the Worker for 720 frames."""
     film = assemble(
         [BeatPlan(beat_id="b1", part="lt-bold-block", copy={}, voice_seconds=None)],
@@ -244,7 +276,7 @@ def test_a_long_visual_timeline_is_compressed_into_one_complete_capture(tmp_path
     assert segment.source_end_millis == 24_000
 
 
-def test_a_part_the_catalog_does_not_carry_is_refused(tmp_path) -> None:
+def test_a_part_the_catalog_does_not_carry_is_refused(tmp_path: Path) -> None:
     with pytest.raises(AssemblyRejected):
         assemble(
             [BeatPlan(beat_id="b1", part="not-a-part", copy={}, voice_seconds=2.0)],
@@ -252,7 +284,7 @@ def test_a_part_the_catalog_does_not_carry_is_refused(tmp_path) -> None:
         )
 
 
-def test_a_visual_only_part_with_no_frozen_slots_is_rendered_unchanged(tmp_path) -> None:
+def test_a_visual_only_part_with_no_frozen_slots_is_rendered_unchanged(tmp_path: Path) -> None:
     """A missing copy slot must not make an otherwise renderable part unusable."""
     film = assemble(
         [BeatPlan(beat_id="b1", part="lt-bold-block", copy={}, voice_seconds=None)],
@@ -264,8 +296,9 @@ def test_a_visual_only_part_with_no_frozen_slots_is_rendered_unchanged(tmp_path)
     assert film.segments[0].slot_budgets == ()
 
 
-def test_a_visual_only_part_does_not_request_copy_replacement_fonts(tmp_path) -> None:
+def test_a_visual_only_part_does_not_request_copy_replacement_fonts(tmp_path: Path) -> None:
     """No frozen copy means the part keeps its visual text and its font fallback."""
+
     def unexpected_font_request(_name: str) -> str:
         raise AssertionError("visual-only part requested copy replacement fonts")
 
@@ -279,7 +312,7 @@ def test_a_visual_only_part_does_not_request_copy_replacement_fonts(tmp_path) ->
     assert film.segments[0].part == "lt-bold-block"
 
 
-def test_reusing_one_part_keeps_each_beats_own_working_copy(tmp_path) -> None:
+def test_reusing_one_part_keeps_each_beats_own_working_copy(tmp_path: Path) -> None:
     workspace = _Workspace()
     film = assemble(
         [
@@ -306,7 +339,7 @@ def test_reusing_one_part_keeps_each_beats_own_working_copy(tmp_path) -> None:
     assert "第二镜" in workspace.written[second.entry_html].decode("utf-8")
 
 
-def test_a_visual_only_part_refuses_copy_that_has_no_frozen_anchor(tmp_path) -> None:
+def test_a_visual_only_part_refuses_copy_that_has_no_frozen_anchor(tmp_path: Path) -> None:
     with pytest.raises(AssemblyRejected):
         assemble(
             [BeatPlan(beat_id="b1", part="lt-bold-block", copy={1: "张三"}, voice_seconds=None)],
@@ -316,7 +349,7 @@ def test_a_visual_only_part_refuses_copy_that_has_no_frozen_anchor(tmp_path) -> 
 
 
 def test_a_shot_too_long_for_one_render_is_refused_before_anything_is_written(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     workspace = _Workspace()
     with pytest.raises(FilmOverBudget):
@@ -328,7 +361,7 @@ def test_a_shot_too_long_for_one_render_is_refused_before_anything_is_written(
     assert workspace.written == {}
 
 
-def test_the_plan_says_how_long_the_render_will_take(tmp_path) -> None:
+def test_the_plan_says_how_long_the_render_will_take(tmp_path: Path) -> None:
     film = assemble(
         [
             BeatPlan(beat_id="b1", part="lt-bold-block", copy={1: "张三"}, voice_seconds=None),
@@ -341,7 +374,7 @@ def test_the_plan_says_how_long_the_render_will_take(tmp_path) -> None:
     assert film.estimated_render_seconds == pytest.approx(153.6)
 
 
-def test_every_segment_carries_the_budget_its_copy_has_to_fit(tmp_path) -> None:
+def test_every_segment_carries_the_budget_its_copy_has_to_fit(tmp_path: Path) -> None:
     """PC-14 needs the baseline at render time, not at freezing time."""
     film = assemble(
         [BeatPlan(beat_id="b1", part="lt-bold-block", copy={1: "张三"}, voice_seconds=None)],

@@ -322,7 +322,7 @@ def test_gate_constructor_clock_and_boundary_failures_are_fixed_and_redacted(
     assert invalid_token.value.__cause__ is None
     assert "private" not in str(invalid_token.value)
     with pytest.raises(ActionGateRejected):
-        gate.admission(ProtocolTargetId(resource_id(21, str)))  # type: ignore[arg-type]
+        gate.admission(ProtocolTargetId(resource_id(21, str)))
     with pytest.raises(ActionGateRejected):
         gate.clear_emergency_stop(expected_revision=0)
 

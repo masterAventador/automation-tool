@@ -265,7 +265,7 @@ def main() -> None:
     buffered_stdin = sys.stdin.buffer
     input_stream = getattr(buffered_stdin, "raw", buffered_stdin)
     if sys.argv[1:] == [AUTHOR_MOTION_ARGUMENT]:
-        from automation_tool.executor.motion_authoring import (  # noqa: PLC0415
+        from automation_tool.executor.motion_authoring import (
             serve_one_motion_authoring_request,
         )
 

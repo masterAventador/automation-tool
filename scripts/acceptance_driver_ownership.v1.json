@@ -60,6 +60,8 @@
         "run_bu_06_acceptance.py",
         "run_cq_04_acceptance.py",
         "run_le_15_acceptance.py",
+        "run_pc_14_acceptance.py",
+        "run_pc_16_macos_package_acceptance.py",
         "run_t36_acceptance.py"
       ]
     },
@@ -140,6 +142,7 @@
         "run_bm_07_acceptance.py",
         "run_bm_15_acceptance.py",
         "run_cq_01_acceptance.py",
+        "run_cq_02_acceptance.py",
         "run_vf_05_acceptance.py",
         "run_vf_07_acceptance.py"
       ]

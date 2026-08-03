@@ -25,6 +25,9 @@ class FakePage:
         self.closed = False
         self.fail_close = fail_close
 
+    def title(self) -> str:
+        return "fixture page"
+
     def close(self, *, reason: str | None = None, run_before_unload: bool = False) -> None:
         self.close_calls.append({"reason": reason, "run_before_unload": run_before_unload})
         if self.fail_close:

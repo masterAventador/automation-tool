@@ -7,9 +7,10 @@ survives contact with a real browser: a real page's text is what the model
 actually receives, real hrefs are what a navigation would actually target, and
 a real takeover really does leave processes behind if nobody kills them.
 
-So this stages the digest-locked Chromium with the production staging builder
-and drives it through the production harness in both closed modes against a
-**hostile** local fixture page, asserting:
+So this can either stage the digest-locked Chromium with the production staging
+builder or resolve the same distribution from a release package, then drive it
+through the production harness in both closed modes against a **hostile** local
+fixture page, asserting:
 
 1. the model-facing text of the real page carries no cookie, bearer token,
    API key, CDP endpoint or local path;
@@ -21,8 +22,8 @@ and drives it through the production harness in both closed modes against a
 5. no browser process from this run survives it.
 
 No model is called, no platform is touched, and no side effect is dispatched.
-The remaining BU-07 evidence — the same matrix from inside the signed macOS
-and Windows packages — needs EB-16 packages and is recorded as pending.
+`--repeat` deliberately caps consecutive runs at ten, so stability evidence is
+real but the native browser driver cannot become an accidental unbounded job.
 """
 
 from __future__ import annotations
@@ -48,6 +49,10 @@ from build_embedded_chromium_staging import (  # noqa: E402
     sha256_file,
 )
 from embedded_browser_archives import default_archives  # noqa: E402
+from release_assembly import (  # noqa: E402
+    ReleaseAssemblyRejected,
+    require_packaged_browser,
+)
 
 STAGING_CONTRACT = ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
 DEFAULT_ARCHIVES = default_archives(ROOT)
@@ -319,6 +324,78 @@ def current_target_id() -> str:
     raise AssertionError("unreachable")
 
 
+def repeat_count(raw: str) -> int:
+    """Parse a useful but bounded number of consecutive native probes."""
+    value = int(raw)
+    if not 1 <= value <= 10:
+        raise ValueError("repeat count must be between 1 and 10")
+    return value
+
+
+def package_platform(target_id: str) -> str:
+    if target_id.startswith("macos-"):
+        return "macos"
+    if target_id.startswith("windows-"):
+        return "windows"
+    fail(f"unsupported package target: {target_id}")
+    raise AssertionError("unreachable")
+
+
+def declared_packaged_browser(
+    *,
+    application: Path,
+    browser_root: Path,
+    target_id: str,
+    locked_version: str,
+) -> Path:
+    """Resolve the executable only after its release distribution was verified."""
+    manifest = browser_root / "distribution-manifest.v1.json"
+    if not manifest.is_file():
+        fail(f"package carries no distribution manifest: {manifest}")
+    try:
+        document = json.loads(manifest.read_text(encoding="utf-8"))
+        declared_target = document["target"]
+        declared_version = document["runtime"]["chromium"]["browser_version"]
+        relative_executable = Path(*str(document["executable"]).split("/"))
+    except (KeyError, TypeError, json.JSONDecodeError) as error:
+        fail(f"package distribution manifest is malformed: {error}")
+    if declared_target != target_id:
+        fail(f"package targets {declared_target!r}, not {target_id!r}")
+    if declared_version != locked_version:
+        fail(
+            f"packaged browser version {declared_version!r} does not match "
+            f"the locked version {locked_version!r}"
+        )
+    executable = (browser_root / relative_executable).resolve()
+    application_root = application.resolve()
+    if not executable.is_relative_to(application_root):
+        fail(f"resolved browser lives outside the package: {executable}")
+    if not executable.is_file():
+        fail(f"packaged browser executable is missing: {executable}")
+    return executable
+
+
+def packaged_browser(
+    *, application: Path, target_id: str, locked_version: str
+) -> Path:
+    if not application.is_dir():
+        fail(f"release package does not exist: {application}")
+    try:
+        browser_root = require_packaged_browser(
+            application=application,
+            target_id=target_id,
+            platform=package_platform(target_id),
+        )
+    except ReleaseAssemblyRejected as error:
+        fail(str(error))
+    return declared_packaged_browser(
+        application=application,
+        browser_root=browser_root,
+        target_id=target_id,
+        locked_version=locked_version,
+    )
+
+
 def check_probe_payload(payload: dict[str, object]) -> None:
     isolated = payload["isolated"]
     takeover = payload["takeover"]
@@ -339,13 +416,68 @@ def check_probe_payload(payload: dict[str, object]) -> None:
         fail(f"browser processes survived the run: {payload['leftover_processes']}")
 
 
+def run_hostile_probe(executable: Path) -> dict[str, object]:
+    harness_dir = ROOT / "tools/browser-use-contract"
+    sys.path.insert(0, str(harness_dir))
+    from browser_use_harness import harness_environment
+
+    probe_environment = harness_environment(dict(os.environ))
+    probe_environment.update(
+        {
+            "BU07_HARNESS_DIR": str(harness_dir),
+            "BU07_SCRIPTS_DIR": str(ROOT / "scripts"),
+            "BU07_BACKEND_SRC": str(ROOT / "backend/src"),
+            "BU07_EXECUTABLE": str(executable),
+        }
+    )
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--project",
+            str(harness_dir),
+            "--locked",
+            "python",
+            "-c",
+            PROBE,
+        ],
+        cwd=ROOT,
+        env=probe_environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=900,
+    )
+    if result.returncode != 0:
+        fail(f"hostile-page probe failed: {result.stderr.strip()[-800:]}")
+    try:
+        payload = json.loads(result.stdout.strip().splitlines()[-1])
+    except (IndexError, json.JSONDecodeError) as error:
+        fail(f"hostile-page probe returned no valid result: {error}")
+    check_probe_payload(payload)
+    return payload
+
+
+def run_repeated_probes(executable: Path, repetitions: int) -> None:
+    for index in range(1, repetitions + 1):
+        payload = run_hostile_probe(executable)
+        port = payload["takeover"]["port"]
+        print(
+            f"[BU-07] native hostile-page probe {index}/{repetitions} passed "
+            f"(random CDP port {port})",
+            flush=True,
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--archive", type=Path)
-    archive = (parser.parse_args().archive or DEFAULT_ARCHIVES[current_target_id()]).resolve()
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--archive", type=Path)
+    source.add_argument("--package", type=Path)
+    parser.add_argument("--repeat", type=repeat_count, default=1)
+    arguments = parser.parse_args()
     target_id = current_target_id()
-    if not archive.is_file():
-        fail(f"locked archive not downloaded yet: {archive}")
+    contract = load_staging_contract(STAGING_CONTRACT)
 
     deterministic = subprocess.run(
         [
@@ -358,55 +490,48 @@ def main() -> int:
     if deterministic.returncode != 0:
         fail("the deterministic attack matrix failed")
 
-    contract = load_staging_contract(STAGING_CONTRACT)
     target = contract.targets[target_id]
-    digest = sha256_file(archive)
-    if not target.buildable or digest != target.archive_sha256:
-        fail("archive digest does not match the staging contract lock")
-
-    with tempfile.TemporaryDirectory(prefix="bu07-staging-") as directory:
-        resources = Path(directory) / "resources"
-        resources.mkdir()
-        staging = resources / "embedded-browser"
-        build_staging(
-            contract=contract,
+    if arguments.package is not None:
+        application = arguments.package.resolve()
+        executable = packaged_browser(
+            application=application,
             target_id=target_id,
-            archive_path=archive,
-            archive_sha256=digest,
-            output=staging,
+            locked_version=contract.browser_version,
         )
-        build_distribution_manifest(staging=staging, target_id=target_id)
-        harness_dir = ROOT / "tools/browser-use-contract"
-        sys.path.insert(0, str(harness_dir))
-        from browser_use_harness import harness_environment
+        run_repeated_probes(executable, arguments.repeat)
+        source_description = "verified release package"
+    else:
+        archive = (
+            arguments.archive or DEFAULT_ARCHIVES[current_target_id()]
+        ).resolve()
+        if not archive.is_file():
+            fail(f"locked archive not downloaded yet: {archive}")
+        digest = sha256_file(archive)
+        if not target.buildable or digest != target.archive_sha256:
+            fail("archive digest does not match the staging contract lock")
 
-        probe_environment = harness_environment(dict(os.environ))
-        probe_environment.update(
-            {
-                "BU07_HARNESS_DIR": str(harness_dir),
-                "BU07_SCRIPTS_DIR": str(ROOT / "scripts"),
-                "BU07_BACKEND_SRC": str(ROOT / "backend/src"),
-                "BU07_EXECUTABLE": str(staging / Path(*target.executable.split("/"))),
-            }
-        )
-        result = subprocess.run(
-            ["uv", "run", "--project", str(harness_dir), "--locked", "python", "-c", PROBE],
-            cwd=ROOT,
-            env=probe_environment,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=900,
-        )
-        if result.returncode != 0:
-            fail(f"hostile-page probe failed: {result.stderr.strip()[-800:]}")
-        check_probe_payload(json.loads(result.stdout.strip().splitlines()[-1]))
+        with tempfile.TemporaryDirectory(prefix="bu07-staging-") as directory:
+            resources = Path(directory) / "resources"
+            resources.mkdir()
+            staging = resources / "embedded-browser"
+            build_staging(
+                contract=contract,
+                target_id=target_id,
+                archive_path=archive,
+                archive_sha256=digest,
+                output=staging,
+            )
+            build_distribution_manifest(staging=staging, target_id=target_id)
+            executable = staging / Path(*target.executable.split("/"))
+            run_repeated_probes(executable, arguments.repeat)
+        source_description = "digest-locked staging"
 
     print(
         "BU-07 attack matrix passed against the real locked browser "
-        f"({contract.browser_version}, {target_id}): injected navigation refused, "
-        "model-facing text redacted, tool surface unchanged, random loopback CDP, "
-        "no leftover processes"
+        f"({contract.browser_version}, {target_id}, {source_description}, "
+        f"{arguments.repeat} consecutive run(s)): injected navigation refused, "
+        "model-facing text redacted, tool surface unchanged, random loopback "
+        "CDP, no leftover processes"
     )
     return 0
 

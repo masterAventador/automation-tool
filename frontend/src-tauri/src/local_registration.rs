@@ -150,9 +150,17 @@ fn map_store_error(_error: SecureStoreError) -> LocalRegistrationHandoffError {
     LocalRegistrationHandoffError::new(LocalRegistrationHandoffErrorCode::StorageUnavailable)
 }
 
+#[cfg_attr(
+    all(feature = "desktop-e2e", not(feature = "control-plane-e2e")),
+    allow(dead_code)
+)]
 pub(crate) type ProductionLocalRegistrationHandoffStore =
     LocalRegistrationHandoffStore<AppDataSecretStore>;
 
+#[cfg_attr(
+    all(feature = "desktop-e2e", not(feature = "control-plane-e2e")),
+    allow(dead_code)
+)]
 pub(crate) fn initialize_local_registration_handoff_store(
     app_data_directory: &Path,
 ) -> Result<ProductionLocalRegistrationHandoffStore, LocalRegistrationHandoffError> {
@@ -228,6 +236,10 @@ where
 }
 
 /// Seconds since the Unix epoch, for grant validity only.
+#[cfg_attr(
+    all(feature = "desktop-e2e", not(feature = "control-plane-e2e")),
+    allow(dead_code)
+)]
 pub(crate) fn current_unix_seconds() -> Result<i64, LocalRegistrationHandoffError> {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

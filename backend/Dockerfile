@@ -12,8 +12,10 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 
 COPY --from=uv /uv /uvx /bin/
-COPY pyproject.toml uv.lock README.md ./
-COPY src ./src
+COPY backend/pyproject.toml backend/uv.lock backend/README.md ./
+COPY backend/src ./src
+COPY contracts/publishing/bilibili-open-api.v1.json \
+     /app/contracts/publishing/bilibili-open-api.v1.json
 # Download the pinned artifacts from a path-identical mirror. The mirror serves
 # the same /packages/<a>/<b>/<digest>/<file> layout, so only the hostname of the
 # in-image copy of the lock changes; the committed uv.lock is untouched.
@@ -47,8 +49,11 @@ ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
 COPY --from=builder --chown=65532:65532 /app/.venv /app/.venv
-COPY --chown=65532:65532 alembic.ini /app/alembic.ini
-COPY --chown=65532:65532 migrations /app/migrations
+COPY --chown=65532:65532 backend/alembic.ini /app/alembic.ini
+COPY --chown=65532:65532 backend/migrations /app/migrations
+COPY --from=builder --chown=65532:65532 \
+     /app/contracts/publishing/bilibili-open-api.v1.json \
+     /app/contracts/publishing/bilibili-open-api.v1.json
 
 USER 65532:65532
 EXPOSE 8000

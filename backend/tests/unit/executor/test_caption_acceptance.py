@@ -50,6 +50,7 @@ _SFNT_MAGIC: Final[Mapping[str, bytes]] = {
     _LATIN: b"wOF2",
 }
 
+
 # Coverage readings from the T3 and T4a rounds, recorded in
 # `docs/development/LE-09.md` and until now held by nothing.
 #
@@ -137,7 +138,7 @@ _INK_SAMPLE_PX: Final = 48
 # punctuation a Chinese caption is actually written with, and it is drawn by
 # the Chinese face while the latin words beside it are not.
 _ACCEPTANCE_TEXT: Final = (
-    "这条字幕会自动换行，因为它比一帧画面还要长得多，中间还夹着 latin words 和一个\t制表符"  # noqa: RUF001
+    "这条字幕会自动换行，因为它比一帧画面还要长得多，中间还夹着 latin words 和一个\t制表符"
 )
 _ACCEPTANCE_FRAME: Final = (1080, 1920)
 _ACCEPTANCE_LINES: Final = 3
@@ -520,9 +521,7 @@ class TestRealFaceLoading:
         assert face.path == fonts.resolve_font_file(font_key)
         assert face.size == _INK_SAMPLE_PX
 
-    @pytest.mark.parametrize(
-        "font_key", [_CJK_BOLD, _CJK_REGULAR, _RARE_CJK_P1, _RARE_CJK_P2]
-    )
+    @pytest.mark.parametrize("font_key", [_CJK_BOLD, _CJK_REGULAR, _RARE_CJK_P1, _RARE_CJK_P2])
     def test_a_packaged_static_face_has_no_axes_to_pin(self, font_key: str) -> None:
         """The static branch of the weight pinning, on the real static faces.
 

@@ -199,7 +199,7 @@ class RecordingRuntime:
         self.session = RecordingSession() if session is None else session
         self.failure = failure
         self.session_options: list[object] = []
-        self.session_calls: list[tuple[str, tuple[str, ...], object]] = []
+        self.session_calls: list[tuple[bytes, tuple[str, ...], object]] = []
 
     def get_available_providers(self) -> list[str]:
         return list(self.providers)
@@ -211,7 +211,7 @@ class RecordingRuntime:
 
     def InferenceSession(
         self,
-        model: object,
+        model: bytes,
         *,
         providers: list[str],
         sess_options: object,
@@ -370,7 +370,7 @@ def test_factory_never_reopens_the_model_after_digest_verification(
     class ReplacingRuntime(RecordingRuntime):
         def InferenceSession(
             self,
-            model: object,
+            model: bytes,
             *,
             providers: list[str],
             sess_options: object,

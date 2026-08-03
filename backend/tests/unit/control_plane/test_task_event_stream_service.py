@@ -182,7 +182,7 @@ async def test_service_rejects_invalid_scope_task_or_limit_without_querying(
     expected_error = TaskEventStreamNotFound if task_id == "invalid" else InvalidTaskEventStream
     with pytest.raises(expected_error):
         await service.read(
-            installation_id=installation_id,  # type: ignore[arg-type]
+            installation_id=installation_id,
             task_id=task_id,
             last_event_id=None,
             limit=limit,  # type: ignore[arg-type]
@@ -291,7 +291,7 @@ def test_event_and_batch_models_reject_invalid_values() -> None:
     }
     for overrides in invalid_event_values:
         with pytest.raises(InvalidTaskEventStream):
-            TaskEventRecord(**(values | overrides))  # type: ignore[arg-type]
+            TaskEventRecord(**(values | overrides))
 
     with pytest.raises(InvalidTaskEventStream):
         TaskEventStreamBatch(

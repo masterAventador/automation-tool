@@ -92,7 +92,7 @@ def test_input_is_immutable_and_repr_redacts_the_keyword() -> None:
 
     assert repr(value) == "DouyinSearchInput(<redacted>)"
     with pytest.raises((AttributeError, TypeError)):
-        value.keyword = "replacement"  # type: ignore[misc]
+        value.keyword = "replacement"
 
 
 def test_constraint_constants_are_the_exact_mvp_policy() -> None:

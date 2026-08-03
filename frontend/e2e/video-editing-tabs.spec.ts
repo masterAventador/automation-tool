@@ -5,14 +5,10 @@ import { PRODUCTION_WINDOW } from "./production-window";
 /**
  * 视频剪辑 的「时间轴编辑」与「预览」两个页签。
  *
- * These two tabs had no test of any kind, and no one had ever seen them,
- * because reaching them requires an editing project and the UI Harness could
- * not create one: `harness/main.tsx` passed no `videoEditingGateway`, so the
- * shell fell back to its own `shellVideoEditingGateway`, whose `createProject`
- * throws `draft_storage_unavailable`. The production entry (`src/main.tsx`)
- * has always passed `createLocalVideoEditingGateway(window.sessionStorage)` —
- * a gateway that needs nothing but the browser — so the harness was strictly
- * less capable than the product for no reason.
+ * Reaching them requires an editing project. The current local-editing flow
+ * creates that project from its title, then accepts imported material IDs on
+ * timeline clips; the retired project-level source-reference field must not be
+ * restored just to prepare these layout assertions.
  *
  * Viewport is 1280x800, the size the production Tauri window opens at
  * (`src-tauri/tauri.conf.json`), inherited from `playwright.config.ts`, which
@@ -31,19 +27,7 @@ import { PRODUCTION_WINDOW } from "./production-window";
 const HARNESS = "/harness.html?health=available";
 
 const PROJECT_TITLE = "页签宽度验收项目";
-
-/**
- * Source references have to be canonical UUIDv4.
- *
- * `editingProjectSchema.sourceArtifactIds` is an array of `resourceIdSchema`,
- * so a friendly-looking "artifact-001" is rejected as `invalid_project` and no
- * project is created. Real artifact ids come from 视频制作 output, which is
- * where these two stand in for.
- */
-const SOURCE_ARTIFACTS = [
-  "6f1a2b3c-4d5e-4f60-8a1b-2c3d4e5f6071",
-  "7a2b3c4d-5e6f-4071-9b2c-3d4e5f607182",
-] as const;
+const MATERIAL_ID = "6f1a2b3c-4d5e-4f60-8a1b-2c3d4e5f6071";
 
 interface TabGeometry {
   /** The column the page content is given, in CSS pixels. */
@@ -134,7 +118,6 @@ async function openVideoEditing(page: Page): Promise<void> {
 async function openTimelineTab(page: Page): Promise<void> {
   await openVideoEditing(page);
   await page.getByLabel("剪辑项目标题").fill(PROJECT_TITLE);
-  await page.getByLabel("输入素材引用").fill(SOURCE_ARTIFACTS.join("\n"));
   await page.getByRole("button", { name: "创建剪辑项目" }).click();
   await expect(page.getByText(`已创建剪辑项目：${PROJECT_TITLE}`)).toBeVisible();
   await page.getByRole("tab", { name: "时间轴编辑" }).click();
@@ -158,6 +141,7 @@ test.describe("the two tabs behind a project can be reached at all", () => {
 
   test("预览 shows the structure preview once a timeline is saved", async ({ page }) => {
     await openTimelineTab(page);
+    await page.getByLabel("轨道1片段1素材编号").fill(MATERIAL_ID);
     await page.getByRole("button", { name: "保存时间轴" }).click();
     await page.getByRole("tab", { name: "预览" }).click();
 
@@ -203,7 +187,6 @@ test.describe("视频剪辑 的首屏在生产窗口里放得下", () => {
   }) => {
     await openVideoEditing(page);
     await page.getByLabel("剪辑项目标题").fill(PROJECT_TITLE);
-    await page.getByLabel("输入素材引用").fill(SOURCE_ARTIFACTS.join("\n"));
     await page.getByRole("button", { name: "创建剪辑项目" }).click();
     await expect(page.getByText(`已创建剪辑项目：${PROJECT_TITLE}`)).toBeVisible();
 
@@ -246,6 +229,7 @@ test.describe("视频剪辑 的两个内页页签填满它们拿到的宽度", (
 
   test("预览 tab", async ({ page }) => {
     await openTimelineTab(page);
+    await page.getByLabel("轨道1片段1素材编号").fill(MATERIAL_ID);
     await page.getByRole("button", { name: "保存时间轴" }).click();
     await page.getByRole("tab", { name: "预览" }).click();
 

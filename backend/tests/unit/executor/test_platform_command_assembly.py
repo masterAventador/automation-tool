@@ -19,6 +19,8 @@ from types import ModuleType
 from typing import Any, cast
 
 import pytest
+from pydantic import SecretStr
+
 from automation_tool.executor import cli as executor_cli
 from automation_tool.executor.authentication import LocalSessionAuthenticator
 from automation_tool.executor.bootstrap import read_executor_bootstrap
@@ -38,7 +40,6 @@ from automation_tool.executor.runtime import (
     RuntimeMetadata,
 )
 from automation_tool.protocol import PlatformSessionHealthEnvelope
-from pydantic import SecretStr
 
 TOKEN = "".join(f"{value:02x}" for value in range(32))
 COMMAND_ID = "123e4567-e89b-42d3-a456-426614174005"

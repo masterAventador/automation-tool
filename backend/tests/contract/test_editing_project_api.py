@@ -378,7 +378,7 @@ async def test_service_refuses_a_foreign_installation_type() -> None:
 
     with pytest.raises(ValueError, match="Editing project query is invalid"):
         await service.create(
-            installation_id=foreign,  # type: ignore[arg-type]
+            installation_id=foreign,
             title="夏日露营 第一集",
             output=OutputSpec(width=1080, height=1920, fps=30),
             caption_style=CaptionStyle(
@@ -390,7 +390,7 @@ async def test_service_refuses_a_foreign_installation_type() -> None:
         )
     with pytest.raises(ValueError, match="Editing project query is invalid"):
         await service.get(
-            installation_id=foreign,  # type: ignore[arg-type]
+            installation_id=foreign,
             project_id=str(EditingProjectId.new()),
         )
 

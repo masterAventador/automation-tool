@@ -659,7 +659,7 @@ def wait_for_online(
     while time.monotonic() < deadline:
         snapshot = portal.call(registry.snapshot, installation_id)
         if predicate(snapshot):
-            return snapshot
+            return cast(OnlineExecutorConnection, snapshot)
         time.sleep(0.005)
     raise AssertionError("Executor online projection did not reach the expected state")
 

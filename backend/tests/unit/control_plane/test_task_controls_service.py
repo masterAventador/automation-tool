@@ -162,7 +162,7 @@ async def test_input_and_repository_failures_are_closed_and_stable() -> None:
             )
     with pytest.raises(InvalidTaskControl):
         await service.pause(
-            installation_id=str(INSTALLATION_ID),  # type: ignore[arg-type]
+            installation_id=str(INSTALLATION_ID),
             task_id=str(TASK_ID),
             idempotency_key="task:pause:scope",
         )
