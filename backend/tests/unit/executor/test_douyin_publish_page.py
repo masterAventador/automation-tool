@@ -9,6 +9,7 @@ import pytest
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from automation_tool.executor.browser_runtime import BrowserWindow
+from automation_tool.executor.rpa.douyin import publish_page as publish_page_module
 from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
 from automation_tool.executor.rpa.douyin.publish_page import (
     DOUYIN_PUBLISH_ENTRY_URL,
@@ -905,5 +906,108 @@ def test_navigating_to_the_works_list_that_fails_reads_as_an_unknown_route() -> 
 
     page = _RefusingNavigation(url=FORM_URL, visible_selectors=set(FORM_SELECTORS))
     observation = DouyinPublishPage(window(page)).open_works_list(timeout_milliseconds=100)
+
+    assert observation.route is DouyinPublishRoute.UNKNOWN
+
+
+class _RowsUnreadable(FakePage):
+    """The works list resolves into something that cannot be snapshotted."""
+
+    def locator(self, selector: str) -> FakeLocator:
+        self.requested_selectors.append(selector)
+        return _UnreadableRowsLocator(selector, self)
+
+
+class _UnreadableRowsLocator(FakeLocator):
+    def element_handles(self) -> list[FakeHandle]:
+        raise RuntimeError("private handle resolution failure")
+
+
+def test_a_works_list_that_cannot_be_snapshotted_is_a_page_failure() -> None:
+    page = _RowsUnreadable(url=MANAGE_URL, visible_selectors={WORK_LIST})
+
+    with pytest.raises(DouyinPublishPageRejected):
+        DouyinPublishPage(window(page)).works_titled("确认过的标题")
+
+
+class _AnchorGoneAfterObservation(FakePage):
+    """The publish control is counted once and then leaves before it is read."""
+
+    def __init__(self, *, fail_instead: bool) -> None:
+        super().__init__(url=FORM_URL, visible_selectors=set(FORM_SELECTORS))
+        self._fail_instead = fail_instead
+        self._submit_requests = 0
+
+    def locator(self, selector: str) -> FakeLocator:
+        if selector.startswith(SUBMIT_CONTROL):
+            self._submit_requests += 1
+            if self._submit_requests > 1:
+                if self._fail_instead:
+                    self.failed_selectors.add(selector)
+                else:
+                    self.visible_selectors.discard(SUBMIT_CONTROL)
+        return super().locator(selector)
+
+
+@pytest.mark.parametrize("fail_instead", (False, True))
+def test_a_control_that_leaves_between_the_check_and_the_read_is_refused(
+    fail_instead: bool,
+) -> None:
+    page = _AnchorGoneAfterObservation(fail_instead=fail_instead)
+
+    with pytest.raises(DouyinPublishPageRejected):
+        DouyinPublishPage(window(page)).submit_enabled()
+    assert page.clicked == []
+
+
+class _SubmitControlUnreadable(FakePage):
+    """The publish control is there and refuses to say whether it is armed."""
+
+    def locator(self, selector: str) -> FakeLocator:
+        self.requested_selectors.append(selector)
+        return _UnreadableEnabledLocator(selector, self)
+
+
+class _UnreadableEnabledLocator(FakeLocator):
+    def is_enabled(self) -> bool:
+        raise RuntimeError("private enabled failure")
+
+
+def test_a_publish_control_that_will_not_say_whether_it_is_armed_is_refused() -> None:
+    page = _SubmitControlUnreadable(url=FORM_URL, visible_selectors=set(FORM_SELECTORS))
+
+    with pytest.raises(DouyinPublishPageRejected):
+        DouyinPublishPage(window(page)).submit_enabled()
+    assert page.clicked == []
+
+
+def test_every_form_anchor_can_arrive_without_the_page_becoming_the_form() -> None:
+    """Form-shaped anchors on the upload route are not the form; the wait reports what it saw."""
+    page = FakePage(url=DOUYIN_PUBLISH_ENTRY_URL, visible_selectors=set(FORM_SELECTORS))
+
+    observation = DouyinPublishPage(window(page)).wait_for_form(timeout_milliseconds=1_000)
+
+    assert observation.state is DouyinPublishPageState.UNKNOWN
+    assert observation.evidence is DouyinPublishPageEvidence.REQUIRED_ANCHOR_MISSING
+    assert page.wait_timeouts == []
+
+
+def test_a_wait_whose_budget_is_gone_reports_the_page_instead_of_waiting_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ticks = iter((0.0, 0.0, 5.0))
+    monkeypatch.setattr(publish_page_module, "monotonic", lambda: next(ticks))
+    page = FakePage(url=DOUYIN_PUBLISH_ENTRY_URL, visible_selectors=set(FORM_SELECTORS))
+
+    observation = DouyinPublishPage(window(page)).wait_for_form(timeout_milliseconds=1_000)
+
+    assert observation.evidence is DouyinPublishPageEvidence.REQUIRED_ANCHOR_MISSING
+
+
+def test_a_url_that_cannot_be_parsed_at_all_is_no_route() -> None:
+    """`urlsplit` accepts the string and only refuses when the port is read."""
+    page = FakePage(url="https://creator.douyin.com:not-a-port/creator-micro/home")
+
+    observation = DouyinPublishPage(window(page)).observe()
 
     assert observation.route is DouyinPublishRoute.UNKNOWN

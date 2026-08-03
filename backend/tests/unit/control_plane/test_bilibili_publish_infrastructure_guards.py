@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 from test_bilibili_archive_publishing import CONTRACT, NOW
 from test_bilibili_archive_publishing_guards import valid_record_values
 
@@ -39,6 +40,7 @@ from automation_tool.control_plane.infrastructure.bilibili import (
 from automation_tool.control_plane.infrastructure.database import Database
 from automation_tool.control_plane.infrastructure.database.bilibili_publish_repository import (
     SqlAlchemyBilibiliArchivePublishStore,
+    SqlAlchemyBilibiliReconciliationStore,
 )
 
 CREDENTIALS = BilibiliApiCredentials(
@@ -374,3 +376,53 @@ async def test_a_refresh_the_platform_refused_is_unavailable(
         with pytest.raises(BilibiliArchivePublishUnavailable):
             await provider.refresh_access_token()
         assert label
+
+
+class _SessionRaises(Database):
+    """A database whose session opening fails with one chosen error."""
+
+    def __init__(self, error: BaseException) -> None:
+        self._error = error
+
+    def session(self) -> Any:
+        raise self._error
+
+
+def reconciliation_store(
+    error: BaseException | None = None,
+) -> SqlAlchemyBilibiliReconciliationStore:
+    return SqlAlchemyBilibiliReconciliationStore(
+        _SessionRaises(error if error is not None else RuntimeError("database driver exploded"))
+    )
+
+
+def test_the_reconciliation_store_rejects_anything_that_is_not_a_database() -> None:
+    with pytest.raises(BilibiliArchivePublishRejected):
+        SqlAlchemyBilibiliReconciliationStore("database")  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_the_reconciliation_store_validates_inputs_before_touching_the_database() -> None:
+    store = reconciliation_store()
+    job = PublishJobId.new()
+    for resource_id in ("", "x" * 17, 42):
+        with pytest.raises(BilibiliArchivePublishRejected):
+            await store.ensure_pending(job, resource_id, NOW)  # type: ignore[arg-type]
+        with pytest.raises(BilibiliArchivePublishRejected):
+            await store.find_by_resource_id(resource_id)  # type: ignore[arg-type]
+    with pytest.raises(BilibiliArchivePublishRejected):
+        await store.record_checked(job, "0", NOW)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_the_reconciliation_store_separates_refusal_from_unavailability() -> None:
+    """A refusal raised inside the unit of work is the caller's fault and stays itself."""
+    job = PublishJobId.new()
+    with pytest.raises(BilibiliArchivePublishRejected):
+        await reconciliation_store(BilibiliArchivePublishRejected()).load(job)
+    for driver_error in (
+        SQLAlchemyError("the connection pool is exhausted"),
+        RuntimeError("the driver exploded in a way nobody modelled"),
+    ):
+        with pytest.raises(BilibiliArchivePublishUnavailable):
+            await reconciliation_store(driver_error).load(job)
