@@ -3373,3 +3373,50 @@ class AuthorEntryTests(unittest.TestCase):
 
             with self.assertRaises(MotionAuthoringRejected):
                 agent.author(cast(MotionBrief, object()))
+
+
+class ModelTransportFailureTests(unittest.TestCase):
+    """A model that is not there and one that went quiet are different failures.
+
+    Measured: the first answers in about two seconds and the second in 363 --
+    `timeout_seconds` plus the connect -- and while both said the same sentence
+    the user could not tell which had happened. The timeout arrives either bare
+    (`socket.timeout` is `TimeoutError`) or as the `reason` urllib wraps in a
+    `URLError`, so both shapes are asked about.
+    """
+
+    _CONFIG: ClassVar[VideoCreationModelConfig] = VideoCreationModelConfig(
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        model_id="qwen3-max-2026-01-25",
+        api_key="sk-" + "a" * 40,
+    )
+
+    def _call_with(self, failure: BaseException) -> MotionAuthoringRejected:
+        def refusing_urlopen(*_args: object, **_kw: object) -> object:
+            raise failure
+
+        with (
+            mock.patch.object(motion_authoring_agent.urllib.request, "urlopen", refusing_urlopen),
+            self.assertRaises(MotionAuthoringRejected) as caught,
+        ):
+            call_video_creation_model(
+                self._CONFIG,
+                messages=[{"role": "user", "content": "x"}],
+                timeout_seconds=5,
+            )
+        return caught.exception
+
+    def test_a_bare_timeout_says_so(self) -> None:
+        self.assertIn("timed out", str(self._call_with(TimeoutError("timed out"))))
+
+    def test_a_timeout_wrapped_in_a_reason_also_says_so(self) -> None:
+        wrapped = OSError("connection reset by peer")
+        wrapped.reason = TimeoutError("timed out")  # type: ignore[attr-defined]
+
+        self.assertIn("timed out", str(self._call_with(wrapped)))
+
+    def test_any_other_socket_failure_is_a_transport_failure(self) -> None:
+        rejected = self._call_with(OSError("connection refused"))
+
+        self.assertIn("transport failed", str(rejected))
+        self.assertNotIn(self._CONFIG.api_key, str(rejected))
