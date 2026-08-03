@@ -1,0 +1,94 @@
+# COV-03 动效作者链 388 点
+
+用户可操作：否
+证据类型：分层实现
+
+> 状态：🚧 实现中。388 → **139**。十一个模块已收口到 0，`entry.py` 剩 14、
+> `part_workspace.py` 剩 2，`agent.py` 123 未开始。
+> 上游计划：`docs/development/2026-08-03-backend-coverage-debt-plan.md`
+> 前置：[COV-02](COV-02.md)
+> 分支：`coverage/backend-100`
+
+## 1. 起点核对
+
+COV-02 收口后重新测量 `automation_tool.executor.motion_authoring`，精确缺口
+**388** 点（计划 §5.2 估算「约 390」）。逐模块：
+
+| 模块 | 起点 | 现在 |
+|---|---:|---:|
+| `agent.py` | 123 | 123 |
+| `entry.py` | 55 | 14 |
+| `voiceover.py` | 52 | **0** |
+| `part_typography.py` | 34 | **0** |
+| `film_assembly.py` | 24 | **0** |
+| `component_host.py` | 21 | **0** |
+| `segment_concat.py` | 19 | **0** |
+| `part_workspace.py` | 18 | 2 |
+| `slot_probe_browser.py` | 12 | **0** |
+| `composition_template.py` | 11 | **0** |
+| `authoring_workspace.py` | 11 | **0** |
+| `part_document.py` | 6 | **0** |
+| `resources.py` | 2 | **0** |
+
+## 2. 几处只能这么测的地方
+
+### 2.1 写穿符号链接：守的其实是竞态
+
+`AuthoringWorkspace._write` 里的 `if target.is_symlink(): _reject(...)` 看起来是
+「本来就是链接的路径要拒绝」，实际不是——`resolve()` 会跟随链接，所以这种路径要么
+被改写成工作区内的真实路径、要么因逃逸被更早的检查拒掉。**真正留给这道检查的只有
+一个窗口：名字在 resolve 之后、写入之前才被换成链接。**
+
+从外面进不到那个窗口。钩子挂在 `mkdir` 上——那是写入前的最后一步——在它返回后种下
+链接。测试里写明了为什么只能这样。
+
+顺带记：符号链接**循环**在 Python 3.12 的 `Path.resolve()` 上抛的是 `RuntimeError`
+而不是 `OSError`，会穿透 `_write` 的 `except OSError`。这条不在本任务范围，但值得
+知道。
+
+### 2.2 平台值注入：Windows 设备前缀
+
+`_native_path_for_playwright` 读 `os.name` 之后做纯字符串处理。三种形状剥法不同：
+verbatim 去掉四个字符、UNC 去掉八个再补回两个斜杠、没有前缀的原样交出。在 POSIX
+主机上驱动它靠的是**供给平台值而不是平台**，与 COV-02 §2.2 同一手法。真实 Windows
+行为仍归 Windows runner。
+
+注意路径对象要在 patch 外构造：`os.name == "nt"` 期间 `Path()` 会造 `WindowsPath`，
+它解析这些字符串的规则与断言比较的 `PosixPath` 不同（COV-02 §2.6 记过三次）。
+
+### 2.3 不信任外部工具，就要连成功路径一起验
+
+`segment_concat` 的模块文档记着一次真实事故：拼接一段 1920×1080 和一段 1080×1920，
+退出码 0、帧数正好是两段之和、时长也对，而画面是竖的装在横的容器里。每一项便宜的
+检查都过了，文件是坏的。
+
+所以这次补的不只是拒绝分支，还有「测量之后才算数」那条：帧数对但尺寸不对，照样拒绝。
+探针的四种不可读回答（没有流、字段缺失、帧率没有分母、帧数不是数字）各一条。
+
+### 2.4 走错门的用例是绿不了的，但要先红才知道
+
+静态叠加宿主那两条最初按「组件」入口写，拿到的是组件背景板而不是叠加宿主——那条路
+的入口是 `build_visual_part_film_html`，不是 `build_component_film_html`。断言先红
+才发现走错了门。
+
+这与 COV-02 反复出现的「断言通过但被测路径没执行」是同一类问题的另一面：**这次运气
+好，走错门的后果是红而不是绿。**
+
+## 3. 第六处不可达分支改成断言
+
+`part_typography.document_font_css` 里的「没有打包文件服务这个字体面」走不到：
+`resolve_faces` 刚刚用来判定这个面可用的权重表，就是从同一份锁定文件算出来的，而
+`face_artifact` 又按同样两个键把它读回来。
+
+改成 `assert artifacts, ...`，判据与 COV-02 的五处一致：断言行每次都执行因而可覆盖，
+语义仍是防御，两个读取方真要漂移必须是响亮失败，而不是发出一条背后没有文件的字体
+规则。**仍然没有新增 `pragma: no cover`。**
+
+## 4. 待办
+
+- `agent.py` 123 点——这是本批最大的一块，未开始；
+- `entry.py` 剩 14 点：契约加载与漂移（需要 patch 契约路径）、旁白闭包（需要真实
+  配音配置）、`serve_one_motion_authoring_request` 的成功路径（它不接受 `model_call`
+  参数，会真的调模型，需要另想办法）；
+- `part_workspace.py` 剩 2 点：元素开标签不以 `>` 结尾，尚未找到能让 `HTMLParser`
+  产出这种 span 的文档。
