@@ -15,13 +15,13 @@
 | COV-00 基线与排除项审计 | — | — | ✅ |
 | COV-01 对齐已有测试收集边界 | — | — | ✅ |
 | COV-02 本地/智能剪辑 | 768 | **0** | ✅ 已由含 integration 的全量验证 |
-| COV-03 动效作者链 | 388 | **15** | 🚧 十一个模块已收口，见 [COV-03](COV-03.md) |
+| COV-03 动效作者链 | 388 | **13** | 🚧 十二个模块已收口，见 [COV-03](COV-03.md) |
 | COV-04 语音/音频 | 199 | 199 | 未开始 |
 | COV-05 发布链 | 178 | 178 | 未开始 |
 | COV-06 平台尾项与最终审计 | 129 | 129 | 未开始 |
 
-全库缺口从 **2,023** 降到 **523**（COV-01 后为 1,664，减 COV-02 的 768 与
-COV-03 已消除的 373）。
+全库缺口从 **2,023** 降到 **521**（COV-01 后为 1,664，减 COV-02 的 768 与
+COV-03 已消除的 375）。
 
 **交接点是干净的**：分支最后一次提交后跑了完整 `pytest tests`（含 integration，
 真实 PostgreSQL），**7,118 passed / 21 skipped，退出码 0**；`ruff check`、
@@ -80,14 +80,18 @@ print('TOTAL', sum(g for g,_ in rows))
 
 ### 3.2 不可达分支：改断言，不加 pragma
 
-本轮遇到六处 `if` 的某一侧在任何输入下都到不了。**全部改成 `assert`**，判据一致：
+本轮遇到七处 `if` 的某一侧在任何输入下都到不了。**全部改成 `assert`**，判据一致：
 
 - 断言行每次都执行，因而可覆盖；
 - 语义仍是防御；
 - 规则一放宽就是响亮失败，而不是静默走偏。
 
-六处在 `adaptive_frame_extraction`、`local_material_preview`、`smart_edit_pipeline`、
-`timeline_repository`、`material_repository`、`part_typography`。
+七处在 `adaptive_frame_extraction`、`local_material_preview`、`smart_edit_pipeline`、
+`timeline_repository`、`material_repository`、`part_typography`、`part_workspace`。
+
+**下这个结论前要实测，不能只靠读代码。** 最后一处（开标签必带闭合尖括号）是逐一量过
+CRLF、裸 CR、换页、垂直制表、U+2028、U+0085、U+2029 七种分隔符、确认 `getpos()` 与
+真实字符偏移不漂之后才敢改的。
 
 **全程没有新增 `pragma: no cover`、没有新增 `omit`、没有降低 `fail_under`。** 接手
 的人也别加——那等于把债务换个地方藏起来。
@@ -113,10 +117,10 @@ print('TOTAL', sum(g for g,_ in rows))
 ## 4. 下一步怎么排
 
 建议顺序：**COV-03 收尾 → COV-04 → COV-05 → COV-06**。理由是 COV-03 已经开了头，
-上下文还热；且剩下的 15 点里有 13 点集中在两个文件的少数几条路径上，收掉它们比
-换一批模块从零开始便宜。
+上下文还热；且剩下的 13 点全在两个文件的少数几条路径上，收掉它们比换一批模块
+从零开始便宜。
 
-### 4.1 COV-03 剩 15 点
+### 4.1 COV-03 剩 13 点
 
 见 [COV-03.md](COV-03.md) §4。三块：
 
@@ -127,9 +131,8 @@ print('TOTAL', sum(g for g,_ in rows))
 2. **`entry.py` 剩 6 点**——旁白闭包要真实配音配置；
    `serve_one_motion_authoring_request` 的成功路径它不接受 `model_call`，会真的调
    模型，得从现有的子进程测试那条路接；
-3. **`part_workspace.py` 剩 2 点**——元素开标签不以 `>` 结尾。我没找到能让
-   `HTMLParser` 产出这种 span 的文档，怀疑也是不可达，但**没确认，别直接当不可达
-   处理**。
+3. ~~`part_workspace.py`~~ ✅ 已收口。那 2 点确认不可达并改成了断言，见
+   COV-03 §3——实测过七种行尾与分隔符，`getpos()` 与真实偏移都不漂。
 
 ### 4.2 COV-04 / 05 / 06
 

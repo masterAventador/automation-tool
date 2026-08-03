@@ -3,8 +3,8 @@
 用户可操作：否
 证据类型：分层实现
 
-> 状态：🚧 实现中。388 → **15**。十一个模块已收口到 0，`agent.py` 剩 7、
-> `entry.py` 剩 6、`part_workspace.py` 剩 2。
+> 状态：🚧 实现中。388 → **13**。十二个模块已收口到 0，`agent.py` 剩 7、
+> `entry.py` 剩 6。
 > 上游计划：`docs/development/2026-08-03-backend-coverage-debt-plan.md`
 > 前置：[COV-02](COV-02.md)
 > 分支：`coverage/backend-100`
@@ -23,7 +23,7 @@ COV-02 收口后重新测量 `automation_tool.executor.motion_authoring`，精�
 | `film_assembly.py` | 24 | **0** |
 | `component_host.py` | 21 | **0** |
 | `segment_concat.py` | 19 | **0** |
-| `part_workspace.py` | 18 | 2 |
+| `part_workspace.py` | 18 | **0** |
 | `slot_probe_browser.py` | 12 | **0** |
 | `composition_template.py` | 11 | **0** |
 | `authoring_workspace.py` | 11 | **0** |
@@ -74,7 +74,7 @@ verbatim 去掉四个字符、UNC 去掉八个再补回两个斜杠、没有前�
 这与 COV-02 反复出现的「断言通过但被测路径没执行」是同一类问题的另一面：**这次运气
 好，走错门的后果是红而不是绿。**
 
-## 3. 第六处不可达分支改成断言
+## 3. 两处不可达分支改成断言（本轮第六、第七处）
 
 `part_typography.document_font_css` 里的「没有打包文件服务这个字体面」走不到：
 `resolve_faces` 刚刚用来判定这个面可用的权重表，就是从同一份锁定文件算出来的，而
@@ -82,7 +82,16 @@ verbatim 去掉四个字符、UNC 去掉八个再补回两个斜杠、没有前�
 
 改成 `assert artifacts, ...`，判据与 COV-02 的五处一致：断言行每次都执行因而可覆盖，
 语义仍是防御，两个读取方真要漂移必须是响亮失败，而不是发出一条背后没有文件的字体
-规则。**仍然没有新增 `pragma: no cover`。**
+规则。
+
+第七处在 `part_workspace` 里：「持有槽位的元素没有闭合尖括号」也走不到。这一处
+**先做了实测再下结论**——span 取的是 `get_starttag_text()` 的长度，而 parser 只有
+看到闭合尖括号才会 emit 开标签（它的回退拼法也自带一个）；唯一能让这个切片对不上
+的是 `getpos()` 与真实字符偏移漂移，对 CRLF、裸 CR、换页、垂直制表、U+2028、
+U+0085、U+2029 七种分隔符逐一量过，都不漂。
+
+交接文档里原本写着「怀疑不可达但没确认，别直接当不可达处理」——现在确认了。
+**仍然没有新增 `pragma: no cover`。**
 
 ## 4. `agent.py`：123 → 7
 
@@ -134,5 +143,4 @@ verbatim 去掉四个字符、UNC 去掉八个再补回两个斜杠、没有前�
 - `entry.py` 剩 6 点：旁白闭包（需要真实配音配置才走得到）与
   `serve_one_motion_authoring_request` 的成功路径（它不接受 `model_call` 参数，
   会真的调模型；现有的子进程测试是另一条路，可以从那里接）；
-- `part_workspace.py` 剩 2 点：元素开标签不以 `>` 结尾，尚未找到能让 `HTMLParser`
-  产出这种 span 的文档。
+
