@@ -37,9 +37,13 @@ from automation_tool.executor.motion_authoring.agent import (
     MotionAuthoringAgent,
     MotionAuthoringRejected,
     MotionAuthoringTools,
+    MotionAuthoringUnavailable,
     VideoCreationModelConfig,
     call_video_creation_model,
     verify_closed_tool_surface,
+)
+from automation_tool.executor.motion_authoring.entry import (
+    serve_one_motion_authoring_request,
 )
 
 BRIEF = "用蓝色商务风做一段本周销售增长说明"
@@ -865,3 +869,132 @@ def test_our_own_wiring_defect_is_never_answered_as_a_refusal_of_the_brief(
     assert not unclassified, f"our own defects are still refusals of the brief: {unclassified}"
     blamed = sorted(token for token in defects if status(token) == "rejected")
     assert not blamed, f"these reach the App as a refusal of a sentence nothing read: {blamed}"
+
+
+def test_the_request_shape_is_checked_field_by_field(workspace: Path) -> None:
+    """Each of these reaches something that would otherwise be built from it."""
+    model = _NeverCalledModel()
+
+    cases: list[tuple[str, dict[str, object]]] = [
+        ("another schema version", {"schemaVersion": 2}),
+        ("a workspace that is not text", {"workspace": 1}),
+        ("an empty workspace", {"workspace": ""}),
+        ("a workspace that is not a usable one", {"workspace": str(workspace / "absent")}),
+        ("a model that is not an object", {"model": "qwen"}),
+        ("a model with the wrong field set", {"model": {"modelId": "x"}}),
+        ("brand assets that are not a list", {"brandAssets": "logo.png"}),
+        ("a brand asset that is not text", {"brandAssets": [1]}),
+        ("a duration that is not a whole number", {"durationSeconds": 6.0}),
+        ("a thinking choice that is not a bool", {"modelThinking": "yes"}),
+        ("a catalog root that is not text", {"catalogRoot": 1}),
+        ("an empty catalog root", {"catalogRoot": ""}),
+        ("a relative catalog root", {"catalogRoot": "relative/catalog"}),
+        ("catalog part overrides that are not a list", {"catalogParts": {}}),
+        ("a catalog part override that is not text", {"catalogParts": [1]}),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(MotionAuthoringEntryRejected):
+            run_motion_authoring_entry(_request(workspace, **overrides), model_call=model)
+        assert label
+
+    assert model.calls == 0, "nothing may reach the model before the request is trusted"
+
+
+def test_a_model_configuration_the_agent_refuses_is_restated_not_forwarded(
+    workspace: Path,
+) -> None:
+    """The agent's message never carries the key, but this boundary restates anyway."""
+    model = _NeverCalledModel()
+
+    with pytest.raises(MotionAuthoringEntryRejected) as caught:
+        run_motion_authoring_entry(
+            _request(
+                workspace,
+                model={"baseUrl": "http://insecure.example", "modelId": "m", "apiKey": "sk-x"},
+            ),
+            model_call=model,
+        )
+
+    assert "sk-x" not in str(caught.value)
+    assert model.calls == 0
+
+
+def test_a_model_that_is_unavailable_is_told_apart_from_one_that_refused(
+    workspace: Path,
+) -> None:
+    """Retryable and not-retryable lead to different next steps for the caller."""
+
+    def unavailable(*_args: object, **_kw: object) -> object:
+        raise MotionAuthoringUnavailable("motion authoring unavailable: gateway down")
+
+    with pytest.raises(MotionAuthoringEntryRejected) as caught:
+        run_motion_authoring_entry(_request(workspace), model_call=unavailable)
+
+    # The message stays fixed; the closed reason is what tells the two apart.
+    assert caught.value.rejection_reason == "video_creation_model_unavailable"
+
+
+def test_a_wire_reason_outside_the_closed_vocabulary_is_dropped() -> None:
+    """Anything not in the contract becomes no reason at all, never a passthrough."""
+    closed = motion_authoring_entry._closed_wire_reason
+
+    assert closed(None) is None
+    assert closed(1) is None
+    assert closed("something_nobody_declared") is None
+
+
+def test_a_static_gate_reason_is_only_read_when_it_is_the_declared_shape() -> None:
+    reader = motion_authoring_entry._closed_static_gate_reason
+
+    assert reader("not a gate message") is None
+    prefix = motion_authoring_entry._STATIC_GATE_MESSAGE_PREFIX
+    assert reader(prefix + "x" * 1025) is None, "an oversized payload is not parsed"
+    assert reader(prefix + "[unclosed") is None, "a payload that will not parse is dropped"
+
+
+def test_a_rejection_reason_that_is_not_text_or_not_the_agents_is_dropped() -> None:
+    reader = motion_authoring_entry._closed_rejection_reason
+
+    assert reader(None) is None
+    assert reader(1) is None
+    assert reader("something the agent never says") is None
+
+
+def test_an_outcome_table_that_could_answer_two_ways_is_refused() -> None:
+    """A token in two classes would answer with whichever iteration reached first."""
+    declared = motion_authoring_entry._outcomes_are_declared
+    fixed = frozenset({"a", "b"})
+
+    assert declared({"partial": ["a"], "refused_by_model": ["b"]}, fixed) is True
+    assert declared("not a table", fixed) is False
+    assert declared({}, fixed) is False
+    assert declared({"b_class": ["a"], "a_class": ["b"]}, fixed) is False, "unsorted names"
+    assert declared({"Partial": ["a"]}, fixed) is False, "a name outside the wire token shape"
+    assert declared({"partial": "a"}, fixed) is False, "reasons that are not a list"
+    assert declared({"partial": []}, fixed) is False, "a class with no reasons"
+    assert declared({"partial": ["b", "a"]}, fixed) is False, "unsorted reasons"
+    assert declared({"partial": ["c"]}, fixed) is False, "a reason outside the fixed set"
+    assert declared({"partial": ["a"], "second": ["a"]}, fixed) is False, (
+        "the same reason in two classes"
+    )
+    reserved = motion_authoring_entry._REFUSED_STATUS
+    assert declared({reserved: ["a"]}, fixed) is False, "the reserved status name"
+
+
+def test_a_request_larger_than_the_reader_accepts_is_refused_without_parsing() -> None:
+    oversized = b"{" + b" " * (motion_authoring_entry.MAX_REQUEST_BYTES + 1) + b"}"
+    out = io.StringIO()
+
+    code = serve_one_motion_authoring_request(io.BytesIO(oversized), out)
+
+    assert code != 0
+    assert json.loads(out.getvalue())["rejectionReason"] == "request_too_large"
+
+
+def test_a_request_that_is_not_readable_json_answers_without_a_reason() -> None:
+    """A body that will not decode names no closed reason, so none is invented."""
+    out = io.StringIO()
+
+    code = serve_one_motion_authoring_request(io.BytesIO(b"\xff\xfe not json"), out)
+
+    assert code != 0
