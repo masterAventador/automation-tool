@@ -292,7 +292,6 @@ def _verified_one_of_regular_file_bytes(path: Path, locked_files: tuple[_LockedF
         if payload is not None and hashlib.sha256(payload).hexdigest() == locked.sha256:
             return payload
     _reject()
-    raise AssertionError("unreachable")
 
 
 def _resolved_assets(package_root: Path | None) -> tuple[bytes, _RuntimeContract]:

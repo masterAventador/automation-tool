@@ -3197,7 +3197,8 @@ class StreamAccumulatorTests(unittest.TestCase):
             b"",
             b"data: not json",
             b"data: " + json.dumps({"choices": []}).encode(),
-            b"data: " + json.dumps({"choices": [{"delta": {"reasoning_content": "thinking"}}]}).encode(),
+            b"data: "
+            + json.dumps({"choices": [{"delta": {"reasoning_content": "thinking"}}]}).encode(),
             b"data: " + json.dumps({"choices": [{"delta": {"content": ""}}]}).encode(),
             b"data: " + self._delta("answer").encode(),
             b"data: [DONE]",
@@ -3340,9 +3341,7 @@ class ClipIntervalTests(unittest.TestCase):
         )
 
     def test_a_clip_whose_numbers_do_not_parse_makes_the_reading_unusable(self) -> None:
-        _intervals, well_formed = motion_authoring_agent._clip_intervals(
-            self._clip("soon", "6")
-        )
+        _intervals, well_formed = motion_authoring_agent._clip_intervals(self._clip("soon", "6"))
 
         self.assertFalse(well_formed)
 
@@ -3505,9 +3504,7 @@ class SlotProbeSelectionTests(unittest.TestCase):
             with TemporaryDirectory() as raw:
                 root = Path(raw)
                 workspace = _make_workspace(root / "job")
-                model = ScriptedModel(
-                    [_valid_model_payload(_valid_storyboard([_probe_beat()]))]
-                )
+                model = ScriptedModel([_valid_model_payload(_valid_storyboard([_probe_beat()]))])
                 agent = self._agent(workspace, model, probe, _probe_catalog(root))
                 with self.subTest(label=label), self.assertRaises(MotionAuthoringRejected) as ctx:
                     agent.author(_brief())

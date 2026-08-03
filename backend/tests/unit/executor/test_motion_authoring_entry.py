@@ -1061,20 +1061,14 @@ def test_the_refusal_contract_itself_must_be_readable_and_undrifted(tmp_path: Pa
     Loaded once at import and trusted afterwards, so the loader is driven
     directly with the module's own path constant pointed at a written file.
     """
-    complete = json.loads(
-        motion_authoring_entry._REFUSAL_CONTRACT_PATH.read_text(encoding="utf-8")
-    )
+    complete = json.loads(motion_authoring_entry._REFUSAL_CONTRACT_PATH.read_text(encoding="utf-8"))
 
     malformed = tmp_path / "broken.json"
     malformed.write_text("{not json", encoding="utf-8")
     drifted = tmp_path / "drifted.json"
-    drifted.write_text(
-        json.dumps({**complete, "schemaVersion": 2}), encoding="utf-8"
-    )
+    drifted.write_text(json.dumps({**complete, "schemaVersion": 2}), encoding="utf-8")
     extra = tmp_path / "extra.json"
-    extra.write_text(
-        json.dumps({**complete, "somethingNobodyDeclared": True}), encoding="utf-8"
-    )
+    extra.write_text(json.dumps({**complete, "somethingNobodyDeclared": True}), encoding="utf-8")
 
     for label, path in [
         ("no file at all", tmp_path / "absent.json"),
