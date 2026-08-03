@@ -3267,3 +3267,72 @@ class LockedComponentMetadataTests(unittest.TestCase):
             self.assertRaises(MotionAuthoringRejected),
         ):
             motion_authoring_agent._load_locked_component_metadata()
+
+
+class BriefBrandAssetTests(unittest.TestCase):
+    def test_a_brand_asset_that_is_not_a_clean_relative_path_is_refused(self) -> None:
+        """These become workspace paths; only what the workspace itself accepts may pass."""
+        for label, asset in [
+            ("an absolute path", "/etc/passwd"),
+            ("a parent segment", "../outside.png"),
+            ("a backslash", "assets\\logo.png"),
+            ("something that is not text", 1),
+            ("the empty string", ""),
+        ]:
+            with self.subTest(label=label), self.assertRaises(MotionAuthoringRejected):
+                MotionBrief(
+                    text="用蓝色商务风做一段本周销售增长说明",
+                    aspect_ratio="16:9",
+                    duration_seconds=6,
+                    language="zh",
+                    brand_assets=(cast(str, asset),),
+                )
+
+    def test_a_relative_asset_inside_the_workspace_is_accepted(self) -> None:
+        brief = MotionBrief(
+            text="用蓝色商务风做一段本周销售增长说明",
+            aspect_ratio="16:9",
+            duration_seconds=6,
+            language="zh",
+            brand_assets=("assets/logo.png",),
+        )
+
+        self.assertEqual(brief.brand_assets, ("assets/logo.png",))
+
+
+class ClipIntervalTests(unittest.TestCase):
+    """Reading each clip's stretch of the timeline out of the document itself."""
+
+    @staticmethod
+    def _clip(start: str, duration: str, clip_id: str = "a") -> str:
+        return (
+            f'<section id="{clip_id}" data-start="{start}" '
+            f'data-duration="{duration}" data-track-index="1"></section>'
+        )
+
+    def test_a_clip_whose_numbers_do_not_parse_makes_the_reading_unusable(self) -> None:
+        _intervals, well_formed = motion_authoring_agent._clip_intervals(
+            self._clip("soon", "6")
+        )
+
+        self.assertFalse(well_formed)
+
+    def test_a_clip_that_starts_before_zero_or_lasts_no_time_is_unusable(self) -> None:
+        for label, start, duration in [
+            ("a negative start", "-1", "6"),
+            ("no duration at all", "0", "0"),
+            ("a negative duration", "0", "-2"),
+        ]:
+            with self.subTest(label=label):
+                _intervals, well_formed = motion_authoring_agent._clip_intervals(
+                    self._clip(start, duration)
+                )
+                self.assertFalse(well_formed)
+
+    def test_clips_are_returned_in_timeline_order_however_they_were_written(self) -> None:
+        intervals, well_formed = motion_authoring_agent._clip_intervals(
+            self._clip("4", "2", "later") + self._clip("0", "4", "earlier")
+        )
+
+        self.assertTrue(well_formed)
+        self.assertEqual([identifier for _s, _e, identifier in intervals], ["earlier", "later"])
