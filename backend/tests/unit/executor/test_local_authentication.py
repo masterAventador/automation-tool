@@ -226,3 +226,45 @@ def test_command_proofs_reject_invalid_uuid_type_scope_state_and_paths() -> None
     authenticator.close()
     with pytest.raises(LocalSessionAuthenticationRejected):
         authenticator.proof_for_command_result(command_id=COMMAND_ID, state="logged_out")
+
+
+def test_a_dispatch_proof_only_covers_the_one_command_that_can_press_publish() -> None:
+    """Widening this would let another command spend an approval meant for the click."""
+    authenticator = LocalSessionAuthenticator(SecretStr(LOCAL_SESSION_TOKEN))
+    job_id = "423e4567-e89b-42d3-a456-426614174001"
+    confirmation_id = "423e4567-e89b-42d3-a456-426614174002"
+
+    proof = authenticator.proof_for_publish_dispatch_command(
+        command_id=COMMAND_ID,
+        command_type="douyin.publish.dispatch",
+        publish_job_id=job_id,
+        confirmation_id=confirmation_id,
+    )
+    assert proof.startswith("atlcp1.")
+
+    for command_type in ("douyin.publish.preflight", "douyin.login.open", "", 0):
+        with pytest.raises(LocalSessionAuthenticationRejected):
+            authenticator.proof_for_publish_dispatch_command(
+                command_id=COMMAND_ID,
+                command_type=command_type,  # type: ignore[arg-type]
+                publish_job_id=job_id,
+                confirmation_id=confirmation_id,
+            )
+
+
+def test_a_result_carrying_half_an_approval_is_refused() -> None:
+    """One term without the other is an account nobody confirmed, or terms nobody saw."""
+    authenticator = LocalSessionAuthenticator(SecretStr(LOCAL_SESSION_TOKEN))
+    confirmation_id = "423e4567-e89b-42d3-a456-426614174002"
+
+    for confirmation, account in (
+        (confirmation_id, None),
+        (None, "自动化运营测试账号"),
+    ):
+        with pytest.raises(LocalSessionAuthenticationRejected):
+            authenticator.proof_for_command_result(
+                command_id=COMMAND_ID,
+                state="publish_pre_submit_ready",
+                confirmation_id=confirmation,
+                target_account=account,
+            )

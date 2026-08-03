@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
@@ -16,7 +16,11 @@ from automation_tool.executor.ledger import (
     ExecutorLedger,
     ExecutorLedgerRejected,
 )
-from automation_tool.executor.side_effect_ledger import LocalSideEffect, SideEffectState
+from automation_tool.executor.side_effect_ledger import (
+    LocalPublishDispatch,
+    LocalSideEffect,
+    SideEffectState,
+)
 from automation_tool.protocol import (
     ACTION_AUTHORIZATION_VERSION,
     ActionAuthorizationClaims,
@@ -623,3 +627,48 @@ def test_side_effect_tamper_transition_order_and_inputs_fail_closed(
         scoped.setattr(opened, "_connect", lambda: (_ for _ in ()).throw(OSError()))
         with pytest.raises(ExecutorLedgerRejected):
             opened.get_side_effect(str(authorization.action_id))
+
+
+def test_a_publish_dispatch_record_that_could_not_have_happened_is_refused() -> None:
+    """The record is what stands between "confirmed once" and "posted twice"."""
+    sound: dict[str, object] = {
+        "publish_job_id": "423e4567-e89b-42d3-a456-426614174001",
+        "content_hash": "a" * 64,
+        "state": SideEffectState.PREPARED,
+        "prepared_at": datetime(2026, 7, 25, 8, 0, tzinfo=UTC),
+        "dispatched_at": None,
+        "settled_at": None,
+        "verification_fingerprint": None,
+        "revision": 1,
+        "replayed": False,
+    }
+    assert LocalPublishDispatch(**cast(Any, sound)).state is SideEffectState.PREPARED
+
+    broken_cases: list[tuple[str, dict[str, object]]] = [
+        ("a job identifier that is not canonical", {"publish_job_id": "not-a-uuid"}),
+        ("a content hash that is not a digest", {"content_hash": "not-a-digest"}),
+        ("a state outside the closed set", {"state": "prepared"}),
+        ("a preparation moment with no zone", {"prepared_at": datetime(2026, 7, 25, 8, 0)}),
+        (
+            "a click that predates its own preparation",
+            {
+                "state": SideEffectState.DISPATCHED,
+                "revision": 2,
+                "dispatched_at": datetime(2026, 7, 25, 7, 0, tzinfo=UTC),
+            },
+        ),
+        (
+            "a settlement with no click before it",
+            {
+                "state": SideEffectState.UNCERTAIN,
+                "revision": 3,
+                "settled_at": datetime(2026, 7, 25, 9, 0, tzinfo=UTC),
+            },
+        ),
+        ("a revision no transition produces", {"revision": 9}),
+        ("a replay flag that is not a flag", {"replayed": 1}),
+    ]
+    for label, broken in broken_cases:
+        with pytest.raises(ExecutorLedgerRejected):
+            LocalPublishDispatch(**cast(Any, sound | broken))
+        assert label

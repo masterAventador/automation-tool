@@ -8,6 +8,7 @@ import pytest
 
 from automation_tool.executor.browser_runtime import (
     BrowserLaunchRequest,
+    BrowserRuntime,
     BrowserRuntimeRejected,
     PackagedBrowserRuntime,
 )
@@ -239,3 +240,31 @@ def test_context_manager_closes_context_and_driver(tmp_path: Path) -> None:
 
     assert context.close_calls == 1
     assert playwright.stop_calls == 1
+
+
+class FakePage:
+    def __init__(self, title: object) -> None:
+        self.title = title
+
+
+@pytest.mark.parametrize(
+    ("label", "pages", "reachable"),
+    (
+        ("a context with no page left", [], True),
+        ("a page that cannot be asked", [FakePage(title="not callable")], True),
+        ("a page that answers", [FakePage(title=lambda: "标题")], True),
+        (
+            "a page whose browser is gone",
+            [FakePage(title=lambda: (_ for _ in ()).throw(RuntimeError("private probe failure")))],
+            False,
+        ),
+    ),
+)
+def test_one_cheap_round_trip_decides_whether_the_browser_is_still_there(
+    label: str, pages: list[FakePage], reachable: bool
+) -> None:
+    """A cached page handle outlives a dead browser, so holding one proves nothing."""
+    context = cast(Any, type("Context", (), {"pages": pages})())
+
+    assert BrowserRuntime._context_reachable(context) is reachable
+    assert label
