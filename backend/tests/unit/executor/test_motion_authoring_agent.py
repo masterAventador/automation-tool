@@ -2860,3 +2860,106 @@ class VideoCreationModelConfigTests(unittest.TestCase):
 
             assert config is not None
             self.assertEqual(config.base_url, "https://gateway.example.com/v1")
+
+
+class CompositionGateEdgeTests(unittest.TestCase):
+    """The gate's own edges: what it refuses outright and what it deliberately ignores."""
+
+    _ALLOWED: ClassVar[frozenset[str]] = frozenset({RUNTIME_ASSET})
+
+    def _codes(self, result: object) -> frozenset[str]:
+        return frozenset(finding.code for finding in cast(Any, result).findings)
+
+    def _lint(self, html: object) -> object:
+        return lint_composition(
+            cast(str, html),
+            allowed_assets=self._ALLOWED,
+            max_bytes=200_000,
+            entry_path=COMPOSITION_PATH,
+        )
+
+    def test_something_that_is_not_a_document_is_refused_by_both_gates(self) -> None:
+        """A model that answered with a list must not be read as an empty document."""
+        for value in (None, 1, ["<html>"]):
+            self.assertIn("composition_invalid", self._codes(self._lint(value)))
+            self.assertIn(
+                "composition_invalid",
+                self._codes(check_composition(cast(str, value), duration_seconds=6)),
+            )
+
+    def test_fragment_and_inline_data_references_are_not_treated_as_files(self) -> None:
+        """`#anchor` names a node in this document and `data:` carries its own bytes."""
+        html = VALID_COMPOSITION.replace(
+            '<h1 id="title">',
+            '<a href="#title">jump</a><img src="data:image/gif;base64,R0lGOD"><h1 id="title">',
+        )
+
+        result = cast(Any, self._lint(html))
+
+        self.assertTrue(result.ok, result.findings)
+
+    def test_a_composition_missing_each_required_marker_says_which_one(self) -> None:
+        cases: list[tuple[str, str, str]] = [
+            ("no composition root", 'data-composition-id="main"', "missing_composition_root"),
+            ("no clip element", 'data-track-index="1"', "missing_clip"),
+        ]
+        for label, marker, code in cases:
+            with self.subTest(label=label):
+                findings = self._codes(
+                    check_composition(
+                        VALID_COMPOSITION.replace(marker, 'data-removed="1"'),
+                        duration_seconds=6,
+                    )
+                )
+                self.assertIn(code, findings)
+
+    def test_a_clip_whose_timing_is_not_a_number_is_refused_as_unusable(self) -> None:
+        """`data-start` is read as a float; text that is not one is not read around."""
+        html = VALID_COMPOSITION.replace(
+            'data-start="0" data-duration="6" data-track-index="1"',
+            'data-start="soon" data-duration="6" data-track-index="1"',
+        )
+
+        codes = self._codes(check_composition(html, duration_seconds=6))
+
+        self.assertIn("clip_interval_invalid", codes)
+
+    def test_a_composition_with_no_clips_at_all_reports_no_overlap(self) -> None:
+        """Nothing to overlap is not an overlap; the missing-clip finding covers it."""
+        html = VALID_COMPOSITION.replace('data-track-index="1"', 'data-removed="1"')
+
+        codes = self._codes(check_composition(html, duration_seconds=6))
+
+        self.assertIn("missing_clip", codes)
+        self.assertNotIn("clip_overlap", codes)
+
+    def test_the_runtime_finding_only_fires_on_the_one_unrunnable_shape(self) -> None:
+        """Calling a runtime that is neither loaded nor defined; anything else is left alone."""
+        unrunnable = VALID_COMPOSITION.replace('<script src="./runtime/gsap.min.js"></script>', "")
+        self.assertIn(
+            "missing_animation_runtime",
+            self._codes(check_composition(unrunnable, duration_seconds=6)),
+        )
+
+        # Loads it: left alone.
+        self.assertNotIn(
+            "missing_animation_runtime",
+            self._codes(check_composition(VALID_COMPOSITION, duration_seconds=6)),
+        )
+
+        # Defines it inline instead of loading it: also left alone.
+        inlined = unrunnable.replace(
+            "window.__timelines = window.__timelines || {};",
+            "const gsap = {timeline: () => ({from: () => {}})};\n"
+            "window.__timelines = window.__timelines || {};",
+        )
+        self.assertNotIn(
+            "missing_animation_runtime",
+            self._codes(check_composition(inlined, duration_seconds=6)),
+        )
+
+        # Never mentions a runtime at all: nothing to find.
+        self.assertNotIn(
+            "missing_animation_runtime",
+            self._codes(check_composition("<html><body></body></html>", duration_seconds=6)),
+        )
