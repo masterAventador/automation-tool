@@ -366,3 +366,127 @@ def test_the_record_redacts_itself_when_printed(ledger: ExecutorLedger) -> None:
     assert content_hash("job-1") not in printed
     assert job_id(1) not in printed
     assert "prepared" in printed
+
+
+def test_reading_a_dispatch_under_a_shape_that_is_not_a_job_identifier_is_rejected(
+    ledger: ExecutorLedger,
+) -> None:
+    for value in ("", "not-a-uuid", job_id(1).upper()):
+        with pytest.raises(ExecutorLedgerRejected):
+            ledger.get_publish_dispatch(value)
+
+
+def test_a_click_asked_for_under_an_impossible_interval_is_rejected(
+    ledger: ExecutorLedger,
+) -> None:
+    """The interval is the flood control; a broken one must stop the click, not widen it."""
+    prepared(ledger)
+    for interval in (-1, True, 60.0, "60"):
+        with pytest.raises(ExecutorLedgerRejected):
+            ledger.begin_publish_dispatch(
+                publish_job_id=job_id(1),
+                content_hash=content_hash("job-1"),
+                dispatched_at=NOW + timedelta(seconds=1),
+                minimum_interval_seconds=interval,  # type: ignore[arg-type]
+            )
+    with pytest.raises(ExecutorLedgerRejected):
+        ledger.begin_publish_dispatch(
+            publish_job_id=job_id(1),
+            content_hash=content_hash("job-1"),
+            dispatched_at=(NOW + timedelta(seconds=1)).replace(tzinfo=None),
+            minimum_interval_seconds=MINIMUM_INTERVAL_SECONDS,
+        )
+    recorded = ledger.get_publish_dispatch(job_id(1))
+    assert recorded is not None
+    assert recorded.state is SideEffectState.PREPARED
+
+
+def test_a_settlement_that_is_neither_proof_nor_uncertainty_is_rejected(
+    ledger: ExecutorLedger,
+) -> None:
+    """Only two outcomes exist; anything else would leave the click unaccounted for."""
+    prepared(ledger)
+    begun(ledger)
+    proof = hashlib.sha256(b"independent evidence").digest()
+
+    for target_state, fingerprint in (
+        (SideEffectState.PREPARED, None),
+        (SideEffectState.DISPATCHED, None),
+        (SideEffectState.UNCERTAIN, proof),
+    ):
+        with pytest.raises(ExecutorLedgerRejected):
+            ledger._settle_publish_dispatch(
+                publish_job_id=job_id(1),
+                content_hash=content_hash("job-1"),
+                verification_fingerprint=fingerprint,
+                settled_at=NOW + timedelta(seconds=2),
+                target_state=target_state,
+            )
+    recorded = ledger.get_publish_dispatch(job_id(1))
+    assert recorded is not None
+    assert recorded.state is SideEffectState.DISPATCHED
+
+
+def test_a_settlement_whose_moment_or_content_is_unusable_is_rejected(
+    ledger: ExecutorLedger,
+) -> None:
+    prepared(ledger)
+    begun(ledger)
+
+    with pytest.raises(ExecutorLedgerRejected):
+        ledger.mark_publish_dispatch_uncertain(
+            publish_job_id=job_id(1),
+            content_hash="not-a-digest",
+            uncertain_at=NOW + timedelta(seconds=2),
+        )
+    with pytest.raises(ExecutorLedgerRejected):
+        ledger.mark_publish_dispatch_uncertain(
+            publish_job_id=job_id(1),
+            content_hash=content_hash("job-1"),
+            uncertain_at=(NOW + timedelta(seconds=2)).replace(tzinfo=None),
+        )
+    recorded = ledger.get_publish_dispatch(job_id(1))
+    assert recorded is not None
+    assert recorded.state is SideEffectState.DISPATCHED
+
+
+def test_settling_against_content_this_job_never_confirmed_is_rejected(
+    ledger: ExecutorLedger,
+) -> None:
+    prepared(ledger)
+    begun(ledger)
+
+    with pytest.raises(ExecutorLedgerRejected):
+        ledger.mark_publish_dispatch_uncertain(
+            publish_job_id=job_id(1),
+            content_hash=content_hash("a different clip"),
+            uncertain_at=NOW + timedelta(seconds=2),
+        )
+    recorded = ledger.get_publish_dispatch(job_id(1))
+    assert recorded is not None
+    assert recorded.state is SideEffectState.DISPATCHED
+
+
+def test_a_replayed_verification_must_carry_the_same_proof_it_recorded(
+    ledger: ExecutorLedger,
+) -> None:
+    """Replaying with different evidence is a different claim, not the same one."""
+    prepared(ledger)
+    begun(ledger)
+    ledger.verify_publish_dispatch(
+        publish_job_id=job_id(1),
+        content_hash=content_hash("job-1"),
+        verification_fingerprint=hashlib.sha256(b"the recorded proof").digest(),
+        verified_at=NOW + timedelta(seconds=2),
+    )
+
+    with pytest.raises(ExecutorLedgerRejected):
+        ledger.verify_publish_dispatch(
+            publish_job_id=job_id(1),
+            content_hash=content_hash("job-1"),
+            verification_fingerprint=hashlib.sha256(b"some other proof").digest(),
+            verified_at=NOW + timedelta(seconds=3),
+        )
+    recorded = ledger.get_publish_dispatch(job_id(1))
+    assert recorded is not None
+    assert recorded.state is SideEffectState.VERIFIED
