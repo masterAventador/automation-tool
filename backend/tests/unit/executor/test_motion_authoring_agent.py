@@ -3100,3 +3100,50 @@ class SelectableCatalogDriftTests(unittest.TestCase):
             self.assertRaises(MotionAuthoringRejected),
         ):
             motion_authoring_agent._load_selectable_catalog_parts()
+
+
+class LockedAuthoringWorkflowTests(unittest.TestCase):
+    def test_a_workflow_contract_that_cannot_be_read_is_refused(self) -> None:
+        with TemporaryDirectory() as raw:
+            broken = Path(raw) / "workflow.json"
+            broken.write_text("{not json", encoding="utf-8")
+
+            for label, path in [("no file", Path(raw) / "absent.json"), ("malformed", broken)]:
+                with self.subTest(label=label), self.assertRaises(MotionAuthoringRejected):
+                    load_locked_authoring_workflow(vendor_root=VENDOR_ROOT, contract_path=path)
+
+    def test_a_pinned_file_the_submodule_does_not_carry_is_refused(self) -> None:
+        """The digest cannot vouch for a file that is not there, or for a link."""
+        document = json.loads(WORKFLOW_CONTRACT.read_text(encoding="utf-8"))
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            contract = root / "workflow.json"
+            contract.write_text(json.dumps(document), encoding="utf-8")
+
+            # An empty vendor root: every pinned path is missing.
+            with self.assertRaises(MotionAuthoringRejected):
+                load_locked_authoring_workflow(vendor_root=root, contract_path=contract)
+
+            # A link standing in for the first pinned file: still refused.
+            first = str(document["files"][0]["path"])
+            planted = root / first
+            planted.parent.mkdir(parents=True, exist_ok=True)
+            planted.symlink_to(VENDOR_ROOT / first)
+            with self.assertRaises(MotionAuthoringRejected):
+                load_locked_authoring_workflow(vendor_root=root, contract_path=contract)
+
+
+class LockedItemDurationTests(unittest.TestCase):
+    def test_a_component_the_metadata_never_measured_has_no_duration(self) -> None:
+        """Every selectable part needs a length; a silent zero would render nothing."""
+        with self.assertRaises(MotionAuthoringRejected):
+            motion_authoring_agent._locked_item_duration({"name": "a-part-nobody-measured"})
+
+    def test_a_part_that_declares_its_own_duration_is_capped_at_the_segment_ceiling(
+        self,
+    ) -> None:
+        capped = motion_authoring_agent._locked_item_duration(
+            {"name": "whatever", "duration": 10_000}
+        )
+
+        self.assertEqual(capped, float(motion_authoring_agent.CATALOG_SEGMENT_SECONDS_MAXIMUM))
