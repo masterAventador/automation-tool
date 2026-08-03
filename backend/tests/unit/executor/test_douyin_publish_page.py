@@ -826,7 +826,7 @@ def test_a_row_that_cannot_be_read_is_refused_and_the_rest_released() -> None:
     page = _works_list_page(titles=(("作品", True), ("另一个作品", True)))
     page.failing_handle_index = 1
 
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError):
         DouyinPublishPage(window(page)).works_titled("作品")
 
     assert page.disposed == [0, 1]
@@ -857,8 +857,9 @@ def test_a_submit_control_that_answers_with_a_non_bool_is_refused() -> None:
     page = form_page()
 
     class _OddLocator(FakeLocator):
-        def is_enabled(self) -> object:
-            return "yes"
+        def is_enabled(self) -> bool:
+            # Deliberately not a bool: the page has to notice rather than trust it.
+            return cast(bool, "yes")
 
     page.locator = lambda selector: _OddLocator(selector, page)  # type: ignore[method-assign]
 
