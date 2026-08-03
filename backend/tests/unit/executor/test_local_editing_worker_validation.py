@@ -27,6 +27,7 @@ from automation_tool.executor.local_editing_worker import (
     LocalEditingWorkerBootstrap,
     LocalEditingWorkerFailureCode,
     LocalMaterialForgetCommand,
+    LocalMaterialImportCommand,
     LocalMaterialStatusCommand,
     LocalMaterialWorkerFailureCode,
     LocalMaterialWorkerStatus,
@@ -41,15 +42,18 @@ from automation_tool.executor.local_editing_worker_process import (
     _materials,
     _object,
     _optional_uuid,
+    _project,
     _render_failure,
+    _timeline,
     _timestamp,
     _track,
     _transition,
     _uuid,
     execute_local_material_forget,
+    execute_local_material_import,
     execute_local_material_status,
 )
-from automation_tool.executor.material_probe import PackagedMediaTools
+from automation_tool.executor.material_probe import MaterialPathRegistry, PackagedMediaTools
 from automation_tool.executor.visual_render_execution import (
     VisualRenderExecutionRejected,
     VisualRenderExecutionRejection,
@@ -180,6 +184,98 @@ class TrackTests(unittest.TestCase):
         for label, value in cases:
             with self.subTest(label=label), self.assertRaises(LocalEditingRenderRejected):
                 _track(value)
+
+
+def _project_document(**overrides: Any) -> dict[str, Any]:
+    document: dict[str, Any] = {
+        "projectId": _UUID_A,
+        "title": "真实出片",
+        "output": {"width": 1280, "height": 720, "fps": 25},
+        "captionStyle": {
+            "fontKey": "noto-sans-cjk-sc",
+            "fontPx": 42,
+            "strokePx": 2,
+            "lineSpacing": 1.2,
+        },
+        "createdAt": "2026-08-01T00:00:00Z",
+    }
+    document.update(overrides)
+    return document
+
+
+def _timeline_document(**overrides: Any) -> dict[str, Any]:
+    document: dict[str, Any] = {
+        "timelineId": _UUID_B,
+        "projectId": _UUID_A,
+        "revision": 1,
+        "durationMs": 1_000,
+        "tracks": [{"trackId": "t1", "kind": "visual", "clips": [_clip_document()]}],
+        "createdAt": "2026-08-01T00:00:01Z",
+    }
+    document.update(overrides)
+    return document
+
+
+class ProjectTests(unittest.TestCase):
+    def test_a_project_document_parses(self) -> None:
+        project = _project(_project_document())
+
+        self.assertEqual(project.project_id.uuid, UUID(_UUID_A))
+        self.assertEqual(project.output.width, 1280)
+
+    def test_a_project_the_domain_refuses_is_an_invalid_timeline(self) -> None:
+        """Field-shape checks happen here; value rules stay in the domain type.
+
+        An odd frame width is well-formed JSON of the right type, so nothing in
+        this module can see it. `OutputSpec` is what refuses it, and the caller
+        must still receive one closed worker code rather than the domain error.
+        """
+        cases: list[tuple[str, dict[str, Any]]] = [
+            (
+                "odd frame width",
+                _project_document(output={"width": 1281, "height": 720, "fps": 25}),
+            ),
+            ("title is not text", _project_document(title=42)),
+            (
+                "caption size the domain refuses",
+                _project_document(
+                    captionStyle={
+                        "fontKey": "noto-sans-cjk-sc",
+                        "fontPx": 0,
+                        "strokePx": 2,
+                        "lineSpacing": 1.2,
+                    }
+                ),
+            ),
+        ]
+        for label, document in cases:
+            with self.subTest(label=label), self.assertRaises(LocalEditingRenderRejected) as caught:
+                _project(document)
+            self.assertIs(caught.exception.code, LocalEditingWorkerFailureCode.INVALID_TIMELINE)
+
+
+class TimelineTests(unittest.TestCase):
+    def test_a_timeline_document_parses(self) -> None:
+        timeline = _timeline(_timeline_document())
+
+        self.assertEqual(timeline.timeline_id.uuid, UUID(_UUID_B))
+        self.assertEqual(len(timeline.tracks), 1)
+
+    def test_tracks_that_are_not_a_list_are_refused_before_construction(self) -> None:
+        """Refused by shape, not by iterating: a string would otherwise iterate."""
+        for label, tracks in [("an object", {}), ("text", "visual"), ("nothing", None)]:
+            with (
+                self.subTest(label=label),
+                self.assertRaises(LocalEditingRenderRejected) as caught,
+            ):
+                _timeline(_timeline_document(tracks=tracks))
+            self.assertIs(caught.exception.code, LocalEditingWorkerFailureCode.INVALID_TIMELINE)
+
+    def test_a_timeline_the_domain_refuses_is_an_invalid_timeline(self) -> None:
+        with self.assertRaises(LocalEditingRenderRejected) as caught:
+            _timeline(_timeline_document(durationMs=-1))
+
+        self.assertIs(caught.exception.code, LocalEditingWorkerFailureCode.INVALID_TIMELINE)
 
 
 class MaterialBindingTests(unittest.TestCase):
@@ -471,6 +567,57 @@ class MaterialCommandTests(unittest.TestCase):
                     caught.exception.code,
                     LocalMaterialWorkerFailureCode.UNUSABLE_IDENTIFIER,
                 )
+
+    def test_import_refuses_a_bootstrap_or_command_of_the_wrong_type(self) -> None:
+        """Refused before the registry home is touched, so nothing is created."""
+        with tempfile.TemporaryDirectory() as raw:
+            bootstrap = _bootstrap(Path(raw).resolve())
+            source = Path(raw) / "source.mp4"
+            source.write_bytes(b"controlled source")
+            command = LocalMaterialImportCommand(material_id=UUID(_UUID_A), source_path=source)
+
+            for label, args in [
+                ("bad bootstrap", (cast(Any, object()), command)),
+                ("bad command", (bootstrap, cast(Any, object()))),
+            ]:
+                with (
+                    self.subTest(label=label),
+                    self.assertRaises(LocalMaterialOperationRejected) as caught,
+                ):
+                    execute_local_material_import(*args)
+                self.assertIs(
+                    caught.exception.code,
+                    LocalMaterialWorkerFailureCode.UNUSABLE_IDENTIFIER,
+                )
+
+            self.assertFalse((bootstrap.asset_root / "local-executor").exists())
+
+    def test_forget_translates_a_registry_reason_into_a_worker_code(self) -> None:
+        """The registry's own refusal is not allowed to escape as a registry error.
+
+        A well-typed command can still name an identifier the registry cannot
+        store -- the registry's key is the canonical v4 text -- and the caller of
+        this worker only understands worker codes.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            bootstrap = _bootstrap(root)
+            state = bootstrap.asset_root / "local-executor" / "state"
+            state.mkdir(parents=True, mode=0o700)
+            source = root / "source.mp4"
+            source.write_bytes(b"controlled source")
+            MaterialPathRegistry(state_directory=state).register(UUID(_UUID_A), source)
+
+            with self.assertRaises(LocalMaterialOperationRejected) as caught:
+                execute_local_material_forget(
+                    bootstrap, LocalMaterialForgetCommand(material_id=UUID(int=0))
+                )
+
+            self.assertIs(
+                caught.exception.code,
+                LocalMaterialWorkerFailureCode.UNUSABLE_IDENTIFIER,
+            )
+            self.assertNotIn(str(source), str(caught.exception))
 
     def test_status_reports_an_unregistered_material(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

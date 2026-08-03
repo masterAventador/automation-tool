@@ -3,8 +3,8 @@
 用户可操作：否
 证据类型：分层实现
 
-> 状态：🚧 实现中。第 1 批 `adaptive_frame_extraction.py` ✅ **178/178 全部消除，
-> 模块达 100%**（连跑三次稳定）；其余三批未开始。
+> 状态：🚧 实现中。第 1 批 `adaptive_frame_extraction.py` 178→**0**、第 2 批两个
+> worker process 193→**0**，均连跑三次稳定；第 3、4 批未开始。
 > 上游计划：`docs/development/2026-08-03-backend-coverage-debt-plan.md`
 > 前置：[COV-00](COV-00.md)、[COV-01](COV-01.md)
 > 分支：`coverage/backend-100`
@@ -113,10 +113,51 @@ COV-00 §2.2 记录 `_kill_and_reap` 的 `(1040, 1043)` 是竞态分支——同
 防御，而且真出问题时是响亮失败，而不是静默按 `-1` 计费得出一条错误的选帧路径。**没有新增
 `pragma: no cover`。**
 
-## 3. 待办
+## 3. 第 2 批：两个 worker process（193 → 0）
+
+| 模块 | 基线 | 结果 |
+|---|---:|---:|
+| `smart_edit_worker_process.py` | 107 | **0** |
+| `local_editing_worker_process.py` | 86 | **0** |
+
+新增 `test_smart_edit_worker_validation.py`（55）、`test_local_editing_worker_validation.py`
+（43 + 61 subtest），并把两个 `..._process.py` 测试各扩到 32 / 14 条。四个文件
+连跑三次均为 100.00%。
+
+### 3.1 两条自己写的假阳性
+
+都是「断言绿了，但被测那条路根本没执行」，且**只有覆盖率数据能发现**：
+
+- **用 monkeypatch 把 `_MAX_DOCUMENT_BYTES` 降到 1 来测结果文档超限。** 看着等价，
+  实际不是——`_load_object` 拿同一个常量限制*请求*文件，于是运行在读自己的输入时
+  就死了，从没到过结果大小那道关。改成真的产出一份超限文档；
+- **测「adapter 加载失败要拒绝」时 fixture 用了 catalog 里不存在的 `model_id`。**
+  adapter 本来就加载不起来，我 mock 的那个特定失败从未被触及——两条不同的失败路径
+  共用了一个断言。改用真实存在的 `model_id` 与 `base_url`，并对着一条既有的通过用例
+  核对过。
+
+这正是本轮一律用「基线 `missing` ∩ 新 `executed`」计量、而不是只看测试通过与否的原因：
+`pytest` 说通过只证明断言没炸，缺口数字下降才证明那段代码真的被执行。
+
+### 3.2 第三次撞上 `Path` / `os.name`
+
+`patch os.name="nt"` 期间构造的 `Path` 是 `WindowsPath`，`lstat` 与路径比较在 macOS 上
+必然失败，被测函数于是在最开头就返回——断言照样通过。§2.6 已记两次，本批是第三次，
+三处都已注明原因。
+
+### 3.3 几处值得记的验收形状
+
+- **`_render_failure` 用全映射断言守枚举增长**：`covered == set(VisualRenderExecutionRejection)`，
+  将来加一个没人翻译的成员会在这里红，而不是在运行时 `KeyError`；
+- **`commit` 回滚失败时不得留在已发布状态**：树搬不回去就必须丢弃，不能两头都在；
+- **渲染作业的路径泄漏**：异常里不得出现源路径，`repr` 必须是 `<redacted>`（§7）；
+- **产物标识**：非 UUID、nil UUID、v1、非 RFC 4122 变体四种都必须拒绝——渲染已经成功，
+  唯一能表达成功的就是一个查得回来的标识。
+
+## 4. 待办
 
 - ~~第 1 批~~ ✅ 已收口；
-- 第 2 批 smart/local 两个 worker process 193 点；
+- ~~第 2 批~~ ✅ 已收口；
 - 第 3 批 pipeline/preview/generation/media/local worker 279 点；
 - 第 4 批 material 与控制面尾项 118 点。
 
