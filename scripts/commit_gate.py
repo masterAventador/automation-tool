@@ -246,6 +246,17 @@ def _initialize_slow_checkout_repository(checkout: Path) -> None:
         ],
         checkout,
     )
+    # The fast tier adds this ignored runtime after `git archive` extracts the
+    # commit. A directory-shaped ignore (`node_modules/`) does not match the
+    # symlink itself, so source-identity checks would otherwise mistake the
+    # gate's absolute host link for an untracked release input. Keep the link
+    # usable by later render tests while excluding this one gate-owned path
+    # from the disposable repository's source inventory.
+    info_exclude = checkout / ".git" / "info" / "exclude"
+    existing = info_exclude.read_text(encoding="utf-8")
+    marker = "/frontend/node_modules\n"
+    if marker not in existing:
+        info_exclude.write_text(existing + marker, encoding="utf-8")
     _run_checkout_command(
         [
             "git",

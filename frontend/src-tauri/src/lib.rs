@@ -23,6 +23,16 @@ pub mod executor_manager;
 pub mod executor_package;
 pub mod executor_platform;
 pub mod executor_protocol;
+pub mod local_editing_job_ledger;
+pub mod local_editing_runtime;
+// The desktop-only acceptance build deliberately omits every Control Plane
+// material command. Keep the module available to its unit tests, while the
+// normal and control-plane builds continue to lint every private path.
+#[cfg_attr(
+    all(feature = "desktop-e2e", not(feature = "control-plane-e2e")),
+    allow(dead_code)
+)]
+pub mod local_material_library;
 pub mod local_registration;
 pub mod local_video_orchestrator;
 mod managed_process_tree;
@@ -32,10 +42,8 @@ pub mod motion_video_studio;
 pub mod publish_workspace;
 mod runtime_compatibility;
 pub mod secure_store;
+pub mod smart_edit_runtime;
 pub mod startup_environment;
-pub mod video_editing_executor;
-pub mod video_editing_service_settings;
-pub mod video_editing_workspace;
 pub mod video_job_workspace;
 pub mod video_media_toolchain;
 
@@ -58,6 +66,8 @@ use local_registration::{
 };
 use tauri::Manager;
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+use tauri_plugin_dialog::{DialogExt, FilePath};
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use zeroize::Zeroizing;
 
 struct ControlPlaneCommandError {
@@ -65,7 +75,44 @@ struct ControlPlaneCommandError {
     retryable: bool,
 }
 
+#[cfg_attr(
+    all(feature = "desktop-e2e", not(feature = "control-plane-e2e")),
+    allow(dead_code)
+)]
+struct LocalMaterialCommandError {
+    code: &'static str,
+    retryable: bool,
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+struct SmartEditCommandError {
+    code: &'static str,
+    retryable: bool,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+static MATERIAL_ACCEPTANCE_PICK_INDEX: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(1);
+
+#[cfg(feature = "control-plane-e2e")]
+static MATERIAL_ACCEPTANCE_SOURCES: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<uuid::Uuid, std::path::PathBuf>>,
+> = std::sync::OnceLock::new();
+
+impl serde::Serialize for LocalMaterialCommandError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        command_error::serialize(&self.code, Some(self.retryable), serializer)
+    }
+}
+
 impl serde::Serialize for ControlPlaneCommandError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        command_error::serialize(&self.code, Some(self.retryable), serializer)
+    }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+impl serde::Serialize for SmartEditCommandError {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         command_error::serialize(&self.code, Some(self.retryable), serializer)
     }
@@ -90,28 +137,6 @@ struct ExecutorDiagnosticsSnapshot {
 struct DiagnosticExportCommandError {
     code: &'static str,
     retryable: bool,
-}
-
-struct VideoEditingWorkspaceCommandError {
-    code: &'static str,
-    retryable: bool,
-}
-
-impl From<video_editing_workspace::VideoEditingWorkspaceError>
-    for VideoEditingWorkspaceCommandError
-{
-    fn from(error: video_editing_workspace::VideoEditingWorkspaceError) -> Self {
-        Self {
-            code: error.code().as_str(),
-            retryable: error.code().retryable(),
-        }
-    }
-}
-
-impl serde::Serialize for VideoEditingWorkspaceCommandError {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        command_error::serialize(&self.code, Some(self.retryable), serializer)
-    }
 }
 
 impl serde::Serialize for DiagnosticExportCommandError {
@@ -281,59 +306,6 @@ async fn test_model_service_connection(
 }
 
 #[tauri::command]
-fn get_video_editing_service_settings(
-    settings: tauri::State<
-        '_,
-        video_editing_service_settings::ProductionVideoEditingServiceSettings,
-    >,
-) -> Result<
-    video_editing_service_settings::VideoEditingServiceSnapshot,
-    video_editing_service_settings::VideoEditingServiceCommandError,
-> {
-    settings.snapshot().map_err(Into::into)
-}
-
-#[tauri::command]
-fn configure_video_editing_service(
-    request: video_editing_service_settings::ConfigureVideoEditingServiceRequest,
-    settings: tauri::State<
-        '_,
-        video_editing_service_settings::ProductionVideoEditingServiceSettings,
-    >,
-) -> Result<
-    video_editing_service_settings::VideoEditingServiceSnapshot,
-    video_editing_service_settings::VideoEditingServiceCommandError,
-> {
-    settings.configure(&request).map_err(Into::into)
-}
-
-#[tauri::command]
-fn clear_video_editing_service(
-    settings: tauri::State<
-        '_,
-        video_editing_service_settings::ProductionVideoEditingServiceSettings,
-    >,
-) -> Result<
-    video_editing_service_settings::VideoEditingServiceSnapshot,
-    video_editing_service_settings::VideoEditingServiceCommandError,
-> {
-    settings.clear().map_err(Into::into)
-}
-
-#[tauri::command]
-async fn test_video_editing_service_connection(
-    settings: tauri::State<
-        '_,
-        video_editing_service_settings::ProductionVideoEditingServiceSettings,
-    >,
-) -> Result<
-    video_editing_service_settings::VideoEditingConnectionSnapshot,
-    video_editing_service_settings::VideoEditingServiceCommandError,
-> {
-    settings.test_connection().await.map_err(Into::into)
-}
-
-#[tauri::command]
 fn get_bilibili_service_settings(
     settings: tauri::State<'_, bilibili_service_settings::ProductionBilibiliServiceSettings>,
 ) -> Result<
@@ -362,477 +334,6 @@ fn clear_bilibili_service(
     bilibili_service_settings::BilibiliServiceCommandError,
 > {
     settings.clear().map_err(Into::into)
-}
-
-#[tauri::command]
-fn list_video_editing_projects(
-    workspace: tauri::State<'_, video_editing_workspace::VideoEditingWorkspace>,
-) -> Result<Vec<video_editing_workspace::EditingProjectSnapshot>, VideoEditingWorkspaceCommandError>
-{
-    workspace.list_projects().map_err(Into::into)
-}
-
-#[tauri::command]
-fn create_video_editing_project(
-    request: video_editing_workspace::CreateEditingProjectRequest,
-    workspace: tauri::State<'_, video_editing_workspace::VideoEditingWorkspace>,
-) -> Result<video_editing_workspace::EditingProjectSnapshot, VideoEditingWorkspaceCommandError> {
-    workspace.create_project(request).map_err(Into::into)
-}
-
-#[tauri::command]
-fn get_video_editing_timeline(
-    project_id: uuid::Uuid,
-    workspace: tauri::State<'_, video_editing_workspace::VideoEditingWorkspace>,
-) -> Result<
-    Option<video_editing_workspace::EditingTimelineSnapshot>,
-    VideoEditingWorkspaceCommandError,
-> {
-    workspace.get_timeline(project_id).map_err(Into::into)
-}
-
-#[tauri::command]
-fn save_video_editing_timeline(
-    project_id: uuid::Uuid,
-    draft: video_editing_workspace::EditingTimelineDraft,
-    workspace: tauri::State<'_, video_editing_workspace::VideoEditingWorkspace>,
-) -> Result<video_editing_workspace::EditingTimelineSnapshot, VideoEditingWorkspaceCommandError> {
-    workspace
-        .save_timeline(project_id, draft)
-        .map_err(Into::into)
-}
-
-#[tauri::command]
-fn list_video_editing_jobs(
-    project_id: uuid::Uuid,
-    workspace: tauri::State<'_, video_editing_workspace::VideoEditingWorkspace>,
-) -> Result<Vec<video_editing_workspace::EditingJobSnapshot>, VideoEditingWorkspaceCommandError> {
-    workspace.list_editing_jobs(project_id).map_err(Into::into)
-}
-
-#[tauri::command]
-fn read_video_editing_artifact(
-    artifact_id: uuid::Uuid,
-    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
-) -> Result<video_job_workspace::RenderedVideoArtifactPayload, VideoEditingWorkspaceCommandError> {
-    workspaces
-        .read_rendered_video_artifact(artifact_id)
-        .map_err(|_| VideoEditingWorkspaceCommandError {
-            code: "draft_storage_unavailable",
-            retryable: false,
-        })
-}
-
-#[tauri::command]
-async fn submit_video_editing_job(
-    project_id: uuid::Uuid,
-    app: tauri::AppHandle,
-) -> Result<video_editing_workspace::EditingJobSnapshot, VideoEditingWorkspaceCommandError> {
-    tauri::async_runtime::spawn_blocking(move || {
-        submit_video_editing_job_off_thread(&app, project_id)
-    })
-    .await
-    .map_err(|_| VideoEditingWorkspaceCommandError {
-        code: "editing_service_unavailable",
-        retryable: true,
-    })?
-}
-
-const VIDEO_EDITING_CHILD_DEADLINE: std::time::Duration =
-    std::time::Duration::from_secs(2 * 60 * 60);
-
-fn submit_video_editing_job_off_thread(
-    app: &tauri::AppHandle,
-    project_id: uuid::Uuid,
-) -> Result<video_editing_workspace::EditingJobSnapshot, VideoEditingWorkspaceCommandError> {
-    use video_editing_executor::{
-        build_video_editing_child_request, build_video_editing_recovery_checkpoint,
-        run_video_editing_child, VideoEditingChildErrorKind, VideoEditingChildStatus,
-        VIDEO_EDITING_RECOVERY_CHECKPOINT_NAME,
-    };
-    use video_editing_workspace::{EditingFailureCode, EditingJobTerminalOutcome};
-    use video_job_workspace::{VideoWorkspaceDisposition, VideoWorkspaceErrorCode};
-
-    let editing = app
-        .try_state::<video_editing_workspace::VideoEditingWorkspace>()
-        .ok_or(VideoEditingWorkspaceCommandError {
-            code: "draft_storage_unavailable",
-            retryable: false,
-        })?;
-    let prepared = editing
-        .prepare_editing_job(project_id)
-        .map_err(VideoEditingWorkspaceCommandError::from)?;
-    let editing_job_id = prepared.snapshot().editing_job_id;
-    let fail = |code: EditingFailureCode| {
-        editing
-            .settle_editing_job(editing_job_id, EditingJobTerminalOutcome::Failed(code))
-            .map_err(Into::into)
-    };
-    let uncertain = || {
-        editing
-            .settle_editing_job(editing_job_id, EditingJobTerminalOutcome::OutcomeUncertain)
-            .map_err(Into::into)
-    };
-    let Some(settings) =
-        app.try_state::<video_editing_service_settings::ProductionVideoEditingServiceSettings>()
-    else {
-        return fail(EditingFailureCode::DependencyUnavailable);
-    };
-    let credential = match settings.credential_for_adapter() {
-        Ok(value) => value,
-        Err(_) => return fail(EditingFailureCode::DependencyUnavailable),
-    };
-    let Some(platform) = app.try_state::<executor_platform::ExecutorPlatformService>() else {
-        return fail(EditingFailureCode::DependencyUnavailable);
-    };
-    let entrypoint = match platform.verified_entrypoint() {
-        Ok(value) => value,
-        Err(_) => return fail(EditingFailureCode::DependencyUnavailable),
-    };
-    let Some(workspaces) = app.try_state::<video_job_workspace::VideoJobWorkspaceStore>() else {
-        return fail(EditingFailureCode::DependencyUnavailable);
-    };
-    let execution_workspace = match workspaces.create(editing_job_id) {
-        Ok(value) => value,
-        Err(_) => return fail(EditingFailureCode::DependencyUnavailable),
-    };
-    let finish = |disposition| {
-        let _ = workspaces.finish(&execution_workspace, disposition);
-    };
-    let staged = match workspaces.stage_editing_artifacts(
-        &execution_workspace,
-        &prepared.snapshot().input_artifact_ids,
-    ) {
-        Ok(value) => value,
-        Err(error) => {
-            finish(VideoWorkspaceDisposition::Delete);
-            let failure_code = if error.code() == VideoWorkspaceErrorCode::QuotaExceeded {
-                EditingFailureCode::ResourceExhausted
-            } else {
-                EditingFailureCode::InvalidInput
-            };
-            return fail(failure_code);
-        }
-    };
-    let input_directory = match workspaces.worker_asset_directory(&execution_workspace) {
-        Ok(value) => value,
-        Err(_) => {
-            finish(VideoWorkspaceDisposition::Delete);
-            return fail(EditingFailureCode::DependencyUnavailable);
-        }
-    };
-    let output_directory = match workspaces.worker_output_directory(&execution_workspace) {
-        Ok(value) => value,
-        Err(_) => {
-            finish(VideoWorkspaceDisposition::Delete);
-            return fail(EditingFailureCode::DependencyUnavailable);
-        }
-    };
-    let state_directory = match workspaces.worker_checkpoint_directory(&execution_workspace) {
-        Ok(value) => value,
-        Err(_) => {
-            finish(VideoWorkspaceDisposition::Delete);
-            return fail(EditingFailureCode::DependencyUnavailable);
-        }
-    };
-    let recovery_checkpoint = match build_video_editing_recovery_checkpoint(
-        prepared.snapshot(),
-        prepared.timeline(),
-        (1920, 1080),
-    ) {
-        Ok(value) => value,
-        Err(_) => {
-            finish(VideoWorkspaceDisposition::Delete);
-            return fail(EditingFailureCode::InvalidInput);
-        }
-    };
-    if workspaces
-        .save_checkpoint(
-            &execution_workspace,
-            VIDEO_EDITING_RECOVERY_CHECKPOINT_NAME,
-            &recovery_checkpoint,
-        )
-        .is_err()
-    {
-        finish(VideoWorkspaceDisposition::Delete);
-        return fail(EditingFailureCode::DependencyUnavailable);
-    }
-    let request = match build_video_editing_child_request(
-        &credential,
-        prepared.snapshot(),
-        prepared.timeline(),
-        &staged,
-        &input_directory,
-        &output_directory,
-        &state_directory,
-        (1920, 1080),
-    ) {
-        Ok(value) => value,
-        Err(_) => {
-            finish(VideoWorkspaceDisposition::Delete);
-            return fail(EditingFailureCode::InvalidInput);
-        }
-    };
-    if editing.mark_editing_job_running(editing_job_id).is_err() {
-        finish(VideoWorkspaceDisposition::Delete);
-        return Err(VideoEditingWorkspaceCommandError {
-            code: "draft_storage_unavailable",
-            retryable: false,
-        });
-    }
-    let result = match run_video_editing_child(
-        &entrypoint,
-        request.as_slice(),
-        editing_job_id,
-        &output_directory,
-        VIDEO_EDITING_CHILD_DEADLINE,
-    ) {
-        Ok(value) => value,
-        Err(error) => {
-            return match error.kind() {
-                VideoEditingChildErrorKind::NotStarted => {
-                    finish(VideoWorkspaceDisposition::Delete);
-                    fail(EditingFailureCode::DependencyUnavailable)
-                }
-                VideoEditingChildErrorKind::RequestRejected => {
-                    finish(VideoWorkspaceDisposition::Delete);
-                    fail(EditingFailureCode::InvalidInput)
-                }
-                VideoEditingChildErrorKind::InvalidResponse
-                | VideoEditingChildErrorKind::OutcomeUncertain => {
-                    finish(VideoWorkspaceDisposition::Keep);
-                    uncertain()
-                }
-            };
-        }
-    };
-    match result.status() {
-        VideoEditingChildStatus::Failed => {
-            finish(VideoWorkspaceDisposition::Delete);
-            fail(
-                result
-                    .failure_code()
-                    .unwrap_or(EditingFailureCode::EditingFailed),
-            )
-        }
-        VideoEditingChildStatus::OutcomeUncertain => {
-            finish(VideoWorkspaceDisposition::Keep);
-            uncertain()
-        }
-        VideoEditingChildStatus::Succeeded => {
-            let Some(file_name) = result
-                .output_path()
-                .and_then(std::path::Path::file_name)
-                .and_then(std::ffi::OsStr::to_str)
-            else {
-                finish(VideoWorkspaceDisposition::Keep);
-                return uncertain();
-            };
-            let imported = workspaces.import_output(
-                &execution_workspace,
-                file_name,
-                "video/mp4",
-                "rendered_video",
-            );
-            let artifact = match imported {
-                Ok(value)
-                    if Some(value.sha256()) == result.output_sha256()
-                        && Some(value.size_bytes()) == result.output_size_bytes() =>
-                {
-                    value
-                }
-                Ok(value) => {
-                    let _ = workspaces.delete_artifact(value.artifact_id());
-                    finish(VideoWorkspaceDisposition::Delete);
-                    return fail(EditingFailureCode::EditingFailed);
-                }
-                Err(error) => {
-                    finish(VideoWorkspaceDisposition::Delete);
-                    let code = if error.code() == VideoWorkspaceErrorCode::QuotaExceeded {
-                        EditingFailureCode::ResourceExhausted
-                    } else {
-                        EditingFailureCode::EditingFailed
-                    };
-                    return fail(code);
-                }
-            };
-            match editing.settle_editing_job(
-                editing_job_id,
-                EditingJobTerminalOutcome::Succeeded(vec![artifact.artifact_id()]),
-            ) {
-                Ok(snapshot) => {
-                    finish(VideoWorkspaceDisposition::Delete);
-                    Ok(snapshot)
-                }
-                Err(error) => {
-                    let _ = workspaces.delete_artifact(artifact.artifact_id());
-                    finish(VideoWorkspaceDisposition::Keep);
-                    Err(VideoEditingWorkspaceCommandError::from(error))
-                }
-            }
-        }
-    }
-}
-
-fn start_interrupted_video_editing_reconciliation(app: tauri::AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            reconcile_interrupted_video_editing_jobs_off_thread(&app)
-        })
-        .await;
-    });
-}
-
-fn reconcile_interrupted_video_editing_jobs_off_thread(app: &tauri::AppHandle) {
-    let Some(editing) = app.try_state::<video_editing_workspace::VideoEditingWorkspace>() else {
-        return;
-    };
-    let Ok(jobs) = editing.list_recoverable_editing_jobs() else {
-        return;
-    };
-    for job in jobs {
-        reconcile_interrupted_video_editing_job_off_thread(app, &job);
-    }
-}
-
-fn reconcile_interrupted_video_editing_job_off_thread(
-    app: &tauri::AppHandle,
-    job: &video_editing_workspace::EditingJobSnapshot,
-) {
-    use video_editing_executor::{
-        build_video_editing_recovery_child_request, run_video_editing_child,
-        VideoEditingChildStatus, VIDEO_EDITING_RECOVERY_CHECKPOINT_NAME,
-    };
-    use video_editing_workspace::{EditingFailureCode, EditingJobTerminalOutcome};
-    use video_job_workspace::VideoWorkspaceDisposition;
-
-    let Some(editing) = app.try_state::<video_editing_workspace::VideoEditingWorkspace>() else {
-        return;
-    };
-    let Some(settings) =
-        app.try_state::<video_editing_service_settings::ProductionVideoEditingServiceSettings>()
-    else {
-        return;
-    };
-    let Ok(credential) = settings.credential_for_adapter() else {
-        return;
-    };
-    let Some(platform) = app.try_state::<executor_platform::ExecutorPlatformService>() else {
-        return;
-    };
-    let Ok(entrypoint) = platform.verified_entrypoint() else {
-        return;
-    };
-    let Some(workspaces) = app.try_state::<video_job_workspace::VideoJobWorkspaceStore>() else {
-        return;
-    };
-    let Ok(execution_workspace) = workspaces.open(job.editing_job_id) else {
-        return;
-    };
-    let keep = || {
-        let _ = workspaces.finish(&execution_workspace, VideoWorkspaceDisposition::Keep);
-    };
-    let Ok(recovery_checkpoint) =
-        workspaces.load_checkpoint(&execution_workspace, VIDEO_EDITING_RECOVERY_CHECKPOINT_NAME)
-    else {
-        keep();
-        return;
-    };
-    let Ok(staged) =
-        workspaces.reopen_staged_editing_artifacts(&execution_workspace, &job.input_artifact_ids)
-    else {
-        keep();
-        return;
-    };
-    let Ok(input_directory) = workspaces.worker_asset_directory(&execution_workspace) else {
-        keep();
-        return;
-    };
-    let Ok(output_directory) = workspaces.worker_output_directory(&execution_workspace) else {
-        keep();
-        return;
-    };
-    let Ok(state_directory) = workspaces.worker_checkpoint_directory(&execution_workspace) else {
-        keep();
-        return;
-    };
-    let Ok(request) = build_video_editing_recovery_child_request(
-        &credential,
-        job,
-        &recovery_checkpoint,
-        &staged,
-        &input_directory,
-        &output_directory,
-        &state_directory,
-    ) else {
-        keep();
-        return;
-    };
-    let Ok(result) = run_video_editing_child(
-        &entrypoint,
-        request.as_slice(),
-        job.editing_job_id,
-        &output_directory,
-        VIDEO_EDITING_CHILD_DEADLINE,
-    ) else {
-        keep();
-        return;
-    };
-    match result.status() {
-        VideoEditingChildStatus::OutcomeUncertain => keep(),
-        VideoEditingChildStatus::Failed => {
-            let settled = editing.settle_reconciled_editing_job(
-                job.editing_job_id,
-                EditingJobTerminalOutcome::Failed(
-                    result
-                        .failure_code()
-                        .unwrap_or(EditingFailureCode::EditingFailed),
-                ),
-            );
-            if settled.is_ok() {
-                let _ = workspaces.finish(&execution_workspace, VideoWorkspaceDisposition::Delete);
-            } else {
-                keep();
-            }
-        }
-        VideoEditingChildStatus::Succeeded => {
-            let Some(file_name) = result
-                .output_path()
-                .and_then(std::path::Path::file_name)
-                .and_then(std::ffi::OsStr::to_str)
-            else {
-                keep();
-                return;
-            };
-            let imported = workspaces.import_output(
-                &execution_workspace,
-                file_name,
-                "video/mp4",
-                "rendered_video",
-            );
-            let Ok(artifact) = imported else {
-                keep();
-                return;
-            };
-            if Some(artifact.sha256()) != result.output_sha256()
-                || Some(artifact.size_bytes()) != result.output_size_bytes()
-            {
-                let _ = workspaces.delete_artifact(artifact.artifact_id());
-                keep();
-                return;
-            }
-            let settled = editing.settle_reconciled_editing_job(
-                job.editing_job_id,
-                EditingJobTerminalOutcome::Succeeded(vec![artifact.artifact_id()]),
-            );
-            if settled.is_ok() {
-                let _ = workspaces.finish(&execution_workspace, VideoWorkspaceDisposition::Delete);
-            } else {
-                let _ = workspaces.delete_artifact(artifact.artifact_id());
-                keep();
-            }
-        }
-    }
 }
 
 #[tauri::command]
@@ -1188,6 +689,10 @@ pub fn motion_authoring_request(
     model_id: &str,
     api_key: &str,
 ) -> serde_json::Value {
+    let work = child_filesystem_path(work);
+    let catalog_root = child_filesystem_path(catalog_root);
+    let browser = child_filesystem_path(browser);
+    let ffprobe = child_filesystem_path(ffprobe);
     serde_json::json!({
         "schemaVersion": 1,
         "workspace": work,
@@ -1214,6 +719,47 @@ pub fn motion_authoring_request(
             "apiKey": api_key,
         },
     })
+}
+
+/// Hand an out-of-process Windows worker paths that remain usable past
+/// `MAX_PATH`.
+///
+/// The App's private job root is already long before catalog assets add their
+/// nested font names. Rust can create that tree through modern Windows APIs,
+/// while the frozen Python worker needs the extended-length spelling to keep
+/// writing below it. Existing verbatim/device paths are left untouched and UNC
+/// paths use Windows' required `\\?\UNC\` form.
+#[cfg(windows)]
+fn child_filesystem_path(path: &std::path::Path) -> std::path::PathBuf {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+    let encoded = path.as_os_str().encode_wide().collect::<Vec<_>>();
+    const SEPARATOR: u16 = b'\\' as u16;
+    const QUESTION: u16 = b'?' as u16;
+    const DOT: u16 = b'.' as u16;
+    let already_device = encoded.starts_with(&[SEPARATOR, SEPARATOR, QUESTION, SEPARATOR])
+        || encoded.starts_with(&[SEPARATOR, SEPARATOR, DOT, SEPARATOR]);
+    if already_device || !path.is_absolute() {
+        return path.to_path_buf();
+    }
+
+    let mut extended = if encoded.starts_with(&[SEPARATOR, SEPARATOR]) {
+        "\\\\?\\UNC\\".encode_utf16().collect::<Vec<_>>()
+    } else {
+        "\\\\?\\".encode_utf16().collect::<Vec<_>>()
+    };
+    extended.extend_from_slice(if encoded.starts_with(&[SEPARATOR, SEPARATOR]) {
+        &encoded[2..]
+    } else {
+        &encoded
+    });
+    std::path::PathBuf::from(OsString::from_wide(&extended))
+}
+
+#[cfg(not(windows))]
+fn child_filesystem_path(path: &std::path::Path) -> std::path::PathBuf {
+    path.to_path_buf()
 }
 
 pub fn run_motion_authoring(
@@ -1250,10 +796,10 @@ pub fn run_motion_authoring(
         return Err(error);
     }
     let deadline = std::time::Instant::now() + budget;
-    let exited_cleanly = loop {
+    let exit_status = loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                break status.success();
+                break status;
             }
             Ok(None) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(std::time::Duration::from_millis(200));
@@ -1283,9 +829,15 @@ pub fn run_motion_authoring(
     // reason token and no model output, so nothing the model produced is read
     // here.
     let answer = read_bounded_child_output(&mut child)?;
-    if exited_cleanly {
+    if exit_status.success() {
         return Ok(answer);
     }
+    eprintln!(
+        "motion authoring child failed: exitCode={:?} answerBytes={} {}",
+        exit_status.code(),
+        answer.len(),
+        motion_video_studio::safe_failed_authoring_diagnostic(&answer),
+    );
     Err(motion_video_studio::classify_failed_authoring_answer(
         &answer,
     ))
@@ -1771,12 +1323,13 @@ fn delete_motion_video_artifact(
 async fn check_local_startup_environment(
     app: tauri::AppHandle,
 ) -> startup_environment::StartupEnvironmentSnapshot {
+    app_logging::record(app_logging::DesktopLogEvent::StartupLocalCheckStarted);
     // The gate hashes every byte of the packaged Executor and, the first time,
     // of the packaged browser as well — 519 MB between them, off a disk that is
     // cold on the launch that matters most. That is not work the UI thread may
     // own: a window that cannot repaint while it happens is the first thing a
     // customer sees, and it looks exactly like a hang.
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         let (Some(startup), Some(profiles), Some(authority), Some(platform)) = (
             app.try_state::<startup_environment::StartupEnvironmentService>(),
             app.try_state::<browser_profiles::BrowserProfileStore>(),
@@ -1793,6 +1346,7 @@ async fn check_local_startup_environment(
         } else {
             startup_environment::AppDataStartupState::Unavailable
         };
+        app_logging::record(app_logging::DesktopLogEvent::StartupAppDataCheckCompleted);
         // EB-08：健康状态来自内置发行物验证，不再询问系统浏览器发现/选择。
         let embedded_browser = match authority.resolve() {
             Ok(_) => startup_environment::EmbeddedBrowserStartupState::Ready,
@@ -1804,14 +1358,23 @@ async fn check_local_startup_environment(
             }
             Err(_) => startup_environment::EmbeddedBrowserStartupState::ComponentDamaged,
         };
-        startup_environment::StartupEnvironmentSnapshot::new(
-            app_data,
-            platform.startup_environment_state(),
-            embedded_browser,
-        )
+        app_logging::record(app_logging::DesktopLogEvent::StartupBrowserCheckCompleted);
+        app_logging::record(app_logging::DesktopLogEvent::StartupExecutorCheckStarted);
+        let executor = platform.startup_environment_state();
+        app_logging::record(app_logging::DesktopLogEvent::StartupExecutorCheckCompleted);
+        startup_environment::StartupEnvironmentSnapshot::new(app_data, executor, embedded_browser)
     })
-    .await
-    .unwrap_or_else(|_| startup_environment_unusable())
+    .await;
+    match result {
+        Ok(snapshot) => {
+            app_logging::record(app_logging::DesktopLogEvent::StartupLocalCheckCompleted);
+            snapshot
+        }
+        Err(_) => {
+            app_logging::record(app_logging::DesktopLogEvent::StartupLocalCheckRejected);
+            startup_environment_unusable()
+        }
+    }
 }
 
 /// What the startup gate answers when it could not run its probes at all.
@@ -1908,7 +1471,8 @@ fn map_executor_connection_error(
         | control_plane::ControlPlaneErrorCode::RecoveryInvalid
         | control_plane::ControlPlaneErrorCode::AccountSessionInvalid => "operation_unavailable",
         control_plane::ControlPlaneErrorCode::ProtocolInvalid
-        | control_plane::ControlPlaneErrorCode::RequestRejected => "operation_unavailable",
+        | control_plane::ControlPlaneErrorCode::RequestRejected
+        | control_plane::ControlPlaneErrorCode::ResourceNotFound => "operation_unavailable",
     };
     ExecutorPlatformCommandError { code, retryable }
 }
@@ -3034,7 +2598,18 @@ async fn restart_executor(
 async fn check_control_plane_health(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
 ) -> Result<control_plane::ControlPlaneHealth, ControlPlaneCommandError> {
-    client.check_health().await.map_err(map_control_plane_error)
+    app_logging::record(app_logging::DesktopLogEvent::ControlPlaneHealthCheckStarted);
+    match client.check_health().await.map_err(map_control_plane_error) {
+        Ok(health) => {
+            app_logging::record(app_logging::DesktopLogEvent::ControlPlaneServiceHealthCompleted);
+            app_logging::record(app_logging::DesktopLogEvent::ControlPlaneHealthCheckCompleted);
+            Ok(health)
+        }
+        Err(error) => {
+            app_logging::record(app_logging::DesktopLogEvent::ControlPlaneHealthCheckRejected);
+            Err(error)
+        }
+    }
 }
 
 #[tauri::command]
@@ -3045,15 +2620,34 @@ async fn check_control_plane_health(
     vault: tauri::State<'_, ProductionDeviceCredentialVault>,
     handoff: tauri::State<'_, ProductionLocalRegistrationHandoffStore>,
 ) -> Result<control_plane::ControlPlaneHealth, ControlPlaneCommandError> {
-    let health = client
-        .check_health()
-        .await
-        .map_err(map_control_plane_error)?;
-    register_installation_from_local_handoff(&client, &identity, &vault, &handoff).await?;
-    client
+    app_logging::record(app_logging::DesktopLogEvent::ControlPlaneHealthCheckStarted);
+    let health = match client.check_health().await.map_err(map_control_plane_error) {
+        Ok(health) => {
+            app_logging::record(app_logging::DesktopLogEvent::ControlPlaneServiceHealthCompleted);
+            health
+        }
+        Err(error) => {
+            app_logging::record(app_logging::DesktopLogEvent::ControlPlaneHealthCheckRejected);
+            return Err(error);
+        }
+    };
+    if let Err(error) =
+        register_installation_from_local_handoff(&client, &identity, &vault, &handoff).await
+    {
+        app_logging::record(app_logging::DesktopLogEvent::ControlPlaneHealthCheckRejected);
+        return Err(error);
+    }
+    app_logging::record(app_logging::DesktopLogEvent::ControlPlaneRegistrationCompleted);
+    if let Err(error) = client
         .check_installation_access_if_registered(&vault)
         .await
-        .map_err(map_control_plane_error)?;
+        .map_err(map_control_plane_error)
+    {
+        app_logging::record(app_logging::DesktopLogEvent::ControlPlaneHealthCheckRejected);
+        return Err(error);
+    }
+    app_logging::record(app_logging::DesktopLogEvent::ControlPlaneInstallationAccessCompleted);
+    app_logging::record(app_logging::DesktopLogEvent::ControlPlaneHealthCheckCompleted);
     Ok(health)
 }
 
@@ -3145,7 +2739,8 @@ fn map_control_plane_error(error: control_plane::ControlPlaneError) -> ControlPl
         control_plane::ControlPlaneErrorCode::RecoveryInvalid => "recovery_invalid",
         control_plane::ControlPlaneErrorCode::AccountSessionInvalid => "session_invalid",
         control_plane::ControlPlaneErrorCode::ProtocolInvalid
-        | control_plane::ControlPlaneErrorCode::RequestRejected => "operation_unavailable",
+        | control_plane::ControlPlaneErrorCode::RequestRejected
+        | control_plane::ControlPlaneErrorCode::ResourceNotFound => "operation_unavailable",
     };
     ControlPlaneCommandError {
         code,
@@ -3479,6 +3074,373 @@ async fn get_workbench_metrics(
         .get_workbench_metrics(&vault)
         .await
         .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn list_editing_projects(
+    cursor: Option<String>,
+    limit: u16,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::EditingProjectListPage, ControlPlaneCommandError> {
+    client
+        .list_editing_projects(&vault, cursor.as_deref(), limit)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn list_editing_materials(
+    cursor: Option<String>,
+    limit: u16,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::EditingMaterialListPage, ControlPlaneCommandError> {
+    client
+        .list_editing_materials(&vault, cursor.as_deref(), limit)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn update_editing_material_description(
+    material_id: String,
+    description: String,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::EditingMaterialSnapshot, ControlPlaneCommandError> {
+    client
+        .update_editing_material_description(&vault, &material_id, &description)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn create_editing_project(
+    request: control_plane::EditingProjectCreateRequest,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::EditingProjectSnapshot, ControlPlaneCommandError> {
+    client
+        .create_editing_project(&vault, &request)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn get_editing_project_timeline(
+    project_id: String,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<Option<control_plane::EditingTimelineSnapshot>, ControlPlaneCommandError> {
+    client
+        .get_editing_project_timeline(&vault, &project_id)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn save_editing_project_timeline(
+    project_id: String,
+    draft: control_plane::EditingTimelineDraft,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::EditingTimelineSnapshot, ControlPlaneCommandError> {
+    client
+        .save_editing_project_timeline(&vault, &project_id, &draft)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn list_editing_jobs(
+    project_id: String,
+    cursor: Option<String>,
+    limit: u16,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::EditingJobListPage, ControlPlaneCommandError> {
+    client
+        .list_editing_jobs(&vault, &project_id, cursor.as_deref(), limit)
+        .await
+        .map_err(map_control_plane_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn submit_editing_job(
+    project_id: String,
+    app: tauri::AppHandle,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<control_plane::EditingJobSnapshot, ControlPlaneCommandError> {
+    let submitted = client
+        .submit_editing_job(&vault, &project_id)
+        .await
+        .map_err(map_control_plane_error)?;
+    if local_editing_runtime::dispatch_submitted_job(&app, &submitted)
+        .await
+        .is_err()
+    {
+        let settled = local_editing_runtime::fail_submitted_job(&app, &submitted)
+            .await
+            .is_ok();
+        return Err(ControlPlaneCommandError {
+            code: if settled {
+                "operation_unavailable"
+            } else {
+                "outcome_uncertain"
+            },
+            retryable: false,
+        });
+    }
+    Ok(submitted)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+fn map_smart_edit_error(error: smart_edit_runtime::SmartEditRuntimeError) -> SmartEditCommandError {
+    use smart_edit_runtime::SmartEditRuntimeErrorCode;
+
+    SmartEditCommandError {
+        code: match error.code() {
+            SmartEditRuntimeErrorCode::InvalidRequest => "invalid_request",
+            SmartEditRuntimeErrorCode::GenerationNotFound => "generation_not_found",
+            SmartEditRuntimeErrorCode::GenerationNotCancellable => "generation_not_cancellable",
+            SmartEditRuntimeErrorCode::StorageUnavailable => "storage_unavailable",
+        },
+        retryable: false,
+    }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+fn start_smart_edit_generation(
+    request: smart_edit_runtime::SmartEditGenerationRequest,
+    app: tauri::AppHandle,
+    runtime: tauri::State<'_, smart_edit_runtime::SmartEditRuntime>,
+) -> Result<smart_edit_runtime::SmartEditGenerationSnapshot, SmartEditCommandError> {
+    runtime.start(&app, request).map_err(map_smart_edit_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+fn get_smart_edit_generation(
+    generation_id: String,
+    runtime: tauri::State<'_, smart_edit_runtime::SmartEditRuntime>,
+) -> Result<smart_edit_runtime::SmartEditGenerationSnapshot, SmartEditCommandError> {
+    runtime
+        .snapshot(&generation_id)
+        .map_err(map_smart_edit_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+fn cancel_smart_edit_generation(
+    generation_id: String,
+    runtime: tauri::State<'_, smart_edit_runtime::SmartEditRuntime>,
+) -> Result<smart_edit_runtime::SmartEditGenerationSnapshot, SmartEditCommandError> {
+    runtime.cancel(&generation_id).map_err(map_smart_edit_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+fn map_local_material_error(
+    error: local_material_library::LocalMaterialLibraryError,
+) -> LocalMaterialCommandError {
+    use control_plane::ControlPlaneErrorCode as ControlPlane;
+    use local_material_library::LocalMaterialLibraryErrorCode as Library;
+    use local_video_orchestrator::VideoWorkerErrorCode as Worker;
+
+    let code = match error.code() {
+        Library::ConfigurationInvalid => "configuration_invalid",
+        Library::SourceChanged => "source_changed",
+        Library::CompensationFailed => "compensation_failed",
+        Library::RemapUncertain => "outcome_uncertain",
+        Library::WorkerRejected(code) => code.as_str(),
+        Library::WorkerLifecycle(Worker::AuthenticationRejected) => "authentication_rejected",
+        Library::WorkerLifecycle(Worker::ConfigurationInvalid) => "operation_in_progress",
+        Library::WorkerLifecycle(Worker::TimedOut) => "timed_out",
+        Library::WorkerLifecycle(Worker::VersionMismatch) => "version_mismatch",
+        Library::WorkerLifecycle(
+            Worker::AlreadyRunning
+            | Worker::NotRunning
+            | Worker::ProcessUnavailable
+            | Worker::RenderRejected,
+        ) => "worker_unavailable",
+        Library::ControlPlane(ControlPlane::CredentialMissing) => "credential_missing",
+        Library::ControlPlane(ControlPlane::InstallationAccessDenied) => {
+            "installation_access_denied"
+        }
+        Library::ControlPlane(ControlPlane::OutcomeUncertain) => "outcome_uncertain",
+        Library::ControlPlane(
+            ControlPlane::IdentityUnavailable | ControlPlane::StorageUnavailable,
+        ) => "storage_unavailable",
+        Library::ControlPlane(ControlPlane::TransportUnavailable) => "transport_unavailable",
+        Library::ControlPlane(
+            ControlPlane::ProtocolInvalid
+            | ControlPlane::RequestRejected
+            | ControlPlane::InstallationBusy
+            | ControlPlane::InstallationConflict
+            | ControlPlane::AuthenticationInvalid
+            | ControlPlane::RecoveryInvalid
+            | ControlPlane::AccountSessionInvalid
+            | ControlPlane::ResourceNotFound,
+        ) => "control_plane_rejected",
+    };
+    LocalMaterialCommandError {
+        code,
+        retryable: error.retryable(),
+    }
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+fn parse_material_id(value: &str) -> Result<uuid::Uuid, LocalMaterialCommandError> {
+    let parsed = uuid::Uuid::parse_str(value).map_err(|_| LocalMaterialCommandError {
+        code: "configuration_invalid",
+        retryable: false,
+    })?;
+    if parsed.get_version_num() != 4
+        || parsed.get_variant() != uuid::Variant::RFC4122
+        || parsed.hyphenated().to_string() != value
+    {
+        return Err(LocalMaterialCommandError {
+            code: "configuration_invalid",
+            retryable: false,
+        });
+    }
+    Ok(parsed)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+fn pick_editing_material(app: &tauri::AppHandle) -> Option<FilePath> {
+    #[cfg(feature = "control-plane-e2e")]
+    if std::env::var("AUTOMATION_TOOL_LE18_ACCEPTANCE_PICKER").as_deref() == Ok("1") {
+        use std::sync::atomic::Ordering;
+
+        let index = MATERIAL_ACCEPTANCE_PICK_INDEX.fetch_add(1, Ordering::SeqCst);
+        return std::env::var(format!("AUTOMATION_TOOL_LE18_PICK_{index}"))
+            .ok()
+            .map(std::path::PathBuf::from)
+            .map(FilePath::Path);
+    }
+    app.dialog().file().blocking_pick_file()
+}
+
+#[cfg(feature = "control-plane-e2e")]
+fn remember_material_acceptance_source(
+    outcome: &local_material_library::LocalMaterialImportOutcome,
+    source_path: &std::path::Path,
+) -> Result<(), LocalMaterialCommandError> {
+    if std::env::var("AUTOMATION_TOOL_LE18_ACCEPTANCE_PICKER").as_deref() != Ok("1") {
+        return Ok(());
+    }
+    let material_id = parse_material_id(outcome.material().material_id())?;
+    let sources = MATERIAL_ACCEPTANCE_SOURCES
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    sources
+        .lock()
+        .map_err(|_| LocalMaterialCommandError {
+            code: "worker_unavailable",
+            retryable: true,
+        })?
+        .insert(material_id, source_path.to_path_buf());
+    Ok(())
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn import_editing_material(
+    app: tauri::AppHandle,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+    orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
+    coordinator: tauri::State<'_, local_material_library::LocalMaterialLibraryCoordinator>,
+) -> Result<Option<local_material_library::LocalMaterialImportOutcome>, LocalMaterialCommandError> {
+    let selected = pick_editing_material(&app);
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let FilePath::Path(source_path) = selected else {
+        return Err(LocalMaterialCommandError {
+            code: "configuration_invalid",
+            retryable: false,
+        });
+    };
+    let _operation = coordinator.acquire().await;
+    local_editing_runtime::ensure_worker(&app).map_err(|_| LocalMaterialCommandError {
+        code: "worker_unavailable",
+        retryable: true,
+    })?;
+    let outcome =
+        local_material_library::import_material(&orchestrator, &client, &vault, &source_path)
+            .await
+            .map_err(map_local_material_error)?;
+    #[cfg(feature = "control-plane-e2e")]
+    remember_material_acceptance_source(&outcome, &source_path)?;
+    Ok(Some(outcome))
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn get_local_editing_material_status(
+    material_id: String,
+    app: tauri::AppHandle,
+    orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
+    coordinator: tauri::State<'_, local_material_library::LocalMaterialLibraryCoordinator>,
+) -> Result<local_video_orchestrator::VideoWorkerLocalMaterialStatus, LocalMaterialCommandError> {
+    let material_id = parse_material_id(&material_id)?;
+    let _operation = coordinator.acquire().await;
+    local_editing_runtime::ensure_worker(&app).map_err(|_| LocalMaterialCommandError {
+        code: "worker_unavailable",
+        retryable: true,
+    })?;
+    local_material_library::material_status(&orchestrator, material_id)
+        .map_err(map_local_material_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn get_local_editing_material_preview_url(
+    material_id: String,
+    app: tauri::AppHandle,
+    orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
+    coordinator: tauri::State<'_, local_material_library::LocalMaterialLibraryCoordinator>,
+) -> Result<String, LocalMaterialCommandError> {
+    let material_id = parse_material_id(&material_id)?;
+    let _operation = coordinator.acquire().await;
+    local_editing_runtime::ensure_worker(&app).map_err(|_| LocalMaterialCommandError {
+        code: "worker_unavailable",
+        retryable: true,
+    })?;
+    local_material_library::material_preview_url(&orchestrator, material_id)
+        .map_err(map_local_material_error)
+}
+
+#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+#[tauri::command]
+async fn delete_editing_material(
+    material_id: String,
+    app: tauri::AppHandle,
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+    orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
+    coordinator: tauri::State<'_, local_material_library::LocalMaterialLibraryCoordinator>,
+) -> Result<(), LocalMaterialCommandError> {
+    let material_id = parse_material_id(&material_id)?;
+    let _operation = coordinator.acquire().await;
+    local_editing_runtime::ensure_worker(&app).map_err(|_| LocalMaterialCommandError {
+        code: "worker_unavailable",
+        retryable: true,
+    })?;
+    local_material_library::delete_material(&orchestrator, &client, &vault, material_id)
+        .await
+        .map_err(map_local_material_error)
 }
 
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -4138,6 +4100,30 @@ struct TaskCreateFormAcceptancePreparation {
 #[cfg(feature = "control-plane-e2e")]
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+struct VideoEditingAcceptancePreparation {
+    installation_id: String,
+    material_id: String,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MaterialLibraryAcceptancePreparation {
+    installation_id: String,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum MaterialAcceptanceSourceAction {
+    Missing,
+    Unreadable,
+    Changed,
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TaskRunAcceptancePreparation {
     installation_id: String,
     controlled_task_id: String,
@@ -4754,6 +4740,176 @@ async fn prepare_task_create_form_for_acceptance(
 
 #[cfg(feature = "control-plane-e2e")]
 #[tauri::command]
+async fn prepare_video_editing_for_acceptance(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<VideoEditingAcceptancePreparation, ControlPlaneCommandError> {
+    let token = std::env::var("AUTOMATION_TOOL_LE17_BOOTSTRAP_TOKEN").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let environment_id = std::env::var("AUTOMATION_TOOL_LE17_ENVIRONMENT_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let material_id = std::env::var("AUTOMATION_TOOL_LE17_MATERIAL_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let content_digest = std::env::var("AUTOMATION_TOOL_LE17_MATERIAL_DIGEST").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let bootstrap = control_plane::DemoBootstrap::new(token, environment_id)
+        .map_err(map_control_plane_error)?;
+    let registration = client
+        .register_installation(&bootstrap, &identity, &vault)
+        .await
+        .map_err(|error| map_video_editing_acceptance_error("registration", error))?;
+    let material = client
+        .register_editing_video_material_for_acceptance(&vault, &material_id, &content_digest)
+        .await
+        .map_err(|error| map_video_editing_acceptance_error("material", error))?;
+    Ok(VideoEditingAcceptancePreparation {
+        installation_id: registration.installation_id().to_owned(),
+        material_id: material.material_id().to_owned(),
+    })
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+async fn prepare_material_library_for_acceptance(
+    client: tauri::State<'_, control_plane::ControlPlaneClient>,
+    identity: tauri::State<'_, ProductionDeviceIdentity>,
+    vault: tauri::State<'_, ProductionDeviceCredentialVault>,
+) -> Result<MaterialLibraryAcceptancePreparation, ControlPlaneCommandError> {
+    use std::sync::atomic::Ordering;
+
+    let token = std::env::var("AUTOMATION_TOOL_LE18_BOOTSTRAP_TOKEN").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    let environment_id = std::env::var("AUTOMATION_TOOL_LE18_ENVIRONMENT_ID").map_err(|_| {
+        ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        }
+    })?;
+    if std::env::var("AUTOMATION_TOOL_LE18_ACCEPTANCE_PICKER").as_deref() != Ok("1") {
+        return Err(ControlPlaneCommandError {
+            code: "acceptance_configuration_unavailable",
+            retryable: false,
+        });
+    }
+    let bootstrap = control_plane::DemoBootstrap::new(token, environment_id)
+        .map_err(map_control_plane_error)?;
+    let registration = client
+        .register_installation(&bootstrap, &identity, &vault)
+        .await
+        .map_err(map_control_plane_error)?;
+    MATERIAL_ACCEPTANCE_PICK_INDEX.store(1, Ordering::SeqCst);
+    MATERIAL_ACCEPTANCE_SOURCES
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+        .lock()
+        .map_err(|_| ControlPlaneCommandError {
+            code: "acceptance_state_unavailable",
+            retryable: false,
+        })?
+        .clear();
+    Ok(MaterialLibraryAcceptancePreparation {
+        installation_id: registration.installation_id().to_owned(),
+    })
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
+fn set_material_source_state_for_acceptance(
+    material_id: String,
+    action: MaterialAcceptanceSourceAction,
+) -> Result<(), LocalMaterialCommandError> {
+    use std::io::Write;
+
+    if std::env::var("AUTOMATION_TOOL_LE18_ACCEPTANCE_PICKER").as_deref() != Ok("1") {
+        return Err(LocalMaterialCommandError {
+            code: "configuration_invalid",
+            retryable: false,
+        });
+    }
+    let material_id = parse_material_id(&material_id)?;
+    let source_path = MATERIAL_ACCEPTANCE_SOURCES
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+        .lock()
+        .map_err(|_| LocalMaterialCommandError {
+            code: "worker_unavailable",
+            retryable: true,
+        })?
+        .get(&material_id)
+        .cloned()
+        .ok_or(LocalMaterialCommandError {
+            code: "configuration_invalid",
+            retryable: false,
+        })?;
+    let state_error = || LocalMaterialCommandError {
+        code: "worker_unavailable",
+        retryable: false,
+    };
+    match action {
+        MaterialAcceptanceSourceAction::Missing => {
+            std::fs::remove_file(source_path).map_err(|_| state_error())?;
+        }
+        MaterialAcceptanceSourceAction::Unreadable => {
+            std::fs::remove_file(&source_path).map_err(|_| state_error())?;
+            std::fs::create_dir(source_path).map_err(|_| state_error())?;
+        }
+        MaterialAcceptanceSourceAction::Changed => {
+            let mut source = std::fs::OpenOptions::new()
+                .append(true)
+                .open(source_path)
+                .map_err(|_| state_error())?;
+            source.write_all(&[0]).map_err(|_| state_error())?;
+            source.sync_all().map_err(|_| state_error())?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "control-plane-e2e")]
+fn map_video_editing_acceptance_error(
+    stage: &'static str,
+    error: control_plane::ControlPlaneError,
+) -> ControlPlaneCommandError {
+    let retryable = error.retryable();
+    let code = match (stage, error.code()) {
+        ("registration", control_plane::ControlPlaneErrorCode::ProtocolInvalid) => {
+            "acceptance_registration_protocol_invalid"
+        }
+        ("registration", control_plane::ControlPlaneErrorCode::RequestRejected) => {
+            "acceptance_registration_rejected"
+        }
+        ("material", control_plane::ControlPlaneErrorCode::ProtocolInvalid) => {
+            "acceptance_material_protocol_invalid"
+        }
+        ("material", control_plane::ControlPlaneErrorCode::RequestRejected) => {
+            "acceptance_material_rejected"
+        }
+        _ => map_control_plane_error(error).code,
+    };
+    ControlPlaneCommandError { code, retryable }
+}
+
+#[cfg(feature = "control-plane-e2e")]
+#[tauri::command]
 async fn prepare_task_run_for_acceptance(
     client: tauri::State<'_, control_plane::ControlPlaneClient>,
     identity: tauri::State<'_, ProductionDeviceIdentity>,
@@ -5353,6 +5509,7 @@ pub fn run() {
     let update_configuration = app_update_coordinator::UpdateRuntimeConfiguration::load()
         .expect("desktop update configuration rejected");
     let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
             let app_data_root = app.path().app_data_dir()?;
@@ -5363,9 +5520,7 @@ pub fn run() {
             app.manage(control_plane::ControlPlaneClient::for_deployment_profile(
                 &deployment_profile,
             )?);
-            app_logging::record(
-                app_logging::DesktopLogEvent::ControlPlaneClientInitialized,
-            );
+            app_logging::record(app_logging::DesktopLogEvent::ControlPlaneClientInitialized);
             let app_data_directory = deployment_profile.prepare_data_directory(&app_data_root)?;
             app_logging::record(app_logging::DesktopLogEvent::ProfileDataDirectoryReady);
             app.manage(ProductAccountRequirement(
@@ -5421,8 +5576,7 @@ pub fn run() {
             app.manage(update_coordinator);
             app_logging::record(app_logging::DesktopLogEvent::UpdateCoordinatorInitialized);
             app.manage(embedded_browser_authority::EmbeddedBrowserAuthority::new(
-                app
-                    .path()
+                app.path()
                     .resource_dir()
                     .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)?,
                 embedded_browser_authority::release_target_id(),
@@ -5433,18 +5587,10 @@ pub fn run() {
                 )?,
             );
             app.manage(
-                video_editing_service_settings::initialize_production_video_editing_service_settings(
-                    &app_data_directory,
-                )?,
-            );
-            app.manage(
                 bilibili_service_settings::initialize_production_bilibili_service_settings(
                     &app_data_directory,
                 )?,
             );
-            app.manage(video_editing_workspace::VideoEditingWorkspace::initialize(
-                &app_data_directory,
-            )?);
             app.manage(PublishWorkspaceState(std::sync::Mutex::new(
                 publish_workspace::PublishWorkspace::new(false),
             )));
@@ -5456,6 +5602,12 @@ pub fn run() {
             app.manage(local_video_orchestrator::LocalVideoOrchestrator::new(
                 local_video_orchestrator::DEFAULT_VIDEO_WORKER_START_TIMEOUT,
                 local_video_orchestrator::DEFAULT_VIDEO_WORKER_REQUEST_TIMEOUT,
+            )?);
+            app.manage(local_editing_job_ledger::LocalEditingJobScheduler::new());
+            app.manage(local_material_library::LocalMaterialLibraryCoordinator::new());
+            app.manage(smart_edit_runtime::SmartEditRuntime::new());
+            app.manage(local_editing_runtime::LocalEditingRuntime::new(
+                app_data_directory.clone(),
             )?);
             app_logging::record(app_logging::DesktopLogEvent::LocalServicesInitialized);
             app.manage(video_job_workspace::VideoJobWorkspaceStore::initialize(
@@ -5477,7 +5629,6 @@ pub fn run() {
                     &package_root,
                 )?;
             app.manage(executor_platform);
-            start_interrupted_video_editing_reconciliation(app.handle().clone());
             app_logging::record(app_logging::DesktopLogEvent::ExecutorServiceInitialized);
             app.manage(diagnostic_export::DiagnosticExportService::initialize(
                 &app_data_directory,
@@ -5544,20 +5695,9 @@ pub fn run() {
         reuse_script_model_service_for_video,
         clear_model_service,
         test_model_service_connection,
-        get_video_editing_service_settings,
-        configure_video_editing_service,
-        clear_video_editing_service,
-        test_video_editing_service_connection,
         get_bilibili_service_settings,
         configure_bilibili_service,
         clear_bilibili_service,
-        list_video_editing_projects,
-        create_video_editing_project,
-        get_video_editing_timeline,
-        save_video_editing_timeline,
-        list_video_editing_jobs,
-        read_video_editing_artifact,
-        submit_video_editing_job,
         open_material_video_studio,
         update_material_video_studio_view,
         close_material_video_studio,
@@ -5595,6 +5735,21 @@ pub fn run() {
         get_douyin_platform_session,
         get_workbench_status,
         get_workbench_metrics,
+        list_editing_projects,
+        list_editing_materials,
+        update_editing_material_description,
+        create_editing_project,
+        get_editing_project_timeline,
+        save_editing_project_timeline,
+        list_editing_jobs,
+        submit_editing_job,
+        start_smart_edit_generation,
+        get_smart_edit_generation,
+        cancel_smart_edit_generation,
+        import_editing_material,
+        get_local_editing_material_status,
+        get_local_editing_material_preview_url,
+        delete_editing_material,
         open_douyin_login,
         recheck_douyin_login,
         logout_douyin_session,
@@ -5623,20 +5778,9 @@ pub fn run() {
         reuse_script_model_service_for_video,
         clear_model_service,
         test_model_service_connection,
-        get_video_editing_service_settings,
-        configure_video_editing_service,
-        clear_video_editing_service,
-        test_video_editing_service_connection,
         get_bilibili_service_settings,
         configure_bilibili_service,
         clear_bilibili_service,
-        list_video_editing_projects,
-        create_video_editing_project,
-        get_video_editing_timeline,
-        save_video_editing_timeline,
-        list_video_editing_jobs,
-        read_video_editing_artifact,
-        submit_video_editing_job,
         open_material_video_studio,
         update_material_video_studio_view,
         close_material_video_studio,
@@ -5673,6 +5817,21 @@ pub fn run() {
         get_douyin_platform_session,
         get_workbench_status,
         get_workbench_metrics,
+        list_editing_projects,
+        list_editing_materials,
+        update_editing_material_description,
+        create_editing_project,
+        get_editing_project_timeline,
+        save_editing_project_timeline,
+        list_editing_jobs,
+        submit_editing_job,
+        start_smart_edit_generation,
+        get_smart_edit_generation,
+        cancel_smart_edit_generation,
+        import_editing_material,
+        get_local_editing_material_status,
+        get_local_editing_material_preview_url,
+        delete_editing_material,
         open_douyin_login,
         recheck_douyin_login,
         logout_douyin_session,
@@ -5696,6 +5855,9 @@ pub fn run() {
         stream_task_events_for_acceptance,
         prepare_task_projection_for_acceptance,
         prepare_task_create_form_for_acceptance,
+        prepare_video_editing_for_acceptance,
+        prepare_material_library_for_acceptance,
+        set_material_source_state_for_acceptance,
         prepare_task_run_for_acceptance,
         prepare_task_lifecycle_for_acceptance,
         prepare_executor_lifecycle_for_acceptance,
@@ -5733,20 +5895,9 @@ pub fn run() {
         reuse_script_model_service_for_video,
         clear_model_service,
         test_model_service_connection,
-        get_video_editing_service_settings,
-        configure_video_editing_service,
-        clear_video_editing_service,
-        test_video_editing_service_connection,
         get_bilibili_service_settings,
         configure_bilibili_service,
         clear_bilibili_service,
-        list_video_editing_projects,
-        create_video_editing_project,
-        get_video_editing_timeline,
-        save_video_editing_timeline,
-        list_video_editing_jobs,
-        read_video_editing_artifact,
-        submit_video_editing_job,
         open_material_video_studio,
         update_material_video_studio_view,
         close_material_video_studio,
@@ -5805,6 +5956,34 @@ pub fn run() {
 mod tests {
     use super::*;
 
+    #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+    #[test]
+    fn smart_edit_command_errors_are_fixed_and_path_free() {
+        let runtime = smart_edit_runtime::SmartEditRuntime::new();
+        for (generation_id, expected_code) in [
+            ("private-invalid-id", "invalid_request"),
+            (
+                "3d594650-b5f4-4498-8e38-0cf85d6dfa72",
+                "generation_not_found",
+            ),
+        ] {
+            let error = runtime
+                .snapshot(generation_id)
+                .expect_err("invalid or unknown generation must fail closed");
+            let wire = serde_json::to_value(map_smart_edit_error(error))
+                .expect("smart-edit command error must serialize");
+            assert_eq!(
+                wire,
+                serde_json::json!({
+                    "code": expected_code,
+                    "message": format!("native command error: {expected_code}"),
+                    "retryable": false,
+                })
+            );
+            assert!(!wire.to_string().contains(generation_id));
+        }
+    }
+
     /// The JavaScript side of every Tauri command rejection reads `error.message`
     /// before it falls back to `String(error)`, and `String()` of a plain JSON
     /// object is always `[object Object]`. A command error that carries no
@@ -5829,12 +6008,32 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_local_material_command_error_is_path_free_and_structured() {
+        let wire = serde_json::to_value(LocalMaterialCommandError {
+            code: "compensation_failed",
+            retryable: true,
+        })
+        .expect("a command error must serialize");
+
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "code": "compensation_failed",
+                "message": "native command error: compensation_failed",
+                "retryable": true,
+            })
+        );
+        assert!(!wire.to_string().contains("sourcePath"));
+    }
+
     /// PC-25：安全注销失败时，界面能说出的话取决于这个映射区分了几种失败。
     ///
     /// 五个互不相同的 Profile 失败此前一起塌成 `storage_unavailable`——那句
     /// 文案是「这是本产品自身的问题，重新操作不会有效」。b5_13 的四轮插桩
     /// 之所以只查到「删 Profile 一步失败了」而定位不到是哪一步，就是因为
     /// 到达用户和日志的那个字符串已经把五种原因抹平。每一种都要有自己的码。
+    #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
     #[test]
     fn every_profile_removal_failure_reaches_the_operator_as_its_own_code() {
         use browser_profiles::BrowserProfileErrorCode as Code;

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""BM-16 determinism and release acceptance (macOS scope).
+"""BM-16 cross-platform determinism and release acceptance.
 
 Runs the aggregated deterministic gates, composes the locked 134-item release
 directory, then drives the real embedded Chromium through the production
 worker for: a per-item render sweep over all 134 catalog parts, a 12-style
 manual-template render sweep, and a same-input double-run frame-digest
 comparison. Also verifies the first release has no URL-entry or scraping
-entry point. Windows package acceptance and sleep/resume coverage are
-recorded as pending evidence in the task ledger, never silently skipped.
+entry point and leaves no staged Chromium or worker process behind. Formal
+package acceptance and sleep/resume coverage are recorded in the task ledger.
 """
 
 from __future__ import annotations
@@ -20,13 +20,16 @@ import math
 import os
 import re
 import shutil
+import stat
 import struct
 import subprocess
 import sys
 import uuid
 import zlib
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
+from types import TracebackType
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -36,6 +39,7 @@ from build_embedded_chromium_staging import (
     build_staging,
     load_staging_contract,
 )
+from process_inspection import process_ids_matching, terminate_matching_processes
 from run_bm_04_acceptance import current_target_id
 from test_motion_video_render_adapter import (
     WorkerSession,
@@ -1110,6 +1114,153 @@ def verify_no_url_entry() -> None:
         )
 
 
+def require_no_run_processes(
+    run_root: Path, *, baseline: set[int] | frozenset[int] = frozenset()
+) -> None:
+    """Reject a completed run that left an owned worker or Chromium alive."""
+    survivors = process_ids_matching(str(run_root)) - set(baseline)
+    if survivors:
+        raise RuntimeError(
+            "BM-16 left a staged Chromium or worker process running: "
+            + ", ".join(str(process_id) for process_id in sorted(survivors))
+        )
+
+
+def _retry_read_only_remove(
+    remove: Callable[[str], object],
+    path: str,
+    error: tuple[type[BaseException], BaseException, TracebackType | None],
+) -> None:
+    """Make a generated read-only release path writable, then delete it."""
+    if not isinstance(error[1], PermissionError):
+        raise error[1]
+    os.chmod(path, stat.S_IRWXU)
+    remove(path)
+
+
+def remove_run_root(run_root: Path) -> None:
+    """Delete the complete run tree and fail closed if anything remains."""
+    if not run_root.exists():
+        return
+    shutil.rmtree(run_root, onerror=_retry_read_only_remove)
+    if run_root.exists():
+        raise RuntimeError(f"BM-16 left its run directory behind: {run_root}")
+
+
+def cleanup_run_root(
+    run_root: Path,
+    process_baseline: set[int] | frozenset[int],
+    *,
+    matching: Callable[[str], set[int]] = process_ids_matching,
+    terminate_owned: Callable[..., set[int]] = terminate_matching_processes,
+    require_none: Callable[..., None] = require_no_run_processes,
+    remove: Callable[[Path], None] = remove_run_root,
+) -> None:
+    """Clean run-owned resources, but never turn a lifecycle leak into success."""
+    leaked: set[int] = set()
+    survivors: set[int] = set()
+    process_cleanup_errors: list[tuple[str, Exception]] = []
+    try:
+        leaked.update(matching(str(run_root)) - set(process_baseline))
+    except Exception as error:
+        process_cleanup_errors.append(("initial process scan", error))
+    try:
+        survivors.update(
+            terminate_owned(
+                str(run_root), baseline=process_baseline, observed=leaked
+            )
+        )
+    except Exception as error:
+        process_cleanup_errors.append(("initial process termination", error))
+    first_inspection_error: Exception | None = None
+    try:
+        require_none(run_root, baseline=process_baseline)
+    except Exception as error:  # keep cleaning before surfacing the lifecycle failure
+        first_inspection_error = error
+
+    removal_error: Exception | None = None
+    try:
+        remove(run_root)
+    except Exception as error:  # the final process pass must still run
+        removal_error = error
+    try:
+        leaked.update(matching(str(run_root)) - set(process_baseline))
+    except Exception as error:
+        process_cleanup_errors.append(("post-removal process scan", error))
+    # Always rescan inside the terminator as well: a process can appear after
+    # the explicit post-removal snapshot and before cleanup returns.
+    try:
+        survivors.update(
+            terminate_owned(
+                str(run_root), baseline=process_baseline, observed=leaked
+            )
+        )
+    except Exception as error:
+        process_cleanup_errors.append(("final process termination", error))
+    if removal_error is not None:
+        try:
+            remove(run_root)
+        except Exception as error:
+            removal_error = error
+        else:
+            removal_error = None
+    # The directory is already gone, so a process discovered here cannot be a
+    # legitimate child still starting from the staged runtime. Check again
+    # after terminating it so cleanup never leaves the leak it reports.
+    final_inspection_error: Exception | None = None
+    try:
+        require_none(run_root, baseline=process_baseline)
+    except Exception as error:
+        final_inspection_error = error
+    if final_inspection_error is not None:
+        # A child can become visible after the final terminator's last empty
+        # snapshot. Give that PID one owned termination pass and prove it is
+        # gone before reporting the lifecycle failure.
+        try:
+            survivors.update(
+                terminate_owned(
+                    str(run_root), baseline=process_baseline, observed=leaked
+                )
+            )
+        except Exception as error:
+            process_cleanup_errors.append(("late process termination", error))
+        if removal_error is not None:
+            try:
+                remove(run_root)
+            except Exception as error:
+                removal_error = error
+            else:
+                removal_error = None
+        try:
+            require_none(run_root, baseline=process_baseline)
+        except Exception as error:
+            final_inspection_error = error
+    if survivors:
+        raise RuntimeError(
+            "BM-16 could not terminate its staged Chromium or worker processes: "
+            + ", ".join(str(process_id) for process_id in sorted(survivors))
+        )
+    if leaked:
+        raise RuntimeError(
+            "BM-16 left staged Chromium or worker processes after the run; "
+            "cleanup terminated PID(s): "
+            + ", ".join(str(process_id) for process_id in sorted(leaked))
+        )
+    if removal_error is not None:
+        raise RuntimeError("BM-16 run directory cleanup failed") from removal_error
+    if process_cleanup_errors:
+        stages = ", ".join(stage for stage, _ in process_cleanup_errors)
+        raise RuntimeError(
+            f"BM-16 process cleanup tool failed during: {stages}"
+        ) from process_cleanup_errors[0][1]
+    if final_inspection_error is not None:
+        raise RuntimeError("BM-16 final cleanup inspection failed") from final_inspection_error
+    if first_inspection_error is not None:
+        raise RuntimeError(
+            "BM-16 first cleanup inspection failed before the final cleanup pass"
+        ) from first_inspection_error
+
+
 def main() -> int:
     if sys.version_info < (3, 10):
         raise RuntimeError("BM-16 acceptance requires python3.10+ (use python3.12)")
@@ -1117,6 +1268,7 @@ def main() -> int:
     run_root = (
         ROOT / ".local/embedded-browser-video-studio" / f"ebvs-bm16-{os.getpid()}"
     )
+    process_baseline = process_ids_matching(str(run_root))
     run_root.mkdir(parents=True, exist_ok=False)
     try:
         release = stage_release_directory(run_root)
@@ -1151,21 +1303,9 @@ def main() -> int:
             encoding="utf-8",
         )
     finally:
-        shutil.rmtree(run_root, ignore_errors=True)
-    survivors = subprocess.run(
-        ["pgrep", "-f", str(run_root)],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
-    )
-    if survivors.stdout.strip():
-        raise RuntimeError(
-            "BM-16 left a staged Chromium or worker process running: "
-            + survivors.stdout.strip()
-        )
+        cleanup_run_root(run_root, process_baseline)
     print(
-        "BM-16 macOS acceptance passed:",
+        f"BM-16 {current_target_id()} acceptance passed:",
         "134-item visual sweep, 11 category sheets, 12-style sweep, "
         "double-run determinism, no URL entry;",
         "evidence:",

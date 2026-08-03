@@ -12,6 +12,8 @@ use automation_tool_desktop_lib::motion_video_studio::{
     seed_authoring_runtime, MotionVideoBriefRequest, MotionVideoStudioErrorCode,
     AUTHORING_RUNTIME_ASSET,
 };
+#[cfg(windows)]
+use automation_tool_desktop_lib::motion_worker_launch;
 use automation_tool_desktop_lib::video_job_workspace::{
     VideoJobWorkspacePolicy, VideoJobWorkspaceStore,
 };
@@ -302,8 +304,8 @@ fn user_part_overrides_are_validated_and_reach_the_authoring_request() {
             true,
             vec![Some("caption-kinetic-slam".to_owned()), None, None],
         )
-        .is_err(),
-        "a catalogued part without a real film slot must not reach the Executor",
+        .is_ok(),
+        "a locked visual-only part must be allowed to reach the Executor",
     );
 }
 
@@ -838,6 +840,178 @@ fn the_authoring_request_tells_the_child_where_the_packaged_parts_are() {
     );
 }
 
+/// Windows' ordinary `C:\...` spelling stops working once catalog assets make
+/// the App-owned job tree cross MAX_PATH. The frozen child must receive the
+/// extended-length spelling at this process boundary; its own private paths
+/// must not depend on a customer choosing a shorter Windows account name.
+#[cfg(windows)]
+#[test]
+fn the_windows_authoring_request_makes_the_app_workspace_long_path_capable() {
+    use automation_tool_desktop_lib::motion_authoring_request;
+
+    let request = MotionVideoBriefRequest::one_sentence(
+        "用蓝色商务风做一段本周销售增长说明".to_owned(),
+        "16:9".to_owned(),
+        6,
+        "zh".to_owned(),
+    )
+    .unwrap();
+    let workspace = Path::new(
+        r"C:\Users\Aventador\AppData\Roaming\com.aventador.automationtool.pc16windowspackage\video-workspaces-v1\jobs\00000000-0000-4000-8000-000000000001\work",
+    );
+    let document = motion_authoring_request(
+        workspace,
+        Path::new(r"C:\installed\motion-catalog"),
+        Path::new(r"C:\installed\embedded-browser\chrome.exe"),
+        Path::new(r"C:\installed\media-toolchain\ffprobe.exe"),
+        &request,
+        "qwen-example",
+        "sk-example",
+    );
+
+    assert_eq!(
+        document["workspace"].as_str().unwrap(),
+        format!(r"\\?\{}", workspace.display()),
+    );
+}
+
+/// Tauri returns the installed resource directory as `\\?\C:\...`. The
+/// authoring child already accepts that spelling; the next production boundary
+/// must also be able to construct the packaged Node Worker launch from it.
+#[cfg(windows)]
+#[test]
+fn the_windows_motion_worker_accepts_the_verbatim_installed_resource_path() {
+    use automation_tool_desktop_lib::local_video_orchestrator::{
+        VideoWorkerLaunch, VideoWorkerRestartPolicy,
+    };
+    use std::collections::BTreeMap;
+
+    let root = TempDirectory::new();
+    // `canonicalize` itself returns a verbatim path on Windows. Rebuild the
+    // same owned directory from the ordinary temp root so this fixture has one
+    // ordinary control spelling and exactly one `\\?\` spelling.
+    let ordinary_root = std::env::temp_dir().join(root.0.file_name().unwrap());
+    let package = ordinary_root.join("motion-video-worker").join("package");
+    let asset_root = ordinary_root
+        .join("video-workspaces-v1")
+        .join("jobs")
+        .join("job-id")
+        .join("work");
+    let browser = ordinary_root
+        .join("embedded-browser")
+        .join("chrome-win64")
+        .join("chrome.exe");
+    let ffmpeg = ordinary_root
+        .join("media-toolchain")
+        .join("bin")
+        .join("ffmpeg.exe");
+    fs::create_dir_all(package.join("runtime")).unwrap();
+    fs::create_dir_all(package.join("app")).unwrap();
+    fs::create_dir_all(&asset_root).unwrap();
+    fs::create_dir_all(browser.parent().unwrap()).unwrap();
+    fs::create_dir_all(ffmpeg.parent().unwrap()).unwrap();
+    fs::write(package.join("runtime/node.exe"), b"node fixture").unwrap();
+    fs::write(package.join("app/worker.mjs"), b"worker fixture").unwrap();
+    fs::write(&browser, b"browser fixture").unwrap();
+    fs::write(&ffmpeg, b"ffmpeg fixture").unwrap();
+
+    let verbatim_package = PathBuf::from(format!(r"\\?\{}", package.display()));
+    let verbatim_browser = PathBuf::from(format!(r"\\?\{}", browser.display()));
+    let verbatim_ffmpeg = PathBuf::from(format!(r"\\?\{}", ffmpeg.display()));
+    let media = BTreeMap::from([("AUTOMATION_TOOL_FFMPEG", verbatim_ffmpeg.as_path())]);
+
+    let policy = VideoWorkerRestartPolicy::new(0, Duration::ZERO).unwrap();
+    VideoWorkerLaunch::bundled_node(&package, asset_root.clone(), policy.clone())
+        .expect("the ordinary Worker package fixture must be valid");
+    VideoWorkerLaunch::bundled_node(&verbatim_package, asset_root.clone(), policy)
+        .expect("the installed verbatim Worker package must pass path validation");
+
+    motion_worker_launch(verbatim_package, asset_root, verbatim_browser, 149, media)
+        .expect("the installed Windows resource path must construct the real Worker launch");
+}
+
+/// The constructor is only half the installed boundary: Node must also accept
+/// the verbatim executable and entrypoint spellings and complete its real
+/// authenticated startup handshake. The Windows package runner supplies the
+/// isolated production payload root explicitly.
+#[cfg(windows)]
+#[test]
+#[ignore = "requires AUTOMATION_TOOL_WINDOWS_PACKAGE_PAYLOAD with the real packaged Worker"]
+fn the_windows_packaged_motion_worker_starts_from_the_verbatim_resource_path() {
+    use automation_tool_desktop_lib::local_video_orchestrator::{
+        LocalVideoOrchestrator, VideoWorkerKind, VideoWorkerState,
+    };
+    use std::collections::BTreeMap;
+
+    let payload = PathBuf::from(
+        std::env::var_os("AUTOMATION_TOOL_WINDOWS_PACKAGE_PAYLOAD")
+            .expect("the package payload root is required"),
+    );
+    let verbatim = |path: &Path| PathBuf::from(format!(r"\\?\{}", path.display()));
+    let package = verbatim(&payload.join("motion-video-worker").join("package"));
+    let browser = verbatim(
+        &payload
+            .join("embedded-browser")
+            .join("chrome-win64")
+            .join("chrome.exe"),
+    );
+    let browser_debug_log = payload
+        .join("embedded-browser")
+        .join("chrome-win64")
+        .join("debug.log");
+    assert!(
+        !browser_debug_log.exists(),
+        "the sealed installed browser tree must start without runtime diagnostics"
+    );
+    let ffmpeg = verbatim(
+        &payload
+            .join("media-toolchain")
+            .join("bin")
+            .join("ffmpeg.exe"),
+    );
+    let root = TempDirectory::new();
+    let asset_root = std::env::temp_dir()
+        .join(root.0.file_name().unwrap())
+        .join("video-workspaces-v1")
+        .join("jobs")
+        .join("00000000-0000-4000-8000-000000000001")
+        .join("work");
+    fs::create_dir_all(&asset_root).unwrap();
+    let media = BTreeMap::from([("AUTOMATION_TOOL_FFMPEG", ffmpeg.as_path())]);
+    let launch = motion_worker_launch(package, asset_root, browser, 149, media)
+        .expect("the installed payload must construct its real Worker launch");
+    let orchestrator =
+        LocalVideoOrchestrator::new(Duration::from_secs(30), Duration::from_secs(10))
+            .expect("orchestrator");
+
+    let running = orchestrator
+        .start(launch)
+        .expect("the packaged Worker must complete its authenticated startup handshake");
+    assert_eq!(running.state(), VideoWorkerState::Running);
+    orchestrator
+        .health(VideoWorkerKind::Node)
+        .expect("the packaged Worker must answer its authenticated health probe");
+    let major = orchestrator
+        .render_verify(
+            VideoWorkerKind::Node,
+            uuid::Uuid::parse_str("3f2504e0-4f89-41d3-9a0c-0305e82c3301").unwrap(),
+        )
+        .expect("the packaged Worker must launch the verbatim-resource Chromium");
+    assert_eq!(major, 149);
+    fs::write(
+        &browser_debug_log,
+        b"owned diagnostic after a failed render",
+    )
+    .expect("simulate the packaged Chromium diagnostic left by a failed render");
+    orchestrator
+        .stop(VideoWorkerKind::Node)
+        .expect("the packaged Worker must stop cleanly");
+    assert!(
+        !browser_debug_log.exists(),
+        "the packaged Chromium probe must not leave diagnostics in the sealed install tree"
+    );
+}
+
 /// PC-26：旁白随段到达。音频必须真在工作区里，秒数必须装得进这一拍——
 /// 镜头长 = max(语音, 动效) 是子进程排的，这里是它的话不再被直接采信的边界。
 #[test]
@@ -924,7 +1098,7 @@ fn a_narrated_segment_is_accepted_and_its_narration_reaches_the_mix() {
         "多条旁白要混在同一条音轨上: {rendered}"
     );
     assert!(
-        rendered.contains("narration/hook.wav"),
+        rendered.replace('\\', "/").contains("narration/hook.wav"),
         "音频输入必须是工作区里那个文件"
     );
     assert!(

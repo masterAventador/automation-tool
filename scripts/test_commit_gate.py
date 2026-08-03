@@ -430,6 +430,13 @@ def check_slow_checkout_preparation_is_isolated_and_reconstructible() -> None:
         ).splitlines()
         if tracked != [".gitignore", "tracked.txt"]:
             _fail(f"slow checkout snapshot tracked build inputs: {tracked}")
+        untracked = subprocess.check_output(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            cwd=checkout,
+            text=True,
+        ).splitlines()
+        if "frontend/node_modules" in untracked:
+            _fail("slow checkout exposed its Node runtime as release source")
         if not (checkout_modules / "runtime.txt").is_file():
             _fail("slow checkout lost the Node dependency linked by the fast tier")
         if not (checkout / "backend/.venv" / executable[0] / executable[1]).is_file():

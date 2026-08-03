@@ -95,7 +95,8 @@ def authorization() -> tuple[str, ActionAuthorizationExpectation]:
 
 
 def test_production_direct_message_action_enters_and_dispatches_once_headlessly(
-    tmp_path: Path, staged_embedded_chromium: Path,
+    tmp_path: Path,
+    staged_embedded_chromium: Path,
 ) -> None:
     profile = tmp_path / "automation-tool-a7-12-profile"
     create_private_profile_directory(profile)

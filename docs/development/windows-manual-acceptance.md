@@ -93,37 +93,25 @@ POSIX 走 pgrep/SIGKILL，Windows 走 CIM 进程表与 `taskkill /F`。
 
 ---
 
-## 3. BM-07 原生文件选择器上传品牌 Logo
+## 3. BM-07 原生文件选择器上传品牌字体与 Logo（✅ 2026-08-02 已完成）
 
-**这一项没有可跑的脚本入口**，需要你驱动真实系统文件对话框。
+已在 Windows 可见桌面会话中安装无 WebDriver/test feature 的生产 NSIS 包，并从正常
+“创作 → 品牌动效成片 → 完整制作面板”入口完成：
 
-**为什么不能照抄现有用例**：`frontend/e2e-tauri/motion-video-native.spec.ts:77-96` 是用
-`browser.execute` 直接构造 `File` 对象塞给页面输入控件的，**根本不碰系统对话框**。
-macOS 上也是这么绕过去的（WebKit WebDriver 不支持 `uploadFile`）。所以两个平台都缺
-真实系统对话框的证据，Windows 这次是第一次补——**不要用构造 File 的方式来"完成"它**，
-那样等于什么都没验。
+- 两次点击生产文件输入，真实操作 Windows 原生文件对话框，选择普通绝对 NTFS 路径下的
+  `AcmeSans-Regular.woff2` 与 `bm07-logo.png`，没有构造 `File` 或调用上传注入。
+- 预览实际加载 `Acme Sans` 和 128×128 PNG；相同草稿两次提交获得真实 RenderJob
+  `2e1f1dc9-b478-4c89-8172-9bc6d6ecb2e8`、`33001ff2-845d-481a-89f1-ba078c88832b`。
+- 两个工作区的字体、Logo、frame、style-freeze、composition、脚本和分镜摘要逐项一致；
+  两个 H.264 1920×1080 / 30 fps / 90 帧 / 3 秒 MP4 的 SHA-256 均为
+  `DA03B11237F3BEEA21C1F688F5ECF782F66DFCC2F87EB7D800CB6F6D7C94E54E`。
+- App 内播放到结束并抽看首、中、尾三段画面后，从 App 删除成片；隔离 App、端口、进程、
+  数据库、计划任务、安装目录和 AppData 均已清理。
 
-**构建测试 App**
-
-```powershell
-cd F:\automation-tool\frontend
-pnpm build:tauri:video-studio-test
-```
-
-**要走的路径**：左侧导航 →「视频制作」→ 选「品牌动效成片」→ 品牌素材步骤 → 上传 Logo。
-
-**要覆盖的输入**：真实 PNG、JPEG、WebP 各一张，以及一个本地字体文件。每次都确认页面预览
-出现且内容正确。
-
-**提交渲染后**确认冻结摘要与页面所见一致；二次打开重现同样结果。
-
-**Windows 专有、macOS 上不存在的三种路径形态**，这是本项在 Windows 补验的主要价值：
-- NTFS reparse point（目录联接/符号链接）指向别处的文件；
-- 大小写不同的同一路径；
-- 8.3 短文件名（`PROGRA~1` 形式）。
-
-三者都是"路径字符串不同、实际指向同一处"，产品必须收敛到同一真实位置并保持
-containment 不被绕出。若发现能绕出允许范围，那是**真实安全缺陷**，先写复现测试再修。
+正式包样本使用 WOFF2 + PNG；其余支持格式由扩展名、魔数、大小和协议测试覆盖。生产链路只把
+文件名和读取后的字节传给 Rust，不传源路径，因此旧清单中的 reparse point、大小写和 8.3
+路径字符串矩阵不再作为 BM-07 功能完成条件，也不声称已做过这些真人路径操作。完整终态证据、
+冻结摘要及包体积边界见 `docs/development/BM-07.md`。
 
 ---
 
@@ -154,7 +142,7 @@ schtasks /Run /TN at-cq01
 | --- | --- | --- |
 | CQ-01 | `docs/development/CQ-01.md` | 日期、命令、**终态输出原文**、退出码；字体回退那条附截图结论 |
 | EB-15 有头 | `docs/development/EB-15.md` | 同上；明确写 `5 passed` 还是 `4 passed, 1 skipped` |
-| BM-07 | `docs/development/BM-07.md` | 四种输入各自结果、三种路径形态各自结果、冻结摘要是否一致 |
+| BM-07 | `docs/development/BM-07.md` | ✅ 已完成；保留正式包、原生文件框、RenderJob、冻结摘要和成片终态证据 |
 
 规则：**失败记报错原文，不要转述**。跑不了的记"未跑"和原因，不要含糊成"待补"。
 

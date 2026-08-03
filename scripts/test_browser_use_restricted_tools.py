@@ -177,4 +177,6 @@ class RestrictedAgentPolicyTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    program = unittest.main(exit=False)
+    print(f"executed checks: {program.result.testsRun}")
+    raise SystemExit(0 if program.result.wasSuccessful() else 1)

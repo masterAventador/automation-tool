@@ -1,0 +1,680 @@
+"""PostgreSQL storage for the local editing material library."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, cast
+
+from sqlalchemy import (
+    ColumnElement,
+    CursorResult,
+    and_,
+    delete,
+    desc,
+    insert,
+    or_,
+    select,
+    update,
+)
+from sqlalchemy.engine import RowMapping
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+
+from automation_tool.control_plane.application.materials import (
+    MaterialAlreadyRegistered,
+    MaterialDataRejected,
+    MaterialDescriptionProtected,
+    MaterialInUse,
+    MaterialNotFound,
+    MaterialPersistenceUnavailable,
+    MaterialSnapshotConflict,
+    SmartEditMaterialWriteback,
+)
+from automation_tool.control_plane.domain import (
+    DescriptionSource,
+    InstallationId,
+    InvalidMaterialModel,
+    Material,
+    MaterialId,
+    MaterialKind,
+)
+
+from .hydration import normalise_timestamp
+from .schema import materials
+from .session import Database
+
+# A refused or timed-out connection surfaces as an `OSError`, not a
+# `SQLAlchemyError`: it comes out of asyncio's connect call, and the asyncpg
+# dialect only wraps asyncpg's own exceptions. `session.py` and five other
+# repositories catch the same pair for the same reason.
+_CONNECTION_FAILURES = (OSError, SQLAlchemyError)
+
+
+def _segment_pairs(value: object) -> object:
+    """Turn a JSON array of pairs back into the tuples the domain declares.
+
+    Measured against PostgreSQL 18.4 with asyncpg 0.31.0: SQLAlchemy's asyncpg
+    dialect registers a JSON codec, so a JSONB column arrives already parsed --
+    a JSON array as `list`, an object as `dict`, never as text. Nested arrays
+    therefore come back as lists of lists, and `Material` declares tuples of
+    tuples, so something has to convert.
+
+    Shaped deliberately like `normalise_timestamp`: convert only what is already
+    the right shape and hand everything else on untouched. Converting first
+    would raise a bare `TypeError` from inside this module on a number, and
+    iterating a `dict` would quietly hand back a tuple of its keys -- neither of
+    which is the domain's error or one of this module's, and the second of which
+    would be a plausible-looking value built out of nonsense.
+    """
+    if isinstance(value, list) and all(isinstance(item, list) for item in value):
+        return tuple(tuple(item) for item in value)
+    return value
+
+
+def _sequence(value: object) -> object:
+    """The same rule for the two flat JSON arrays: `ai_tags`, `shot_boundaries_ms`.
+
+    Nesting is not unwrapped here on purpose. `[[0]]` becomes a tuple holding a
+    list, which the domain refuses because a shot boundary must be an `int` --
+    the right answer for a row that is wrong, rather than a repair that invents
+    what was meant.
+    """
+    if isinstance(value, list):
+        return tuple(value)
+    return value
+
+
+def _hydrate(row: RowMapping) -> Material:
+    """Rebuild a material by constructing it, so a stored row is re-validated.
+
+    Nothing in the table stops a row the domain would refuse -- least of all in
+    the three JSONB columns, which PostgreSQL does not inspect at all -- and
+    rows arrive from migrations, fixtures and hand-run statements as well as
+    from `save`. Going through the constructor makes every one of them meet the
+    rules a caller meets. `InvalidMaterialModel` then propagates rather than
+    being translated: a row the domain rejects is bad data, not a repository
+    failure, and the caller has to be able to tell those apart.
+
+    This is the one place in the codebase outside `material.py` that is allowed
+    to build a `Material` from parts, and a structural test enforces that by
+    name -- everything else has to go through `with_ai_understanding` or
+    `with_user_description`, so that a describe pass cannot overwrite what a
+    person wrote. Reconstituting a stored row is not that operation.
+
+    The three parses share one `except`. `InvalidResourceId` and an unknown
+    enumeration member are both `ValueError`, and all three mean the same thing
+    to a caller: this row is not a material. Leaving the raw string on the
+    object instead is the failure LE-04 recorded on `EditingJobStatus` --
+    `kind is MaterialKind.AUDIO` is silently `False` for the string `"audio"`,
+    and that is the unsafe direction.
+    """
+    try:
+        material_id = MaterialId.parse(row["material_id"])
+        kind = MaterialKind(row["kind"])
+        description_source = DescriptionSource(row["description_source"])
+    except ValueError:
+        raise InvalidMaterialModel from None
+    return Material(
+        material_id=material_id,
+        kind=kind,
+        duration_ms=cast(int | None, row["duration_ms"]),
+        width=cast(int | None, row["width"]),
+        height=cast(int | None, row["height"]),
+        content_digest=cast(str, row["content_digest"]),
+        has_audio=cast(bool, row["has_audio"]),
+        audio_loudness_lufs=cast(float | None, row["audio_loudness_lufs"]),
+        has_speech=cast(bool, row["has_speech"]),
+        speech_segments_ms=cast(
+            tuple[tuple[int, int], ...], _segment_pairs(row["speech_segments_ms"])
+        ),
+        speech_transcript=cast(str | None, row["speech_transcript"]),
+        shot_boundaries_ms=cast(tuple[int, ...], _sequence(row["shot_boundaries_ms"])),
+        ai_description=cast(str | None, row["ai_description"]),
+        ai_tags=cast(tuple[str, ...], _sequence(row["ai_tags"])),
+        description_source=description_source,
+        described_at=cast(datetime | None, normalise_timestamp(row["described_at"])),
+    )
+
+
+def _column_values(material: Material) -> dict[str, object]:
+    """The full row, with the domain's tuples spelled as the lists JSON has."""
+    return {
+        "material_id": material.material_id.uuid,
+        "kind": material.kind.value,
+        "duration_ms": material.duration_ms,
+        "width": material.width,
+        "height": material.height,
+        "content_digest": material.content_digest,
+        "has_audio": material.has_audio,
+        "audio_loudness_lufs": material.audio_loudness_lufs,
+        "has_speech": material.has_speech,
+        "speech_segments_ms": [list(segment) for segment in material.speech_segments_ms],
+        "speech_transcript": material.speech_transcript,
+        "shot_boundaries_ms": list(material.shot_boundaries_ms),
+        **_description_values(material),
+    }
+
+
+def _description_values(material: Material) -> dict[str, object]:
+    """The four columns a user description write is allowed to move."""
+    return {
+        "ai_description": material.ai_description,
+        "ai_tags": list(material.ai_tags),
+        "description_source": material.description_source.value,
+        "described_at": material.described_at,
+    }
+
+
+def _understanding_values(material: Material) -> dict[str, object]:
+    """The complete AI result, persisted by one guarded UPDATE."""
+    return {
+        **_description_values(material),
+        "shot_boundaries_ms": list(material.shot_boundaries_ms),
+    }
+
+
+def _speech_analysis_values(material: Material) -> dict[str, object]:
+    """The three columns produced by one complete local speech pass."""
+
+    return {
+        "has_speech": material.has_speech,
+        "speech_segments_ms": [list(segment) for segment in material.speech_segments_ms],
+        "speech_transcript": material.speech_transcript,
+    }
+
+
+class SqlAlchemyMaterialRepository:
+    """Write-once material rows, apart from guarded understanding fields."""
+
+    def __init__(self, database: Database) -> None:
+        if not isinstance(database, Database):
+            raise MaterialPersistenceUnavailable
+        self._database = database
+
+    async def save(
+        self,
+        material: Material,
+        installation_id: InstallationId,
+    ) -> None:
+        """Insert one material into its Installation's independent digest scope."""
+        if not isinstance(material, Material) or not isinstance(installation_id, InstallationId):
+            raise MaterialDataRejected
+        try:
+            async with self._database.session() as session:
+                await session.execute(
+                    insert(materials).values(
+                        **_column_values(material),
+                        installation_id=installation_id.uuid,
+                    )
+                )
+        except IntegrityError as error:
+            constraint = getattr(
+                getattr(error.orig, "__cause__", None),
+                "constraint_name",
+                None,
+            )
+            if constraint in {
+                "pk_materials",
+                "uq_materials_installation_content_digest",
+            }:
+                raise MaterialAlreadyRegistered from None
+            raise MaterialDataRejected from None
+        except _CONNECTION_FAILURES:
+            raise MaterialPersistenceUnavailable from None
+        except Exception:
+            raise MaterialPersistenceUnavailable from None
+
+    async def get(
+        self,
+        material_id: MaterialId,
+        installation_id: InstallationId,
+    ) -> Material:
+        if not isinstance(material_id, MaterialId) or not isinstance(
+            installation_id, InstallationId
+        ):
+            raise MaterialDataRejected
+        row = await self._row(
+            and_(
+                materials.c.material_id == material_id.uuid,
+                materials.c.installation_id == installation_id.uuid,
+            )
+        )
+        if row is None:
+            raise MaterialNotFound
+        return _hydrate(row)
+
+    async def find_by_digest(
+        self,
+        content_digest: str,
+        installation_id: InstallationId,
+    ) -> Material | None:
+        """Answer whether this exact content is already stored.
+
+        `None` means "not stored", which is why the argument's type is checked
+        first: a caller handing over something that is not text would otherwise
+        get `None` back, read it as "safe to import", and store the same file
+        twice. The digest's *format* is the domain's business and is not checked
+        here -- a well-formed digest nobody has stored and a malformed one both
+        correctly answer `None`.
+        """
+        if not isinstance(content_digest, str) or not isinstance(installation_id, InstallationId):
+            raise MaterialDataRejected
+        row = await self._row(
+            and_(
+                materials.c.content_digest == content_digest,
+                materials.c.installation_id == installation_id.uuid,
+            )
+        )
+        return None if row is None else _hydrate(row)
+
+    async def list_page(
+        self,
+        *,
+        installation_id: InstallationId,
+        before_material_id: MaterialId | None,
+        limit: int,
+    ) -> tuple[Material, ...]:
+        if (
+            not isinstance(installation_id, InstallationId)
+            or type(limit) is not int
+            or not 1 <= limit <= 101
+            or (before_material_id is not None and not isinstance(before_material_id, MaterialId))
+        ):
+            raise MaterialDataRejected
+        statement = select(materials).where(materials.c.installation_id == installation_id.uuid)
+        if before_material_id is not None:
+            statement = statement.where(materials.c.material_id < before_material_id.uuid)
+        statement = statement.order_by(desc(materials.c.material_id)).limit(limit)
+        try:
+            async with self._database.session() as session:
+                rows = (await session.execute(statement)).mappings().all()
+        except _CONNECTION_FAILURES:
+            raise MaterialPersistenceUnavailable from None
+        except Exception:
+            raise MaterialPersistenceUnavailable from None
+        return tuple(_hydrate(row) for row in rows)
+
+    async def delete(
+        self,
+        material_id: MaterialId,
+        installation_id: InstallationId,
+    ) -> None:
+        if not isinstance(material_id, MaterialId) or not isinstance(
+            installation_id, InstallationId
+        ):
+            raise MaterialDataRejected
+        try:
+            async with self._database.session() as session:
+                result = cast(
+                    "CursorResult[Any]",
+                    await session.execute(
+                        delete(materials).where(
+                            materials.c.material_id == material_id.uuid,
+                            materials.c.installation_id == installation_id.uuid,
+                        )
+                    ),
+                )
+                matched = result.rowcount != 0
+        except IntegrityError as error:
+            constraint = getattr(error.orig, "constraint_name", None)
+            if constraint is None:
+                constraint = getattr(
+                    getattr(error.orig, "__cause__", None),
+                    "constraint_name",
+                    None,
+                )
+            if constraint == "fk_timeline_material_references_material_owner":
+                raise MaterialInUse from None
+            raise MaterialDataRejected from None
+        except _CONNECTION_FAILURES:
+            raise MaterialPersistenceUnavailable from None
+        except Exception:
+            raise MaterialPersistenceUnavailable from None
+        if not matched:
+            raise MaterialNotFound
+
+    async def update_user_description(
+        self,
+        material: Material,
+        installation_id: InstallationId,
+    ) -> None:
+        """Rewrite only the four description columns for a person."""
+        if (
+            not isinstance(material, Material)
+            or material.description_source is not DescriptionSource.USER
+            or not isinstance(installation_id, InstallationId)
+        ):
+            raise MaterialDataRejected
+        await self._update_understanding_fields(
+            material,
+            installation_id,
+            values=_description_values(material),
+            protect_user=False,
+        )
+
+    async def update_ai_understanding(
+        self,
+        material: Material,
+        installation_id: InstallationId,
+    ) -> None:
+        """Atomically rewrite the complete AI result unless a person owns it.
+
+        `Material.with_ai_understanding` returns the material unchanged when the
+        description came from the user -- but it decides that from the snapshot
+        in the caller's hand, and a snapshot goes stale. Load a material while
+        its description is still the model's, let the user write theirs, and the
+        object that describe pass is holding still says `AI`. Every method call
+        in that sequence is the sanctioned one; no test of behaviour and no
+        structural guard sees anything wrong; and the user's words are gone.
+
+        So the refusal is a predicate inside the UPDATE, for the same reason
+        `save` leans on the primary key rather than looking first: reading the
+        row and then deciding has the identical defect one level down, where two
+        describe passes both read `ai` and both proceed. Only the database sees
+        one statement at a time.
+
+        `rowcount == 0` then has two meanings, and the follow-up read is a
+        best-effort attempt to say which. It is **not** the second half of the
+        guard: the protection decision was made in full by the UPDATE, in one
+        statement, before this read runs at all.
+
+        Sharing a transaction with the UPDATE does not make the two answers
+        exhaustive, and an earlier version of this comment claimed it did.
+        Measured against this database: `transaction_isolation` is
+        `read committed`, so every statement takes a *fresh* snapshot. Another
+        connection that deletes the row and commits between the two statements
+        makes it invisible to the read -- same transaction or not. The shared
+        transaction saves a trip through the pool; that is all it buys.
+
+        Both answers are safe inside that window: a row that really was deleted
+        is `MaterialNotFound`, and a row still present and owned by the user is
+        `MaterialDescriptionProtected`. Only the label on a concurrently deleted
+        row can come out wrong, and both labels tell the caller the same thing --
+        stop. Collapsing the two would not be safe: it would tell a caller to
+        stop retrying a material that exists, and leave LE-06 answering 404
+        where 409 is correct.
+
+        There is no `IntegrityError` clause, unlike `save`: none of these five
+        columns carries a constraint that an UPDATE could violate.
+        `SQLAlchemyError` would catch one anyway if that ever stopped being true.
+        """
+        if (
+            not isinstance(material, Material)
+            or material.description_source is not DescriptionSource.AI
+            or not isinstance(installation_id, InstallationId)
+        ):
+            raise MaterialDataRejected
+        await self._update_understanding_fields(
+            material,
+            installation_id,
+            values=_understanding_values(material),
+            protect_user=True,
+        )
+
+    async def update_speech_analysis(
+        self,
+        material: Material,
+        installation_id: InstallationId,
+    ) -> None:
+        """Atomically rewrite only the three speech-analysis columns."""
+
+        if not isinstance(material, Material) or not isinstance(installation_id, InstallationId):
+            raise MaterialDataRejected
+        condition = and_(
+            materials.c.material_id == material.material_id.uuid,
+            materials.c.installation_id == installation_id.uuid,
+        )
+        try:
+            async with self._database.session() as session:
+                result = cast(
+                    "CursorResult[Any]",
+                    await session.execute(
+                        update(materials)
+                        .where(condition)
+                        .values(**_speech_analysis_values(material))
+                    ),
+                )
+                matched = result.rowcount != 0
+        except _CONNECTION_FAILURES:
+            raise MaterialPersistenceUnavailable from None
+        except Exception:
+            raise MaterialPersistenceUnavailable from None
+        if not matched:
+            raise MaterialNotFound
+
+    async def apply_smart_edit_writeback(
+        self,
+        writeback: SmartEditMaterialWriteback,
+        installation_id: InstallationId,
+    ) -> tuple[Material, ...]:
+        """Lock, validate and persist one generated draft as a single transaction."""
+
+        if not isinstance(writeback, SmartEditMaterialWriteback) or not isinstance(
+            installation_id, InstallationId
+        ):
+            raise MaterialDataRejected
+        analysis_ids = tuple(value.material_id.uuid for value in writeback.analyses)
+        narration_ids = tuple(value.material_id.uuid for value in writeback.narrations)
+        narration_digests = tuple(value.content_digest for value in writeback.narrations)
+        try:
+            async with self._database.session() as session:
+                analysis_rows = (
+                    (
+                        await session.execute(
+                            select(materials)
+                            .where(
+                                materials.c.installation_id == installation_id.uuid,
+                                materials.c.material_id.in_(analysis_ids),
+                            )
+                            .order_by(materials.c.material_id)
+                            .with_for_update()
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
+                hydrated_analyses = tuple(_hydrate(row) for row in analysis_rows)
+                stored_analyses = {material.material_id: material for material in hydrated_analyses}
+                if len(stored_analyses) != len(writeback.analyses):
+                    raise MaterialNotFound
+
+                changed_analyses: list[Material] = []
+                for analysis in writeback.analyses:
+                    current = stored_analyses[analysis.material_id]
+                    if current.content_digest != analysis.content_digest:
+                        raise MaterialSnapshotConflict
+                    if analysis.description_source is DescriptionSource.USER:
+                        if (
+                            current.description_source is not DescriptionSource.USER
+                            or current.ai_description != analysis.ai_description
+                            or current.ai_tags != analysis.ai_tags
+                            or current.shot_boundaries_ms != analysis.shot_boundaries_ms
+                            or current.described_at != analysis.described_at
+                        ):
+                            raise MaterialSnapshotConflict
+                        changed = current
+                    else:
+                        if current.description_source is DescriptionSource.USER:
+                            raise MaterialDescriptionProtected
+                        if analysis.ai_description is None:
+                            if (
+                                current.ai_description is not None
+                                or current.ai_tags
+                                or current.shot_boundaries_ms != analysis.shot_boundaries_ms
+                                or current.described_at is not None
+                            ):
+                                raise MaterialSnapshotConflict
+                            changed = current
+                        else:
+                            if analysis.described_at is None:
+                                raise MaterialSnapshotConflict
+                            changed = current.with_ai_understanding(
+                                analysis.ai_description,
+                                analysis.ai_tags,
+                                analysis.shot_boundaries_ms,
+                                analysis.described_at,
+                            )
+                    changed_analyses.append(
+                        changed.with_speech_analysis(
+                            has_speech=analysis.has_speech,
+                            speech_segments_ms=analysis.speech_segments_ms,
+                            speech_transcript=analysis.speech_transcript,
+                        )
+                    )
+
+                stored_narration_rows: list[RowMapping] = []
+                if writeback.narrations:
+                    stored_narration_rows = list(
+                        (
+                            await session.execute(
+                                select(materials)
+                                .where(
+                                    or_(
+                                        materials.c.material_id.in_(narration_ids),
+                                        and_(
+                                            materials.c.installation_id == installation_id.uuid,
+                                            materials.c.content_digest.in_(narration_digests),
+                                        ),
+                                    )
+                                )
+                                .order_by(materials.c.material_id)
+                                .with_for_update()
+                            )
+                        )
+                        .mappings()
+                        .all()
+                    )
+                rows_by_id = {row["material_id"]: row for row in stored_narration_rows}
+                rows_by_digest = {
+                    cast(str, row["content_digest"]): row
+                    for row in stored_narration_rows
+                    if row["installation_id"] == installation_id.uuid
+                }
+                new_narrations: list[Material] = []
+                for narration in writeback.narrations:
+                    existing = rows_by_id.get(narration.material_id.uuid)
+                    if existing is not None:
+                        if (
+                            existing["installation_id"] != installation_id.uuid
+                            or _hydrate(existing) != narration
+                        ):
+                            raise MaterialAlreadyRegistered
+                        continue
+                    if narration.content_digest in rows_by_digest:
+                        raise MaterialAlreadyRegistered
+                    new_narrations.append(narration)
+
+                for analysis, changed in zip(
+                    writeback.analyses,
+                    changed_analyses,
+                    strict=True,
+                ):
+                    values = _speech_analysis_values(changed)
+                    if analysis.description_source is DescriptionSource.AI:
+                        values.update(_understanding_values(changed))
+                    result = cast(
+                        "CursorResult[Any]",
+                        await session.execute(
+                            update(materials)
+                            .where(
+                                materials.c.material_id == changed.material_id.uuid,
+                                materials.c.installation_id == installation_id.uuid,
+                                materials.c.content_digest == analysis.content_digest,
+                            )
+                            .values(**values)
+                        ),
+                    )
+                    if result.rowcount != 1:
+                        raise MaterialSnapshotConflict
+                if new_narrations:
+                    await session.execute(
+                        insert(materials),
+                        [
+                            {
+                                **_column_values(material),
+                                "installation_id": installation_id.uuid,
+                            }
+                            for material in new_narrations
+                        ],
+                    )
+        except (
+            InvalidMaterialModel,
+            MaterialAlreadyRegistered,
+            MaterialDescriptionProtected,
+            MaterialNotFound,
+            MaterialSnapshotConflict,
+        ):
+            raise
+        except IntegrityError:
+            raise MaterialAlreadyRegistered from None
+        except _CONNECTION_FAILURES:
+            raise MaterialPersistenceUnavailable from None
+        except Exception:
+            raise MaterialPersistenceUnavailable from None
+        return (*changed_analyses, *writeback.narrations)
+
+    async def _update_understanding_fields(
+        self,
+        material: Material,
+        installation_id: InstallationId,
+        *,
+        values: dict[str, object],
+        protect_user: bool,
+    ) -> None:
+        condition = and_(
+            materials.c.material_id == material.material_id.uuid,
+            materials.c.installation_id == installation_id.uuid,
+        )
+        statement = update(materials).where(condition).values(**values)
+        if protect_user:
+            statement = statement.where(
+                materials.c.description_source != DescriptionSource.USER.value
+            )
+        try:
+            async with self._database.session() as session:
+                # `AsyncSession.execute` is declared as returning `Result`, and
+                # `rowcount` lives on the `CursorResult` a DML statement really
+                # hands back. The cast records that rather than reaching through
+                # an `Any`, so a SQLAlchemy release that changes it fails here.
+                result = cast("CursorResult[Any]", await session.execute(statement))
+                matched = result.rowcount != 0
+                stored = (
+                    None
+                    if matched
+                    else (await session.execute(select(materials).where(condition)))
+                    .mappings()
+                    .one_or_none()
+                )
+        except _CONNECTION_FAILURES:
+            raise MaterialPersistenceUnavailable from None
+        except Exception:
+            raise MaterialPersistenceUnavailable from None
+        if matched:
+            return
+        if stored is None:
+            raise MaterialNotFound
+        if protect_user:
+            raise MaterialDescriptionProtected
+        raise MaterialPersistenceUnavailable
+
+    async def _row(self, condition: ColumnElement[bool]) -> RowMapping | None:
+        """Read at most one row, with hydration deliberately left to the caller.
+
+        Hydrating in here would put `Material.__post_init__` inside the `try`,
+        where the catch-all tail would swallow a domain rejection and report it
+        as an unavailable database -- turning "this stored row is broken" into
+        "try again later", which is both wrong and unfixable by retrying.
+        """
+        try:
+            async with self._database.session() as session:
+                return (
+                    (await session.execute(select(materials).where(condition)))
+                    .mappings()
+                    .one_or_none()
+                )
+        except _CONNECTION_FAILURES:
+            raise MaterialPersistenceUnavailable from None
+        except Exception:
+            raise MaterialPersistenceUnavailable from None
+
+
+__all__ = ["SqlAlchemyMaterialRepository"]

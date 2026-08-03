@@ -50,11 +50,14 @@ GROUP_COUNTS = {
     "VF": 7,
     "IM": 8,
     "BM": 16,
-    "VE": 8,
     "PB": 8,
     "SA": 7,
     "CQ": 5,
 }
+# VE（独立视频剪辑）线整条废弃，不再是台账追踪的工作线。行解析仍识别 VE，
+# 这样任何重新加入 Roadmap 的 VE 行都会作为 extra 被明确拒绝；证据文件扫描不识别
+# VE，因此保留在磁盘上的历史 docs/development/VE-*.md 不会被误判为当前专项证据。
+
 EXPECTED_IDS = {
     f"{prefix}-{number:02d}"
     for prefix, count in GROUP_COUNTS.items()
@@ -161,7 +164,7 @@ def require_evidence_headings(task_id: str, status: str, evidence: str) -> None:
 def validate_evidence(rows: dict[str, TaskRow], evidence_root: Path) -> None:
     if not evidence_root.is_dir() or evidence_root.is_symlink():
         fail("evidence root must be a regular directory")
-    specialized_name = re.compile(r"^(?:AV|EB|BU|VF|IM|BM|VE|PB|SA|CQ)-\d{2}\.md$")
+    specialized_name = re.compile(r"^(?:AV|EB|BU|VF|IM|BM|PB|SA|CQ)-\d{2}\.md$")
     unknown_files = sorted(
         path.name
         for path in evidence_root.iterdir()

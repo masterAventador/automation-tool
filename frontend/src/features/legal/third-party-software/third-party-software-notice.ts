@@ -221,10 +221,23 @@ export const DISTRIBUTED_COMPONENT_PRESENTATION: Readonly<
     noticeHint:
       "安装包内附带一份清单文件，逐条列出随包分发的每个 Python 组件、版本和它声明的许可证，路径见下。",
   },
+  onnxruntime: {
+    role: "随本机执行器分发的模型推理运行库，用来在本地判断素材声音中是否包含人声。",
+    noticeHint: "它的 MIT 许可证正文随运行库放在安装包内，路径见下。",
+  },
+  "silero-vad-model": {
+    role: "随本机执行器分发的人声检测模型，只在本地处理音频采样，不把视频发送给模型服务。",
+    noticeHint: "模型的 MIT 许可证正文与模型一起放在安装包内，路径见下。",
+  },
   "subtitle-fonts": {
     role: "随安装包分发的开源中文字体，「智能素材成片」用它来把字幕画到画面上；字体本身是完整字符集，不做删减。",
     noticeHint:
       "它按 SIL 开放字体许可证授权，许可证要求随字体附带版权声明与许可证正文：正文已收录在本页下方，安装包内也在字体旁边放了一份，路径见下。",
+  },
+  "plangothic-fonts": {
+    role: "随安装包分发的开源生僻汉字补充字体，与思源/Noto 字体组成字幕 fallback，覆盖 Unicode 扩展 B 至 J。",
+    noticeHint:
+      "它按 SIL 开放字体许可证授权；版权声明来自实际字体元数据，原项目的许可证正文也随字体放入安装包。",
   },
 };
 
@@ -234,6 +247,7 @@ export const ASSET_CATEGORY_LABELS: Readonly<Record<string, string>> = {
   stock_media: "图片与视频素材",
   music_sfx: "音乐与音效",
   codec_binary: "视频编解码程序",
+  ml_model: "本地机器学习模型",
   map_3d: "地图与三维数据",
   generated: "模型生成内容",
 };

@@ -22,7 +22,7 @@ use tauri::{Manager, WebviewBuilder, WebviewUrl};
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const WEBVIEW_LABEL: &str = "material-video-studio";
-const WORKER_VERSION: &str = "1.3.2";
+pub(crate) const WORKER_VERSION: &str = "1.3.2";
 const INIT_SCRIPT: &str = include_str!("material_video_studio_init.js");
 const JOB_CHECKPOINT: &str = "material-render-job";
 const OBSERVATION_FILE: &str = "material-render-job-observation.json";

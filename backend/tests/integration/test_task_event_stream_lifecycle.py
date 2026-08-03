@@ -295,7 +295,7 @@ async def test_repository_fails_closed_for_invalid_inputs_and_unavailable_databa
             },
         ):
             with pytest.raises(TaskEventStreamUnavailable):
-                await repository.read_batch(**values)  # type: ignore[arg-type]
+                await repository.read_batch(**values)
 
         with pytest.raises(TaskEventStreamUnavailable) as raised:
             await repository.read_batch(

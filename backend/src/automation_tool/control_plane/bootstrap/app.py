@@ -22,6 +22,21 @@ from automation_tool.control_plane.api.device_credentials import (
 from automation_tool.control_plane.api.device_sessions import (
     router as device_session_router,
 )
+from automation_tool.control_plane.api.editing_jobs import (
+    detail_router as editing_job_detail_router,
+)
+from automation_tool.control_plane.api.editing_jobs import (
+    project_router as editing_job_project_router,
+)
+from automation_tool.control_plane.api.editing_materials import (
+    router as editing_material_router,
+)
+from automation_tool.control_plane.api.editing_projects import (
+    router as editing_project_router,
+)
+from automation_tool.control_plane.api.editing_timelines import (
+    router as editing_timeline_router,
+)
 from automation_tool.control_plane.api.errors import (
     install_request_context,
     register_error_handlers,
@@ -62,12 +77,15 @@ from automation_tool.control_plane.application.bilibili_publishing_runtime impor
 from automation_tool.control_plane.application.desktop_updates import DesktopUpdateCatalog
 from automation_tool.control_plane.application.device_credentials import DeviceCredentialService
 from automation_tool.control_plane.application.device_sessions import DeviceSessionService
+from automation_tool.control_plane.application.editing_jobs import EditingJobService
+from automation_tool.control_plane.application.editing_projects import EditingProjectService
 from automation_tool.control_plane.application.executor_connection_registry import (
     ExecutorConnectionRegistry,
 )
 from automation_tool.control_plane.application.executor_connections import (
     ExecutorConnectionService,
 )
+from automation_tool.control_plane.application.materials import MaterialService
 from automation_tool.control_plane.application.platform_session_health import (
     PlatformSessionHealthService,
 )
@@ -92,6 +110,7 @@ from automation_tool.control_plane.application.task_target_results import (
     TaskTargetResultService,
 )
 from automation_tool.control_plane.application.tasks import TaskCreationService
+from automation_tool.control_plane.application.timelines import TimelineService
 from automation_tool.control_plane.application.workbench_metrics import WorkbenchMetricsService
 from automation_tool.control_plane.bootstrap.account_devices import (
     account_device_service as build_account_device_service,
@@ -117,6 +136,18 @@ from automation_tool.control_plane.bootstrap.device_credentials import (
 )
 from automation_tool.control_plane.bootstrap.device_sessions import (
     device_session_service as build_device_session_service,
+)
+from automation_tool.control_plane.bootstrap.editing_jobs import (
+    editing_job_service as build_editing_job_service,
+)
+from automation_tool.control_plane.bootstrap.editing_materials import (
+    material_service as build_material_service,
+)
+from automation_tool.control_plane.bootstrap.editing_projects import (
+    editing_project_service as build_editing_project_service,
+)
+from automation_tool.control_plane.bootstrap.editing_timelines import (
+    timeline_service as build_timeline_service,
 )
 from automation_tool.control_plane.bootstrap.local_provisioning import (
     LocalRegistrationBootstrap,
@@ -207,7 +238,7 @@ async def control_plane_lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app(
     *,
-    database: DatabaseLifecycle | None | _FromEnvironment = _FROM_ENVIRONMENT,
+    database: DatabaseLifecycle | _FromEnvironment | None = _FROM_ENVIRONMENT,
     account_session_service: AccountSessionService | None = None,
     account_installation_binding_service: AccountInstallationBindingService | None = None,
     account_device_service: AccountDeviceService | None = None,
@@ -218,6 +249,10 @@ def create_app(
     executor_connection_service: ExecutorConnectionService | None = None,
     executor_connection_registry: ExecutorConnectionRegistry | None = None,
     platform_session_health_service: PlatformSessionHealthService | None = None,
+    editing_project_service: EditingProjectService | None = None,
+    material_service: MaterialService | None = None,
+    timeline_service: TimelineService | None = None,
+    editing_job_service: EditingJobService | None = None,
     task_creation_service: TaskCreationService | None = None,
     task_query_service: TaskQueryService | None = None,
     task_command_delivery_service: TaskCommandDeliveryService | None = None,
@@ -255,6 +290,10 @@ def create_app(
         executor_connection_registry or ExecutorConnectionRegistry()
     )
     resolved_platform_session_health_service = platform_session_health_service
+    resolved_editing_project_service = editing_project_service
+    resolved_material_service = material_service
+    resolved_timeline_service = timeline_service
+    resolved_editing_job_service = editing_job_service
     resolved_task_creation_service = task_creation_service
     resolved_task_query_service = task_query_service
     resolved_task_command_delivery_service = task_command_delivery_service
@@ -327,6 +366,14 @@ def create_app(
         resolved_platform_session_health_service = build_platform_session_health_service(
             resolved_database
         )
+    if resolved_editing_project_service is None and isinstance(resolved_database, Database):
+        resolved_editing_project_service = build_editing_project_service(resolved_database)
+    if resolved_material_service is None and isinstance(resolved_database, Database):
+        resolved_material_service = build_material_service(resolved_database)
+    if resolved_timeline_service is None and isinstance(resolved_database, Database):
+        resolved_timeline_service = build_timeline_service(resolved_database)
+    if resolved_editing_job_service is None and isinstance(resolved_database, Database):
+        resolved_editing_job_service = build_editing_job_service(resolved_database)
     if resolved_task_creation_service is None and isinstance(resolved_database, Database):
         resolved_task_creation_service = build_task_creation_service(resolved_database)
     if resolved_task_query_service is None and isinstance(resolved_database, Database):
@@ -402,6 +449,10 @@ def create_app(
     app.state.executor_connection_service = resolved_executor_connection_service
     app.state.executor_connection_registry = resolved_executor_connection_registry
     app.state.platform_session_health_service = resolved_platform_session_health_service
+    app.state.editing_project_service = resolved_editing_project_service
+    app.state.material_service = resolved_material_service
+    app.state.timeline_service = resolved_timeline_service
+    app.state.editing_job_service = resolved_editing_job_service
     app.state.task_creation_service = resolved_task_creation_service
     app.state.task_query_service = resolved_task_query_service
     app.state.task_command_delivery_service = resolved_task_command_delivery_service
@@ -436,6 +487,11 @@ def create_app(
     app.include_router(device_session_router)
     app.include_router(installation_access_router)
     app.include_router(platform_session_router)
+    app.include_router(editing_project_router)
+    app.include_router(editing_material_router)
+    app.include_router(editing_timeline_router)
+    app.include_router(editing_job_project_router)
+    app.include_router(editing_job_detail_router)
     app.include_router(task_event_stream_router)
     app.include_router(task_control_router)
     app.include_router(task_target_preview_router)

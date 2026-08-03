@@ -109,7 +109,10 @@
       "reviewedAt": "2026-07-23T23:50:00+08:00",
       "embeddingAllowed": true,
       "attribution": "Big Shoulders Display authors; SIL Open Font License 1.1",
-      "bm12LockedSha256": "203dd8ba4ae61b19cd2e00c66708f0d0f6d8484cdfdb1d7e8be37260d36a99b1"
+      "bm12LockedSha256": "203dd8ba4ae61b19cd2e00c66708f0d0f6d8484cdfdb1d7e8be37260d36a99b1",
+      "licensePath": "fonts/BigShouldersDisplay-OFL.txt",
+      "licenseTextSha256": "338f9c050f19daeda1d597243faf79f3a3d437c338af58cb7047617d0ce08771",
+      "licenseTextBytes": 4396
     },
     {
       "id": "generated-avatar",

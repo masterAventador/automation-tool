@@ -787,11 +787,12 @@ $ ls .../profiles/demo-xuanbai/embedded-browser-profiles/douyin/
 **✅ 2026-07-27 实测（本机当前没有卡在这个状态）**：
 
 ```text
-$ ls -l .../embedded-browser-profiles/douyin/739b9297-.../.automation-tool-profile-lock-v1
+$ ls -l .../embedded-browser-profiles/douyin/.automation-tool-profile-lease-v1-739b9297-...
 -rw-------  ...  0  Jul 27 01:24    ← 0 字节 = 已经正常释放，没有残留占用
 ```
 
-**这个文件是 0 字节就没事；不是 0 字节，就是上面说的那个状态。**
+**这个文件是 0 字节就没事；不是 0 字节，就是上面说的那个状态。** 旧包放在 Profile 内的
+`.automation-tool-profile-lock-v1` 已被 2026-08-02 的父目录租约替换；它不再是当前版本的判据。
 
 **⛔ 别把「A1 没过」和这个搞混。** 如果包里的 JavaScript 运行时跑不了，浏览器根本起不来，这两个按钮同样会失败——但现在它报的是「运营浏览器组件缺失或损坏……安装包自身的问题」，**不再是那句万能的「请稍后重试」**。看到「安装包自身的问题」就回 A1，不要在这里反复点。
 

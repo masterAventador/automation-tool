@@ -3,7 +3,17 @@ import { describe, expect, it } from "vitest";
 import { createLocalVideoEditingGateway } from "./local-video-editing-gateway";
 import { VideoEditingGatewayError } from "./video-editing-gateway";
 
-const ARTIFACT_A = "9f48954d-2df1-4168-8f33-b62c5772845b";
+const MATERIAL_A = "9f48954d-2df1-4168-8f33-b62c5772845b";
+const PROJECT_INPUT = {
+  title: "发布会剪辑",
+  output: { width: 720, height: 1280, fps: 20 },
+  captionStyle: {
+    fontKey: "noto-sans-cjk-sc-bold",
+    fontPx: 48,
+    strokePx: 3,
+    lineSpacing: 1.2,
+  },
+} as const;
 
 function memoryStorage(initial: Record<string, string> = {}) {
   const values = new Map(Object.entries(initial));
@@ -15,7 +25,7 @@ function memoryStorage(initial: Record<string, string> = {}) {
   };
 }
 
-function draft(sourceArtifactId: string = ARTIFACT_A) {
+function draft(sourceMaterialId: string = MATERIAL_A) {
   return {
     durationMs: 3_000,
     tracks: [
@@ -27,9 +37,13 @@ function draft(sourceArtifactId: string = ARTIFACT_A) {
             clipId: "clip-1",
             startMs: 0,
             durationMs: 3_000,
-            sourceArtifactId,
+            sourceMaterialId,
+            sourceInMs: 0,
+            sourceOutMs: 3_000,
             text: null,
+            gainDb: null,
             transitionIn: null,
+            originalAudioMode: null,
           },
         ],
       },
@@ -43,12 +57,9 @@ describe("local video editing gateway", () => {
     const gateway = createLocalVideoEditingGateway(storage);
 
     expect(await gateway.listProjects()).toEqual([]);
-    const project = await gateway.createProject({
-      title: "发布会剪辑",
-      sourceArtifactIds: [ARTIFACT_A],
-    });
+    const project = await gateway.createProject(PROJECT_INPUT);
     expect(project.title).toBe("发布会剪辑");
-    expect(project.sourceArtifactIds).toEqual([ARTIFACT_A]);
+    expect(project.output).toEqual(PROJECT_INPUT.output);
 
     const listed = await gateway.listProjects();
     expect(listed).toHaveLength(1);
@@ -61,15 +72,18 @@ describe("local video editing gateway", () => {
   it("rejects invalid project input", async () => {
     const gateway = createLocalVideoEditingGateway(memoryStorage());
     await expect(
-      gateway.createProject({ title: "   ", sourceArtifactIds: [] }),
-    ).rejects.toMatchObject({ code: "invalid_project" });
-    await expect(
-      gateway.createProject({ title: "标题", sourceArtifactIds: ["not-a-uuid"] }),
+      gateway.createProject({ ...PROJECT_INPUT, title: "   " }),
     ).rejects.toMatchObject({ code: "invalid_project" });
     await expect(
       gateway.createProject({
-        title: "标题",
-        sourceArtifactIds: [ARTIFACT_A, ARTIFACT_A],
+        ...PROJECT_INPUT,
+        output: { width: 721, height: 1280, fps: 20 },
+      }),
+    ).rejects.toMatchObject({ code: "invalid_project" });
+    await expect(
+      gateway.createProject({
+        ...PROJECT_INPUT,
+        captionStyle: { ...PROJECT_INPUT.captionStyle, fontKey: "../font" },
       }),
     ).rejects.toMatchObject({ code: "invalid_project" });
   });
@@ -77,10 +91,7 @@ describe("local video editing gateway", () => {
   it("saves timelines with a monotonically increasing revision", async () => {
     const storage = memoryStorage();
     const gateway = createLocalVideoEditingGateway(storage);
-    const project = await gateway.createProject({
-      title: "发布会剪辑",
-      sourceArtifactIds: [ARTIFACT_A],
-    });
+    const project = await gateway.createProject(PROJECT_INPUT);
 
     expect(await gateway.getTimeline(project.projectId)).toBeNull();
 
@@ -99,10 +110,7 @@ describe("local video editing gateway", () => {
 
   it("rejects invalid drafts and unknown projects", async () => {
     const gateway = createLocalVideoEditingGateway(memoryStorage());
-    const project = await gateway.createProject({
-      title: "发布会剪辑",
-      sourceArtifactIds: [],
-    });
+    const project = await gateway.createProject(PROJECT_INPUT);
     await expect(
       gateway.saveTimeline(project.projectId, {
         ...draft(),
@@ -126,10 +134,7 @@ describe("local video editing gateway", () => {
 
   it("has no editing jobs and refuses submission while the cloud service is not connected", async () => {
     const gateway = createLocalVideoEditingGateway(memoryStorage());
-    const project = await gateway.createProject({
-      title: "发布会剪辑",
-      sourceArtifactIds: [ARTIFACT_A],
-    });
+    const project = await gateway.createProject(PROJECT_INPUT);
     await gateway.saveTimeline(project.projectId, draft());
 
     expect(await gateway.listEditingJobs(project.projectId)).toEqual([]);

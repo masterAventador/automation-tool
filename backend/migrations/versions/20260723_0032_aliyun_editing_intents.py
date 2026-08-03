@@ -102,7 +102,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "ux_aliyun_editing_intents_vendor_job_id", table_name="aliyun_editing_intents"
-    )
+    op.drop_index("ux_aliyun_editing_intents_vendor_job_id", table_name="aliyun_editing_intents")
     op.drop_table("aliyun_editing_intents")

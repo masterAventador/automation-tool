@@ -117,7 +117,7 @@ def ledger(state_directory: Path) -> ExecutorLedger:
     )
 
 
-def test_empty_private_directory_migrates_to_the_exact_v8_schema(tmp_path: Path) -> None:
+def test_empty_private_directory_migrates_to_the_exact_v9_schema(tmp_path: Path) -> None:
     state_directory = tmp_path / "executor-state"
 
     opened = ledger(state_directory)
@@ -136,6 +136,9 @@ def test_empty_private_directory_migrates_to_the_exact_v8_schema(tmp_path: Path)
             FROM executor_action_policy WHERE singleton_id = 1
             """
         ).fetchone() == (None, None)
+        assert connection.execute(
+            "SELECT name FROM pragma_table_info('executor_outbox') WHERE name = 'expired'"
+        ).fetchone() == ("expired",)
         tables = {
             row[0]
             for row in connection.execute(
@@ -230,7 +233,7 @@ def test_platform_session_values_and_transitions_fail_closed_at_every_boundary(
     )
     for overrides in invalid_values:
         with pytest.raises(ExecutorLedgerRejected):
-            LocalPlatformSession(**(valid | overrides))  # type: ignore[arg-type]
+            LocalPlatformSession(**(valid | overrides))
 
     opened = ledger(tmp_path / "session-boundaries")
     with pytest.raises(ExecutorLedgerRejected):
@@ -238,7 +241,7 @@ def test_platform_session_values_and_transitions_fail_closed_at_every_boundary(
     with pytest.raises(ExecutorLedgerRejected):
         opened.record_platform_session(
             platform="douyin",
-            state="missing",  # type: ignore[arg-type]
+            state="missing",
             observed_at=NOW,
         )
     first = opened.record_platform_session(
@@ -687,6 +690,110 @@ def test_pending_event_spool_is_bounded_and_overflow_rolls_back_checkpoint(
         opened.enqueue_outbox(source_message_id=str(second_source.message_id), message=third)
 
 
+def test_expired_never_sent_outbox_stays_durable_without_blocking_capacity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened = ledger(tmp_path / "expired-spool")
+    first_source = command(1)
+    opened.receive_command(first_source)
+    first = outbound(
+        message_id=_uuid(115),
+        idempotency_key="executor-ledger:spool:expired",
+    )
+    opened.enqueue_outbox(source_message_id=str(first_source.message_id), message=first)
+
+    assert (
+        opened.outbox_for_delivery(
+            observed_at=first.deadline_at,
+            recover_delivered=True,
+        )
+        == ()
+    )
+    with sqlite3.connect(opened.database_path) as connection:
+        assert connection.execute(
+            "SELECT delivered FROM executor_outbox WHERE message_id = ?",
+            (str(first.message_id),),
+        ).fetchone() == (0,)
+
+    monkeypatch.setattr(ledger_module, "_MAX_PENDING_OUTBOX_ENTRIES", 1)
+    monkeypatch.setattr(ledger_module, "_MAX_PENDING_OUTBOX_BYTES", 1024 * 1024)
+    second_task = _uuid(712)
+    second_attempt = _uuid(713)
+    second_source = command(
+        1,
+        message_id=_uuid(116),
+        idempotency_key="executor-ledger:spool:after-expiry-source",
+        task_id=second_task,
+        attempt_id=second_attempt,
+    )
+    opened.receive_command(second_source)
+    second = outbound(
+        message_id=_uuid(117),
+        idempotency_key="executor-ledger:spool:after-expiry",
+        task_id=second_task,
+        attempt_id=second_attempt,
+    )
+
+    stored = opened.enqueue_outbox(
+        source_message_id=str(second_source.message_id),
+        message=second,
+    )
+
+    assert stored.message == second
+    with sqlite3.connect(opened.database_path) as connection:
+        assert connection.execute(
+            "SELECT delivered FROM executor_outbox WHERE message_id = ?",
+            (str(first.message_id),),
+        ).fetchone() == (0,)
+
+
+def test_outbox_delivery_scans_long_history_in_bounded_ordinal_pages(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened = ledger(tmp_path / "paged-outbox")
+    source = command(1)
+    opened.receive_command(source)
+    messages = tuple(
+        outbound(
+            message_id=_uuid(120 + index),
+            idempotency_key=f"executor-ledger:paged:{index}",
+        )
+        for index in range(5)
+    )
+    for message in messages:
+        opened.enqueue_outbox(
+            source_message_id=str(source.message_id),
+            message=message,
+        )
+
+    selects: list[str] = []
+    connect = opened._connect
+
+    def traced_connect() -> sqlite3.Connection:
+        connection = connect()
+        connection.set_trace_callback(
+            lambda statement: (
+                selects.append(statement)
+                if "FROM executor_outbox" in statement and "WHERE expired = 0" in statement
+                else None
+            )
+        )
+        return connection
+
+    monkeypatch.setattr(opened, "_connect", traced_connect)
+    monkeypatch.setattr(ledger_module, "_MAX_OUTBOX_BATCH", 2)
+
+    restored = opened.outbox_for_delivery(
+        observed_at=NOW + timedelta(seconds=1),
+        recover_delivered=False,
+    )
+
+    assert tuple(entry.message for entry in restored) == messages
+    assert len(selects) == 3
+
+
 def test_atomic_outcome_commit_and_recovery_reject_every_inconsistent_boundary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -811,7 +918,7 @@ def test_newer_or_corrupt_schema_and_symlink_paths_fail_closed(tmp_path: Path) -
     state_directory = tmp_path / "state"
     opened = ledger(state_directory)
     with sqlite3.connect(opened.database_path) as connection:
-        connection.execute("PRAGMA user_version = 9")
+        connection.execute(f"PRAGMA user_version = {EXECUTOR_LEDGER_SCHEMA_VERSION + 1}")
     with pytest.raises(ExecutorLedgerRejected):
         ledger(state_directory)
 

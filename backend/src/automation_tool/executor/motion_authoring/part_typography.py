@@ -65,9 +65,7 @@ CJK_RANGES: Final[tuple[tuple[int, int], ...]] = (
     (0xFF00, 0xFFEF),  # Halfwidth and fullwidth forms
 )
 
-CHINESE_UNICODE_RANGE: Final = ", ".join(
-    f"U+{start:04X}-{end:04X}" for start, end in CJK_RANGES
-)
+CHINESE_UNICODE_RANGE: Final = ", ".join(f"U+{start:04X}-{end:04X}" for start, end in CJK_RANGES)
 
 # Everything the part's own typeface keeps. Copied from the range Google Fonts
 # uses for its `latin` + `latin-ext` subsets, which is what the packaged woff2
@@ -147,6 +145,14 @@ class ResolvedFace:
     weight: int
 
 
+@dataclass(frozen=True, slots=True)
+class PackagedFaceArtifact:
+    """One locked font file and only the code points it actually contains."""
+
+    path: str
+    unicode_range: str
+
+
 class FontRequestUnmet(RuntimeError):
     """A part names a typeface the package cannot declare a face for.
 
@@ -156,6 +162,16 @@ class FontRequestUnmet(RuntimeError):
     would put the text in whatever the host machine has, on one machine and not
     another, with nothing anywhere reporting it.
     """
+
+
+def _object_entries(
+    document: Mapping[str, object],
+    field: str,
+) -> tuple[Mapping[str, object], ...]:
+    raw = document.get(field)
+    if not isinstance(raw, list) or any(not isinstance(entry, dict) for entry in raw):
+        raise FontRequestUnmet(f"a packaged typography contract has invalid {field}")
+    return tuple(entry for entry in raw if isinstance(entry, dict))
 
 
 def _family_names(stack: str) -> set[str]:
@@ -195,12 +211,26 @@ def requested_faces(text: str) -> frozenset[tuple[str, int]]:
 
 def family_policies(contract: Mapping[str, object]) -> dict[str, FamilyPolicy]:
     policies: dict[str, FamilyPolicy] = {}
-    for entry in contract["families"]:  # type: ignore[index]
-        policies[entry["family"]] = FamilyPolicy(
-            entry["policy"],
-            entry.get("replacement"),
-            entry.get("reason", ""),
-            entry.get("visualDifference", ""),
+    for entry in _object_entries(contract, "families"):
+        family = entry.get("family")
+        policy = entry.get("policy")
+        replacement = entry.get("replacement")
+        reason = entry.get("reason", "")
+        visual_difference = entry.get("visualDifference", "")
+        if (
+            not isinstance(family, str)
+            or policy not in POLICIES
+            or (replacement is not None and not isinstance(replacement, str))
+            or not isinstance(reason, str)
+            or not isinstance(visual_difference, str)
+        ):
+            raise FontRequestUnmet("a packaged typography family policy is invalid")
+        assert isinstance(policy, str)
+        policies[family] = FamilyPolicy(
+            policy,
+            replacement,
+            reason,
+            visual_difference,
         )
     return policies
 
@@ -212,9 +242,17 @@ def packaged_weights(lock: Mapping[str, object]) -> dict[str, frozenset[int]]:
     downloaded cannot be declared against by accident.
     """
     weights: dict[str, set[int]] = {}
-    for sheet in lock["stylesheets"]:  # type: ignore[index]
-        for face in sheet["faces"]:
-            weights.setdefault(face["family"], set()).add(int(face["weight"]))
+    for sheet in _object_entries(lock, "stylesheets"):
+        for face in _object_entries(sheet, "faces"):
+            family = face.get("family")
+            raw_weight = face.get("weight")
+            if not isinstance(family, str) or not isinstance(raw_weight, (int, str)):
+                raise FontRequestUnmet("a packaged typography face is invalid")
+            try:
+                weight = int(raw_weight)
+            except ValueError as error:
+                raise FontRequestUnmet("a packaged typography face weight is invalid") from error
+            weights.setdefault(family, set()).add(weight)
     return {family: frozenset(values) for family, values in weights.items()}
 
 
@@ -249,23 +287,32 @@ def resolve_faces(
 
 def face_artifact(
     lock: Mapping[str, object], source_family: str, weight: int
-) -> tuple[str, ...]:
-    """The locked woff2 paths that serve one source family at one weight."""
-    matches: list[tuple[bool, str]] = []
-    for sheet in lock["stylesheets"]:  # type: ignore[index]
-        for face in sheet["faces"]:
-            if face["family"] == source_family and int(face["weight"]) == weight:
-                path = face["artifactPath"]
-                if any(existing == path for _, existing in matches):
+) -> tuple[PackagedFaceArtifact, ...]:
+    """The locked woff2 paths and exact ranges for one family and weight."""
+    matches: list[tuple[bool, PackagedFaceArtifact]] = []
+    for sheet in _object_entries(lock, "stylesheets"):
+        for face in _object_entries(sheet, "faces"):
+            family = face.get("family")
+            raw_weight = face.get("weight")
+            if not isinstance(raw_weight, (int, str)):
+                raise FontRequestUnmet("a packaged typography face weight is invalid")
+            try:
+                face_weight = int(raw_weight)
+            except ValueError as error:
+                raise FontRequestUnmet("a packaged typography face weight is invalid") from error
+            if family == source_family and face_weight == weight:
+                path = face.get("artifactPath")
+                unicode_range = face.get("unicodeRange")
+                if not isinstance(path, str) or not isinstance(unicode_range, str):
+                    raise FontRequestUnmet("a packaged font face has no path or unicode range")
+                artifact = PackagedFaceArtifact(path=path, unicode_range=unicode_range)
+                if any(existing == artifact for _, existing in matches):
                     continue
-                # Google Fonts lists latin-ext before latin. A single broad
-                # Latin rule must point at the subset that contains ASCII, or
-                # ordinary English silently falls through to the host font.
-                basic_latin = face.get("subset") == "latin" or "U+0000" in str(
-                    face.get("unicodeRange", "")
-                )
-                matches.append((basic_latin, path))
-    return tuple(path for _, path in sorted(matches, key=lambda item: not item[0]))
+                # Put the basic subset first for stable output, but retain every
+                # subset because each file may only claim its locked range.
+                basic_latin = face.get("subset") == "latin" or "U+0000" in str(unicode_range)
+                matches.append((basic_latin, artifact))
+    return tuple(artifact for _, artifact in sorted(matches, key=lambda item: not item[0]))
 
 
 def _load(path: Path) -> Mapping[str, object]:
@@ -316,9 +363,7 @@ def document_font_css(
         offline_lock = packaged_offline_lock()
     policies = family_policies(typography_contract)
     weights = packaged_weights(offline_lock)
-    faces, unmet = resolve_faces(
-        requested_faces(text), policies=policies, packaged_weights=weights
-    )
+    faces, unmet = resolve_faces(requested_faces(text), policies=policies, packaged_weights=weights)
     if unmet:
         named = ", ".join(f"{family} {weight}" for family, weight in unmet)
         raise FontRequestUnmet(f"the package cannot declare a face for: {named}")
@@ -326,15 +371,27 @@ def document_font_css(
         typography_contract["chineseFace"]["artifactPath"]  # type: ignore[index]
     )
 
-    def latin(face: ResolvedFace) -> str:
+    blocks: list[str] = []
+    for face in faces:
         artifacts = face_artifact(offline_lock, face.source_family, face.weight)
         if not artifacts:
-            raise FontRequestUnmet(
-                f"no packaged file serves {face.source_family} {face.weight}"
+            raise FontRequestUnmet(f"no packaged file serves {face.source_family} {face.weight}")
+        for artifact in artifacts:
+            blocks.append(
+                _font_face_rule(
+                    face,
+                    artifact=artifact_prefix + artifact.path,
+                    unicode_range=artifact.unicode_range,
+                )
             )
-        return artifact_prefix + artifacts[0]
-
-    return part_font_css(faces, chinese_artifact=chinese, latin_artifact=latin)
+        blocks.append(
+            _font_face_rule(
+                face,
+                artifact=chinese,
+                unicode_range=CHINESE_UNICODE_RANGE,
+            )
+        )
+    return "\n".join(blocks)
 
 
 def cjk_codepoints() -> frozenset[int]:
@@ -359,18 +416,34 @@ def part_font_css(
     blocks: list[str] = []
     for face in faces:
         blocks.append(
-            f"@font-face{{font-family:'{face.css_family}';font-style:normal;"
-            f"font-weight:{face.weight};font-display:block;"
-            f"src:url({latin_artifact(face)}) format('woff2');"
-            f"unicode-range:{LATIN_UNICODE_RANGE};}}"
+            _font_face_rule(
+                face,
+                artifact=latin_artifact(face),
+                unicode_range=LATIN_UNICODE_RANGE,
+            )
         )
         blocks.append(
-            f"@font-face{{font-family:'{face.css_family}';font-style:normal;"
-            f"font-weight:{face.weight};font-display:block;"
-            f"src:url({chinese_artifact}) format('woff2');"
-            f"unicode-range:{CHINESE_UNICODE_RANGE};}}"
+            _font_face_rule(
+                face,
+                artifact=chinese_artifact,
+                unicode_range=CHINESE_UNICODE_RANGE,
+            )
         )
     return "\n".join(blocks)
+
+
+def _font_face_rule(
+    face: ResolvedFace,
+    *,
+    artifact: str,
+    unicode_range: str,
+) -> str:
+    return (
+        f"@font-face{{font-family:'{face.css_family}';font-style:normal;"
+        f"font-weight:{face.weight};font-display:block;"
+        f"src:url({artifact}) format('woff2');"
+        f"unicode-range:{unicode_range};}}"
+    )
 
 
 __all__ = [

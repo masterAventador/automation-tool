@@ -19,7 +19,8 @@ DRIFT_URL = "https://www.douyin.com/video/7351234567890123458"
 
 
 def test_production_comment_page_uses_headless_fake_pages_and_closes(
-    tmp_path: Path, staged_embedded_chromium: Path,
+    tmp_path: Path,
+    staged_embedded_chromium: Path,
 ) -> None:
     profile = tmp_path / "automation-tool-a7-08-profile"
     create_private_profile_directory(profile)

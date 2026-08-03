@@ -181,6 +181,53 @@
         "title": "ActionResultEvidence",
         "type": "string"
       },
+      "AiMaterialDescriptionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "describedAt": {
+            "format": "date-time",
+            "title": "Describedat",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "shotBoundariesMs": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 4096,
+            "minItems": 1,
+            "title": "Shotboundariesms",
+            "type": "array"
+          },
+          "source": {
+            "const": "ai",
+            "title": "Source",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source",
+          "description",
+          "tags",
+          "shotBoundariesMs",
+          "describedAt"
+        ],
+        "title": "AiMaterialDescriptionRequest",
+        "type": "object"
+      },
       "BilibiliArchiveRequest": {
         "additionalProperties": false,
         "properties": {
@@ -502,6 +549,15 @@
         "title": "BindingResponse",
         "type": "object"
       },
+      "DescriptionSource": {
+        "description": "Who wrote the description currently held by a material.\n\nThe distinction exists to keep a later AI pass from overwriting what a\nuser typed: `USER` is a terminal state for the description field.",
+        "enum": [
+          "ai",
+          "user"
+        ],
+        "title": "DescriptionSource",
+        "type": "string"
+      },
       "DeviceSessionCapability": {
         "enum": [
           "app.control-plane",
@@ -578,6 +634,945 @@
         ],
         "title": "DouyinSearchExposureAction",
         "type": "string"
+      },
+      "EditingCaptionStyle": {
+        "additionalProperties": false,
+        "properties": {
+          "fontKey": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Fontkey",
+            "type": "string"
+          },
+          "fontPx": {
+            "maximum": 200.0,
+            "minimum": 12.0,
+            "title": "Fontpx",
+            "type": "integer"
+          },
+          "lineSpacing": {
+            "maximum": 3.0,
+            "minimum": 1.0,
+            "title": "Linespacing",
+            "type": "number"
+          },
+          "strokePx": {
+            "maximum": 20.0,
+            "minimum": 0.0,
+            "title": "Strokepx",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fontKey",
+          "fontPx",
+          "strokePx",
+          "lineSpacing"
+        ],
+        "title": "EditingCaptionStyle",
+        "type": "object"
+      },
+      "EditingJobFailureCode": {
+        "description": "Why a render stopped, grouped by what the user can do about it.",
+        "enum": [
+          "invalid_timeline",
+          "material_unavailable",
+          "material_unsupported",
+          "font_unavailable",
+          "render_failed",
+          "resource_exhausted",
+          "permission_denied",
+          "worker_lost"
+        ],
+        "title": "EditingJobFailureCode",
+        "type": "string"
+      },
+      "EditingJobListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EditingJobResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "title": "EditingJobListResponse",
+        "type": "object"
+      },
+      "EditingJobReconcileRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedUpdatedAt": {
+            "format": "date-time",
+            "title": "Expectedupdatedat",
+            "type": "string"
+          },
+          "failureCode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditingJobFailureCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outputArtifactId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outputartifactid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/EditingJobStatus"
+          }
+        },
+        "required": [
+          "expectedUpdatedAt",
+          "status",
+          "failureCode",
+          "outputArtifactId"
+        ],
+        "title": "EditingJobReconcileRequest",
+        "type": "object"
+      },
+      "EditingJobResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "failureCode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditingJobFailureCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "jobId": {
+            "title": "Jobid",
+            "type": "string"
+          },
+          "outputArtifactId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outputartifactid"
+          },
+          "projectId": {
+            "title": "Projectid",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/EditingJobStatus"
+          },
+          "timelineId": {
+            "title": "Timelineid",
+            "type": "string"
+          },
+          "timelineRevision": {
+            "minimum": 1.0,
+            "title": "Timelinerevision",
+            "type": "integer"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "jobId",
+          "projectId",
+          "timelineId",
+          "timelineRevision",
+          "status",
+          "failureCode",
+          "outputArtifactId",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "EditingJobResponse",
+        "type": "object"
+      },
+      "EditingJobStatus": {
+        "description": "Where one render is in its life.\n\nSix states, deliberately. There is no PAUSED — a 5-55 second local\nrender has no pause story. There is no OUTCOME_UNCERTAIN either: that\nstate exists for platform side effects nobody can re-read, whereas the\noutput file here is ours to inspect, and a half-written mp4 is simply\na failure to delete.",
+        "enum": [
+          "queued",
+          "running",
+          "cancelling",
+          "succeeded",
+          "failed",
+          "cancelled"
+        ],
+        "title": "EditingJobStatus",
+        "type": "string"
+      },
+      "EditingJobSubmitRequest": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "EditingJobSubmitRequest",
+        "type": "object"
+      },
+      "EditingMaterialCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "aiDescription": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aidescription"
+          },
+          "aiTags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Aitags",
+            "type": "array"
+          },
+          "audioLoudnessLufs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audioloudnesslufs"
+          },
+          "contentDigest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Contentdigest",
+            "type": "string"
+          },
+          "describedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Describedat"
+          },
+          "descriptionSource": {
+            "$ref": "#/components/schemas/DescriptionSource"
+          },
+          "durationMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Durationms"
+          },
+          "hasAudio": {
+            "title": "Hasaudio",
+            "type": "boolean"
+          },
+          "hasSpeech": {
+            "title": "Hasspeech",
+            "type": "boolean"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MaterialKind"
+          },
+          "materialId": {
+            "title": "Materialid",
+            "type": "string"
+          },
+          "shotBoundariesMs": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 4096,
+            "title": "Shotboundariesms",
+            "type": "array"
+          },
+          "speechSegmentsMs": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "maxItems": 4096,
+            "title": "Speechsegmentsms",
+            "type": "array"
+          },
+          "speechTranscript": {
+            "anyOf": [
+              {
+                "maxLength": 100000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speechtranscript"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "materialId",
+          "kind",
+          "durationMs",
+          "width",
+          "height",
+          "contentDigest",
+          "hasAudio",
+          "audioLoudnessLufs",
+          "hasSpeech",
+          "speechSegmentsMs",
+          "speechTranscript",
+          "shotBoundariesMs",
+          "aiDescription",
+          "aiTags",
+          "descriptionSource",
+          "describedAt"
+        ],
+        "title": "EditingMaterialCreateRequest",
+        "type": "object"
+      },
+      "EditingMaterialListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EditingMaterialResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "title": "EditingMaterialListResponse",
+        "type": "object"
+      },
+      "EditingMaterialResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "aiDescription": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aidescription"
+          },
+          "aiTags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aitags",
+            "type": "array"
+          },
+          "audioLoudnessLufs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audioloudnesslufs"
+          },
+          "contentDigest": {
+            "title": "Contentdigest",
+            "type": "string"
+          },
+          "describedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Describedat"
+          },
+          "descriptionSource": {
+            "$ref": "#/components/schemas/DescriptionSource"
+          },
+          "durationMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Durationms"
+          },
+          "hasAudio": {
+            "title": "Hasaudio",
+            "type": "boolean"
+          },
+          "hasSpeech": {
+            "title": "Hasspeech",
+            "type": "boolean"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MaterialKind"
+          },
+          "materialId": {
+            "title": "Materialid",
+            "type": "string"
+          },
+          "shotBoundariesMs": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Shotboundariesms",
+            "type": "array"
+          },
+          "speechSegmentsMs": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Speechsegmentsms",
+            "type": "array"
+          },
+          "speechTranscript": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speechtranscript"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "materialId",
+          "kind",
+          "durationMs",
+          "width",
+          "height",
+          "contentDigest",
+          "hasAudio",
+          "audioLoudnessLufs",
+          "hasSpeech",
+          "speechSegmentsMs",
+          "speechTranscript",
+          "shotBoundariesMs",
+          "aiDescription",
+          "aiTags",
+          "descriptionSource",
+          "describedAt"
+        ],
+        "title": "EditingMaterialResponse",
+        "type": "object"
+      },
+      "EditingOutputSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "fps": {
+            "maximum": 60.0,
+            "minimum": 12.0,
+            "title": "Fps",
+            "type": "integer"
+          },
+          "height": {
+            "maximum": 4096.0,
+            "minimum": 128.0,
+            "title": "Height",
+            "type": "integer"
+          },
+          "width": {
+            "maximum": 4096.0,
+            "minimum": 128.0,
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "width",
+          "height",
+          "fps"
+        ],
+        "title": "EditingOutputSpec",
+        "type": "object"
+      },
+      "EditingProjectCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "captionStyle": {
+            "$ref": "#/components/schemas/EditingCaptionStyle"
+          },
+          "output": {
+            "$ref": "#/components/schemas/EditingOutputSpec"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "output",
+          "captionStyle"
+        ],
+        "title": "EditingProjectCreateRequest",
+        "type": "object"
+      },
+      "EditingProjectListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EditingProjectResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "title": "EditingProjectListResponse",
+        "type": "object"
+      },
+      "EditingProjectResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "captionStyle": {
+            "$ref": "#/components/schemas/EditingCaptionStyle"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "output": {
+            "$ref": "#/components/schemas/EditingOutputSpec"
+          },
+          "projectId": {
+            "title": "Projectid",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "title",
+          "output",
+          "captionStyle",
+          "createdAt"
+        ],
+        "title": "EditingProjectResponse",
+        "type": "object"
+      },
+      "EditingTimelineClip": {
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Clipid",
+            "type": "string"
+          },
+          "durationMs": {
+            "maximum": 600000.0,
+            "minimum": 1.0,
+            "title": "Durationms",
+            "type": "integer"
+          },
+          "gainDb": {
+            "anyOf": [
+              {
+                "maximum": 12.0,
+                "minimum": -60.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gaindb"
+          },
+          "originalAudioMode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OriginalAudioMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sourceInMs": {
+            "anyOf": [
+              {
+                "maximum": 14400000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceinms"
+          },
+          "sourceMaterialId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcematerialid"
+          },
+          "sourceOutMs": {
+            "anyOf": [
+              {
+                "maximum": 14400000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceoutms"
+          },
+          "startMs": {
+            "maximum": 600000.0,
+            "minimum": 0.0,
+            "title": "Startms",
+            "type": "integer"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "transitionIn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditingTimelineTransition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "clipId",
+          "startMs",
+          "durationMs",
+          "sourceMaterialId",
+          "sourceInMs",
+          "sourceOutMs",
+          "text",
+          "gainDb",
+          "transitionIn"
+        ],
+        "title": "EditingTimelineClip",
+        "type": "object"
+      },
+      "EditingTimelineResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "durationMs": {
+            "title": "Durationms",
+            "type": "integer"
+          },
+          "projectId": {
+            "title": "Projectid",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "timelineId": {
+            "title": "Timelineid",
+            "type": "string"
+          },
+          "tracks": {
+            "items": {
+              "$ref": "#/components/schemas/EditingTimelineTrack"
+            },
+            "title": "Tracks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "timelineId",
+          "projectId",
+          "revision",
+          "durationMs",
+          "tracks",
+          "createdAt"
+        ],
+        "title": "EditingTimelineResponse",
+        "type": "object"
+      },
+      "EditingTimelineSaveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "durationMs": {
+            "maximum": 600000.0,
+            "minimum": 100.0,
+            "title": "Durationms",
+            "type": "integer"
+          },
+          "expectedRevision": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedrevision"
+          },
+          "tracks": {
+            "items": {
+              "$ref": "#/components/schemas/EditingTimelineTrack"
+            },
+            "maxItems": 5,
+            "minItems": 1,
+            "title": "Tracks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "durationMs",
+          "tracks"
+        ],
+        "title": "EditingTimelineSaveRequest",
+        "type": "object"
+      },
+      "EditingTimelineTrack": {
+        "additionalProperties": false,
+        "properties": {
+          "clips": {
+            "items": {
+              "$ref": "#/components/schemas/EditingTimelineClip"
+            },
+            "maxItems": 512,
+            "minItems": 1,
+            "title": "Clips",
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TimelineTrackKind"
+          },
+          "trackId": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Trackid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trackId",
+          "kind",
+          "clips"
+        ],
+        "title": "EditingTimelineTrack",
+        "type": "object"
+      },
+      "EditingTimelineTransition": {
+        "additionalProperties": false,
+        "properties": {
+          "durationMs": {
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Durationms",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TransitionKind"
+          }
+        },
+        "required": [
+          "kind",
+          "durationMs"
+        ],
+        "title": "EditingTimelineTransition",
+        "type": "object"
+      },
+      "ErrorEnvelope": {
+        "additionalProperties": false,
+        "description": "Stable top-level shape for every Control Plane error.",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/PublicError"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ErrorEnvelope",
+        "type": "object"
       },
       "HTTPValidationError": {
         "properties": {
@@ -751,6 +1746,25 @@
         "title": "IssuedDeviceCredentialResponse",
         "type": "object"
       },
+      "MaterialKind": {
+        "enum": [
+          "video",
+          "image",
+          "audio"
+        ],
+        "title": "MaterialKind",
+        "type": "string"
+      },
+      "OriginalAudioMode": {
+        "description": "How one source-material audio clip participates in the final mix.",
+        "enum": [
+          "auto_duck",
+          "fixed_volume",
+          "muted"
+        ],
+        "title": "OriginalAudioMode",
+        "type": "string"
+      },
       "PasswordChangeRequest": {
         "additionalProperties": false,
         "properties": {
@@ -888,6 +1902,68 @@
         "title": "PrepareBilibiliPublishRequest",
         "type": "object"
       },
+      "PublicError": {
+        "additionalProperties": false,
+        "description": "The only error details allowed to cross the API boundary.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicErrorDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "requestId": {
+            "title": "Requestid",
+            "type": "string"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "retryable",
+          "requestId"
+        ],
+        "title": "PublicError",
+        "type": "object"
+      },
+      "PublicErrorDetails": {
+        "additionalProperties": false,
+        "description": "The complete public context for a timeline revision conflict.",
+        "properties": {
+          "currentRevision": {
+            "minimum": 0.0,
+            "title": "Currentrevision",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "timeline_revision_conflict.v1",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "currentRevision"
+        ],
+        "title": "TimelineRevisionConflictDetails",
+        "type": "object"
+      },
       "RegistrationChallengeRequest": {
         "additionalProperties": false,
         "properties": {
@@ -978,6 +2054,192 @@
           "scope"
         ],
         "title": "RotatedDeviceCredentialResponse",
+        "type": "object"
+      },
+      "SmartEditMaterialAnalysisRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "aiDescription": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aidescription"
+          },
+          "aiTags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Aitags",
+            "type": "array"
+          },
+          "contentDigest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Contentdigest",
+            "type": "string"
+          },
+          "describedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Describedat"
+          },
+          "descriptionSource": {
+            "$ref": "#/components/schemas/DescriptionSource"
+          },
+          "hasSpeech": {
+            "title": "Hasspeech",
+            "type": "boolean"
+          },
+          "materialId": {
+            "title": "Materialid",
+            "type": "string"
+          },
+          "shotBoundariesMs": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 4096,
+            "title": "Shotboundariesms",
+            "type": "array"
+          },
+          "speechSegmentsMs": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "maxItems": 4096,
+            "title": "Speechsegmentsms",
+            "type": "array"
+          },
+          "speechTranscript": {
+            "anyOf": [
+              {
+                "maxLength": 100000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speechtranscript"
+          }
+        },
+        "required": [
+          "materialId",
+          "contentDigest",
+          "hasSpeech",
+          "speechSegmentsMs",
+          "speechTranscript",
+          "shotBoundariesMs",
+          "aiDescription",
+          "aiTags",
+          "descriptionSource",
+          "describedAt"
+        ],
+        "title": "SmartEditMaterialAnalysisRequest",
+        "type": "object"
+      },
+      "SmartEditMaterialWritebackRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "analyses": {
+            "items": {
+              "$ref": "#/components/schemas/SmartEditMaterialAnalysisRequest"
+            },
+            "maxItems": 32,
+            "title": "Analyses",
+            "type": "array"
+          },
+          "narrations": {
+            "items": {
+              "$ref": "#/components/schemas/SmartEditNarrationMaterialRequest"
+            },
+            "maxItems": 32,
+            "title": "Narrations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "analyses",
+          "narrations"
+        ],
+        "title": "SmartEditMaterialWritebackRequest",
+        "type": "object"
+      },
+      "SmartEditMaterialWritebackResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "materials": {
+            "items": {
+              "$ref": "#/components/schemas/EditingMaterialResponse"
+            },
+            "title": "Materials",
+            "type": "array"
+          }
+        },
+        "required": [
+          "materials"
+        ],
+        "title": "SmartEditMaterialWritebackResponse",
+        "type": "object"
+      },
+      "SmartEditNarrationMaterialRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "contentDigest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Contentdigest",
+            "type": "string"
+          },
+          "durationMs": {
+            "minimum": 1.0,
+            "title": "Durationms",
+            "type": "integer"
+          },
+          "materialId": {
+            "title": "Materialid",
+            "type": "string"
+          },
+          "speechTranscript": {
+            "maxLength": 100000,
+            "minLength": 1,
+            "title": "Speechtranscript",
+            "type": "string"
+          }
+        },
+        "required": [
+          "materialId",
+          "contentDigest",
+          "durationMs",
+          "speechTranscript"
+        ],
+        "title": "SmartEditNarrationMaterialRequest",
         "type": "object"
       },
       "TaskCommandStatus": {
@@ -1632,6 +2894,50 @@
         ],
         "title": "TaskTargetResultStatus",
         "type": "string"
+      },
+      "TimelineTrackKind": {
+        "description": "One lane of the film. The three audio lanes mix differently.\n\n`NARRATION` drives the ducking sidechain, `AMBIENT` and `MUSIC` get\nducked by it — one `AUDIO` lane could not say which was which.",
+        "enum": [
+          "visual",
+          "narration",
+          "ambient",
+          "music",
+          "caption"
+        ],
+        "title": "TimelineTrackKind",
+        "type": "string"
+      },
+      "TransitionKind": {
+        "description": "How one visual clip gives way to the next.\n\nA hard cut is the absence of a transition — `transition_in=None` — so\nthere is deliberately no `CUT` member: two spellings of one state is\nhow they drift apart.",
+        "enum": [
+          "fade",
+          "dissolve",
+          "wipe"
+        ],
+        "title": "TransitionKind",
+        "type": "string"
+      },
+      "UserMaterialDescriptionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "source": {
+            "const": "user",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "description"
+        ],
+        "title": "UserMaterialDescriptionRequest",
+        "type": "object"
       },
       "ValidationError": {
         "properties": {
@@ -2343,6 +3649,894 @@
         "summary": "Exchange Device Session",
         "tags": [
           "device-sessions"
+        ]
+      }
+    },
+    "/api/v1/editing-jobs/{job_id}": {
+      "get": {
+        "operationId": "getEditingJob",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Get Editing Job",
+        "tags": [
+          "editing-jobs"
+        ]
+      },
+      "patch": {
+        "operationId": "reconcileEditingJob",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditingJobReconcileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Editing job transition conflicts with stored state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Reconcile Editing Job",
+        "tags": [
+          "editing-jobs"
+        ]
+      }
+    },
+    "/api/v1/editing-materials": {
+      "get": {
+        "operationId": "findEditingMaterialByDigest",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "contentDigest",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Contentdigest",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingMaterialResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Find Editing Material By Digest",
+        "tags": [
+          "editing-materials"
+        ]
+      },
+      "post": {
+        "operationId": "registerEditingMaterial",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditingMaterialCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingMaterialResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Register Editing Material",
+        "tags": [
+          "editing-materials"
+        ]
+      }
+    },
+    "/api/v1/editing-materials/library": {
+      "get": {
+        "operationId": "listEditingMaterials",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingMaterialListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "List Editing Materials",
+        "tags": [
+          "editing-materials"
+        ]
+      }
+    },
+    "/api/v1/editing-materials/smart-edit-writebacks": {
+      "post": {
+        "operationId": "applySmartEditMaterialWriteback",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmartEditMaterialWritebackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SmartEditMaterialWritebackResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Apply Smart Edit Material Writeback",
+        "tags": [
+          "editing-materials"
+        ]
+      }
+    },
+    "/api/v1/editing-materials/{material_id}": {
+      "delete": {
+        "operationId": "deleteEditingMaterial",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "material_id",
+            "required": true,
+            "schema": {
+              "title": "Material Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Delete Editing Material",
+        "tags": [
+          "editing-materials"
+        ]
+      },
+      "get": {
+        "operationId": "getEditingMaterial",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "material_id",
+            "required": true,
+            "schema": {
+              "title": "Material Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingMaterialResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Get Editing Material",
+        "tags": [
+          "editing-materials"
+        ]
+      }
+    },
+    "/api/v1/editing-materials/{material_id}/description": {
+      "put": {
+        "operationId": "updateEditingMaterialDescription",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "material_id",
+            "required": true,
+            "schema": {
+              "title": "Material Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "discriminator": {
+                  "mapping": {
+                    "ai": "#/components/schemas/AiMaterialDescriptionRequest",
+                    "user": "#/components/schemas/UserMaterialDescriptionRequest"
+                  },
+                  "propertyName": "source"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/UserMaterialDescriptionRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AiMaterialDescriptionRequest"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingMaterialResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Update Editing Material Description",
+        "tags": [
+          "editing-materials"
+        ]
+      }
+    },
+    "/api/v1/editing-projects": {
+      "get": {
+        "operationId": "listEditingProjects",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingProjectListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "List Editing Projects",
+        "tags": [
+          "editing-projects"
+        ]
+      },
+      "post": {
+        "operationId": "createEditingProject",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditingProjectCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingProjectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Create Editing Project",
+        "tags": [
+          "editing-projects"
+        ]
+      }
+    },
+    "/api/v1/editing-projects/{project_id}": {
+      "get": {
+        "operationId": "getEditingProject",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingProjectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Get Editing Project",
+        "tags": [
+          "editing-projects"
+        ]
+      }
+    },
+    "/api/v1/editing-projects/{project_id}/jobs": {
+      "get": {
+        "operationId": "listEditingJobs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingJobListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "List Editing Jobs",
+        "tags": [
+          "editing-jobs"
+        ]
+      },
+      "post": {
+        "operationId": "submitEditingJob",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditingJobSubmitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Editing job conflicts with stored work"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Submit Editing Job",
+        "tags": [
+          "editing-jobs"
+        ]
+      }
+    },
+    "/api/v1/editing-projects/{project_id}/timeline": {
+      "get": {
+        "operationId": "getEditingProjectTimeline",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingTimelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Get Editing Project Timeline",
+        "tags": [
+          "editing-timelines"
+        ]
+      },
+      "put": {
+        "operationId": "saveEditingProjectTimeline",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditingTimelineSaveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditingTimelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Timeline revision conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "AppSession": []
+          }
+        ],
+        "summary": "Save Editing Project Timeline",
+        "tags": [
+          "editing-timelines"
         ]
       }
     },

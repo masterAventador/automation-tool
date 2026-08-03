@@ -111,111 +111,42 @@ fn isolates_jobs_and_atomically_imports_a_content_addressed_artifact() {
 }
 
 #[test]
-fn stages_verified_editing_inputs_under_artifact_identity_and_extension() {
+fn imports_the_worker_authenticated_artifact_id_exactly_once() {
     let root = TemporaryRoot::new();
     let store = VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("workspace store");
-    let source_workspace = store
-        .create(job("123e4567-e89b-42d3-a456-426614174231"))
-        .expect("source workspace");
-    let payload = b"verified-editing-input";
-    fs::write(
-        store
-            .worker_output_directory(&source_workspace)
-            .expect("source output")
-            .join("source.mp4"),
-        payload,
-    )
-    .expect("source bytes");
-    let artifact = store
-        .import_output(
-            &source_workspace,
-            "source.mp4",
+    let workspace = store
+        .create(job("123e4567-e89b-42d3-a456-426614174221"))
+        .expect("workspace");
+    let artifact_id = job("123e4567-e89b-42d3-a456-426614174222");
+    let output = store
+        .worker_output_directory(&workspace)
+        .expect("worker output")
+        .join("render.mp4");
+    fs::write(&output, b"authenticated-render").expect("worker output bytes");
+
+    let imported = store
+        .import_output_with_id(
+            &workspace,
+            artifact_id,
+            "render.mp4",
             "video/mp4",
             "rendered_video",
         )
-        .expect("source artifact");
-    let editing_workspace = store
-        .create(job("123e4567-e89b-42d3-a456-426614174232"))
-        .expect("editing workspace");
+        .expect("authenticated artifact import");
 
-    let staged = store
-        .stage_editing_artifacts(&editing_workspace, &[artifact.artifact_id()])
-        .expect("editing staging");
-
-    assert_eq!(staged.len(), 1);
-    assert_eq!(staged[0].artifact_id(), artifact.artifact_id());
-    assert_eq!(staged[0].extension(), ".mp4");
-    assert_eq!(staged[0].sha256(), artifact.sha256());
-    assert_eq!(staged[0].size_bytes(), artifact.size_bytes());
+    assert_eq!(imported.artifact_id(), artifact_id);
     assert_eq!(
-        staged[0].path().parent(),
-        Some(
-            store
-                .worker_asset_directory(&editing_workspace)
-                .expect("editing input")
-                .as_path()
-        )
-    );
-    assert_eq!(
-        staged[0].path().file_name().and_then(|name| name.to_str()),
-        Some(format!("{}.mp4", artifact.artifact_id()).as_str())
-    );
-    assert_eq!(fs::read(staged[0].path()).unwrap(), payload);
-}
-
-#[test]
-fn retained_editing_inputs_reopen_for_reconciliation_without_copying_again() {
-    let root = TemporaryRoot::new();
-    let job_id = job("123e4567-e89b-42d3-a456-426614174233");
-    let store = VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("workspace store");
-    let source_workspace = store
-        .create(job("123e4567-e89b-42d3-a456-426614174234"))
-        .expect("source workspace");
-    fs::write(
         store
-            .worker_output_directory(&source_workspace)
-            .expect("source output")
-            .join("source.mp4"),
-        b"retained-editing-input",
-    )
-    .expect("source bytes");
-    let artifact = store
-        .import_output(
-            &source_workspace,
-            "source.mp4",
-            "video/mp4",
-            "rendered_video",
-        )
-        .expect("source artifact");
-    let workspace = store.create(job_id).expect("editing workspace");
-    store
-        .stage_editing_artifacts(&workspace, &[artifact.artifact_id()])
-        .expect("initial staging");
-    store
-        .finish(&workspace, VideoWorkspaceDisposition::Keep)
-        .expect("retain interrupted workspace");
-    drop(store);
-
-    let reopened_store =
-        VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("reopened store");
-    let reopened = reopened_store.open(job_id).expect("reopened workspace");
-    let staged = reopened_store
-        .reopen_staged_editing_artifacts(&reopened, &[artifact.artifact_id()])
-        .expect("verified retained inputs");
-
-    assert_eq!(staged.len(), 1);
-    assert_eq!(staged[0].artifact_id(), artifact.artifact_id());
-    assert_eq!(
-        fs::read(staged[0].path()).unwrap(),
-        b"retained-editing-input"
-    );
-    assert_eq!(
-        reopened_store
-            .worker_checkpoint_directory(&reopened)
-            .expect("checkpoint directory")
-            .file_name()
-            .and_then(|value| value.to_str()),
-        Some("checkpoints"),
+            .import_output_with_id(
+                &workspace,
+                artifact_id,
+                "render.mp4",
+                "video/mp4",
+                "rendered_video",
+            )
+            .expect_err("authenticated artifact ID is immutable")
+            .code(),
+        VideoWorkspaceErrorCode::AlreadyExists,
     );
 }
 

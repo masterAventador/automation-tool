@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+
 from automation_tool.executor.rpa.douyin.publish_artifact import (
     DOUYIN_PUBLISH_ARTIFACT_MEDIA_TYPES,
     MAX_DOUYIN_PUBLISH_ARTIFACT_BYTES,

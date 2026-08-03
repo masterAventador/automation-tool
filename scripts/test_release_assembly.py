@@ -451,7 +451,10 @@ class ReleaseConfigurationTests(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.base = Path(tempfile.mkdtemp(prefix="release-configuration-"))
+        (ROOT / ".local").mkdir(exist_ok=True)
+        self.base = Path(
+            tempfile.mkdtemp(prefix="release-configuration-", dir=ROOT / ".local")
+        )
         self.addCleanup(shutil.rmtree, self.base, True)
         self.executor = self.base / "build/executor/automation-tool-executor"
         self.executor.mkdir(parents=True)
@@ -496,6 +499,53 @@ class ReleaseConfigurationTests(unittest.TestCase):
                 "motion-video-worker/package/",
             ],
         )
+        configuration = json.loads(
+            (ROOT / "frontend/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            configuration["bundle"]["windows"]["nsis"]["installerHooks"],
+            "windows-installer-hooks.nsh",
+            "the production uninstaller must remove packaged browser directories "
+            "that NSIS leaves empty after deleting their files",
+        )
+        hook = ROOT / "frontend/src-tauri/windows-installer-hooks.nsh"
+        source = hook.read_text(encoding="utf-8")
+        self.assertIn("!macro NSIS_HOOK_POSTUNINSTALL", source)
+        self.assertNotIn(
+            "RMDir /r",
+            source,
+            "the uninstaller must not follow a replaced browser directory recursively",
+        )
+        first_delete = source.index(
+            'RMDir "$INSTDIR\\embedded-browser\\chrome-win64\\Dictionaries"'
+        )
+        self.assertIn("FILE_ATTRIBUTE_REPARSE_POINT", source)
+        self.assertIn("GetFileAttributes", source)
+        self.assertIn(
+            "System::Call",
+            source,
+            "the hook must call the Windows attribute API through valid NSIS syntax",
+        )
+        for guarded in (
+            "$INSTDIR",
+            "$INSTDIR\\embedded-browser",
+            "$INSTDIR\\embedded-browser\\chrome-win64",
+            "$INSTDIR\\embedded-browser\\chrome-win64\\Dictionaries",
+        ):
+            guard = f'!insertmacro EBVS_ABORT_IF_REPARSE "{guarded}"'
+            self.assertIn(guard, source)
+            self.assertLess(
+                source.index(guard),
+                first_delete,
+                "every ancestor must be checked before the first nested removal",
+            )
+        self.assertIn(
+            'RMDir "$INSTDIR\\embedded-browser\\chrome-win64\\Dictionaries"',
+            source,
+        )
+        self.assertIn('RMDir "$INSTDIR\\embedded-browser\\chrome-win64"', source)
+        self.assertIn('RMDir "$INSTDIR\\embedded-browser"', source)
+        self.assertIn('RMDir "$INSTDIR"', source)
 
     def test_a_missing_bundler_source_is_refused_rather_than_dropped(self) -> None:
         from release_configuration import (
@@ -662,6 +712,47 @@ class MacOSSigningContractTests(unittest.TestCase):
         document = self.path.read_text(encoding="utf-8")
         for secret in ("password", "-----BEGIN", "app-specific", "AuthKey"):
             self.assertNotIn(secret, document)
+
+    def test_notarization_retries_one_timed_out_upload_without_s3_acceleration(
+        self,
+    ) -> None:
+        from release_assembly import SigningIdentity, notarize_and_staple
+
+        commands: list[list[str]] = []
+
+        def run(command: list[str]) -> str:
+            commands.append(list(command))
+            if "notarytool" not in command:
+                return ""
+            if "--no-s3-acceleration" not in command:
+                raise ReleaseAssemblyRejected(
+                    "release assembly rejected: xcrun failed: "
+                    "Error: abortedUpload(error: HTTPClientError.deadlineExceeded)"
+                )
+            return '{"id":"retry-id","status":"Accepted"}'
+
+        with tempfile.TemporaryDirectory(prefix="notary-retry-test-") as directory:
+            artifact = Path(directory) / "自动化运营工具.app"
+            artifact.mkdir()
+            identifier = notarize_and_staple(
+                artifact=artifact,
+                identity=SigningIdentity(
+                    certificate="Developer ID Application: Test (TEAMID)",
+                    team_id="TEAMID",
+                    notary_profile="test-profile",
+                ),
+                run=run,
+            )
+
+        submissions = [command for command in commands if "notarytool" in command]
+        self.assertEqual(identifier, "retry-id")
+        self.assertEqual(len(submissions), 2)
+        self.assertNotIn("--no-s3-acceleration", submissions[0])
+        self.assertIn("--no-s3-acceleration", submissions[1])
+        self.assertEqual(
+            sum("stapler" in command for command in commands),
+            1,
+        )
 
     def test_every_signed_component_is_a_declared_release_resource(self) -> None:
         from release_assembly import RELEASE_PACKAGE_RESOURCES

@@ -55,6 +55,11 @@ def test_demo_environment_ids_accept_only_canonical_bounded_slugs(valid_value: s
         "-customer-a",
         "customer-a-",
         "a" * 65,
+        # A trailing newline. Under `fullmatch` a trailing `$` rejects this
+        # too, so this case does not pin the anchor -- it pins the behaviour
+        # against `$` and `match` regressing together. The anchor itself is
+        # pinned by `test_the_guard_does_not_depend_on_the_calling_verb`.
+        "customer-a\n",
         None,
         1,
     ),
@@ -236,3 +241,19 @@ def test_bootstrap_grants_are_immutable() -> None:
         setattr(grant, purpose_attribute, "task.create")
 
     assert grant.purpose is BootstrapPurpose.REGISTER_INSTALLATION
+
+
+def test_the_guard_does_not_depend_on_the_calling_verb() -> None:
+    """`\\Z` is why, and this is the only shape that pins it.
+
+    Under `fullmatch` a trailing `$` behaves identically, so every
+    behavioural case in this file passes either way -- reverting the
+    anchor is invisible to them. Calling `match` instead states the
+    property the anchor actually buys: the guard holds even if the
+    verb is ever weakened.
+    """
+    from automation_tool.control_plane.domain.demo_bootstrap import (
+        _ENVIRONMENT_PATTERN,
+    )
+
+    assert _ENVIRONMENT_PATTERN.match("customer-a\n") is None

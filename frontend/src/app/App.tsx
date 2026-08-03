@@ -22,12 +22,12 @@ import { AccountSessionGate } from "../features/account-session/AccountSessionGa
 import type { AccountSessionGateway } from "../features/account-session/account-session-gateway";
 import type { ModelServiceGateway } from "../features/settings/model-service-gateway";
 import { ModelServiceSettings } from "../features/settings/ModelServiceSettings";
-import type { VideoEditingServiceGateway } from "../features/settings/video-editing-service-gateway";
-import { VideoEditingServiceSettings } from "../features/settings/VideoEditingServiceSettings";
 import type { BilibiliServiceGateway } from "../features/settings/bilibili-service-gateway";
 import { BilibiliServiceSettings } from "../features/settings/BilibiliServiceSettings";
 import type { MaterialVideoStudioGateway } from "../features/video-studio/material-video-studio-gateway";
 import type { VideoEditingGateway } from "../features/video-editing/video-editing-gateway";
+import type { MaterialLibraryGateway } from "../features/video-editing/material-library-gateway";
+import type { SmartEditGateway } from "../features/video-editing/smart-edit-gateway";
 import type { SelectedVideo } from "../features/publishing/PublishWorkspace";
 import type { PublishWorkspaceGateway } from "../features/publishing/publish-workspace-gateway";
 
@@ -46,10 +46,11 @@ interface AppProps {
   appUpdateGateway?: AppUpdateGateway;
   accountSessionGateway?: AccountSessionGateway;
   modelServiceGateway?: ModelServiceGateway;
-  videoEditingServiceGateway?: VideoEditingServiceGateway;
   bilibiliServiceGateway?: BilibiliServiceGateway;
   materialVideoStudioGateway?: MaterialVideoStudioGateway;
   videoEditingGateway?: VideoEditingGateway;
+  materialLibraryGateway?: MaterialLibraryGateway;
+  smartEditGateway?: SmartEditGateway;
   publishWorkspaceGateway?: PublishWorkspaceGateway | undefined;
   selectedVideo?: SelectedVideo | undefined;
 }
@@ -69,10 +70,11 @@ export function App({
   appUpdateGateway,
   accountSessionGateway,
   modelServiceGateway,
-  videoEditingServiceGateway,
   bilibiliServiceGateway,
   materialVideoStudioGateway,
   videoEditingGateway,
+  materialLibraryGateway,
+  smartEditGateway,
   publishWorkspaceGateway,
   selectedVideo,
 }: AppProps) {
@@ -89,10 +91,11 @@ export function App({
       platformSessionGateway={platformSessionGateway}
       appUpdateGateway={appUpdateGateway}
       modelServiceGateway={modelServiceGateway}
-      videoEditingServiceGateway={videoEditingServiceGateway}
       bilibiliServiceGateway={bilibiliServiceGateway}
       materialVideoStudioGateway={materialVideoStudioGateway}
       videoEditingGateway={videoEditingGateway}
+      materialLibraryGateway={materialLibraryGateway}
+      smartEditGateway={smartEditGateway}
       publishWorkspaceGateway={publishWorkspaceGateway}
       selectedVideo={selectedVideo}
     />
@@ -108,9 +111,6 @@ export function App({
             )}
             {modelServiceGateway === undefined ? null : (
               <ModelServiceSettings gateway={modelServiceGateway} />
-            )}
-            {videoEditingServiceGateway === undefined ? null : (
-              <VideoEditingServiceSettings gateway={videoEditingServiceGateway} />
             )}
             {bilibiliServiceGateway === undefined ? null : (
               <BilibiliServiceSettings gateway={bilibiliServiceGateway} />

@@ -1,84 +1,111 @@
 import assert from "node:assert/strict";
 
 import { browser, expect } from "@wdio/globals";
-import {
-  openVideoEditing,
-  openWorkbenchSection,
-  waitForStartup,
-} from "./navigation";
+import { openVideoEditing, waitForStartup } from "./navigation";
 
-const SOURCE_ARTIFACT = "9f48954d-2df1-4168-8f33-b62c5772845b";
+interface VideoEditingPreparation {
+  readonly installationId: string;
+  readonly materialId: string;
+}
 
-describe("VE-03 production App standalone video editing acceptance", () => {
-  it("creates a project, edits the timeline, saves revisions and shows honest submission state", async () => {
+interface LocalStartupEnvironment {
+  readonly appData: "ready" | "unavailable";
+  readonly executor: "ready" | "configuration_required" | "unavailable";
+  readonly embeddedBrowser:
+    | "ready"
+    | "component_missing"
+    | "component_damaged"
+    | "version_incompatible";
+}
+
+const UUID_V4 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+describe("LE-17 production App local-video editing acceptance", () => {
+  it("creates, saves and renders a controlled material into a real Artifact", async () => {
+    const startup = (await browser.tauri.execute(({ core }) =>
+      core.invoke("check_local_startup_environment"),
+    )) as LocalStartupEnvironment;
+    assert.deepEqual(startup, {
+      appData: "ready",
+      executor: "ready",
+      embeddedBrowser: "ready",
+    });
     await waitForStartup();
+    const preparation = (await browser.tauri.execute(({ core }) =>
+      core.invoke("prepare_video_editing_for_acceptance"),
+    )) as VideoEditingPreparation;
+    assert.match(preparation.installationId, UUID_V4);
+    assert.match(preparation.materialId, UUID_V4);
 
-    // 改版后「轻量剪辑」和两种成片方式并列在「创作」下的分段控件里，
-    // 不再是独立的左侧入口。
     await openVideoEditing();
-
     const workbench = await browser.$("section[aria-label='视频剪辑工作区']");
     await expect(workbench).toBeDisplayed();
-    await expect(workbench).toHaveText(expect.stringContaining("还没有剪辑项目"));
 
-    // 创建剪辑项目。
-    await workbench.$("input[aria-label='剪辑项目标题']").setValue("发布会精剪");
-    await workbench.$("textarea[aria-label='输入素材引用']").setValue(SOURCE_ARTIFACT);
+    await workbench.$("input[aria-label='剪辑项目标题']").setValue("LE17 真实本机出片");
     await workbench.$("button=创建剪辑项目").click();
-    await expect(workbench).toHaveText(
-      expect.stringContaining("已创建剪辑项目：发布会精剪"),
+    await browser.waitUntil(
+      async () => (await workbench.getText()).includes("已创建剪辑项目：LE17 真实本机出片"),
+      { timeout: 30_000, timeoutMsg: "real Control Plane did not create the editing project" },
     );
 
-    // 打开时间轴编辑：默认一条画面轨道，素材引用来自项目输入素材。
-    await workbench.$("button=打开时间轴编辑").click();
-    await expect(workbench).toHaveText(expect.stringContaining("正在编辑：发布会精剪"));
-    await expect(workbench).toHaveText(expect.stringContaining("画面轨道 1"));
-    assert.equal(
-      await workbench.$("input[aria-label='轨道1片段1素材引用']").getValue(),
-      SOURCE_ARTIFACT,
+    await workbench.$("div[role='tab']=时间轴编辑").click();
+    await browser.waitUntil(
+      async () => (await workbench.getText()).includes("尚未保存"),
+      { timeout: 30_000, timeoutMsg: "the new project's timeline did not finish loading" },
     );
-
-    // 轨道与片段编辑：字幕轨道、转场和片段时长。
-    await workbench.$("button=添加字幕轨道").click();
-    await expect(workbench).toHaveText(expect.stringContaining("字幕轨道 2"));
-    await workbench
-      .$("input[aria-label='轨道2片段1字幕文字']")
-      .setValue("欢迎来到发布会");
-    await workbench
-      .$("select[aria-label='轨道1片段1转场']")
-      .selectByAttribute("value", "fade");
-
-    // 保存两次，修订号单调递增。
+    const materialInput = await workbench.$("input[aria-label='轨道1片段1素材编号']");
+    const durationInput = await workbench.$("input[aria-label='轨道1片段1时长毫秒']");
+    const sourceInInput = await workbench.$("input[aria-label='轨道1片段1素材起点毫秒']");
+    await materialInput.setValue(preparation.materialId);
+    await durationInput.setValue("1000");
+    await sourceInInput.setValue("0");
+    assert.equal(await materialInput.getValue(), preparation.materialId);
+    assert.equal(await durationInput.getValue(), "1000");
+    assert.equal(await sourceInInput.getValue(), "0");
     await workbench.$("button=保存时间轴").click();
-    await expect(workbench).toHaveText(expect.stringContaining("已保存修订：第 1 版"));
-    await workbench.$("button=保存时间轴").click();
-    await expect(workbench).toHaveText(expect.stringContaining("已保存修订：第 2 版"));
-
-    // 预览只展示真实保存的时间轴结构，不冒充视频画面。
-    await workbench.$("div[role='tab']=预览").click();
-    await expect(workbench).toHaveText(expect.stringContaining("时间轴结构预览"));
-    await expect(workbench).toHaveText(expect.stringContaining("轨道 1（画面）"));
-    await expect(workbench).toHaveText(expect.stringContaining("轨道 2（字幕）"));
-    await expect(workbench).toHaveText(
-      expect.stringContaining("视频画面预览将在云端剪辑服务接入后提供。"),
+    await browser.waitUntil(
+      async () => {
+        const text = await workbench.getText();
+        if (/时间轴还不完整|本机剪辑服务暂时不可用/.test(text)) {
+          throw new Error(`the real timeline save failed: ${text}`);
+        }
+        return text.includes("已保存修订：第 1 版");
+      },
+      { timeout: 30_000, timeoutMsg: "real Control Plane did not save the timeline" },
     );
 
-    // 提交入口保持真实不可用状态，任务列表没有假数据。
     await workbench.$("div[role='tab']=提交与任务").click();
-    await expect(workbench).toHaveText(expect.stringContaining("还没有剪辑任务"));
     await workbench.$("button=提交剪辑任务").click();
-    await expect(workbench).toHaveText(
-      expect.stringContaining("云端剪辑功能尚未开通"),
+    await browser.waitUntil(
+      async () => {
+        const text = await workbench.getText();
+        if (/提交结果暂时无法确认|本机剪辑服务暂时不可用/.test(text)) {
+          throw new Error(`the real editing-job submission failed: ${text}`);
+        }
+        return text.includes("已提交剪辑任务，正在排队。");
+      },
+      { timeout: 30_000, timeoutMsg: "editing job was not accepted" },
     );
-    await expect(workbench).toHaveText(expect.stringContaining("还没有剪辑任务"));
+    await browser.waitUntil(
+      async () => {
+        await workbench.$("button=刷新任务").click();
+        const text = await workbench.getText();
+        if (text.includes("剪辑失败")) {
+          throw new Error("the production local editing job failed");
+        }
+        return text.includes("已完成") && text.includes("成片已入库");
+      },
+      {
+        timeout: 180_000,
+        interval: 1_000,
+        timeoutMsg: "production Worker did not publish a real Artifact",
+      },
+    );
 
-    const body = await browser.$("body").getText();
-    assert.doesNotMatch(body, /moneyprinter|hyperframes|b-roll/i);
-    assert.doesNotMatch(body, /aliyun|阿里云|tencent|腾讯云|provider|ims|ice/i);
-    assert.doesNotMatch(body, /完成 100%|示例成片|假任务/);
-
-    // 回到助理页，避免把页面状态遗留给后续验收用例——常驻 App 在多个 spec
-    // 之间是共享的。`waitForStartup` 只等不导航，用它做这件事等于没做。
-    await openWorkbenchSection("AI 助理");
+    const text = await workbench.getText();
+    assert.match(text, /已完成/);
+    assert.match(text, /成片已入库/);
+    assert.doesNotMatch(text, /示例成片|假任务/);
   });
 });

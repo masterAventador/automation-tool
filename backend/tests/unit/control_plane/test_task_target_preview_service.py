@@ -386,7 +386,7 @@ async def test_service_validates_inputs_paginates_and_maps_repository_failures()
         },
     ):
         with pytest.raises(InvalidTaskTargetPreview):
-            await service.get(cursor=None, **invalid)  # type: ignore[arg-type]
+            await service.get(cursor=None, **invalid)
 
     repository.failure = TaskTargetPreviewNotFound()
     with pytest.raises(TaskTargetPreviewNotFound):

@@ -50,7 +50,16 @@ const MOTION_FAILURES = new Set([
 ]);
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/u;
+const FONT_FAMILY = /^[\p{L}\p{N} .()'-]{1,80}$/u;
+const FONT_FILE = /^[^/\\\0]{1,128}\.(?:woff2?|ttf|otf)$/iu;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
+const MAX_FONT_BYTES = 32 * 1024 * 1024;
+const MAX_FONT_BASE64_CHARACTERS = Math.ceil(MAX_FONT_BYTES / 3) * 4;
+
+function base64ByteLength(value: string): number {
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  return value.length / 4 * 3 - padding;
+}
 
 function exactRecord(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -249,6 +258,7 @@ function validateMotionRequest(request: MotionVideoDraftRequest): void {
     value.trim().length > 0 && [...value.trim()].length <= maximum &&
     !/[<>\0]|:\/\/|www\./iu.test(value);
   const logo = request.logo;
+  const font = request.font;
   if (
     request.creationMode !== "manual_template_v1" ||
     !textValid(request.subject, 80) ||
@@ -256,6 +266,12 @@ function validateMotionRequest(request: MotionVideoDraftRequest): void {
     !HEX_COLOR.test(request.primaryColor) || !HEX_COLOR.test(request.secondaryColor) ||
     motionDurationProblem(request.beats.length, request.secondsPerBeat) !== null ||
     request.beats.some((beat) => !textValid(beat.title, 160) || !textValid(beat.caption, 160)) ||
+    (font !== null && (
+      !FONT_FAMILY.test(font.family) ||
+      !FONT_FILE.test(font.fileName) ||
+      font.base64.length === 0 || font.base64.length > MAX_FONT_BASE64_CHARACTERS ||
+      !BASE64.test(font.base64) || base64ByteLength(font.base64) > MAX_FONT_BYTES
+    )) ||
     (logo !== null && (
       !/^[^/\\\0]{1,128}\.(?:png|jpe?g|webp)$/iu.test(logo.fileName) ||
       !["image/png", "image/jpeg", "image/webp"].includes(logo.mediaType) ||

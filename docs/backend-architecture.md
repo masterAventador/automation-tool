@@ -619,7 +619,7 @@ H8-08 不新增系统电源事件协议，而是在正式 Executor socket 循环
 
 命令层仍以服务端签发的 UTC `deadline_at` 为权威。H8-08 只把“结构与身份均合法但到达时已经过期”细分为固定 `ExecutorCommandExpired`，运行循环可安全忽略并写固定诊断；该命令不会进入 SQLite，坏 envelope、错身份和不支持类型仍走原固定进程失败。恢复诊断不接受调用方字符串：休眠、过期命令、窗口不可用、窗口恢复和传输恢复只有五个固定代码，经 Executor stderr 进入 Rust 既有 4096-byte 行读取、二次脱敏及 200 行/64 KiB 队列。浏览器 `BrowserRuntime` 只在 context/window 操作失败时标记不可用，下一次隔离 runtime 成功启动才记录恢复，不保存页面、URL、Profile 或异常原文。
 
-本机账本原地迁移到 v6，在既有 singleton 动作 guard 增加严格布尔 `network_connected`。独立账本默认在线以保持动作层单独可用，但正式 `LocalExecutorProcess` 构造时先持久置离线；只有 Hello、原 outbox 回放与控制轮询全部完成后置在线，任何连接退出先置离线。`begin_side_effect_dispatch()` 在同一 `BEGIN IMMEDIATE` 中同时检查紧停 latch 和网络闸门，所以已开始动作允许按既有语义结算，prepared 新动作在离线期间绝不能跨过安全点。未交付 outbox 同时受 1000 条和 16 MiB 硬上限约束；command、普通 outbox、崩溃恢复与 outcome 四个生产写入入口都在更新 checkpoint/副作用前原子核容，超限不留下半状态。
+本机账本原地迁移到 v6，在既有 singleton 动作 guard 增加严格布尔 `network_connected`。独立账本默认在线以保持动作层单独可用，但正式 `LocalExecutorProcess` 构造时先持久置离线；只有 Hello、原 outbox 回放与控制轮询全部完成后置在线，任何连接退出先置离线。`begin_side_effect_dispatch()` 在同一 `BEGIN IMMEDIATE` 中同时检查紧停 latch 和网络闸门，所以已开始动作允许按既有语义结算，prepared 新动作在离线期间绝不能跨过安全点。未交付 outbox 同时受 1000 条和 16 MiB 硬上限约束；command、普通 outbox、崩溃恢复与 outcome 四个生产写入入口都在更新 checkpoint/副作用前原子核容，超限不留下半状态。v9 为 outbox 增加独立 `expired` 状态：超过 wire deadline 的未发送事实仍留在账本且不伪报 delivered，但退出待投递容量统计，不会积满配额后阻塞新命令。
 
 T3-14 在同一 API/Outbox 边界增加 `POST /api/v1/tasks/{task_id}/cancel` 与 `/emergency-stop`。首次请求锁定 active Installation、Task/current Attempt，在领域状态机允许取消且 Attempt 尚未终止时，原子写入 pending Command，并把 Task/Attempt 各以 revision CAS 前进一次到 `CANCELLING`；不写伪造的取消终态，也不占用 Executor 持有的事件 sequence。相同 scope/key/意图重放返回原 Command 且不重复增 revision；改意图、再次终止、终态、错 scope、时间回退和不相容投影均 fail closed。
 
@@ -809,7 +809,7 @@ E4-11 建立并由 B5-12、D6-10、A7-04、A7-07、H8-07、H8-16D 逐步升级�
 - 单例紧停与网络连接闸门、未交付 outbox 的有界计数/字节事实；
 - 不保存可由 Control Plane 恢复的第二套完整业务数据库。
 
-v1→v7 在单个排他迁移事务内保留既有 identity、command、checkpoint、outbox、平台 Session 与动作准入事实；v7 只把 `action.execute` 纳入封闭命令类型，并用脱敏 envelope 保存资源/顺序重放所需事实，完整授权 Token、展示名和评论/私信模板不落盘。损坏、未来版本或身份错绑继续拒绝。副作用表保持固定列，不接收任意 JSON；H8-09 Artifact 字节保存在同一私有 state 根的受控子目录，不塞入 SQLite blob。任何 Control Plane Session、完整授权 Token、Cookie、浏览器登录态、密钥、评论/私信正文、页面原文和普通 App 配置都不进入 SQLite；用户秘密继续只在 App 私有存储或浏览器持久 Profile 的既定边界内。
+v1→v9 在单个排他迁移事务内保留既有 identity、command、checkpoint、outbox、平台 Session 与动作准入事实；v7 只把 `action.execute` 纳入封闭命令类型并保存脱敏重放事实，v8 增加发布副作用账本，v9 为过期 outbox 增加不伪报 delivered 的终止投递状态。损坏、未来版本或身份错绑继续拒绝。副作用表保持固定列，不接收任意 JSON；H8-09 Artifact 字节保存在同一私有 state 根的受控子目录，不塞入 SQLite blob。任何 Control Plane Session、完整授权 Token、Cookie、浏览器登录态、密钥、评论/私信正文、页面原文和普通 App 配置都不进入 SQLite；用户秘密继续只在 App 私有存储或浏览器持久 Profile 的既定边界内。
 
 B5-15 明确首次健康 Profile 的 epoch 语义：若本机尚无平台行，无论调用方是否标记“恢复”，都只能创建 revision 1；只有已有行之后的显式健康恢复才递增 revision。这样 App/Executor 重启后可从现存 Profile 直接建立首个健康事实，同时仍禁止已有非健康 epoch 被隐式健康覆盖。四轮隐藏 App 验收验证健康→健康(revision 2)→expired→risk，后两次非健康变化保持同一 revision，Control Plane 最终只保存最小 risk 投影。
 
@@ -933,16 +933,6 @@ EditingJob、PublishJob 三个状态机互不嵌套，只通过 Artifact 谱系�
 供应商（首期阿里云 IMS/ICE）DTO 不进入领域层，依赖方向为
 剪辑页面 → 剪辑领域 → Provider Adapter 单向。`VideoEditingProvider`
 契约由 VE-02 定义；本任务不建表、不加 API、不做 UI。
-
-T4 在设备 Executor 的 infrastructure 边界补齐生产实现：Rust 只从 App 私有设置读取地域、
-同地域 OSS Bucket 与访问密钥，并把已冻结时间轴和重新验过摘要的 Artifact 副本通过一次性
-stdin 交给已签名 Executor；Python Adapter 用固定 OSS 对象键完成上传，再通过 ACS3 签名
-调用 IMS Submit/Query、按有界策略对账、流式导回 MP4，并在确定终态清理临时对象。长期密钥、
-绝对路径和供应商响应不进入领域对象、Control Plane、WebView、argv、环境变量或错误文本；
-响应丢失收敛为 `outcome_uncertain`，不得自动重发。Executor 另在 App 私有任务目录原子保存
-`prepared / dispatched / uncertain` 意图：重启恢复持有 vendor JobId 时只继续 Query，不重复
-OSS 上传或 IMS Submit；无意图可证明 Submit 尚未开始，可以安全完成初次提交；prepared
-模糊窗口不重放。跨进程文件租约保证遗留子进程与恢复子进程不会并发写同一意图。
 
 ### 17.1 两种视频制作执行链
 

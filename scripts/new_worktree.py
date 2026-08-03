@@ -38,8 +38,8 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import stat
 import subprocess
-import sys
 from pathlib import Path, PurePosixPath
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -57,6 +57,16 @@ def gitdir_pointer(worktree_name: str, submodule_path: str) -> str:
     return f"gitdir: {climb}.git/worktrees/{worktree_name}/modules/{submodule_path}"
 
 
+def write_gitdir_pointer(destination: Path, pointer: str) -> None:
+    """Replace a copied submodule pointer even when NTFS kept it read-only."""
+    if destination.exists():
+        if not destination.is_file():
+            raise RuntimeError(f"submodule git pointer is not a file: {destination}")
+        destination.chmod(destination.stat().st_mode | stat.S_IWRITE)
+        destination.unlink()
+    destination.write_text(pointer + "\n", encoding="utf-8")
+
+
 def clone_directory(source: Path, destination: Path) -> str:
     """Copy-on-write if the filesystem offers it, a plain copy if it does not.
 
@@ -64,14 +74,16 @@ def clone_directory(source: Path, destination: Path) -> str:
     the operator should be able to see which one happened.
     """
     destination.parent.mkdir(parents=True, exist_ok=True)
-    cloned = subprocess.run(
-        # `-p` keeps mtime, which `core.checkStat = minimal` then relies on.
-        ["cp", "-c", "-p", "-R", os.fspath(source), os.fspath(destination)],
-        capture_output=True,
-        check=False,
-    )
-    if cloned.returncode == 0:
-        return "clone"
+    cp = shutil.which("cp")
+    if cp is not None:
+        cloned = subprocess.run(
+            # `-p` keeps mtime, which `core.checkStat = minimal` then relies on.
+            [cp, "-c", "-p", "-R", os.fspath(source), os.fspath(destination)],
+            capture_output=True,
+            check=False,
+        )
+        if cloned.returncode == 0:
+            return "clone"
     if destination.exists():
         shutil.rmtree(destination)
     shutil.copytree(source, destination, symlinks=True)
@@ -134,8 +146,9 @@ def install_submodule(root: Path, name: str, submodule_path: str) -> str:
                 capture_output=True,
             )
 
-    (destination / ".git").write_text(
-        gitdir_pointer(name, submodule_path) + "\n", encoding="utf-8"
+    write_gitdir_pointer(
+        destination / ".git",
+        gitdir_pointer(name, submodule_path),
     )
     return method
 
@@ -193,8 +206,34 @@ def verify(root: Path, name: str, submodules: list[str]) -> list[str]:
     return problems
 
 
+def resolved_command(
+    command: list[str],
+    *,
+    resolved: str | None,
+    platform: str,
+    comspec: str,
+) -> list[str]:
+    """Return an argv Windows can launch even when the tool is a batch shim."""
+    if resolved is None:
+        return command
+    direct = [resolved, *command[1:]]
+    if platform == "nt" and Path(resolved).suffix.lower() in {".bat", ".cmd"}:
+        # `call` owns the quoted batch target. Without it, `/s /c` strips the
+        # first and last quotes around a normal `Program Files` path before the
+        # batch file is resolved, splitting the executable at the first space.
+        return [comspec, "/d", "/s", "/c", "call", *direct]
+    return direct
+
+
 def run(command: list[str], cwd: Path) -> None:
-    subprocess.run(command, cwd=cwd, check=True)
+    executable = shutil.which(command[0])
+    arguments = resolved_command(
+        command,
+        resolved=executable,
+        platform=os.name,
+        comspec=os.environ.get("COMSPEC", "cmd.exe"),
+    )
+    subprocess.run(arguments, cwd=cwd, check=True)
 
 
 def worktree_add_command(worktree: Path, commit: str, branch: str | None) -> list[str]:

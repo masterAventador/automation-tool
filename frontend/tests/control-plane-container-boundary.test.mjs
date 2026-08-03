@@ -31,7 +31,7 @@ test("C10-02 builds a locked production-only Control Plane image", async () => {
   );
   assert.match(
     pyproject,
-    /executor\s*=\s*\[\s*"playwright==1\.61\.0",?\s*\]/u,
+    /executor\s*=\s*\[[^\]]*"playwright==1\.61\.0"[^\]]*\]/u,
   );
   assert.match(dockerfile, /USER 65532:65532/u);
   assert.match(dockerfile, /EXPOSE 8000/u);

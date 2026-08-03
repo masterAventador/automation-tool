@@ -63,36 +63,29 @@ describe("BM-15 production App motion parts catalog acceptance", () => {
     const pageText = await studio.getText();
     assert.doesNotMatch(pageText, /apple-money-count|data-chart(?![a-z-])/);
 
-    // All 134 entries stay visible, but a part without a frozen, fillable
-    // film slot cannot offer an action that the Executor will reject later.
+    // A component without frozen text slots is still a real visual part. It
+    // must own the same per-shot override action as the 37 copy-bearing parts
+    // and reach the production component host instead of becoming browse-only.
     await browserRegion
-      .$("//label[contains(@class,'ant-radio-button-wrapper') and contains(., '字幕')]")
+      .$("//label[contains(@class,'ant-radio-button-wrapper') and contains(., '文字效果')]")
       .click();
-    const browseOnlyCard = await browserRegion.$(
-      "//li[contains(@class,'motion-parts-card') and .//*[normalize-space()='重砸落字字幕']]",
+    const visualOnlyCard = await browserRegion.$(
+      "//li[contains(@class,'motion-parts-card') and .//*[normalize-space()='反色叠加文字']]",
     );
-    await expect(browseOnlyCard).toBeDisplayed();
-    await expect(browseOnlyCard.$("button=当前仅供浏览")).toBeDisabled();
-
-    await browserRegion
-      .$("//label[contains(@class,'ant-radio-button-wrapper') and contains(., '数据与地图')]")
-      .click();
-    const selectableCard = await browserRegion.$(
-      "//li[contains(@class,'motion-parts-card') and .//*[normalize-space()='数据图表动画']]",
-    );
+    await expect(visualOnlyCard).toBeDisplayed();
 
     // The real catalog card now owns the next one-sentence film's first shot.
     // One shot accepts one part because film assembly consumes one part per
     // shot; choosing a second card replaces this selection rather than
     // presenting a count the renderer cannot honour.
-    const select = await selectableCard.$("button=指定给第 1 镜头");
+    const select = await visualOnlyCard.$("button=指定给第 1 镜头");
     await expect(select).toBeEnabled();
     await select.click();
     await expect(overrides).toHaveText(
-      expect.stringContaining("第 1 镜头：已指定数据图表动画"),
+      expect.stringContaining("第 1 镜头：已指定反色叠加文字"),
     );
     await expect(
-      selectableCard.$("button=取消第 1 镜头的指定"),
+      visualOnlyCard.$("button=取消第 1 镜头的指定"),
     ).toBeEnabled();
 
     const recommendButtons = await overrides.$$("button=自动推荐");
@@ -110,7 +103,7 @@ describe("BM-15 production App motion parts catalog acceptance", () => {
     );
     await studio.$("div[role='tab']=动效零件").click();
     await expect(overrides).toHaveText(
-      expect.stringContaining("第 1 镜头：已指定数据图表动画"),
+      expect.stringContaining("第 1 镜头：已指定反色叠加文字"),
     );
   });
 });

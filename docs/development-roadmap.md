@@ -366,6 +366,7 @@
 | H8-20 | 后台检查与下载 | App 启动、有界轮询和用户“检查更新”共用同一检查入口；后台下载、签名验证、断点/失败恢复；新包原子覆盖旧缓存 | H8-19 | ✅ 已完成 |
 | H8-21 | 安装与重启协调 | 立即安装先安全退出主 App；暂缓在启动/轮询继续提示；强更下载后下次启动静默进入安装 | H8-20 | ✅ 已完成 |
 | H8-22 | 更新 UI 与双平台验收 | 通用设置/提示 UI；真实签名包从 App 原入口在 macOS、Windows 完成升级、跳过、覆盖和强更验收 | H8-21 | 🔍 待 Developer ID/公证与 Windows Authenticode |
+| H8-23 | 仓储连接失败脱敏收口 | `except SQLAlchemyError` 接不住两类真实故障：连接被拒是 asyncio 的 `OSError`（消息带 host 与端口），认证/权限/连接数上限是 asyncpg 的 `PostgresError`（消息带角色名与库名），两者都不是 `SQLAlchemyError` 子类，会原样抵达调用方并进日志，违反本文件 §4.1 与 CLAUDE.md §7。改为 `(OSError, SQLAlchemyError)` + catch-all 收口，并为每处补真实拒绝连接与真实错密码的用例——现有用例一律注入 `SQLAlchemyError`，照不出这个缺口。AST 实测范围：`backend/src` 下 6 个文件 17 处 try（`account_device`、`account_session`、`customer_account`、`task_discovery`、`task_target_result`、`workbench_metrics` 六个仓储），`session.py` 与另外 6 个仓储已正确收口，不在范围内。发现于 LE-05 T1，证据见 `docs/development/LE-05.md` | H8-11 | ⬜ 未开始 |
 
 ## 14. Wave 9：双平台安装包与本地候选版
 
@@ -569,7 +570,7 @@
 4. `P9-06`（🔍 待设备验收）：Developer ID/notarization/Gatekeeper、fresh 用户级安装、零 Python 环境、Executor/Chrome/Edge/私有 Profile、扫码/browse/结果和双启动恢复的显式 runner 已就绪；等待正式 DMG、授权账号及可交付本地服务/首次设备注册链后执行，不能用 ad-hoc 或人工勾选冒充；
 5. `P9-07`（🔍 待 EB-16 正式签名包/账号/服务链）：2026-07-25 已把 runner 从历史系统 Chrome/Edge 与 `browser-profiles` 迁移为安装根 `embedded-browser` 的唯一 `windows-x86_64` Chromium、`embedded-browser-profiles/douyin/<UUIDv4>` 和第二浏览器拒绝；正式同 signer Authenticode、HKCU-only、零 Python、至少 125% DPI、Job-owned Executor、主 PID 强停恢复、正式卸载和最小 ACL 证据入口已就绪。当前 Windows 证书库无 Code Signing certificate，P9-04 `NotSigned` 包只装配 Executor 且尚无 EB-16 Chromium 资源，同时缺授权账号与 production 注册链，故不能执行最终设备轮次；
 6. `P9-08`（✅ 已完成）：三端精确兼容矩阵、App `/version` 启动协商、Executor 包/Hello 双边降级拒绝和全量门禁已完成；
-7. `P9-09`（🔍 待验收）：14 条最终验收的可执行报告已完成；当前 8 条自动化确认、4 条待授权真实平台、2 条待正式双平台设备/包。Windows 普通候选、完整包审计和内置 Chromium runner 已分别在 P9-04/P9-05/P9-07 留证，但 EB-16 正式 Chromium 装配、Authenticode、授权账号和 production 注册链尚未满足，未达到 14/14 前不得改绿；
+7. `P9-09`（🔍 待验收）：14 条最终验收的可执行报告已完成；当前 8 条自动化确认、4 条待授权真实平台、2 条待正式双平台设备/包。Windows 普通候选、完整包审计、内置 Chromium runner 与正式 Chromium 装配已分别在 P9-04/P9-05/P9-07/EB-16 留证；Authenticode、授权账号和 production 注册链尚未满足，未达到 14/14 前不得改绿；
 8. `U9-01`（✅ 已完成）：客户 Demo 账号生命周期、登录/恢复、opaque Session、不可变设备归属、停用/吊销、审计及 12 类威胁已冻结为可执行契约；
 9. `U9-02`（✅ 已完成）：User/canonical login、固定 Argon2id + Pepper、三态 revision、三张最小 PostgreSQL 表、并发单赢家和 append-only 审计已完成；
 10. `U9-03`（✅ 已完成）：产品登录、刷新、注销、改密/运维恢复、短期 access/旋转 refresh、重放整族吊销、keyed 限流/临时锁和统一脱敏错误已完成；

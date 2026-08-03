@@ -35,10 +35,13 @@ describe("motion parts catalog projection", () => {
     expect(total).toBe(134);
   });
 
-  it("offers only the 37 parts the real film assembler can consume", () => {
-    expect(MOTION_SELECTABLE_PART_IDS.size).toBe(37);
+  it("offers all 134 locked parts to automatic selection and user override", () => {
+    expect(MOTION_SELECTABLE_PART_IDS.size).toBe(134);
     expect(MOTION_SELECTABLE_PART_IDS.has("data-chart")).toBe(true);
-    expect(MOTION_SELECTABLE_PART_IDS.has("caption-kinetic-slam")).toBe(false);
+    expect(MOTION_SELECTABLE_PART_IDS.has("caption-kinetic-slam")).toBe(true);
+    expect(MOTION_SELECTABLE_PART_IDS).toEqual(
+      new Set(MOTION_PARTS_CATALOG.map((part) => part.id)),
+    );
     for (const id of recommendMotionPartsForBeat("展示本周销售数据增长", 0)) {
       expect(MOTION_SELECTABLE_PART_IDS.has(id)).toBe(true);
     }

@@ -1,0 +1,1613 @@
+from __future__ import annotations
+
+# ruff: noqa: RUF001
+import base64
+import builtins
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from types import ModuleType
+from unittest import mock
+
+
+def load_runner() -> ModuleType:
+    path = Path(__file__).with_name("run_eb_11_formal_app_acceptance.py")
+    spec = importlib.util.spec_from_file_location("eb11_formal_app_acceptance", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("EB-11 acceptance runner is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+class CrossPlatformImportTests(unittest.TestCase):
+    def test_loading_the_macos_runner_does_not_import_fcntl_on_windows(self) -> None:
+        real_import = builtins.__import__
+
+        def import_without_fcntl(
+            name: str,
+            globals: Mapping[str, object] | None = None,
+            locals: Mapping[str, object] | None = None,
+            fromlist: Sequence[str] = (),
+            level: int = 0,
+        ) -> object:
+            if name == "fcntl":
+                raise ModuleNotFoundError("No module named 'fcntl'")
+            return real_import(name, globals, locals, fromlist, level)
+
+        with mock.patch.object(builtins, "__import__", side_effect=import_without_fcntl):
+            runner = load_runner()
+
+        self.assertEqual(runner.SCAN_CHECKPOINT, "douyin_scan_confirmed")
+
+
+class VisibleRevisionTests(unittest.TestCase):
+    def test_action_message_cannot_impersonate_a_new_observation(self) -> None:
+        runner = load_runner()
+        before = "当前状态登录正常最近检查：2026/8/1 12:00:00打开登录处理我已处理，重新检查安全注销"
+        after = (
+            "当前状态登录正常最近检查：2026/8/1 12:00:00"
+            "登录正常打开登录处理我已处理，重新检查安全注销"
+        )
+
+        self.assertEqual(
+            runner.observed_revision(before),
+            runner.observed_revision(after),
+        )
+
+    def test_unstructured_last_check_text_fails_closed(self) -> None:
+        runner = load_runner()
+
+        with self.assertRaises(runner.AcceptanceFailed):
+            runner.observed_revision("当前状态登录正常最近检查：刚刚打开登录处理")
+
+    def test_older_observation_cannot_satisfy_a_recheck(self) -> None:
+        runner = load_runner()
+        before = "当前状态登录正常最近检查：2026/8/1 12:00:00"
+        older = "当前状态登录正常最近检查：2026/8/1 11:00:00"
+
+        with (
+            mock.patch.object(runner, "press"),
+            mock.patch.object(runner, "visible_ui_text", return_value=older),
+            mock.patch.object(runner.time, "sleep"),
+            mock.patch.object(runner.time, "monotonic", side_effect=[0.0, 0.0, 151.0]),
+            self.assertRaises(runner.AcceptanceFailed),
+        ):
+            runner.recheck_healthy_session(42, before)
+
+
+class AccountPageReadinessTests(unittest.TestCase):
+    def test_press_binds_a_webkit_accessibility_name_before_comparing_it(self) -> None:
+        runner = load_runner()
+
+        def inspect_script(source: str, *, timeout: float = 30.0) -> str:
+            del timeout
+            self.assertIn("set allElements to entire contents of front window", source)
+            self.assertIn("repeat with elementReference in allElements", source)
+            self.assertIn("set elementName to name of elementReference", source)
+            self.assertIn('(elementName as text) is "账号与平台"', source)
+            return "pressed"
+
+        with mock.patch.object(runner, "apple_script", side_effect=inspect_script):
+            runner.press(42, "账号与平台")
+
+    def test_visible_text_materializes_the_webkit_accessibility_tree(self) -> None:
+        runner = load_runner()
+
+        def inspect_script(source: str, *, timeout: float = 30.0) -> str:
+            del timeout
+            self.assertIn("set allElements to entire contents of front window", source)
+            self.assertIn("repeat with elementReference in allElements", source)
+            return "登录正常"
+
+        with mock.patch.object(runner, "apple_script", side_effect=inspect_script):
+            self.assertEqual(runner.visible_ui_text(42), "登录正常")
+
+    def test_navigation_retries_until_the_normal_control_is_mounted(self) -> None:
+        runner = load_runner()
+        healthy = "当前状态登录正常最近检查：2026/8/1 12:00:00"
+
+        with (
+            mock.patch.object(
+                runner,
+                "press",
+                side_effect=[runner.AcceptanceFailed("not ready"), None],
+            ) as press,
+            mock.patch.object(runner, "visible_ui_text", return_value="正在启动"),
+            mock.patch.object(runner, "wait_for_text", return_value=healthy) as wait,
+            mock.patch.object(runner.time, "sleep"),
+        ):
+            rendered = runner.open_account_page(42)
+
+        self.assertEqual(rendered, healthy)
+        self.assertEqual(press.call_count, 2)
+        wait.assert_called_once_with(
+            42,
+            runner.HEALTHY_LABEL,
+            timeout=runner.ACTION_TIMEOUT_SECONDS,
+        )
+
+
+class FormalLoginLifecycleTests(unittest.TestCase):
+    def test_qr_login_and_restart_must_reuse_the_exact_profile_inode(self) -> None:
+        runner = load_runner()
+        first_path = Path(
+            "/tmp/embedded-browser-profiles/douyin/6d9221cb-e9dc-4359-9f6b-34f7fbc55316"
+        )
+        replacement_path = Path(
+            "/tmp/embedded-browser-profiles/douyin/46ea626c-fddb-49bc-9269-a50368f687ca"
+        )
+
+        def observation(path: Path, identity: tuple[int, int]) -> object:
+            binding = runner.ProfileDirectoryBinding(
+                path=path,
+                parent_fd=10,
+                directory_fd=11,
+                parent_identity=(1, 2),
+                identity=identity,
+            )
+            return runner.RuntimeObservation(
+                executor_observed=True,
+                embedded_browser_observed=True,
+                app_owned_profile_observed=True,
+                profile_directories=(path,),
+                profile_bindings=(binding,),
+            )
+
+        qr_open = observation(first_path, (1, 3))
+        qr_recheck = observation(first_path, (1, 3))
+        restarted = observation(first_path, (1, 3))
+        runner.require_same_profile_reuse(qr_open, qr_recheck, restarted)
+
+        with self.assertRaises(runner.AcceptanceFailed):
+            runner.require_same_profile_reuse(
+                qr_open,
+                observation(replacement_path, (1, 4)),
+                restarted,
+            )
+        with self.assertRaises(runner.AcceptanceFailed):
+            runner.require_same_profile_reuse(
+                qr_open,
+                qr_recheck,
+                observation(first_path, (1, 5)),
+            )
+
+    def test_safe_logout_uses_the_visible_confirmation_and_waits_for_missing(self) -> None:
+        runner = load_runner()
+        missing = "当前状态需要登录最近检查：2026/8/1 12:00:01"
+        with (
+            mock.patch.object(runner, "press") as press,
+            mock.patch.object(runner, "wait_for_text", side_effect=["确认注销", missing]) as wait,
+        ):
+            rendered = runner.logout_current_session(42)
+
+        self.assertEqual(rendered, missing)
+        self.assertEqual(
+            press.call_args_list,
+            [mock.call(42, "安全注销"), mock.call(42, "确认注销")],
+        )
+        self.assertEqual(
+            wait.call_args_list,
+            [
+                mock.call(42, "确认注销"),
+                mock.call(42, "需要登录", timeout=runner.ACTION_TIMEOUT_SECONDS),
+            ],
+        )
+
+    def test_scan_confirmation_is_exact_and_cannot_be_skipped(self) -> None:
+        runner = load_runner()
+        with (
+            mock.patch("builtins.input", return_value="done"),
+            self.assertRaises(runner.AcceptanceFailed),
+        ):
+            runner.confirm_scan_checkpoint()
+
+        with mock.patch("builtins.input", return_value="douyin_scan_confirmed"):
+            runner.confirm_scan_checkpoint()
+
+    def test_safe_logout_requires_the_old_profile_marker_lock_and_process_to_be_gone(
+        self,
+    ) -> None:
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            app = root / "Formal Product.app"
+            browser = app / "Contents/Resources/embedded-browser/Browser"
+            profile_root = root / "embedded-browser-profiles"
+            profile_id = "6d9221cb-e9dc-4359-9f6b-34f7fbc55316"
+            profile = profile_root / "douyin" / profile_id
+            lock = profile.parent / f".automation-tool-profile-lease-v1-{profile_id}"
+            marker = profile_root / "current-douyin-profile-v1"
+            profile.mkdir(parents=True)
+            profile_root.chmod(0o700)
+            profile.parent.chmod(0o700)
+            profile.chmod(0o700)
+            lock.write_text("", encoding="utf-8")
+            marker.write_text(profile_id, encoding="utf-8")
+            parent_fd = os.open(profile.parent, os.O_RDONLY | os.O_DIRECTORY)
+            profile_fd = os.open(profile, os.O_RDONLY | os.O_DIRECTORY)
+            parent_metadata = os.fstat(parent_fd)
+            profile_metadata = os.fstat(profile_fd)
+            binding = runner.ProfileDirectoryBinding(
+                path=profile,
+                parent_fd=parent_fd,
+                directory_fd=profile_fd,
+                parent_identity=(parent_metadata.st_dev, parent_metadata.st_ino),
+                identity=(profile_metadata.st_dev, profile_metadata.st_ino),
+            )
+            instance = runner.ProcessRecord(
+                10,
+                1,
+                os.fspath(app / "Contents/MacOS/Product"),
+                "started",
+            )
+            browser_process = runner.ProcessRecord(
+                11,
+                10,
+                f"{browser} --user-data-dir={profile}",
+                "browser-started",
+            )
+            contract = runner.RuntimeContract(
+                app_path=app,
+                executor_path=app / "Contents/Resources/local-executor/executor",
+                browser_path=browser,
+                profile_root=profile_root,
+            )
+            observed = runner.RuntimeObservation(
+                executor_observed=True,
+                embedded_browser_observed=True,
+                app_owned_profile_observed=True,
+                profile_directories=(profile,),
+                profile_bindings=(binding,),
+            )
+
+            with (
+                mock.patch.object(runner, "process_snapshot", return_value=[instance]),
+                self.assertRaises(runner.AcceptanceFailed),
+            ):
+                runner.require_safe_logout_cleanup(contract, instance, observed)
+
+            lock.unlink()
+            profile.rmdir()
+            with (
+                mock.patch.object(runner, "process_snapshot", return_value=[instance]),
+                self.assertRaises(runner.AcceptanceFailed),
+            ):
+                runner.require_safe_logout_cleanup(contract, instance, observed)
+
+            marker.unlink()
+            with (
+                mock.patch.object(
+                    runner,
+                    "process_snapshot",
+                    return_value=[instance, browser_process],
+                ),
+                self.assertRaises(runner.AcceptanceFailed),
+            ):
+                runner.require_safe_logout_cleanup(contract, instance, observed)
+
+            try:
+                with mock.patch.object(runner, "process_snapshot", return_value=[instance]):
+                    runner.require_safe_logout_cleanup(contract, instance, observed)
+            finally:
+                observed.close()
+
+    def test_safe_logout_rejects_an_old_profile_hidden_by_parent_rename(self) -> None:
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            app = root / "Formal Product.app"
+            profile_root = root / "embedded-browser-profiles"
+            platform_root = profile_root / "douyin"
+            profile_id = "6d9221cb-e9dc-4359-9f6b-34f7fbc55316"
+            profile = platform_root / profile_id
+            profile.mkdir(parents=True, mode=0o700)
+            profile_root.chmod(0o700)
+            platform_root.chmod(0o700)
+            parent_fd = os.open(platform_root, os.O_RDONLY | os.O_DIRECTORY)
+            profile_fd = os.open(profile, os.O_RDONLY | os.O_DIRECTORY)
+            parent_metadata = os.fstat(parent_fd)
+            profile_metadata = os.fstat(profile_fd)
+            binding = runner.ProfileDirectoryBinding(
+                path=profile,
+                parent_fd=parent_fd,
+                directory_fd=profile_fd,
+                parent_identity=(parent_metadata.st_dev, parent_metadata.st_ino),
+                identity=(profile_metadata.st_dev, profile_metadata.st_ino),
+            )
+            instance = runner.ProcessRecord(
+                10,
+                1,
+                os.fspath(app / "Contents/MacOS/Product"),
+                "started",
+            )
+            contract = runner.RuntimeContract(
+                app_path=app,
+                executor_path=app / "Contents/Resources/local-executor/executor",
+                browser_path=app / "Contents/Resources/embedded-browser/Browser",
+                profile_root=profile_root,
+            )
+            observed = runner.RuntimeObservation(
+                executor_observed=True,
+                embedded_browser_observed=True,
+                app_owned_profile_observed=True,
+                profile_directories=(profile,),
+                profile_bindings=(binding,),
+            )
+
+            platform_root.rename(profile_root / "saved-douyin")
+            platform_root.mkdir(mode=0o700)
+            try:
+                with (
+                    mock.patch.object(runner, "process_snapshot", return_value=[instance]),
+                    self.assertRaises(runner.AcceptanceFailed),
+                ):
+                    runner.require_safe_logout_cleanup(contract, instance, observed)
+            finally:
+                observed.close()
+
+
+class EvidenceBoundaryTests(unittest.TestCase):
+    def test_evidence_path_cannot_become_new_release_source(self) -> None:
+        runner = load_runner()
+        with self.assertRaisesRegex(runner.AcceptanceFailed, "source inventory"):
+            runner.require_source_stable_evidence_path(runner.REPOSITORY_ROOT / "eb11.json")
+
+        accepted = runner.require_source_stable_evidence_path(
+            runner.REPOSITORY_ROOT / ".local" / "eb11-evidence.json"
+        )
+        self.assertEqual(
+            accepted,
+            (runner.REPOSITORY_ROOT / ".local" / "eb11-evidence.json").resolve(),
+        )
+
+    def test_evidence_cannot_be_published_inside_the_app_bundle(self) -> None:
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory) / "Product.app"
+            (app / "Contents").mkdir(parents=True)
+
+            with self.assertRaises(runner.AcceptanceFailed):
+                runner.require_evidence_outside_app(app, app / "Contents" / "eb11.json")
+
+    def test_evidence_cannot_be_published_inside_production_app_data(self) -> None:
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory) / "Product.app"
+            app.mkdir()
+
+            with self.assertRaises(runner.AcceptanceFailed):
+                runner.require_evidence_outside_app(
+                    app,
+                    runner.APP_DATA / "embedded-browser-profiles" / "eb11.json",
+                )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX evidence publication contract")
+    def test_opened_evidence_directory_is_rechecked_after_a_path_redirect(self) -> None:
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            app = root / "Product.app"
+            protected = app / "Contents"
+            safe = root / "safe"
+            displaced = root / "displaced"
+            protected.mkdir(parents=True)
+            safe.mkdir()
+            evidence = runner.require_evidence_outside_app(app, safe / "evidence.json")
+
+            safe.rename(displaced)
+            safe.symlink_to(protected, target_is_directory=True)
+            with self.assertRaises(runner.AcceptanceFailed):
+                runner.open_protected_evidence_target(app, evidence)
+
+            self.assertFalse((protected / "evidence.json").exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX evidence publication contract")
+    def test_fixed_parent_handle_prevents_path_replacement_redirect(self) -> None:
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            verified = root / "verified"
+            original = root / "original"
+            redirect = root / "redirect"
+            verified.mkdir()
+            redirect.mkdir()
+            target = runner.open_evidence_target(verified / "evidence.json")
+            try:
+                verified.rename(original)
+                verified.symlink_to(redirect, target_is_directory=True)
+                with self.assertRaises(runner.AcceptanceFailed):
+                    runner.write_evidence(target, {"schema": "test"})
+            finally:
+                target.close()
+
+            self.assertFalse((original / "evidence.json").exists())
+            self.assertFalse((redirect / "evidence.json").exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX evidence publication contract")
+    def test_failed_write_leaves_no_final_or_temporary_evidence(self) -> None:
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / "evidence.json"
+            target = runner.open_evidence_target(evidence)
+            try:
+                with (
+                    mock.patch.object(runner.os, "fsync", side_effect=OSError("disk full")),
+                    self.assertRaises(OSError),
+                ):
+                    runner.write_evidence(target, {"schema": "test"})
+            finally:
+                target.close()
+
+            self.assertFalse(evidence.exists())
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX evidence publication contract")
+    def test_successful_write_is_complete_private_and_non_overwriting(self) -> None:
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / "evidence.json"
+            target = runner.open_evidence_target(evidence)
+            try:
+                runner.write_evidence(target, {"schema": "test"})
+
+                self.assertEqual(evidence.read_text(), '{\n  "schema": "test"\n}\n')
+                self.assertEqual(os.stat(evidence).st_mode & 0o777, 0o600)
+                self.assertEqual(list(Path(directory).iterdir()), [evidence])
+                with self.assertRaises(FileExistsError):
+                    runner.write_evidence(target, {"schema": "replacement"})
+            finally:
+                target.close()
+
+    @unittest.skipUnless(os.name == "posix", "POSIX evidence publication contract")
+    def test_operator_interrupt_rolls_back_already_published_evidence(self) -> None:
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / "evidence.json"
+            target = runner.open_evidence_target(evidence)
+            try:
+                with (
+                    mock.patch.object(
+                        runner.os,
+                        "fsync",
+                        side_effect=[None, KeyboardInterrupt],
+                    ),
+                    self.assertRaises(KeyboardInterrupt),
+                ):
+                    runner.write_evidence(target, {"schema": "test"})
+            finally:
+                target.close()
+
+            self.assertFalse(evidence.exists())
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_main_rolls_back_evidence_when_pass_reporting_is_interrupted(self) -> None:
+        runner = load_runner()
+
+        class Publication:
+            path = Path("/tmp/eb11-evidence.json")
+            rolled_back = False
+            committed = False
+
+            def rollback(self) -> None:
+                self.rolled_back = True
+
+            def commit(self) -> None:
+                self.committed = True
+
+        publication = Publication()
+        with (
+            mock.patch.object(runner, "parse_arguments"),
+            mock.patch.object(runner, "run_acceptance", return_value=publication),
+            mock.patch("builtins.print", side_effect=KeyboardInterrupt),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            runner.main()
+
+        self.assertTrue(publication.rolled_back)
+        self.assertTrue(publication.committed)
+
+    def test_main_does_not_report_pass_when_evidence_commit_fails(self) -> None:
+        runner = load_runner()
+
+        class Publication:
+            path = Path("/tmp/eb11-evidence.json")
+            rolled_back = False
+
+            def rollback(self) -> None:
+                self.rolled_back = True
+
+            def commit(self) -> None:
+                raise runner.AcceptanceFailed("commit failed")
+
+        publication = Publication()
+        stdout = []
+        stderr = []
+        with (
+            mock.patch.object(runner, "parse_arguments"),
+            mock.patch.object(runner, "run_acceptance", return_value=publication),
+            mock.patch("builtins.print") as output,
+        ):
+            exit_code = runner.main()
+
+        for call in output.call_args_list:
+            rendered = str(call.args[0])
+            if call.kwargs.get("file") is runner.sys.stderr:
+                stderr.append(rendered)
+            else:
+                stdout.append(rendered)
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(any("PASS" in line for line in stdout))
+        self.assertTrue(any("FAIL" in line for line in stderr))
+        self.assertTrue(publication.rolled_back)
+
+
+class ReleaseIdentityTests(unittest.TestCase):
+    def test_cli_cannot_supply_self_proving_artifact_identity(self) -> None:
+        runner = load_runner()
+        with mock.patch.object(
+            runner.sys,
+            "argv",
+            [
+                "runner",
+                "--interactive-device-acceptance",
+                "--app",
+                "/Applications/Product.app",
+                "--deployment-profile",
+                "/tmp/deployment.json",
+                "--evidence",
+                "/tmp/evidence.json",
+            ],
+        ):
+            arguments = runner.parse_arguments()
+
+        self.assertEqual(arguments.app, Path("/Applications/Product.app"))
+        self.assertFalse(hasattr(arguments, "expected_bundle_tree_sha256"))
+        self.assertFalse(hasattr(arguments, "expected_executor_build_id"))
+
+    def test_signed_identity_must_match_source_profile_and_packaged_executor(self) -> None:
+        runner = load_runner()
+        artifact = runner.ArtifactFacts(
+            authority="Developer ID Application: Example",
+            team_id="TEAM123",
+            bundle_cdhash="c" * 40,
+            bundle_tree_sha256="a" * 64,
+            bundle_bytes=123,
+            executor_build_id="eb11-current",
+        )
+        app_identity = runner.AppIdentity(
+            bundle_identifier="com.aventador.automationtool",
+            version="0.1.0",
+            executable_path=Path("/Applications/Product.app/Contents/MacOS/Product"),
+        )
+        source = runner.SourceFacts(git_commit="d" * 40, tree_sha256="e" * 64)
+        release = runner.SignedReleaseIdentity(
+            source_git_commit="d" * 40,
+            source_tree_sha256="e" * 64,
+            executor_build_id="eb11-current",
+            target="macos-arm64",
+            architecture="aarch64",
+            deployment_profile_id="demo-xuanbai",
+        )
+        profile_root = runner.APP_DATA / "profiles/demo-xuanbai/embedded-browser-profiles"
+
+        runner.require_release_identity(
+            release,
+            artifact=artifact,
+            app_identity=app_identity,
+            profile_root=profile_root,
+            source=source,
+        )
+        with self.assertRaises(runner.AcceptanceFailed):
+            runner.require_release_identity(
+                release,
+                artifact=artifact,
+                app_identity=app_identity,
+                profile_root=profile_root,
+                source=runner.SourceFacts(git_commit="d" * 40, tree_sha256="f" * 64),
+            )
+        with self.assertRaises(runner.AcceptanceFailed):
+            runner.require_release_identity(
+                runner.SignedReleaseIdentity(
+                    source_git_commit="d" * 40,
+                    source_tree_sha256="e" * 64,
+                    executor_build_id="eb11-old",
+                    target="macos-arm64",
+                    architecture="aarch64",
+                    deployment_profile_id="demo-xuanbai",
+                ),
+                artifact=artifact,
+                app_identity=app_identity,
+                profile_root=profile_root,
+                source=source,
+            )
+
+    def test_signed_identity_accepts_an_ancestor_commit_for_the_exact_source_tree(self) -> None:
+        runner = load_runner()
+        artifact = runner.ArtifactFacts(
+            authority="Developer ID Application: Example",
+            team_id="TEAM123",
+            bundle_cdhash="c" * 40,
+            bundle_tree_sha256="a" * 64,
+            bundle_bytes=123,
+            executor_build_id="eb11-current",
+        )
+        app_identity = runner.AppIdentity(
+            bundle_identifier="com.aventador.automationtool",
+            version="0.1.0",
+            executable_path=Path("/Applications/Product.app/Contents/MacOS/Product"),
+        )
+        release = runner.SignedReleaseIdentity(
+            source_git_commit="c" * 40,
+            source_tree_sha256="e" * 64,
+            executor_build_id="eb11-current",
+            target="macos-arm64",
+            architecture="aarch64",
+            deployment_profile_id="demo-xuanbai",
+        )
+        current = runner.SourceFacts(git_commit="d" * 40, tree_sha256="e" * 64)
+        profile_root = runner.APP_DATA / "profiles/demo-xuanbai/embedded-browser-profiles"
+
+        with mock.patch.object(
+            runner,
+            "source_commit_is_ancestor",
+            return_value=True,
+        ):
+            runner.require_release_identity(
+                release,
+                artifact=artifact,
+                app_identity=app_identity,
+                profile_root=profile_root,
+                source=current,
+            )
+
+        with (
+            mock.patch.object(
+                runner,
+                "source_commit_is_ancestor",
+                return_value=False,
+            ),
+            self.assertRaises(runner.AcceptanceFailed),
+        ):
+            runner.require_release_identity(
+                release,
+                artifact=artifact,
+                app_identity=app_identity,
+                profile_root=profile_root,
+                source=current,
+            )
+
+
+class RuntimeObservationTests(unittest.TestCase):
+    def test_runtime_observation_requires_browser_to_descend_from_executor(self) -> None:
+        runner = load_runner()
+        app = Path("/Applications/Formal Product.app")
+        executor = app / "Contents/Resources/local-executor/package/executor"
+        browser = app / "Contents/Resources/embedded-browser/Browser"
+        profile = (
+            runner.APP_DATA
+            / "profiles/demo-xuanbai/embedded-browser-profiles/douyin"
+            / "6d9221cb-e9dc-4359-9f6b-34f7fbc55316"
+        )
+        contract = runner.RuntimeContract(
+            app_path=app,
+            executor_path=executor,
+            browser_path=browser,
+            profile_root=profile.parents[1],
+            executor_identity=runner.CodeIdentity("executor", "Expected", "TEAM", "a" * 40),
+            browser_identity=runner.CodeIdentity("browser", "Expected", "TEAM", "b" * 40),
+        )
+        instance = runner.ProcessRecord(10, 1, os.fspath(app / "Contents/MacOS/App"), "A")
+        executor_process = runner.ProcessRecord(11, 10, os.fspath(executor), "B")
+        sibling_browser = runner.ProcessRecord(
+            12,
+            10,
+            f"{browser} --user-data-dir={profile}",
+            "C",
+        )
+        with (
+            mock.patch.object(
+                runner,
+                "process_snapshot",
+                return_value=[instance, executor_process, sibling_browser],
+            ),
+            mock.patch.object(runner, "verify_runtime_process_identity"),
+            mock.patch.object(
+                runner,
+                "require_browser_profile_boundary",
+                return_value=profile,
+            ),
+            self.assertRaises(runner.AcceptanceFailed),
+        ):
+            runner.observe_instance_runtime(contract, instance)
+
+    def test_runtime_observation_rejects_a_same_path_replacement_process(self) -> None:
+        runner = load_runner()
+        app = Path("/Applications/Formal Product.app")
+        executor = app / "Contents/Resources/local-executor/package/executor"
+        browser = app / "Contents/Resources/embedded-browser/Browser"
+        profile = (
+            runner.APP_DATA
+            / "profiles/demo-xuanbai/embedded-browser-profiles/douyin"
+            / "6d9221cb-e9dc-4359-9f6b-34f7fbc55316"
+        )
+        expected_executor = runner.CodeIdentity(
+            identifier="com.aventador.automationtool.executor",
+            authority="Developer ID Application: Expected",
+            team_id="EXPECTEDTEAM",
+            cdhash="a" * 40,
+        )
+        expected_browser = runner.CodeIdentity(
+            identifier="com.google.Chrome.for.Testing",
+            authority="Developer ID Application: Expected",
+            team_id="EXPECTEDTEAM",
+            cdhash="b" * 40,
+        )
+        contract = runner.RuntimeContract(
+            app_path=app,
+            executor_path=executor,
+            browser_path=browser,
+            profile_root=profile.parents[1],
+            executor_identity=expected_executor,
+            browser_identity=expected_browser,
+        )
+        instance = runner.ProcessRecord(10, 1, os.fspath(app / "Contents/MacOS/Product"), "A")
+        executor_process = runner.ProcessRecord(11, 10, os.fspath(executor), "B")
+        browser_process = runner.ProcessRecord(
+            12,
+            11,
+            f"{browser} --user-data-dir={profile}",
+            "C",
+        )
+        verified = subprocess.CompletedProcess(["codesign"], 0, stdout="", stderr="")
+        executor_details = subprocess.CompletedProcess(
+            ["codesign"],
+            0,
+            stdout="",
+            stderr=(
+                f"Identifier={expected_executor.identifier}\n"
+                f"Authority={expected_executor.authority}\n"
+                f"TeamIdentifier={expected_executor.team_id}\n"
+                f"CDHash={expected_executor.cdhash}\n"
+            ),
+        )
+        replacement_browser_details = subprocess.CompletedProcess(
+            ["codesign"],
+            0,
+            stdout="",
+            stderr=(
+                f"Identifier={expected_browser.identifier}\n"
+                f"Authority={expected_browser.authority}\n"
+                f"TeamIdentifier={expected_browser.team_id}\n"
+                f"CDHash={'c' * 40}\n"
+            ),
+        )
+
+        with (
+            mock.patch.object(
+                runner,
+                "process_snapshot",
+                return_value=[instance, executor_process, browser_process],
+            ),
+            mock.patch.object(
+                runner,
+                "run_checked",
+                side_effect=[
+                    verified,
+                    executor_details,
+                    verified,
+                    replacement_browser_details,
+                ],
+            ) as checked,
+            self.assertRaises(runner.AcceptanceFailed),
+        ):
+            runner.observe_instance_runtime(contract, instance)
+
+        self.assertEqual(
+            [call.args[0][-1] for call in checked.call_args_list],
+            ["11", "11", "12", "12"],
+        )
+
+    def test_runtime_identity_sampling_treats_process_exit_as_transient(self) -> None:
+        runner = load_runner()
+        record = runner.ProcessRecord(
+            12,
+            11,
+            "/Applications/Formal Product.app/Contents/Resources/browser",
+            "C",
+        )
+        expected = runner.CodeIdentity(
+            identifier="com.google.Chrome.for.Testing",
+            authority="Developer ID Application: Expected",
+            team_id="EXPECTEDTEAM",
+            cdhash="b" * 40,
+        )
+        verified = subprocess.CompletedProcess(["codesign"], 0, stdout="", stderr="")
+        details = subprocess.CompletedProcess(
+            ["codesign"],
+            0,
+            stdout="",
+            stderr=(
+                f"Identifier={expected.identifier}\n"
+                f"Authority={expected.authority}\n"
+                f"TeamIdentifier={expected.team_id}\n"
+                f"CDHash={expected.cdhash}\n"
+            ),
+        )
+
+        with (
+            mock.patch.object(
+                runner,
+                "process_snapshot",
+                side_effect=[[record], []],
+            ),
+            mock.patch.object(runner, "run_checked", side_effect=[verified, details]),
+        ):
+            self.assertFalse(runner.verify_runtime_process_identity(record, expected))
+
+    def test_runtime_identity_sampling_treats_codesign_failure_after_exit_as_transient(
+        self,
+    ) -> None:
+        runner = load_runner()
+        record = runner.ProcessRecord(
+            12,
+            11,
+            "/Applications/Formal Product.app/Contents/Resources/browser",
+            "C",
+        )
+        expected = runner.CodeIdentity(
+            identifier="com.google.Chrome.for.Testing",
+            authority="Developer ID Application: Expected",
+            team_id="EXPECTEDTEAM",
+            cdhash="b" * 40,
+        )
+        verified = subprocess.CompletedProcess(["codesign"], 0, stdout="", stderr="")
+        signing_failure = subprocess.CalledProcessError(1, ["codesign"])
+
+        for signing_results in ([signing_failure], [verified, signing_failure]):
+            with (
+                self.subTest(signing_results=signing_results),
+                mock.patch.object(
+                    runner,
+                    "process_snapshot",
+                    side_effect=[[record], []],
+                ),
+                mock.patch.object(
+                    runner,
+                    "run_checked",
+                    side_effect=signing_results,
+                ),
+            ):
+                self.assertFalse(runner.verify_runtime_process_identity(record, expected))
+
+        with (
+            mock.patch.object(
+                runner,
+                "process_snapshot",
+                side_effect=[[record], [record]],
+            ),
+            mock.patch.object(runner, "run_checked", side_effect=signing_failure),
+            self.assertRaises(runner.AcceptanceFailed),
+        ):
+            runner.verify_runtime_process_identity(record, expected)
+
+    def test_open_file_sampling_retries_only_when_a_sampled_process_exits(self) -> None:
+        runner = load_runner()
+        record = runner.ProcessRecord(
+            12,
+            11,
+            "/Applications/Formal Product.app/Contents/Resources/browser",
+            "C",
+        )
+        failure = subprocess.CalledProcessError(1, ["/usr/sbin/lsof"])
+
+        with (
+            mock.patch.object(runner, "run_checked", side_effect=failure),
+            mock.patch.object(runner, "process_snapshot", return_value=[]),
+        ):
+            self.assertIsNone(runner.read_process_open_paths([record]))
+
+        with (
+            mock.patch.object(runner, "run_checked", side_effect=failure),
+            mock.patch.object(runner, "process_snapshot", return_value=[record]),
+            self.assertRaises(runner.AcceptanceFailed),
+        ):
+            runner.read_process_open_paths([record])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX Profile boundary contract")
+    def test_runtime_observation_rejects_a_profile_symlinked_outside_app_data(self) -> None:
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            app = root / "Formal Product.app"
+            browser = app / "Contents/Resources/embedded-browser/Browser"
+            executor = app / "Contents/Resources/local-executor/package/executor"
+            profile_root = root / "embedded-browser-profiles"
+            platform_root = profile_root / "douyin"
+            external = root / "external-default-profile"
+            profile_id = "6d9221cb-e9dc-4359-9f6b-34f7fbc55316"
+            platform_root.mkdir(parents=True, mode=0o700)
+            external.mkdir(mode=0o700)
+            profile = platform_root / profile_id
+            profile.symlink_to(external, target_is_directory=True)
+            expected_executor = runner.CodeIdentity("executor", "Expected", "TEAM", "a" * 40)
+            expected_browser = runner.CodeIdentity("browser", "Expected", "TEAM", "b" * 40)
+            contract = runner.RuntimeContract(
+                app_path=app,
+                executor_path=executor,
+                browser_path=browser,
+                profile_root=profile_root,
+                executor_identity=expected_executor,
+                browser_identity=expected_browser,
+            )
+            instance = runner.ProcessRecord(10, 1, os.fspath(app / "Contents/MacOS/App"), "A")
+            browser_process = runner.ProcessRecord(
+                12,
+                10,
+                f"{browser} --user-data-dir={profile}",
+                "B",
+            )
+            verified = subprocess.CompletedProcess(["codesign"], 0, stdout="", stderr="")
+            details = subprocess.CompletedProcess(
+                ["codesign"],
+                0,
+                stdout="",
+                stderr=(
+                    "Identifier=browser\nAuthority=Expected\nTeamIdentifier=TEAM\n"
+                    f"CDHash={expected_browser.cdhash}\n"
+                ),
+            )
+            with (
+                mock.patch.object(
+                    runner,
+                    "process_snapshot",
+                    return_value=[instance, browser_process],
+                ),
+                mock.patch.object(runner, "run_checked", side_effect=[verified, details]),
+                self.assertRaises(runner.AcceptanceFailed),
+            ):
+                runner.observe_instance_runtime(contract, instance)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX Profile boundary contract")
+    def test_runtime_observation_binds_profile_identity_across_open_file_audit(self) -> None:
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            app = root / "Formal Product.app"
+            browser = app / "Contents/Resources/embedded-browser/Browser"
+            executor = app / "Contents/Resources/local-executor/package/executor"
+            profile_root = root / "embedded-browser-profiles"
+            platform_root = profile_root / "douyin"
+            profile_id = "6d9221cb-e9dc-4359-9f6b-34f7fbc55316"
+            profile = platform_root / profile_id
+            profile.mkdir(parents=True, mode=0o700)
+            profile_root.chmod(0o700)
+            platform_root.chmod(0o700)
+            expected_executor = runner.CodeIdentity("executor", "Expected", "TEAM", "a" * 40)
+            expected_browser = runner.CodeIdentity("browser", "Expected", "TEAM", "b" * 40)
+            contract = runner.RuntimeContract(
+                app_path=app,
+                executor_path=executor,
+                browser_path=browser,
+                profile_root=profile_root,
+                executor_identity=expected_executor,
+                browser_identity=expected_browser,
+            )
+            instance = runner.ProcessRecord(10, 1, os.fspath(app / "Contents/MacOS/App"), "A")
+            browser_process = runner.ProcessRecord(
+                12,
+                10,
+                f"{browser} --user-data-dir={profile}",
+                "B",
+            )
+            verified = subprocess.CompletedProcess(["codesign"], 0, stdout="", stderr="")
+            details = subprocess.CompletedProcess(
+                ["codesign"],
+                0,
+                stdout="",
+                stderr=(
+                    "Identifier=browser\nAuthority=Expected\nTeamIdentifier=TEAM\n"
+                    f"CDHash={expected_browser.cdhash}\n"
+                ),
+            )
+
+            def checked(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+                if command[0] == "/usr/sbin/lsof":
+                    profile.rename(platform_root / "displaced")
+                    profile.mkdir(mode=0o700)
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout=f"p12\nfcwd\nn{profile}\n",
+                        stderr="",
+                    )
+                return verified if "--verify" in command else details
+
+            with (
+                mock.patch.object(
+                    runner,
+                    "process_snapshot",
+                    return_value=[instance, browser_process],
+                ),
+                mock.patch.object(runner, "run_checked", side_effect=checked),
+                self.assertRaises(runner.AcceptanceFailed),
+            ):
+                runner.observe_instance_runtime(contract, instance)
+
+    def test_deployment_profile_must_be_absolute_and_cannot_be_a_symlink(self) -> None:
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            executable = root / "Product"
+            profile = root / "deployment.json"
+            link = root / "profile-link.json"
+            deployment = {
+                "profileId": "demo-xuanbai",
+                "baseUrl": "https://at.xuanbai.tech",
+                "allowedHosts": ["at.xuanbai.tech"],
+            }
+            manifest = {
+                "version": runner.DEMO_PROFILE_VERSION,
+                "profile": runner.DEMO_PROFILE_KIND,
+                **deployment,
+            }
+            encoded = base64.urlsafe_b64encode(
+                json.dumps(
+                    manifest,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).rstrip(b"=")
+            executable.write_bytes(encoded)
+            profile.write_text(json.dumps(deployment), encoding="utf-8")
+            link.symlink_to(profile)
+
+            previous = Path.cwd()
+            os.chdir(root)
+            try:
+                with self.assertRaises(runner.AcceptanceFailed):
+                    runner.compiled_deployment_profile_root(
+                        executable,
+                        Path("deployment.json"),
+                    )
+            finally:
+                os.chdir(previous)
+            with self.assertRaises(runner.AcceptanceFailed):
+                runner.compiled_deployment_profile_root(executable, link)
+
+    def test_compiled_demo_profile_selects_the_nested_app_data_root(self) -> None:
+        runner = load_runner()
+        deployment = {
+            "profileId": "demo-xuanbai",
+            "baseUrl": "https://at.xuanbai.tech",
+            "allowedHosts": ["at.xuanbai.tech"],
+        }
+        manifest = {
+            "version": "customer-demo-profile.v1",
+            "profile": "demo",
+            **deployment,
+        }
+        encoded = base64.urlsafe_b64encode(
+            json.dumps(
+                manifest,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).rstrip(b"=")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            executable = root / "Product"
+            executable.write_bytes(b"prefix" + encoded + b"suffix")
+            profile = root / "deployment.json"
+            profile.write_text(json.dumps(deployment), encoding="utf-8")
+
+            self.assertEqual(
+                runner.compiled_deployment_profile_root(executable, profile),
+                runner.APP_DATA
+                / "profiles"
+                / "demo-xuanbai"
+                / "embedded-browser-profiles",
+            )
+
+            executable.write_bytes(b"different build")
+            with self.assertRaises(runner.AcceptanceFailed):
+                runner.compiled_deployment_profile_root(executable, profile)
+
+    def test_instance_scope_rejects_foreign_bundle_processes_without_owning_them(self) -> None:
+        runner = load_runner()
+        app = Path("/Applications/Formal Product.app")
+        root = runner.ProcessRecord(10, 1, os.fspath(app / "Contents/MacOS/Product"), "A")
+        own_child = runner.ProcessRecord(
+            11,
+            10,
+            os.fspath(app / "Contents/Resources/local-executor/executor"),
+            "B",
+        )
+        foreign_root = runner.ProcessRecord(
+            20,
+            1,
+            os.fspath(app / "Contents/MacOS/Product"),
+            "C",
+        )
+
+        with self.assertRaises(runner.AcceptanceFailed):
+            runner.instance_process_records(app, root, [root, own_child, foreign_root])
+        self.assertEqual(
+            runner.instance_process_records(
+                app,
+                root,
+                [root, own_child, foreign_root],
+                reject_foreign=False,
+            ),
+            [root, own_child],
+        )
+
+    def test_instance_scope_keeps_nonce_owned_reparented_browser_helpers(self) -> None:
+        runner = load_runner()
+        app = Path("/Applications/Formal Product.app")
+        root = runner.ProcessRecord(
+            10,
+            1,
+            os.fspath(app / "Contents/MacOS/Product"),
+            "A",
+            launch_nonce="owned-launch",
+        )
+        own_child = runner.ProcessRecord(
+            11,
+            10,
+            os.fspath(app / "Contents/Resources/local-executor/executor"),
+            "B",
+        )
+        reparented_helper = runner.ProcessRecord(
+            12,
+            1,
+            os.fspath(
+                app
+                / "Contents/Resources/embedded-browser/Browser.app/Contents/"
+                "Frameworks/Browser Framework.framework/Helpers/chrome_crashpad_handler"
+            ),
+            "C",
+        )
+
+        with mock.patch.object(
+            runner,
+            "process_has_launch_nonce",
+            side_effect=lambda record, nonce: (
+                record == reparented_helper and nonce == "owned-launch"
+            ),
+        ):
+            self.assertEqual(
+                runner.instance_process_records(
+                    app,
+                    root,
+                    [root, own_child, reparented_helper],
+                ),
+                [root, own_child, reparented_helper],
+            )
+
+    def test_instance_scope_ignores_nonce_helper_that_exits_during_sampling(self) -> None:
+        runner = load_runner()
+        app = Path("/Applications/Formal Product.app")
+        root = runner.ProcessRecord(
+            10,
+            1,
+            os.fspath(app / "Contents/MacOS/Product"),
+            "A",
+            launch_nonce="owned-launch",
+        )
+        reparented_helper = runner.ProcessRecord(
+            12,
+            1,
+            os.fspath(
+                app
+                / "Contents/Resources/embedded-browser/Browser.app/Contents/"
+                "Frameworks/Browser Framework.framework/Helpers/chrome_crashpad_handler"
+            ),
+            "C",
+        )
+
+        with (
+            mock.patch.object(runner, "process_has_launch_nonce", return_value=False),
+            mock.patch.object(runner, "process_snapshot", return_value=[root]),
+        ):
+            self.assertEqual(
+                runner.instance_process_records(app, root, [root, reparented_helper]),
+                [root],
+            )
+
+        with (
+            mock.patch.object(runner, "process_has_launch_nonce", return_value=False),
+            mock.patch.object(
+                runner,
+                "process_snapshot",
+                return_value=[root, reparented_helper],
+            ),
+            self.assertRaises(runner.AcceptanceFailed),
+        ):
+            runner.instance_process_records(app, root, [root, reparented_helper])
+
+    def test_instance_scope_rejects_reused_root_pid(self) -> None:
+        runner = load_runner()
+        app = Path("/Applications/Formal Product.app")
+        expected = runner.ProcessRecord(
+            10, 1, os.fspath(app / "Contents/MacOS/Product"), "original-start"
+        )
+        reused = runner.ProcessRecord(
+            10, 1, os.fspath(app / "Contents/MacOS/Product"), "later-start"
+        )
+        child = runner.ProcessRecord(
+            11,
+            10,
+            os.fspath(app / "Contents/Resources/local-executor/executor"),
+            "later-child",
+        )
+
+        self.assertEqual(
+            runner.instance_process_records(app, expected, [reused, child]),
+            [],
+        )
+
+    def test_only_packaged_executor_browser_and_owned_profile_complete_observation(self) -> None:
+        runner = load_runner()
+        app = Path("/Applications/Formal Product.app")
+        executor = app / "Contents/Resources/local-executor/package/automation-tool-executor"
+        browser = (
+            app
+            / "Contents/Resources/embedded-browser/chrome-mac-arm64"
+            / "Browser.app/Contents/MacOS/Browser"
+        )
+        contract = runner.RuntimeContract(
+            app_path=app,
+            executor_path=executor,
+            browser_path=browser,
+            profile_root=(
+                runner.APP_DATA
+                / "profiles"
+                / "demo-xuanbai"
+                / "embedded-browser-profiles"
+            ),
+        )
+        canonical_profile_id = "6d9221cb-e9dc-4359-9f6b-34f7fbc55316"
+        wrong = runner.observe_runtime(
+            contract,
+            [
+                runner.ProcessRecord(1, 0, os.fspath(executor)),
+                runner.ProcessRecord(
+                    2,
+                    1,
+                    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome "
+                    f"--user-data-dir={contract.profile_root / 'douyin' / canonical_profile_id}",
+                ),
+                runner.ProcessRecord(3, 1, f"{browser} --user-data-dir=/tmp/profile"),
+            ],
+        )
+        self.assertTrue(wrong.executor_observed)
+        self.assertTrue(wrong.embedded_browser_observed)
+        self.assertFalse(wrong.app_owned_profile_observed)
+        with self.assertRaises(runner.AcceptanceFailed):
+            runner.require_complete_runtime(wrong)
+
+        complete = wrong.merge(
+            runner.observe_runtime(
+                contract,
+                [
+                    runner.ProcessRecord(
+                        4,
+                        1,
+                        f"{browser} --user-data-dir="
+                        f"{contract.profile_root / 'douyin' / canonical_profile_id}",
+                    )
+                ],
+                (contract.profile_root / "douyin" / canonical_profile_id,),
+            )
+        )
+        runner.require_complete_runtime(complete)
+
+        nested_or_noncanonical = runner.observe_runtime(
+            contract,
+            [
+                runner.ProcessRecord(
+                    5,
+                    1,
+                    f"{browser} --user-data-dir="
+                    f"{contract.profile_root / 'douyin' / canonical_profile_id / 'nested'}",
+                ),
+                runner.ProcessRecord(
+                    6,
+                    1,
+                    f"{browser} --user-data-dir={contract.profile_root / 'douyin' / 'profile'}",
+                ),
+            ],
+        )
+        self.assertFalse(nested_or_noncanonical.app_owned_profile_observed)
+
+        duplicate_profile_arguments = runner.observe_runtime(
+            contract,
+            [
+                runner.ProcessRecord(
+                    7,
+                    1,
+                    f"{browser} --user-data-dir="
+                    f"{contract.profile_root / 'douyin' / canonical_profile_id} "
+                    "--user-data-dir=/Users/example/Library/Application Support/Google/Chrome",
+                )
+            ],
+        )
+        self.assertFalse(duplicate_profile_arguments.app_owned_profile_observed)
+
+
+class LaunchCleanupTests(unittest.TestCase):
+    def test_force_cleanup_kills_a_helper_discovered_after_the_first_kill(self) -> None:
+        runner = load_runner()
+        app = Path("/Applications/Formal Product.app")
+        root = runner.ProcessRecord(
+            10,
+            1,
+            os.fspath(app / "Contents/MacOS/Product"),
+            "started",
+        )
+        late = runner.ProcessRecord(
+            11,
+            1,
+            os.fspath(app / "Contents/Resources/late-helper"),
+            "late-started",
+        )
+
+        with (
+            mock.patch.object(
+                runner,
+                "owned_process_records",
+                side_effect=[[root], [root], [late], []],
+            ),
+            mock.patch.object(
+                runner,
+                "still_running",
+                side_effect=[[root], [], []],
+            ),
+            mock.patch.object(
+                runner.time,
+                "monotonic",
+                side_effect=[0.0, 9.0, 10.0, 10.0, 11.0],
+            ),
+            mock.patch.object(runner.time, "sleep"),
+            mock.patch.object(runner, "terminate_records") as terminate,
+        ):
+            runner.cleanup_owned_runtime(app, root)
+
+        self.assertEqual(
+            terminate.call_args_list,
+            [
+                mock.call([root], runner.signal.SIGTERM),
+                mock.call([root], runner.signal.SIGKILL),
+                mock.call([late], runner.signal.SIGKILL),
+            ],
+        )
+
+    def test_running_process_must_have_the_verified_release_cdhash(self) -> None:
+        runner = load_runner()
+        instance = runner.ProcessRecord(
+            10,
+            1,
+            "/Applications/Formal Product.app/Contents/MacOS/Product",
+            "started",
+        )
+        release = runner.VerifiedRelease(
+            app_identity=runner.AppIdentity(
+                bundle_identifier="com.aventador.automationtool",
+                version="0.1.0",
+                executable_path=Path(instance.command),
+            ),
+            runtime_contract=runner.RuntimeContract(
+                app_path=Path("/Applications/Formal Product.app"),
+                executor_path=Path("/Applications/Formal Product.app/Contents/Resources/executor"),
+                browser_path=Path("/Applications/Formal Product.app/Contents/Resources/browser"),
+                profile_root=Path("/tmp/profiles"),
+            ),
+            artifact=runner.ArtifactFacts(
+                authority="Developer ID Application: Expected",
+                team_id="EXPECTEDTEAM",
+                bundle_cdhash="a" * 40,
+                bundle_tree_sha256="b" * 64,
+                bundle_bytes=123,
+                executor_build_id="current",
+            ),
+            release_identity=runner.SignedReleaseIdentity(
+                source_git_commit="c" * 40,
+                source_tree_sha256="d" * 64,
+                executor_build_id="current",
+                target="macos-arm64",
+                architecture="aarch64",
+                deployment_profile_id="demo-xuanbai",
+            ),
+            profile_root=Path("/tmp/profiles"),
+        )
+        replacement = subprocess.CompletedProcess(
+            ["codesign"],
+            0,
+            stdout="",
+            stderr=(
+                "Identifier=com.aventador.automationtool\n"
+                "Authority=Developer ID Application: Expected\n"
+                "TeamIdentifier=EXPECTEDTEAM\n"
+                f"CDHash={'e' * 40}\n"
+            ),
+        )
+
+        with (
+            mock.patch.object(runner, "process_snapshot", return_value=[instance]),
+            mock.patch.object(runner, "run_checked", return_value=replacement),
+            self.assertRaises(runner.AcceptanceFailed),
+        ):
+            runner.verify_running_release_process(instance, release)
+
+        expected = subprocess.CompletedProcess(
+            ["codesign"],
+            0,
+            stdout="",
+            stderr=replacement.stderr.replace("e" * 40, "a" * 40),
+        )
+        with (
+            mock.patch.object(runner, "process_snapshot", return_value=[instance]),
+            mock.patch.object(runner, "run_checked", return_value=expected),
+        ):
+            runner.verify_running_release_process(instance, release)
+
+    def test_launch_open_interruption_reclaims_nonce_owned_processes(self) -> None:
+        runner = load_runner()
+        app = Path("/Applications/Formal Product.app")
+        executable = app / "Contents/MacOS/Product"
+        instance = runner.ProcessRecord(10, 1, os.fspath(executable), "started")
+
+        with (
+            mock.patch.object(runner.secrets, "token_urlsafe", return_value="launch-nonce"),
+            mock.patch.object(runner, "run_checked", side_effect=KeyboardInterrupt),
+            mock.patch.object(
+                runner,
+                "nonce_owned_process_records",
+                side_effect=[[instance], [], [], []],
+            ) as nonce_records,
+            mock.patch.object(runner, "cleanup_owned_runtime") as cleanup,
+            mock.patch.object(runner.time, "monotonic", side_effect=[0.0, 0.0, 46.0]),
+            mock.patch.object(runner.time, "sleep"),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            runner.launch_app(app, executable)
+
+        self.assertEqual(
+            nonce_records.call_args_list,
+            [mock.call(app, "launch-nonce")] * 4,
+        )
+        cleanup.assert_called_once_with(app, None, [instance])
+
+    def test_launch_interruption_waits_for_a_delayed_nonce_owned_process(self) -> None:
+        runner = load_runner()
+        app = Path("/Applications/Formal Product.app")
+        executable = app / "Contents/MacOS/Product"
+        instance = runner.ProcessRecord(10, 1, os.fspath(executable), "started")
+
+        with (
+            mock.patch.object(runner.secrets, "token_urlsafe", return_value="launch-nonce"),
+            mock.patch.object(runner, "run_checked", side_effect=KeyboardInterrupt),
+            mock.patch.object(
+                runner,
+                "nonce_owned_process_records",
+                side_effect=[[], [instance], [], [], []],
+            ) as nonce_records,
+            mock.patch.object(runner, "cleanup_owned_runtime") as cleanup,
+            mock.patch.object(runner.time, "monotonic", side_effect=[0.0, 0.0, 0.0, 46.0]),
+            mock.patch.object(runner.time, "sleep"),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            runner.launch_app(app, executable)
+
+        self.assertGreaterEqual(nonce_records.call_count, 3)
+        cleanup.assert_called_once_with(app, None, [instance])
+
+    def test_delayed_launch_cleanup_covers_startup_timeout_and_final_quiet_polls(self) -> None:
+        runner = load_runner()
+        app = Path("/Applications/Formal Product.app")
+        late = runner.ProcessRecord(
+            10,
+            1,
+            os.fspath(app / "Contents/MacOS/Product"),
+            "started",
+        )
+        self.assertGreaterEqual(
+            runner.LAUNCH_CLEANUP_DISCOVERY_SECONDS,
+            runner.WINDOW_TIMEOUT_SECONDS,
+        )
+        with (
+            mock.patch.object(runner.time, "monotonic", side_effect=[0.0, 46.0]),
+            mock.patch.object(
+                runner,
+                "nonce_owned_process_records",
+                side_effect=[[], [], [late], [], [], []],
+            ),
+            mock.patch.object(runner.time, "sleep"),
+            mock.patch.object(runner, "cleanup_owned_runtime") as cleanup,
+        ):
+            runner.cleanup_delayed_nonce_owned_runtime(app, "launch-nonce")
+
+        cleanup.assert_called_once_with(app, None, [late])
+
+    def test_nonce_scope_reclaims_reparented_descendant_after_root_disappears(
+        self,
+    ) -> None:
+        runner = load_runner()
+        app = Path("/Applications/Formal Product.app")
+        executable = app / "Contents/MacOS/Product"
+        instance = runner.ProcessRecord(
+            10,
+            1,
+            os.fspath(executable),
+            "started",
+            launch_nonce="launch-nonce",
+        )
+        orphan = runner.ProcessRecord(
+            11,
+            1,
+            os.fspath(app / "Contents/Resources/local-executor/package/executor"),
+            "child-started",
+        )
+
+        with (
+            mock.patch.object(runner, "process_snapshot", return_value=[orphan]),
+            mock.patch.object(runner, "process_has_launch_nonce", return_value=True),
+        ):
+            self.assertEqual(runner.owned_process_records(app, instance), [orphan])
+
+    def test_launch_cleans_the_identified_instance_when_accessibility_is_ambiguous(
+        self,
+    ) -> None:
+        runner = load_runner()
+        app = Path("/Applications/Formal Product.app")
+        executable = app / "Contents/MacOS/Product"
+        instance = runner.ProcessRecord(10, 1, os.fspath(executable), "started")
+
+        with (
+            mock.patch.object(runner, "run_checked"),
+            mock.patch.object(
+                runner,
+                "process_snapshot",
+                side_effect=[[instance], [instance]],
+            ),
+            mock.patch.object(runner, "bundle_process_ids", return_value={10, 20}),
+            mock.patch.object(runner, "process_has_launch_nonce", return_value=True),
+            mock.patch.object(runner, "cleanup_owned_runtime") as cleanup,
+            mock.patch.object(runner.time, "monotonic", side_effect=[0.0, 0.0]),
+            self.assertRaises(runner.AcceptanceFailed),
+        ):
+            runner.launch_app(app, executable)
+
+        cleanup.assert_called_once_with(app, instance)
+
+    def test_launch_cleans_the_identified_instance_when_operator_cancels(self) -> None:
+        runner = load_runner()
+        app = Path("/Applications/Formal Product.app")
+        executable = app / "Contents/MacOS/Product"
+        instance = runner.ProcessRecord(10, 1, os.fspath(executable), "started")
+
+        with (
+            mock.patch.object(runner, "run_checked"),
+            mock.patch.object(runner, "process_snapshot", return_value=[instance]),
+            mock.patch.object(runner, "process_has_launch_nonce", return_value=True),
+            mock.patch.object(runner, "bundle_process_ids", side_effect=KeyboardInterrupt),
+            mock.patch.object(runner, "cleanup_owned_runtime") as cleanup,
+            mock.patch.object(runner.time, "monotonic", side_effect=[0.0, 0.0]),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            runner.launch_app(app, executable)
+
+        cleanup.assert_called_once_with(app, instance)
+
+
+if __name__ == "__main__":
+    unittest.main()

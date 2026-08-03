@@ -16,23 +16,21 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from automation_tool.executor.browser_runtime import (
-    BrowserLaunchRequest,
-    BrowserRuntime,
-    BrowserRuntimeRejected,
-)
-from automation_tool.executor.diagnostics import ExecutorRecoveryDiagnostics
 from conftest import (
     create_private_profile_directory,
     process_ids_matching,
     terminate_process,
 )
 
-_STATE_PAGE_URL = "https://www.douyin.com/automation-tool-eb-15-state"
-_STATE_PAGE_BODY = (
-    "<!doctype html><title>eb-15</title>"
-    "<button id='takeover'>人工接管</button>"
+from automation_tool.executor.browser_runtime import (
+    BrowserLaunchRequest,
+    BrowserRuntime,
+    BrowserRuntimeRejected,
 )
+from automation_tool.executor.diagnostics import ExecutorRecoveryDiagnostics
+
+_STATE_PAGE_URL = "https://www.douyin.com/automation-tool-eb-15-state"
+_STATE_PAGE_BODY = "<!doctype html><title>eb-15</title><button id='takeover'>人工接管</button>"
 
 
 def _private_profile(tmp_path: Path, name: str = "profile") -> Path:
@@ -51,7 +49,7 @@ def _launch(executable: Path, profile: Path, *, headless: bool = True) -> Browse
 
 def _profile_process_ids(profile: Path) -> set[int]:
     """Every live process whose command line names this private profile."""
-    return process_ids_matching(str(profile))
+    return cast(set[int], process_ids_matching(str(profile)))
 
 
 def _await_no_processes(profile: Path, *, timeout: float = 15.0) -> set[int]:
@@ -67,9 +65,7 @@ def _open_state_page(runtime: BrowserRuntime) -> Any:
     page = cast(Any, runtime.primary_window().playwright_page)
     page.route(
         f"{_STATE_PAGE_URL}*",
-        lambda route: route.fulfill(
-            status=200, content_type="text/html", body=_STATE_PAGE_BODY
-        ),
+        lambda route: route.fulfill(status=200, content_type="text/html", body=_STATE_PAGE_BODY),
     )
     page.goto(_STATE_PAGE_URL, wait_until="domcontentloaded", timeout=30_000)
     return page
@@ -160,9 +156,7 @@ def test_diagnostics_stay_bounded_and_never_leak_private_paths(
         with contextlib.suppress(BrowserRuntimeRejected):
             crashed.close()
     emitted = output.getvalue()
-    assert emitted.strip().splitlines() == [
-        "executor.recovery browser_window_unavailable"
-    ], emitted
+    assert emitted.strip().splitlines() == ["executor.recovery browser_window_unavailable"], emitted
     assert str(profile) not in emitted
     assert str(staged_embedded_chromium) not in emitted
     assert str(Path.home()) not in emitted

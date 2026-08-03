@@ -24,6 +24,8 @@ is checked after.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from automation_tool.executor.motion_authoring.segment_concat import (
@@ -109,13 +111,13 @@ def test_an_empty_film_is_refused() -> None:
 # --- 执行层：真正调 ffmpeg，并且不相信它的退出码 -----------------------------
 
 
-def _stub(path, body: str):
+def _stub(path: Path, body: str) -> Path:
     path.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
     path.chmod(0o755)
     return path
 
 
-def test_the_join_is_measured_afterwards_not_trusted(tmp_path) -> None:
+def test_the_join_is_measured_afterwards_not_trusted(tmp_path: Path) -> None:
     """The silent failure this module exists for, expressed as a test.
 
     A stub ffmpeg that exits 0 and writes something, with a probe that reports a
@@ -151,7 +153,7 @@ def test_the_join_is_measured_afterwards_not_trusted(tmp_path) -> None:
     assert output.is_file(), "the fake ffmpeg must write the requested output"
 
 
-def test_a_concat_list_quotes_every_path_the_demuxer_reads(tmp_path) -> None:
+def test_a_concat_list_quotes_every_path_the_demuxer_reads(tmp_path: Path) -> None:
     """`-safe 0` accepts absolute paths; a single quote in one would end the entry."""
     listing = concat_listing([tmp_path / "a b.mp4", tmp_path / "c'd.mp4"])
 

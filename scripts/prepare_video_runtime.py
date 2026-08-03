@@ -32,37 +32,49 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
 from collections.abc import Sequence
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from process_diagnostics import builder_diagnostic  # noqa: E402
 from release_assembly import (  # noqa: E402
     MOTION_CATALOG_RESOURCES,
     VIDEO_RUNTIME_RESOURCES,
     _VideoResource,
 )
 from subtitle_font_assets import ensure_subtitle_fonts  # noqa: E402
-from process_diagnostics import builder_diagnostic  # noqa: E402
 from video_runtime_cache import cache_root, ensure_cached  # noqa: E402
 
 ASSET_RIGHTS_CONTRACT = ROOT / "contracts/quality/asset-rights-policy.v1.json"
 MEDIA_TOOLCHAIN_CONTRACT = ROOT / "contracts/video/ffmpeg-toolchain.v1.json"
 MOTION_WORKER_CONTRACT = ROOT / "contracts/quality/motion-video-worker-package.v1.json"
-MATERIAL_WORKER_CONTRACT = ROOT / "contracts/quality/material-video-worker-package.v1.json"
+MATERIAL_WORKER_CONTRACT = (
+    ROOT / "contracts/quality/material-video-worker-package.v1.json"
+)
+SILERO_VAD_CONTRACT = ROOT / "contracts/quality/silero-vad-runtime.v1.json"
+BAILIAN_MODEL_CATALOG = ROOT / "contracts/video/bailian-model-catalog.v1.json"
 OFFLINE_MOTION_LOCK = ROOT / "contracts/video/offline-motion-dependencies.v1.json"
 THIRD_PARTY_SOURCES_CONTRACT = ROOT / "contracts/quality/third-party-sources.v1.json"
 MEDIA_TOOLCHAIN_BUILDER = ROOT / "scripts/build_video_media_toolchain.sh"
-MEDIA_TOOLCHAIN_MANIFEST_WRITER = ROOT / "scripts/write_video_media_toolchain_manifest.py"
+MEDIA_TOOLCHAIN_MANIFEST_WRITER = (
+    ROOT / "scripts/write_video_media_toolchain_manifest.py"
+)
 MOTION_WORKER_BUILDER = ROOT / "scripts/build_motion_video_worker_candidate.py"
 MOTION_WORKER_SOURCE = ROOT / "workers/motion_composition/worker.mjs"
 MATERIAL_WORKER_BUILDER = ROOT / "scripts/build_material_video_worker_candidate.py"
 MATERIAL_WORKER_SOURCE = ROOT / "workers/material_montage"
+BACKEND_PACKAGE_SOURCE = ROOT / "backend/src/automation_tool"
+BACKEND_SOURCE_ROOT = ROOT / "backend/src"
+BACKEND_PROJECT = ROOT / "backend/pyproject.toml"
 SUBTITLE_FONT_ASSETS = ROOT / "scripts/subtitle_font_assets.py"
+SILERO_VAD_ASSETS = ROOT / "scripts/silero_vad_assets.py"
+WINDOWS_MSYS2_ROOT = Path("C:/msys64")
 
 # What each artifact is made of, in full. A cache key is a promise that nothing
 # outside this list can change the bytes, and the promise is only as good as the
@@ -94,14 +106,22 @@ MOTION_WORKER_INPUTS: tuple[Path, ...] = (
 
 MATERIAL_WORKER_INPUTS: tuple[Path, ...] = (
     MATERIAL_WORKER_CONTRACT,
+    SILERO_VAD_CONTRACT,
+    BAILIAN_MODEL_CATALOG,
     ASSET_RIGHTS_CONTRACT,
     # The package PyInstaller freezes, spec file included: this is the input
     # whose absence shipped a fixed Worker as its unfixed predecessor.
     MATERIAL_WORKER_SOURCE,
     MATERIAL_WORKER_BUILDER,
+    BACKEND_PACKAGE_SOURCE,
+    BACKEND_SOURCE_ROOT,
+    BACKEND_PROJECT,
+    ROOT / "contracts/quality",
+    ROOT / "contracts/video",
     # Imported by the spec; decides which font bytes land in the package and
     # under what name.
     SUBTITLE_FONT_ASSETS,
+    SILERO_VAD_ASSETS,
     # Stands in for `vendor/moneyprinterturbo`, whose dependency lock decides
     # every frozen distribution. The checkout is ~900 MB, far too large to
     # digest on each cache lookup, and this contract pins its exact commit --
@@ -148,15 +168,58 @@ def host_platform() -> str:
     )
 
 
+def media_toolchain_bash(*, platform: str) -> str:
+    if platform != "windows":
+        return "bash"
+
+    discovered = shutil.which("bash")
+    candidates = [WINDOWS_MSYS2_ROOT / "usr" / "bin" / "bash.exe"]
+    if discovered is not None:
+        candidates.insert(0, Path(discovered))
+    for candidate in candidates:
+        if candidate.is_file() and (candidate.parent / "pacman.exe").is_file():
+            return str(candidate)
+    raise VideoRuntimeUnavailable(
+        "MSYS2 MINGW64 is required to build the Windows media toolchain"
+    )
+
+
 def _build_media_toolchain(destination: Path, *, platform: str) -> None:
     target = MEDIA_TOOLCHAIN_TARGETS[platform]
+    bash = os.environ.get("AUTOMATION_TOOL_BASH") or media_toolchain_bash(
+        platform=platform
+    )
+    environment = None
+    if platform == "windows":
+        environment = os.environ.copy()
+        environment["MSYSTEM"] = "MINGW64"
+        environment["CHERE_INVOKING"] = "1"
+        shell_path = (
+            PureWindowsPath(bash)
+            if len(bash) >= 2 and bash[1] == ":"
+            else Path(bash)
+        )
+        if len(shell_path.parents) >= 3:
+            msys2_root = shell_path.parents[2]
+            environment["PATH"] = ";".join(
+                (
+                    str(msys2_root / "mingw64" / "bin"),
+                    str(msys2_root / "usr" / "bin"),
+                    environment.get("PATH", ""),
+                )
+            )
     # The builder creates the directory itself and refuses to reuse one.
     completed = subprocess.run(
-        ["bash", str(MEDIA_TOOLCHAIN_BUILDER), target, str(destination)],
+        [
+            bash,
+            str(MEDIA_TOOLCHAIN_BUILDER),
+            target,
+            str(destination),
+        ],
         cwd=ROOT,
         capture_output=True,
-        text=True,
         check=False,
+        env=environment,
     )
     if completed.returncode != 0:
         # Not `splitlines()[-8:]` on one stream. That is how the Windows
@@ -233,7 +296,9 @@ def prepare(
         ensure_cached(
             name="media-toolchain",
             contracts=MEDIA_TOOLCHAIN_INPUTS,
-            build=lambda destination: _build_media_toolchain(destination, platform=resolved),
+            build=lambda destination: _build_media_toolchain(
+                destination, platform=resolved
+            ),
             root=staging,
         )
     if "motion-video-worker" in wanted:
@@ -330,7 +395,10 @@ def main() -> int:
         "--only",
         action="append",
         metavar="RESOURCE",
-        help=("restrict to one resource; repeatable. One of: " + ", ".join(INSTALLABLE_NAMES)),
+        help=(
+            "restrict to one resource; repeatable. One of: "
+            + ", ".join(INSTALLABLE_NAMES)
+        ),
     )
     parser.add_argument(
         "--install-into",
@@ -343,7 +411,9 @@ def main() -> int:
         ),
     )
     arguments = parser.parse_args()
-    staging = prepare(platform=arguments.platform, root=arguments.root, only=arguments.only)
+    staging = prepare(
+        platform=arguments.platform, root=arguments.root, only=arguments.only
+    )
     if arguments.install_into is not None:
         installed = install(
             staging=staging,

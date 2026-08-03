@@ -1,17 +1,19 @@
-"""真探针：包内 Chromium 里量标记槽——一次会话、顺序加载、末帧读数。
+"""真探针: 包内 Chromium 里量标记槽——一次会话、顺序加载、末帧读数。
 
-判据与 PC-17 的预算探针同源：先 seek 到零件自己时间轴的末帧再量（载入瞬间量到的是
-动画飞行中的一帧，量出来的预算描述的是没人看见的画面）；读数按 data-motion-slot
-标记找槽。这里只验编排：真正的像素读数由 SLOT_PROBE_JS 在浏览器里产生。
+判据与 PC-17 的预算探针同源: 先 seek 到零件自己时间轴的末帧再量(载入瞬间量到的是
+动画飞行中的一帧, 量出来的预算描述的是没人看见的画面); 读数按 data-motion-slot
+标记找槽。这里只验编排: 真正的像素读数由 SLOT_PROBE_JS 在浏览器里产生。
 """
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from typing import cast
 
 import pytest
 
-from automation_tool.executor.browser_runtime import BrowserRuntime
+from automation_tool.executor.browser_runtime import BrowserRuntime, _Playwright
 from automation_tool.executor.motion_authoring.slot_overflow_probe import (
     SLOT_PROBE_JS,
     ProbeReading,
@@ -122,7 +124,7 @@ def _fixture(
     probe = PackagedSlotProbe(
         browser_executable=executable,
         profile_directory=workspace / SLOT_PROBE_PROFILE_DIRECTORY,
-        runtime=BrowserRuntime(lambda: playwright),
+        runtime=BrowserRuntime(lambda: cast(_Playwright, playwright)),
     )
     return probe, page, context, chromium, playwright, workspace
 
@@ -140,9 +142,7 @@ def test_every_document_is_measured_by_one_headless_browser_session(
     tmp_path: Path,
 ) -> None:
     reading = {"12": [205, 347, 35, 32]}
-    probe, page, context, chromium, playwright, workspace = _fixture(
-        tmp_path, [reading, reading]
-    )
+    probe, page, context, chromium, playwright, workspace = _fixture(tmp_path, [reading, reading])
     first, second = _documents(tmp_path, 2)
 
     results = probe((first, second))
@@ -150,13 +150,13 @@ def test_every_document_is_measured_by_one_headless_browser_session(
     # 一次启动、无头、私有 Profile 建在工作区下——不是每份文档一个浏览器。
     assert len(chromium.calls) == 1
     assert chromium.calls[0]["headless"] is True
-    assert chromium.calls[0]["user_data_dir"] == (
-        workspace / SLOT_PROBE_PROFILE_DIRECTORY
-    ).resolve()
+    assert (
+        chromium.calls[0]["user_data_dir"] == (workspace / SLOT_PROBE_PROFILE_DIRECTORY).resolve()
+    )
     assert page.navigations == [first.resolve().as_uri(), second.resolve().as_uri()]
     expected = ProbeReading(slots={12: (205, 347, 35, 32)}, stage=(1920, 1080))
     assert results == [expected, expected]
-    # 会话收尾：上下文与驱动都停了。
+    # 会话收尾: 上下文与驱动都停了。
     assert context.close_calls == 1
     assert playwright.stop_calls == 1
 
@@ -168,7 +168,7 @@ def test_the_timeline_is_sought_to_its_end_before_each_reading(tmp_path: Path) -
 
     probe((document,))
 
-    # 每份文档两次 evaluate：先 seek 后量，顺序不可颠倒。
+    # 每份文档两次 evaluate: 先 seek 后量, 顺序不可颠倒。
     assert len(page.evaluations) == 2
     assert "seek" in page.evaluations[0]
     assert page.evaluations[1] == SLOT_PROBE_JS
@@ -192,8 +192,44 @@ def test_a_failing_page_still_stops_the_browser_and_driver(tmp_path: Path) -> No
     page.fail_evaluate = True
     (document,) = _documents(tmp_path, 1)
 
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError, match="private page failure"):
         probe((document,))
 
     assert context.close_calls == 1
     assert playwright.stop_calls == 1
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows extended-path boundary")
+def test_windows_verbatim_paths_are_native_before_playwright_receives_them(
+    tmp_path: Path,
+) -> None:
+    executable = tmp_path / "chromium.exe"
+    executable.write_bytes(b"browser")
+    workspace = tmp_path / "job"
+    workspace.mkdir()
+    document = tmp_path / "document.html"
+    document.write_text("<html></html>", encoding="utf-8")
+    page = FakePage([{"12": [205, 347, 35, 32]}])
+    context = FakeContext(page)
+    chromium = FakeChromium(context)
+    playwright = FakePlaywright(chromium)
+
+    def verbatim(path: Path) -> Path:
+        return Path(rf"\\?\{path.resolve()}")
+
+    probe = PackagedSlotProbe(
+        browser_executable=verbatim(executable),
+        profile_directory=verbatim(workspace / SLOT_PROBE_PROFILE_DIRECTORY),
+        runtime=BrowserRuntime(lambda: cast(_Playwright, playwright)),
+    )
+
+    probe((verbatim(document),))
+
+    assert chromium.calls == [
+        {
+            "user_data_dir": (workspace / SLOT_PROBE_PROFILE_DIRECTORY).resolve(),
+            "executable_path": executable.resolve(),
+            "headless": True,
+        }
+    ]
+    assert page.navigations == [document.resolve().as_uri()]

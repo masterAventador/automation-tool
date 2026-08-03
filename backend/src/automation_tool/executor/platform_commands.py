@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import threading
 import time
-from hmac import compare_digest
 from collections.abc import Callable
 from datetime import timedelta
+from hmac import compare_digest
 from pathlib import Path
 from queue import Queue
 from types import MappingProxyType
@@ -14,6 +14,7 @@ from typing import Annotated, BinaryIO, Final, Literal, Protocol, TextIO, cast, 
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from automation_tool.executor.action_gate import LocalActionHardPolicy
 from automation_tool.executor.authentication import (
     LocalSessionAuthenticationRejected,
     LocalSessionAuthenticator,
@@ -32,6 +33,11 @@ from automation_tool.executor.browser_surface_lease import (
     BrowserSurfaceLeaseManager,
     SurfaceLeaseRejected,
 )
+from automation_tool.executor.browser_use_safety import (
+    SideEffectApproval,
+    SideEffectConfirmationGate,
+)
+from automation_tool.executor.ledger import ExecutorLedger
 from automation_tool.executor.rpa.douyin.login import (
     DouyinQrLoginFlow,
     DouyinQrLoginState,
@@ -40,12 +46,6 @@ from automation_tool.executor.rpa.douyin.publish_artifact import (
     DouyinPublishArtifactRejected,
     open_publish_artifact,
 )
-from automation_tool.executor.action_gate import LocalActionHardPolicy
-from automation_tool.executor.browser_use_safety import (
-    SideEffectApproval,
-    SideEffectConfirmationGate,
-)
-from automation_tool.executor.ledger import ExecutorLedger
 from automation_tool.executor.rpa.douyin.publish_preflight import (
     DOUYIN_PUBLISH_PREFLIGHT_FLOW_VERSION,
     DouyinPublishPreflight,
@@ -150,9 +150,7 @@ class PlatformCommand(BaseModel):
             # that could contradict what was filled and confirmed.
             if self.publish_job_id is None or self.confirmation_id is None:
                 raise ValueError("dispatch command requires a job and a confirmation")
-            if paths != (None, None, None) or any(
-                value is not None for value in content_fields
-            ):
+            if paths != (None, None, None) or any(value is not None for value in content_fields):
                 raise ValueError("dispatch command must not restate publish content")
             return self
         if self.confirmation_id is not None:
@@ -163,9 +161,7 @@ class PlatformCommand(BaseModel):
             ):
                 raise ValueError("publish command requires browser identity and content")
             return self
-        if self.publish_job_id is not None or any(
-            value is not None for value in content_fields
-        ):
+        if self.publish_job_id is not None or any(value is not None for value in content_fields):
             raise ValueError("only the publish command carries publish content")
         if self.command_type in {"douyin.logout.complete", DOUYIN_PUBLISH_RELEASE_COMMAND}:
             if paths != (None, None, None):
@@ -567,8 +563,7 @@ class DouyinPublishPreflightCommandOperation:
                 and not isinstance(surface_lease, BrowserSurfaceLeaseManager)
             )
             or (
-                publish_policy is not None
-                and not isinstance(publish_policy, LocalActionHardPolicy)
+                publish_policy is not None and not isinstance(publish_policy, LocalActionHardPolicy)
             )
         ):
             raise PlatformCommandRejected
@@ -1071,11 +1066,11 @@ def write_platform_command_result(
 __all__ = [
     "DEFAULT_PUBLISH_HARD_POLICY",
     "DOUYIN_PUBLISH_DISPATCH_COMMAND",
-    "PUBLISH_DISPATCH_RESULT_FOR_STATE",
     "DOUYIN_PUBLISH_PREFLIGHT_COMMAND",
     "DOUYIN_PUBLISH_RELEASE_COMMAND",
     "DOUYIN_QR_LOGIN_FLOW_VERSION",
     "MAX_PLATFORM_COMMAND_BYTES",
+    "PUBLISH_DISPATCH_RESULT_FOR_STATE",
     "PUBLISH_RELEASED_STATE",
     "ApprovalPresentingOperation",
     "BrowserSurfaceOwningOperation",

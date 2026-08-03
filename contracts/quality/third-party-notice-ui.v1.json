@@ -98,6 +98,45 @@
       "upstreamSourceUrl": null
     },
     {
+      "id": "onnxruntime",
+      "name": "ONNX Runtime",
+      "version": "1.23.2",
+      "license": "MIT",
+      "copyleft": false,
+      "copyright": null,
+      "licenseTextId": null,
+      "packagedNoticePath": "local-executor/package/_internal/onnxruntime/LICENSE",
+      "noticeChannelId": null,
+      "packagedSourcePaths": [],
+      "upstreamSourceUrl": null
+    },
+    {
+      "id": "silero-vad-model",
+      "name": "Silero VAD model",
+      "version": "v6.2.1",
+      "license": "MIT",
+      "copyleft": false,
+      "copyright": null,
+      "licenseTextId": null,
+      "packagedNoticePath": "local-executor/package/_internal/speech/silero-vad/SILERO-VAD-LICENSE.txt",
+      "noticeChannelId": null,
+      "packagedSourcePaths": [],
+      "upstreamSourceUrl": null
+    },
+    {
+      "id": "plangothic-fonts",
+      "name": "Plangothic P1/P2",
+      "version": "V2.9.5795",
+      "license": "OFL-1.1",
+      "copyleft": false,
+      "copyright": "Copyright (c) 2024 by Fitzgerald P. Köeingsegg. All rights reserved.",
+      "licenseTextId": "ofl-1.1",
+      "packagedNoticePath": "material-video-worker/package/_internal/upstream/resource/fonts/Plangothic-LICENSE-OFL.txt",
+      "noticeChannelId": null,
+      "packagedSourcePaths": [],
+      "upstreamSourceUrl": "https://github.com/Fitzgerald-Porthmouth-Koenigsegg/Plangothic_Project"
+    },
+    {
       "id": "subtitle-fonts",
       "name": "Noto Sans CJK SC",
       "version": "Sans2.004",
@@ -140,7 +179,7 @@
   "assetRights": {
     "deniedByDefault": true,
     "sharedRequiredFieldCount": 12,
-    "registeredEntryCount": 4,
+    "registeredEntryCount": 7,
     "categories": [
       {
         "id": "codec_binary",
@@ -157,6 +196,10 @@
       {
         "id": "map_3d",
         "requiredFieldCount": 6
+      },
+      {
+        "id": "ml_model",
+        "requiredFieldCount": 8
       },
       {
         "id": "music_sfx",

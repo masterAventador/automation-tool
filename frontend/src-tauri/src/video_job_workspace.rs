@@ -42,7 +42,6 @@ const MAX_RETENTION_SECONDS: u64 = 365 * 24 * 60 * 60;
 const MAX_MEDIA_TYPE_BYTES: usize = 192;
 const MAX_ROLE_BYTES: usize = 64;
 const MAX_FILE_NAME_BYTES: usize = 128;
-const MAX_EDITING_INPUTS: usize = 100;
 const COPY_BUFFER_BYTES: usize = 1024 * 1024;
 /// The largest finished film the in-App player will be handed. It is buffered
 /// whole and base64 encoded, so a bound belongs here rather than in whichever
@@ -311,48 +310,6 @@ pub struct StagedPublishArtifact {
     size_bytes: u64,
 }
 
-#[derive(Clone, Eq, PartialEq)]
-pub struct StagedEditingArtifact {
-    path: PathBuf,
-    artifact_id: Uuid,
-    sha256: String,
-    size_bytes: u64,
-    extension: &'static str,
-}
-
-impl StagedEditingArtifact {
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    pub const fn artifact_id(&self) -> Uuid {
-        self.artifact_id
-    }
-
-    pub fn sha256(&self) -> &str {
-        &self.sha256
-    }
-
-    pub const fn size_bytes(&self) -> u64 {
-        self.size_bytes
-    }
-
-    pub const fn extension(&self) -> &'static str {
-        self.extension
-    }
-}
-
-impl fmt::Debug for StagedEditingArtifact {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("StagedEditingArtifact")
-            .field("artifact_id", &self.artifact_id)
-            .field("size_bytes", &self.size_bytes)
-            .field("extension", &self.extension)
-            .finish_non_exhaustive()
-    }
-}
-
 impl StagedPublishArtifact {
     pub fn path(&self) -> &Path {
         &self.path
@@ -518,176 +475,6 @@ impl VideoJobWorkspaceStore {
         Ok(workspace.directory.join(WORK_DIRECTORY))
     }
 
-    pub fn worker_checkpoint_directory(
-        &self,
-        workspace: &VideoJobWorkspace,
-    ) -> Result<PathBuf, VideoWorkspaceError> {
-        self.revalidate_workspace(workspace)?;
-        Ok(workspace.directory.join(CHECKPOINTS_DIRECTORY))
-    }
-
-    pub fn stage_editing_artifacts(
-        &self,
-        workspace: &VideoJobWorkspace,
-        artifact_ids: &[Uuid],
-    ) -> Result<Vec<StagedEditingArtifact>, VideoWorkspaceError> {
-        self.revalidate_workspace(workspace)?;
-        self.revalidate_roots()?;
-        if artifact_ids.is_empty()
-            || artifact_ids.len() > MAX_EDITING_INPUTS
-            || artifact_ids.iter().any(|value| !valid_uuid_v4(*value))
-            || artifact_ids
-                .iter()
-                .collect::<std::collections::HashSet<_>>()
-                .len()
-                != artifact_ids.len()
-        {
-            return Err(configuration_invalid());
-        }
-        let input_directory = workspace.directory.join(WORK_DIRECTORY);
-        if fs::read_dir(&input_directory)
-            .map_err(|_| storage_unavailable())?
-            .next()
-            .is_some()
-        {
-            return Err(path_rejected());
-        }
-        let result = (|| {
-            let mut staged = Vec::with_capacity(artifact_ids.len());
-            for artifact_id in artifact_ids {
-                let record = self.load_artifact_record(*artifact_id)?;
-                let extension =
-                    editing_extension(&record.media_type).ok_or_else(configuration_invalid)?;
-                let source = self.artifact_directory(*artifact_id).join(ARTIFACT_PAYLOAD);
-                let source_metadata =
-                    safe_regular_file_metadata(&source)?.ok_or_else(storage_unavailable)?;
-                ensure_free_space(&input_directory, source_metadata.len(), self.policy)?;
-                let destination =
-                    input_directory.join(format!("{}{extension}", artifact_id.hyphenated()));
-                let (size_bytes, sha256) = copy_stable_file(
-                    &source,
-                    &destination,
-                    source_metadata,
-                    self.policy.maximum_artifact_bytes,
-                )?;
-                if size_bytes != record.size_bytes || sha256 != record.sha256 {
-                    return Err(storage_unavailable());
-                }
-                staged.push(StagedEditingArtifact {
-                    path: destination,
-                    artifact_id: *artifact_id,
-                    sha256,
-                    size_bytes,
-                    extension,
-                });
-            }
-            if workspace_usage(&workspace.directory)? > self.policy.maximum_workspace_bytes {
-                return Err(quota_exceeded());
-            }
-            sync_directory(&input_directory)?;
-            Ok(staged)
-        })();
-        if result.is_err() {
-            if let Ok(entries) = fs::read_dir(&input_directory) {
-                for entry in entries.flatten() {
-                    if safe_regular_file_metadata(&entry.path())
-                        .ok()
-                        .flatten()
-                        .is_some()
-                    {
-                        let _ = fs::remove_file(entry.path());
-                    }
-                }
-            }
-            let _ = sync_directory(&input_directory);
-        }
-        result
-    }
-
-    pub fn reopen_staged_editing_artifacts(
-        &self,
-        workspace: &VideoJobWorkspace,
-        artifact_ids: &[Uuid],
-    ) -> Result<Vec<StagedEditingArtifact>, VideoWorkspaceError> {
-        self.revalidate_workspace(workspace)?;
-        self.revalidate_roots()?;
-        if artifact_ids.is_empty()
-            || artifact_ids.len() > MAX_EDITING_INPUTS
-            || artifact_ids.iter().any(|value| !valid_uuid_v4(*value))
-            || artifact_ids
-                .iter()
-                .collect::<std::collections::HashSet<_>>()
-                .len()
-                != artifact_ids.len()
-        {
-            return Err(configuration_invalid());
-        }
-        let input_directory = workspace.directory.join(WORK_DIRECTORY);
-        let mut expected_names = std::collections::HashSet::new();
-        let mut staged = Vec::with_capacity(artifact_ids.len());
-        for artifact_id in artifact_ids {
-            let record = self.load_artifact_record(*artifact_id)?;
-            let extension =
-                editing_extension(&record.media_type).ok_or_else(configuration_invalid)?;
-            let file_name = format!("{}{extension}", artifact_id.hyphenated());
-            expected_names.insert(file_name.clone());
-            let path = input_directory.join(&file_name);
-            let before = safe_regular_file_metadata(&path)?.ok_or_else(storage_unavailable)?;
-            if before.len() != record.size_bytes {
-                return Err(storage_unavailable());
-            }
-            let mut file = open_read_no_follow(&path)?;
-            let opened = file.metadata().map_err(|_| storage_unavailable())?;
-            if !same_file(&before, &opened) || opened.len() != record.size_bytes {
-                return Err(storage_unavailable());
-            }
-            let mut hasher = Sha256::new();
-            let mut total = 0_u64;
-            let mut buffer = vec![0_u8; COPY_BUFFER_BYTES];
-            loop {
-                let read = file.read(&mut buffer).map_err(|_| storage_unavailable())?;
-                if read == 0 {
-                    break;
-                }
-                total = total
-                    .checked_add(read as u64)
-                    .ok_or_else(storage_unavailable)?;
-                if total > record.size_bytes {
-                    return Err(storage_unavailable());
-                }
-                hasher.update(&buffer[..read]);
-            }
-            let after = fs::symlink_metadata(&path).map_err(|_| storage_unavailable())?;
-            if total != record.size_bytes
-                || !same_file(&before, &after)
-                || lower_hex(&hasher.finalize()) != record.sha256
-            {
-                return Err(storage_unavailable());
-            }
-            staged.push(StagedEditingArtifact {
-                path,
-                artifact_id: *artifact_id,
-                sha256: record.sha256,
-                size_bytes: record.size_bytes,
-                extension,
-            });
-        }
-        let mut actual_names = std::collections::HashSet::new();
-        for entry in fs::read_dir(&input_directory).map_err(|_| storage_unavailable())? {
-            let entry = entry.map_err(|_| storage_unavailable())?;
-            safe_regular_file_metadata(&entry.path())?.ok_or_else(path_rejected)?;
-            let name = entry
-                .file_name()
-                .into_string()
-                .map_err(|_| path_rejected())?;
-            actual_names.insert(name);
-        }
-        if actual_names != expected_names {
-            return Err(path_rejected());
-        }
-        Ok(staged)
-    }
-
     pub fn save_checkpoint(
         &self,
         workspace: &VideoJobWorkspace,
@@ -740,7 +527,7 @@ impl VideoJobWorkspaceStore {
         if metadata.len() == 0 || metadata.len() > MAX_CHECKPOINT_BYTES {
             return Err(storage_unavailable());
         }
-        read_bounded_file(&path, metadata.len())
+        read_private_checkpoint(&path, metadata)
     }
 
     pub fn import_output(
@@ -750,9 +537,28 @@ impl VideoJobWorkspaceStore {
         media_type: &str,
         role: &str,
     ) -> Result<VideoArtifactRecord, VideoWorkspaceError> {
+        self.import_output_with_id(workspace, generate_uuid_v4()?, file_name, media_type, role)
+    }
+
+    /// Import a Worker-authenticated output under the identifier its terminal
+    /// event already committed to. The same validation and atomic copy used by
+    /// ordinary imports still applies; only UUID generation moves across the
+    /// authenticated process boundary.
+    pub fn import_output_with_id(
+        &self,
+        workspace: &VideoJobWorkspace,
+        artifact_id: Uuid,
+        file_name: &str,
+        media_type: &str,
+        role: &str,
+    ) -> Result<VideoArtifactRecord, VideoWorkspaceError> {
         self.revalidate_workspace(workspace)?;
         self.revalidate_roots()?;
-        if !valid_file_name(file_name) || !valid_media_type(media_type) || !valid_role(role) {
+        if !valid_uuid_v4(artifact_id)
+            || !valid_file_name(file_name)
+            || !valid_media_type(media_type)
+            || !valid_role(role)
+        {
             return Err(path_rejected());
         }
         let source = workspace.directory.join(OUTPUTS_DIRECTORY).join(file_name);
@@ -769,7 +575,11 @@ impl VideoJobWorkspaceStore {
             source_metadata.len(),
             self.policy,
         )?;
-        let artifact_id = generate_uuid_v4()?;
+        if fs::symlink_metadata(self.artifact_directory(artifact_id)).is_ok() {
+            return Err(VideoWorkspaceError::new(
+                VideoWorkspaceErrorCode::AlreadyExists,
+            ));
+        }
         let sequence = TEMPORARY_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let temporary = self.artifacts_directory.join(format!(
             ".import-{}-{}-{sequence}",
@@ -1232,21 +1042,6 @@ impl VideoJobWorkspaceStore {
     }
 }
 
-fn editing_extension(media_type: &str) -> Option<&'static str> {
-    match media_type {
-        "application/x-subrip" => Some(".srt"),
-        "audio/aac" => Some(".aac"),
-        "audio/mp4" => Some(".m4a"),
-        "audio/mpeg" => Some(".mp3"),
-        "audio/wav" | "audio/x-wav" => Some(".wav"),
-        "image/jpeg" => Some(".jpg"),
-        "image/png" => Some(".png"),
-        "video/mp4" => Some(".mp4"),
-        "video/quicktime" => Some(".mov"),
-        _ => None,
-    }
-}
-
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct DirectoryIdentity {
     #[cfg(unix)]
@@ -1468,6 +1263,44 @@ fn read_bounded_file(path: &Path, expected_bytes: u64) -> Result<Vec<u8>, VideoW
         return Err(storage_unavailable());
     }
     Ok(payload)
+}
+
+fn read_private_checkpoint(
+    path: &Path,
+    expected: fs::Metadata,
+) -> Result<Vec<u8>, VideoWorkspaceError> {
+    require_private_file_metadata(&expected)?;
+    let expected_bytes = expected.len();
+    let capacity = usize::try_from(expected_bytes).map_err(|_| storage_unavailable())?;
+    let mut payload = Vec::with_capacity(capacity);
+    let file = open_read_no_follow(path)?;
+    let opened = file.metadata().map_err(|_| storage_unavailable())?;
+    if !same_file(&expected, &opened) {
+        return Err(storage_unavailable());
+    }
+    require_private_file_metadata(&opened)?;
+    file.take(expected_bytes.saturating_add(1))
+        .read_to_end(&mut payload)
+        .map_err(|_| storage_unavailable())?;
+    if payload.len() as u64 != expected_bytes {
+        return Err(storage_unavailable());
+    }
+    Ok(payload)
+}
+
+fn require_private_file_metadata(metadata: &fs::Metadata) -> Result<(), VideoWorkspaceError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o7777 != 0o600 {
+            return Err(storage_unavailable());
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+    }
+    Ok(())
 }
 
 fn ensure_free_space(

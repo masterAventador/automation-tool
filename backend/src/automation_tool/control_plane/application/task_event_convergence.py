@@ -281,9 +281,10 @@ def _action_plan(
 
     progress_percent: int | None = None
     if message_type == "step.progress":
-        progress_percent = payload.get("progress_percent")  # type: ignore[assignment]
-        if type(progress_percent) is not int or not 0 <= progress_percent <= 100:
+        raw_progress = payload.get("progress_percent")
+        if type(raw_progress) is not int or not 0 <= raw_progress <= 100:
             raise TaskEventConvergenceRejected
+        progress_percent = raw_progress
     if message_type == "step.started":
         return action_id, ActionStatus.DISPATCHED if action_id else None, None, None, None
     if message_type == "step.completed":

@@ -87,7 +87,7 @@ def test_stored_password_hash_rejects_untrusted_or_unversioned_values(
 ) -> None:
     with pytest.raises(InvalidAccountModel):
         PasswordHash(
-            encoded=encoded,  # type: ignore[arg-type]
-            pepper_version=pepper_version,  # type: ignore[arg-type]
-            version=version,  # type: ignore[arg-type]
+            encoded=encoded,
+            pepper_version=pepper_version,
+            version=version,
         )

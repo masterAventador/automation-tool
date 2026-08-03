@@ -42,10 +42,8 @@ CATALOG_PATH = REPOSITORY_ROOT / "contracts/quality/motion-catalog.v1.json"
 def part_html(name: str) -> str:
     catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
     item = next(entry for entry in catalog["items"] if entry["name"] == name)
-    document = next(
-        record for record in item["files"] if record["path"].endswith(".html")
-    )
-    return (VENDOR_ROOT / item["path"] / document["path"]).read_text(encoding="utf-8")
+    document = next(record for record in item["files"] if record["path"].endswith(".html"))
+    return str((VENDOR_ROOT / item["path"] / document["path"]).read_text(encoding="utf-8"))
 
 
 def test_the_index_is_dense_and_ordered() -> None:

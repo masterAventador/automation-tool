@@ -182,7 +182,7 @@ describe("MotionPartsCatalog when the creation path consumes part selections", (
       "这些指定只用于下一次“一句话自动制作”",
     );
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "37 项可以指定",
+      "134 项都可以指定",
     );
 
     const overrides = screen.getByRole("region", { name: "分镜零件选用" });
@@ -205,14 +205,19 @@ describe("MotionPartsCatalog when the creation path consumes part selections", (
     expect(onChange).toHaveBeenCalledWith([["data-chart"], [], []]);
   });
 
-  it("keeps unassemblable catalog entries browsable without offering a dead action", () => {
-    renderCatalog([[], [], []], vi.fn(), "applies_to_output");
+  it("lets a visual-only catalog entry override the active shot", () => {
+    const onChange = renderCatalog([[], [], []], vi.fn(), "applies_to_output");
     const browser = screen.getByRole("region", { name: "动效零件目录" });
     const card = within(browser).getByText("重砸落字字幕").closest("li");
-    expect(
-      within(card as HTMLElement).getByRole("button", {
-        name: "当前仅供浏览",
-      }),
-    ).toBeDisabled();
+    const add = within(card as HTMLElement).getByRole("button", {
+      name: "指定给第 1 镜头",
+    });
+    expect(add).toBeEnabled();
+    fireEvent.click(add);
+    expect(onChange).toHaveBeenCalledWith([
+      ["caption-kinetic-slam"],
+      [],
+      [],
+    ]);
   });
 });

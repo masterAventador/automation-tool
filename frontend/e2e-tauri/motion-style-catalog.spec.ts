@@ -61,6 +61,32 @@ describe("BM-06/BM-07 production App motion style catalog acceptance", () => {
     await studio.$("input[aria-label='品牌主色']").setValue("#1234ab");
     await studio.$("input[aria-label='品牌辅助色']").setValue("#f2eadb");
     await studio.$("input[aria-label='品牌字体']").setValue("Acme Sans");
+    const fontBytes = readFileSync(
+      resolve(
+        process.cwd(),
+        "../vendor/hyperframes/skills/talking-head-recut/assets/fonts/Inter-400-latin.woff2",
+      ),
+    ).toString("base64");
+    await browser.execute(
+      (encodedFont: string) => {
+        const input = document.querySelector<HTMLInputElement>(
+          "input[aria-label='品牌字体文件']",
+        );
+        if (input === null) throw new Error("brand font input is missing");
+        const raw = globalThis.atob(encodedFont);
+        const bytes = Uint8Array.from(raw, (character) => character.charCodeAt(0));
+        const transfer = new DataTransfer();
+        transfer.items.add(
+          new File([bytes], "AcmeSans-Regular.woff2", { type: "font/woff2" }),
+        );
+        Object.defineProperty(input, "files", {
+          configurable: true,
+          value: transfer.files,
+        });
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      },
+      fontBytes,
+    );
     const logoBytes =
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
     await browser.execute(
@@ -88,8 +114,40 @@ describe("BM-06/BM-07 production App motion style catalog acceptance", () => {
       expect.stringContaining("华东区和续费业务共同推动增长。"),
     );
     await expect(actualPreview).toHaveText(expect.stringContaining("Acme Sans"));
+    await expect(actualPreview).toHaveText(
+      expect.stringContaining("AcmeSans-Regular.woff2"),
+    );
     await expect(actualPreview).toHaveText(expect.stringContaining("avatar.png"));
     await expect(actualPreview.$("img[alt='品牌 Logo 预览']")).toBeDisplayed();
+    await browser.waitUntil(
+      () => browser.execute(async () => {
+        await document.fonts.ready;
+        let loaded = false;
+        document.fonts.forEach((candidate) => {
+          const raw = candidate.family;
+          const family =
+            raw.length >= 2 &&
+            (raw[0] === '"' || raw[0] === "'") &&
+            raw[raw.length - 1] === raw[0]
+              ? raw.slice(1, -1)
+              : raw;
+          if (family === "Acme Sans" && candidate.status === "loaded") loaded = true;
+        });
+        return loaded && document.fonts.check('16px "Acme Sans"', "BM07");
+      }),
+      { timeout: 10_000, timeoutMsg: "selected local font face never loaded in the App preview" },
+    );
+    const previewFontFamily = await browser.execute(() => {
+      const headline = document.querySelector<HTMLElement>(
+        "section[aria-label='实际内容风格预览'] h3",
+      );
+      if (headline === null) throw new Error("actual-content headline is missing");
+      return globalThis.getComputedStyle(headline).fontFamily;
+    });
+    assert.ok(
+      previewFontFamily.includes("Acme Sans"),
+      `actual-content preview did not apply the selected font: ${previewFontFamily}`,
+    );
 
     await studio.$("button=查看全部 12 套风格").click();
     const radios = await group.$$("div[role='radio']");

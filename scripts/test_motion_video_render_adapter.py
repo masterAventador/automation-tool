@@ -151,6 +151,7 @@ import json, os, sys, time
 
 with open({json.dumps(str(record))}, "a") as record:
     record.write("INVOCATION pid=%d\\n" % os.getpid())
+    record.write("CWD %s\\n" % os.getcwd())
     for argument in sys.argv[1:]:
         record.write("ARG %s\\n" % argument)
     for name, value in os.environ.items():
@@ -294,6 +295,7 @@ fn write_message(message: &[u8]) {{
 
 fn main() {{
     let mut invocation = format!("INVOCATION pid={{}}\\n", process::id());
+    invocation.push_str(&format!("CWD {{}}\\n", env::current_dir().unwrap().display()));
     for argument in env::args().skip(1) {{
         invocation.push_str(&format!("ARG {{argument}}\\n"));
     }}
@@ -436,8 +438,14 @@ def read_invocations(record: Path) -> list[dict[str, object]]:
     current: dict[str, object] | None = None
     for line in record.read_text().splitlines():
         if line.startswith("INVOCATION pid="):
-            current = {"pid": int(line.split("=", 1)[1]), "arguments": [], "environment": {}}
+            current = {
+                "pid": int(line.split("=", 1)[1]),
+                "arguments": [],
+                "environment": {},
+            }
             invocations.append(current)
+        elif line.startswith("CWD ") and current is not None:
+            current["cwd"] = line[4:]
         elif line.startswith("ARG ") and current is not None:
             current["arguments"].append(line[4:])
         elif line.startswith("ENV ") and current is not None and "=" in line[4:]:
@@ -565,6 +573,7 @@ def test_render_verified_headless_job_isolation_and_cleanup(assets: Path, decoy:
     if os.name != "nt":
         assert invocations[0]["arguments"] == ["--version"]
     headless = invocations[-1]
+    assert RENDER_JOB_PREFIX + JOB_ID in str(headless.get("cwd", "")), headless
     arguments = headless["arguments"]
     assert "--headless" in arguments, arguments
     assert "--remote-debugging-pipe" in arguments, arguments
@@ -578,6 +587,9 @@ def test_render_verified_headless_job_isolation_and_cleanup(assets: Path, decoy:
         "the render browser must never open a listening debug port"
     )
     environment = headless["environment"]
+    chrome_log = str(environment.get("CHROME_LOG_FILE", ""))
+    assert RENDER_JOB_PREFIX + JOB_ID in chrome_log, environment
+    assert chrome_log.endswith("chrome-debug.log"), environment
     for name in (
         "HYPERFRAMES_BROWSER_PATH",
         "PRODUCER_HEADLESS_SHELL_PATH",

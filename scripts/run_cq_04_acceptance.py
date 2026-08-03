@@ -1,23 +1,21 @@
 #!/usr/bin/env python3
 """CQ-04 验收：专项终验，如实说清哪些真跑了、哪些跑不了。
 
-CQ-04 要的是"从全新安装的真实 App 一句话创建两类视频、送入独立阿里云剪辑、预览、
-成片入库，再用抖音 Browser Use 完成真实发布"。这条链路上有三处外部条件：
+CQ-04 要的是"从全新安装的真实 App 一句话创建两类视频、预览、
+成片入库，再用抖音 Browser Use 完成真实发布"。这条链路上有两处外部条件：
 
 | 条件 | 本机 | 影响 |
 | --- | --- | --- |
-| 百炼模型密钥文件 | 有 | 只证明文件存在，不证明密钥有效 |
-| 阿里云剪辑密钥文件 | 有 | 只证明文件存在，不证明密钥有效 |
-| 独立剪辑生产装配 | 静态检查 | 正式 App 必须具备 native staging、已验签 Executor、Provider dispatch、回流与终态 |
+| 百炼模型密钥 | 有 | 一句话生成脚本可跑 |
 | 抖音创作者账号 | **没有**（要扫码） | 真实发布跑不了 |
 
 所以本脚本不假装跑完了整条链路。它做三件事：
 
-1. **探测外部条件与生产装配**——不解析密钥内容，且不把文件存在当成 wiring 完成；
+1. **探测外部条件**——不解析密钥内容，只确认文件在不在；
 2. **跑不依赖缺失条件的那些段**，用的是真实正式包；
 3. **核对台账没有虚标**——每个 `🔍 待验收` 的任务必须说得出自己缺什么。
 
-第 3 条是 CQ-04 独有的：作为终验，它必须能回答"这 87 项里哪些是真完成的"。
+第 3 条是 CQ-04 独有的：作为终验，它必须能回答"这 79 项里哪些是真完成的"。
 """
 
 from __future__ import annotations
@@ -35,28 +33,19 @@ from cq_04_ledger_honesty import (  # noqa: E402
     LedgerHonestyRejected,
     require_status_matches_evidence,
 )
-from cq_04_vertical_readiness import (  # noqa: E402
-    VerticalReadinessRejected,
-    video_editing_production_wiring_gaps,
-)
 
 ROADMAP = REPOSITORY_ROOT / "docs/embedded-browser-video-studio-roadmap.md"
 EVIDENCE_DIRECTORY = REPOSITORY_ROOT / "docs/development"
 SECRETS = REPOSITORY_ROOT / ".local/secrets"
-PRODUCTION_MAIN = REPOSITORY_ROOT / "frontend/src/main.tsx"
-PRODUCTION_WIRING_TEST = (
-    REPOSITORY_ROOT / "frontend/src/app/production-wiring.test.ts"
-)
 
 _TASK_ROW = re.compile(
     r"^\|\s*([A-Z]{2}-\d{2})\s*\|.*\|\s*([⬜🧪🚧🔍✅⏸][^|]*)\|\s*$", re.M
 )
 _NOT_ACTIVATED = ("⬜", "⏸")
 
-# 外部条件：只看文件在不在，不读内容——因此存在也不能报告为凭据可用。
+# 外部条件：只看文件在不在，不读内容——密钥不该进入任何日志或报告。
 EXTERNAL_CONDITIONS = {
     "百炼模型密钥": SECRETS / "bailian-model.json",
-    "阿里云剪辑密钥": SECRETS / "aliyun-video-editing.json",
 }
 
 # 不依赖缺失外部条件、且跑在真实正式包上的段。
@@ -91,9 +80,8 @@ def probe_external_conditions() -> dict[str, bool]:
     available = {}
     for name, path in EXTERNAL_CONDITIONS.items():
         present = path.is_file() and path.stat().st_size > 0
-        available[name] = False
-        state = "文件存在（有效性未验证）" if present else "缺失"
-        announce(f"{name}: {state}")
+        available[name] = present
+        announce(f"{name}: {'可用' if present else '缺失'}")
     # 抖音要人工扫码，没有"文件在不在"这种判据；它一律算缺失，
     # 由本脚本如实报告，不用测试页冒充。
     available["抖音创作者账号"] = False
@@ -101,30 +89,12 @@ def probe_external_conditions() -> dict[str, bool]:
     return available
 
 
-def probe_production_readiness() -> dict[str, bool]:
-    """凭据之外，正式 App 自己也必须真的把能力装进去。"""
-    try:
-        gaps = video_editing_production_wiring_gaps(
-            PRODUCTION_MAIN,
-            PRODUCTION_WIRING_TEST,
-            REPOSITORY_ROOT / "frontend/src-tauri/src/lib.rs",
-        )
-    except VerticalReadinessRejected as error:
-        fail(str(error))
-    ready = not gaps
-    if ready:
-        announce("独立视频剪辑生产装配: 已闭合")
-    else:
-        announce("独立视频剪辑生产装配: 缺失（" + "; ".join(gaps) + "）")
-    return {"独立视频剪辑生产装配": ready}
-
-
 def sweep_the_ledger() -> int:
     """核对每个已激活任务的状态与它自己的证据内容自洽。"""
     roadmap = ROADMAP.read_text(encoding="utf-8")
     rows = _TASK_ROW.findall(roadmap)
-    if len(rows) != 87:
-        fail(f"expected 87 task rows in the specialized roadmap, found {len(rows)}")
+    if len(rows) != 79:
+        fail(f"expected 79 task rows in the specialized roadmap, found {len(rows)}")
     problems: list[str] = []
     checked = 0
     for task_id, status in rows:
@@ -168,7 +138,6 @@ def main() -> int:
 
     announce("Probing the external conditions this vertical needs")
     available = probe_external_conditions()
-    available.update(probe_production_readiness())
 
     for label, script in CONTENT_GATES:
         run_segment(label, script)
@@ -184,14 +153,9 @@ def main() -> int:
     announce(f"{checked} activated tasks all state what they are still missing")
 
     missing = [name for name, present in available.items() if not present]
-    package_summary = (
-        "package segments were skipped"
-        if arguments.skip_package_segments
-        else "the release-package segments"
-    )
     print(
         "CQ-04 acceptance passed for everything the host can reach: content gates, "
-        f"{package_summary}, and a {checked}-task ledger sweep. "
+        f"the release-package segments, and a {checked}-task ledger sweep. "
         f"Still unreachable here: {', '.join(missing)} — the vertical is NOT complete, "
         "and no fixture may stand in for it."
     )

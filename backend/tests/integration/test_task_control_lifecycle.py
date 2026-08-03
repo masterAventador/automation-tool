@@ -780,7 +780,7 @@ async def test_control_rejects_mismatched_projection_and_repository_inputs(
             await repository.enqueue_control(object())  # type: ignore[arg-type]
         with pytest.raises(TaskCommandDeliveryRejected):
             await repository.acknowledge(
-                response=object(),  # type: ignore[arg-type]
+                response=object(),
                 received_at=NOW,
             )
 

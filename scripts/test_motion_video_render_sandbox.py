@@ -238,6 +238,7 @@ fn main() {{
         None
     }};
     let mut invocation = format!("INVOCATION pid={{}}\\n", process::id());
+    invocation.push_str(&format!("CWD {{}}\\n", env::current_dir().unwrap().display()));
     for argument in arguments {{
         invocation.push_str(&format!("ARG {{argument}}\\n"));
     }}
@@ -296,6 +297,7 @@ import json, os, sys, time
 
 with open({json.dumps(str(record))}, "a") as record:
     record.write("INVOCATION pid=%d\\n" % os.getpid())
+    record.write("CWD %s\\n" % os.getcwd())
     for argument in sys.argv[1:]:
         record.write("ARG %s\\n" % argument)
     for name, value in os.environ.items():
@@ -682,6 +684,7 @@ def test_sandbox_isolation_flags_and_wall_timeout(assets: Path, decoy: Path) -> 
     if os.name != "nt":
         assert invocations[0]["arguments"] == ["--version"]
     headless = invocations[-1]
+    assert RENDER_JOB_PREFIX + JOB_ID in str(headless.get("cwd", "")), headless
     arguments = headless["arguments"]
     for required in (
         "--headless",
@@ -699,6 +702,9 @@ def test_sandbox_isolation_flags_and_wall_timeout(assets: Path, decoy: Path) -> 
         "the workspace must be reached over CDP navigation, not the command line"
     )
     environment = headless["environment"]
+    chrome_log = str(environment.get("CHROME_LOG_FILE", ""))
+    assert RENDER_JOB_PREFIX + JOB_ID in chrome_log, environment
+    assert chrome_log.endswith("chrome-debug.log"), environment
     for name in (
         "HYPERFRAMES_BROWSER_PATH",
         "PRODUCER_HEADLESS_SHELL_PATH",
@@ -712,6 +718,34 @@ def test_sandbox_isolation_flags_and_wall_timeout(assets: Path, decoy: Path) -> 
         wait_for_process_exit(windows_recorded_child(record))
     assert not render_job_directories(JOB_ID)
     assert_workspace_untouched(workspace)
+
+
+def test_windows_diagnostic_cleanup_is_owned_by_the_native_handle_boundary(
+    _assets: Path, _decoy: Path
+) -> None:
+    """Node must not path-delete a package side effect after an identity check."""
+    worker = (ROOT / "workers/motion_composition/worker.mjs").read_text(encoding="utf-8")
+    native = (ROOT / "frontend/src-tauri/src/local_video_orchestrator.rs").read_text(
+        encoding="utf-8"
+    )
+    assert "removeWindowsBrowserDiagnostic" not in worker
+    assert "captureWindowsBrowserDirectoryIdentity" not in worker
+    assert "SetFileInformationByHandle" in native
+    assert "FILE_FLAG_OPEN_REPARSE_POINT" in native
+    assert "GetFinalPathNameByHandleW" in native
+    assert "remove_windows_render_browser_diagnostic" in native
+    assert "fn receive_render_line_or_stop(" in native
+    assert native.count("receive_render_line_or_stop(&mut workers, kind, wait)?") == 2
+    assert "fn force_stop(running: &mut RunningVideoWorker) -> Result<(), VideoWorkerError>" in native
+    public_stop = native[native.index("    pub fn stop(") : native.index("    pub fn stop_all(")]
+    assert "force_stop(&mut running)?" in public_stop
+    stop_all = native[native.index("    pub fn stop_all(") : native.index("    fn lock_workers(")]
+    assert "if force_stop(&mut running).is_err()" in stop_all
+    assert "return Err(process_unavailable())" in stop_all
+    stop = native[native.index("fn force_stop(") : native.index("fn finish_exited_worker(")]
+    assert stop.index("running.child.wait()") < stop.index(
+        "remove_windows_render_browser_diagnostic"
+    )
 
 
 def run_resource_budget_case(
@@ -759,6 +793,7 @@ def main() -> int:
         test_sandbox_forged_or_tampered_command_is_ignored,
         test_sandbox_rejects_chromium_major_mismatch,
         test_sandbox_isolation_flags_and_wall_timeout,
+        test_windows_diagnostic_cleanup_is_owned_by_the_native_handle_boundary,
         test_sandbox_cpu_budget_kills_the_process_group,
         test_sandbox_memory_budget_kills_the_process_group,
     ]

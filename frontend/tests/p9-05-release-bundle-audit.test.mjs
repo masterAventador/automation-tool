@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createPrivateKey, generateKeyPairSync } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -182,6 +183,89 @@ test("P9-05 does not mistake null-terminated crypto format names for a private k
       platform: "windows",
     });
     assert.equal(result.fileCount, 5);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("P9-05 rejects a valid PEM private key whose header has trailing whitespace", async () => {
+  const fixture = await createBundle("windows");
+  try {
+    const { privateKey } = generateKeyPairSync("ed25519", {
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+      publicKeyEncoding: { type: "spki", format: "pem" },
+    });
+    const spaced = privateKey.replace(
+      "-----BEGIN PRIVATE KEY-----\n",
+      "-----BEGIN PRIVATE KEY----- \t\v\f\r\n",
+    );
+    assert.doesNotThrow(() => createPrivateKey(spaced));
+    await writeFile(join(fixture.bundle, "valid-private.pem"), spaced);
+    await assert.rejects(
+      auditReleaseBundle({
+        bundleRoot: fixture.bundle,
+        executorPackagePath: fixture.executor,
+        platform: "windows",
+      }),
+      /forbidden content marker/u,
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("P9-05 rejects OpenSSL PEM whitespace after a carriage return", async () => {
+  const fixture = await createBundle("windows");
+  try {
+    const { privateKey } = generateKeyPairSync("ed25519", {
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+      publicKeyEncoding: { type: "spki", format: "pem" },
+    });
+    const spaced = privateKey.replace(
+      "-----BEGIN PRIVATE KEY-----\n",
+      "-----BEGIN PRIVATE KEY-----\r\t\n",
+    );
+    assert.doesNotThrow(() => createPrivateKey(spaced));
+    const header = Buffer.from("-----BEGIN PRIVATE KEY-----");
+    const padding = Buffer.alloc(1024 * 1024 - header.length - 1, 0x61);
+    await writeFile(
+      join(fixture.bundle, "valid-private.pem"),
+      Buffer.concat([padding, Buffer.from(spaced)]),
+    );
+    await assert.rejects(
+      auditReleaseBundle({
+        bundleRoot: fixture.bundle,
+        executorPackagePath: fixture.executor,
+        platform: "windows",
+      }),
+      /forbidden content marker/u,
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("P9-05 checks every private-key header before carrying a chunk-boundary candidate", async () => {
+  const fixture = await createBundle("windows");
+  try {
+    const rejectedHeader = Buffer.from("-----BEGIN RSA PRIVATE KEY-----\nsecret");
+    const boundaryHeader = Buffer.from("-----BEGIN PRIVATE KEY-----");
+    const padding = Buffer.alloc(
+      1024 * 1024 - rejectedHeader.length - boundaryHeader.length,
+      0x61,
+    );
+    await writeFile(
+      join(fixture.bundle, "masked-private.bin"),
+      Buffer.concat([rejectedHeader, padding, boundaryHeader, Buffer.from([0])]),
+    );
+    await assert.rejects(
+      auditReleaseBundle({
+        bundleRoot: fixture.bundle,
+        executorPackagePath: fixture.executor,
+        platform: "windows",
+      }),
+      /forbidden content marker/u,
+    );
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }

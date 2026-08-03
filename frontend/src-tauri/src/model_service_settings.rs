@@ -264,7 +264,7 @@ where
         Ok(ModelServiceSnapshot {
             provider: "bailian",
             provider_label: "阿里百炼",
-            catalog_verified_at: "2026-07-23",
+            catalog_verified_at: "2026-07-31",
             script: purpose_snapshot(ModelServicePurpose::Script, script.as_ref()),
             video_creative: purpose_snapshot(ModelServicePurpose::VideoCreative, video.as_ref()),
             same_credential,
@@ -492,7 +492,7 @@ fn validate_catalog() -> Result<(), ModelServiceError> {
     if document.get("schema_version") != Some(&serde_json::json!(1))
         || document.get("provider") != Some(&serde_json::json!("bailian"))
         || document.get("base_url") != Some(&serde_json::json!(PRODUCTION_BASE_URL))
-        || document.get("verified_at") != Some(&serde_json::json!("2026-07-23"))
+        || document.get("verified_at") != Some(&serde_json::json!("2026-07-31"))
     {
         return Err(ModelServiceError::new(
             ModelServiceErrorCode::ConfigurationInvalid,

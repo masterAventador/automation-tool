@@ -29,7 +29,11 @@ INSTALLATION = InstallationId.new()
 SESSION = "fixture-session-token-with-more-than-thirty-two-bytes"
 
 
-def result(phase: BilibiliPublishPhase, *, resource_id: str | None = None) -> Any:
+def result(
+    phase: BilibiliPublishPhase,
+    *,
+    resource_id: str | None = None,
+) -> BilibiliPublishRuntimeResult:
     return BilibiliPublishRuntimeResult(
         phase=phase,
         request_digest="a" * 64,

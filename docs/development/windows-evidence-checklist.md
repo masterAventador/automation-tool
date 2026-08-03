@@ -299,8 +299,10 @@ containment 的 NTFS 语义重验**已完成，并修掉三个真实缺陷**—�
 Windows 真机复验通过：`rejected ... differs only by case`，原文件未被覆盖；
 `python scripts\test_motion_authoring_agent.py` 在 Windows 真机 `Ran 48 tests ... OK`。
 
-Windows 侧仍待补：BM-05 生成物真正被逐帧渲染并从正式 App 用户入口纵向验收，随 BM-08
-（页面）与 BM-16（生产包冻结）在 Windows 平台一并补齐。
+Windows 侧已于 2026-08-02 由 BM-16 的生产 NSIS 已安装 App 正常用户路径闭合：真实模型
+编排结果进入逐帧渲染并产出 H.264 1920×1080 / 990 帧 / 33 秒成片，App 内播放推进。
+BM-08 同日先在交互会话原生 App 闭合手工编辑、取消、90 帧成片、播放与删除，又在无测试
+feature 的生产 NSIS 已安装可见 App 中把同一完整路径重跑通过。
 
 ### 8. BM-07 风格微调与冻结 Windows 待补
 
@@ -309,23 +311,39 @@ Logo、实际文案预览与键盘选择；锁定上游 builder 生成的品牌�
 远程/主动内容、字体/Logo 文件签名、路径 containment 和摘要校验，并在两个 RenderJob
 私有目录重现相同冻结字节。macOS WebKit WebDriver 不支持 `uploadFile`，验收只能在正式
 App WebView 内把真实 PNG 字节构造成 `File` 交给生产文件输入控件，已证明生产
-`FileReader` 与 `<img>` 预览链路，但没有覆盖操作系统原生文件选择器。Windows 侧随 BM-08
-纵向验收：用原生文件选择器选真实 PNG/JPEG/WebP 和本地字体，确认页面预览、Rust/Worker
-提交到 RenderJob 的冻结摘要、NTFS reparse/大小写/短名 containment 与二次打开重现一致。
+`FileReader` 与 `<img>` 预览链路，但没有覆盖操作系统原生文件选择器。Windows 原生文件
+选择器、字体文件选择和冻结摘要重现仍只属于 BM-07 自身的待验收项；BM-08 已验证同一生产
+文件输入控件收到真实 PNG 字节后可预览、提交并进入最终像素，不再把 BM-07 的操作系统
+选择器证据横向算作 BM-08 的完成条件。
 
-### 9. BM-08 App 原生编辑、渲染与 Artifact 导入 Windows 待补
+### 9. BM-08 App 原生编辑、渲染与 Artifact 导入 Windows 已闭合（2026-08-02）
 
-BM-08 已在 macOS 真实测试版 Tauri App 完成正式用户入口全链路验收（编辑三段文案、
-风格与品牌素材、真实草稿预览、提交、渲染中取消并验证 cancelled checkpoint、恢复路径
-重试、真实 Chromium 90 帧渲染 + FFmpeg 编码、App 内解码播放约 3 秒 MP4、删除后
-Artifact 与工作副本双清理、ffprobe 与三帧视觉证据），入口为
-`python3 scripts/run_bm_08_acceptance.py`。Windows 侧待补：同脚本路径在 Windows 真实
-App 重跑（脚本当前对 `os.name == "nt"` 显式拒绝，需补 Windows worker/浏览器包装）；
-用原生文件选择器上传 Logo（macOS 只能以真实字节构造 `File` 交给生产输入控件）；
-Windows WebView2 对 `data:video/mp4;base64` 的 H.264 解码播放；NTFS
-reparse/大小写/短名下 RenderJob 工作区与 Artifact 删除语义。正式双平台安装包链路仍属
-BM-16。通过后更新 `docs/development/BM-08.md` 遗留项并评估 BM-05/BM-07/BM-08 三项
-`🔍 待验收` 状态闭合。
+Windows 11 x86_64 专用最新 `main` worktree `F:\b8` 已从普通登录用户的交互桌面会话运行
+`scripts/run_bm_08_acceptance.py`，退出码 0。入口先通过渲染沙箱 9/9、Rust 20/20、前端
+70/70、typecheck 与 Tauri 构建，再由 WebdriverIO 经原生 App 正常页面完成编辑三段文案、
+品牌设置、真实预览、取消、再次提交、90 帧渲染、播放和删除，原生用例 1/1。
+
+最终 MP4 为 H.264 1920×1080 / 30 fps / 90 帧 / 3.000 秒 / 132374 bytes，SHA-256
+`864186cd4380939cc5e75e7762664a5b0a0b15e4a9f6095628e72e4606ba050c`；三段抽帧摘要互异，
+联系表逐张人工复核无黑屏、乱码或裁切。Windows WebView2 对 base64 MP4 的解码与播放推进、
+cancelled/succeeded checkpoint、Artifact 删除和工作副本清理均通过。退出后专用计划任务、
+工作树归属进程、临时 PostgreSQL 容器/网络和 WebDriver 45457 监听均为 0。
+
+提交前 Codex Review 拒绝用上述测试 App 加 BM-16 一句话路径拼成 BM-08 正式包证据。随后
+在同一 `F:\b8` 构建并安装无 WebDriver、无测试 feature、窗口可见的隔离身份 release
+NSIS；只替换包身份以避开用户与另一会话 AppData，产品业务代码、资源和 capability 保持
+发布路径。已安装 App 从左侧“创作”正常入口再次完成三段编辑、专业蓝、品牌色、真实 PNG
+Logo、三段预览、9 秒任务 5% 取消、1 秒每段重提、90 帧完成、WebView2 播放和确认删除。
+
+正式 App `<video>` 实测 `readyState=4`、非暂停、1920×1080、3 秒并发生播放推进；产物
+仍为 132374 bytes 和同一 SHA-256，证明测试 App 与正式包逐字节一致。删除后 Artifact
+目录为空，成功 checkpoint 的 Artifact 字段清空。NSIS 为 450,677,315 bytes、安装树
+3,915 files / 1,464,632,484 bytes；最新主线资源令 EB-16 通用 runner 的发布大小上限
+失败，此项如实留在 BM-16，不通过放宽预算横向并入 BM-08。退出后安装根、HKCU 卸载项、
+隔离 AppData、计划任务、端口、进程、Docker 容器/网络和临时正式包目录均为 0。
+
+Windows 原生文件选择器仍记录在 BM-07，自身不影响 BM-08 已验证的文件输入、最终像素和
+Artifact 全链路。
 
 ### 10. BM-16 确定性与正式包 Windows 部分完成（2026-07-25）
 
@@ -351,9 +369,9 @@ Windows 真实内置 Chromium 上重跑，**前置确定性门禁、12 套风格
 探针立即给出决定性事实——**隔离环境下三次渲染逐帧字节完全一致**，漂移只在跟着 12 套风格
 sweep 之后的高负载时出现，问题性质因此从"渲染不确定"变成"负载下等待不足"。
 
-**Windows 侧剩余阻塞（一项）→ 根因已修复，待真机复验（2026-07-25）**：134 项 sweep 在
-整机被前序渲染压满后，某一项会触发 `render_resource_exceeded`。已用局部探针证明**同一项
-单独渲染在同一预算下通过**（`cpu=280 memory=2048 -> PASSED`），故非产品缺陷。根因是 CPU 秒
+**原 Windows 侧阻塞已于 2026-08-02 真机复验闭合**：134 项 sweep 曾在
+整机被前序渲染压满后，某一项触发 `render_resource_exceeded`。局部探针证明**同一项
+单独渲染在同一预算下通过**（`cpu=280 memory=2048 -> PASSED`）。根因是 CPU 秒
 按整棵浏览器进程树累加，对渲染是错误的约束维度：16 核满载 20 墙钟秒即 320 CPU 秒，而沙箱
 契约 `SANDBOX_SECONDS_MAXIMUM` 把 CPU 与墙钟共用 300 秒上限。
 
@@ -364,25 +382,31 @@ sweep 之后的高负载时出现，问题性质因此从"渲染不确定"变成
 （短渲染 960、确定性 1440）。该修复同时**收紧**了短墙钟端——旧契约允许 1 秒墙钟声明 300
 CPU 秒，那是任何宿主都到不了的死约束，现在直接被拒。
 
-**本项仍未闭合的部分**：修复只在 macOS 上完成契约层与三层测试验证，**尚未在 Windows 16 核
-真机上重跑 `python scripts\run_bm_16_acceptance.py` 的 134 项 sweep**，因此不能断言原始现象
-已消失。Windows 会话接手时须：(1) 重跑完整 sweep 确认 134/134 通过；(2) 在 Windows 上重跑
-`python scripts\test_motion_video_render_sandbox.py`，确认新增的 CPU 预算用例在 CIM 采样分支
-下同样通过。两项完成后本条才可标记闭合。
+2026-08-02 在隔离工作树 `F:\automation-tool-codex-20260801` 重跑同一入口：Windows
+内置 Chromium 149 完成 **134/134** 内容级 sweep、12/12 风格与 30 帧双跑确定性；
+`test_motion_video_render_sandbox.py` 同时在 CIM 采样分支通过，原始资源超限现象未再出现。
+Windows 聚合证据 SHA-256 为
+`ebc9fd1bfe2fe36da780f950c4f5931c587fb44cbdd26a96c73cef00e1431b13`。
 
-其余 Windows 侧待补：发布目录只读属性的 `FILE_ATTRIBUTE_READONLY` 语义；双平台正式安装包
-链路与包内容负面检查；跨机确定性比对；低配机与休眠恢复注入。通过后更新
-`docs/development/BM-16.md` 遗留项并评估 BM-05/07/08/15/16 五项 `🔍 待验收` 闭合。
+同日又在已安装的生产 release App 可见窗口中，从设置真实模型凭据、目录指定
+“数据图表动画”给第 1 镜头、提交一句话、等待编排/逐帧渲染直到完成并播放成片；
+H.264 1920×1080 / 990 帧 / 33 秒完整解码通过，storyboard 第 1 镜头为 `data-chart`。
 
-### 11. EB-11 登录与 Session Windows 验收（✅ 2026-07-25 已完成）
+其余 Windows 侧待补只保留真实缺口：Authenticode + 时间戳/SmartScreen（验收机无证书）、
+专门低配置机器、休眠恢复注入与跨机像素摘要直接比对。发布树与安装包内容门禁、Windows
+正式 App 用户路径不再列为待补。
+
+### 11. EB-11 登录与 Session Windows 验收（staged ✅；正式 App 待补）
 
 EB-11 已在 macOS 用 staged 内置 Chromium + 全新 0o700 私有 Profile 完成登录整链
 （QR 状态机与人工接管、会话四态探测、重启复用、注销清理）与正式命令面
 （douyin.login.open/recheck/logout）验收，入口
 `cd backend && uv run pytest tests/integration/test_douyin_login_embedded_browser.py`。
-Windows 侧待补：同套测试在 Windows staged 内置 Chromium（EB-04 缓存）上重跑，
-Profile 权限语义按 Windows ACL 等价校验。真实扫码另标 🔍 待真实账号，不属 Windows
-会话职责。通过后更新 `docs/development/EB-11.md` 遗留项。
+Windows staged 内置 Chromium（EB-04 缓存）与 Windows ACL 等价校验已于
+2026-07-25 重跑通过；该结果只闭合 staged 集成链，不是用户可操作的正式 App 证据。
+Windows 正式 App 仍须从“账号与平台”正常入口补做登录状态复查、安全注销、真实扫码、
+手机确认、退出零残留与重启复用；不得再把真实扫码排除在 Windows 正式 App 会话职责外。
+通过后更新 `docs/development/EB-11.md` 遗留项。
 
 ### 12. EB-12 搜索/浏览/候选提取迁移 Windows 验收（✅ 2026-07-25 已完成）
 
@@ -445,10 +469,12 @@ Windows 验收机的 sshd 以 SYSTEM 运行，SSH 会话拿到的是**已提权�
 **这两个都不是产品缺陷**：用户双击运行 App 是非提权的，创建的目录属主就是本人，校验通过。
 已用 `(Get-Acl <新建目录>).Owner` 与 `#[track_caller]` 插桩双向确认（插桩已还原，工作树干净）。
 
-**因此以下验收项不能用当前的 SSH 远程链路完成**，需要用户在本机**交互式（非提权）会话**执行，
-或后续建立"以 LIMITED 权限运行整条验收链"的机制（任务计划程序 `/rl LIMITED`）：
+**因此以下验收项不能在 SSH 的 Session 0 进程里直接完成**，需要用户在本机**交互式
+（非提权）会话**执行，或由任务计划程序以当前交互用户运行。BM-08 已于 2026-08-02 用后者
+进入 `SessionId=1` 完成；直接 SSH 进程的窗口句柄为 0、没有 WebView2 子进程，不能作为失败
+证据：
 
-- 任何创建运营 Profile 的真实 App 启动（含 CQ-01 的桌面 E2E、BM-07/BM-08 的原生入口）；
+- 任何创建运营 Profile 的真实 App 启动（BM-08 已闭合；CQ-01、BM-07 仍按各自状态验收）；
 - `cargo test --test browser_profiles`、`--test browser_profile_locks` 等属主/ACL 相关用例。
 
 纯命令行、不校验属主的项（EB-11~15、BM-05、BM-16 等）不受影响，已正常远程完成。
@@ -485,7 +511,7 @@ EB-12/13/14 十个集成文件合计 `13 passed`，两次 `EXIT_CODE=0`。
 `tests/integration/conftest.py` 的跨平台 helper 修复（提交 `64788fa`）；生产
 Profile 的 Windows 私有性由 `browser_profiles_windows.rs` 的受保护 DACL 保证，
 EB-09 已单独验收，不受影响。各任务的真实抖音账号验收仍为 `🔍 待真实账号`。
-### 17. EB-16 首发安装包与签名 Windows 待补
+### 17. EB-16 首发安装包与签名 Windows 部分完成（2026-08-02）
 
 EB-16 已在 macOS arm64 完成真实正式安装包全链路：真实 `tauri build` 出包、装入唯一
 一套内置 Chromium（331 文件 / 359,441,871 bytes）、`.app` 实测 635 文件 /
@@ -503,7 +529,7 @@ AUTOMATION_TOOL_EB16_LAUNCH_VISIBLE_APP=1 \
 python3.12 scripts/test_embedded_browser_package.py
 ```
 
-Windows 侧待补（需真实 Windows 环境）：
+Windows 侧原待补清单与 2026-08-02 实测结果：
 
 1. 用 `scripts/build_embedded_chromium_staging.py` + `build_embedded_browser_distribution.py`
    暂存 `windows-x86_64` 目标，构建真实 NSIS 安装包（`--bundles nsis`），并把内置浏览器
@@ -524,9 +550,10 @@ Windows 侧待补（需真实 Windows 环境）：
 3. 跑 `node frontend/scripts/audit-production-package.mjs --binary <安装目录>/*.exe
    --tauri-config <本次构建实际使用的合并配置>`：确认真实产物内没有 WebDriver、调试
    端口、测试凭据、`*_for_acceptance` 测试命令，且窗口配置不是隐藏测试窗口；
-4. 记录 Windows 实测体积（安装包与安装目录），如与 macOS 差异较大需回头校准
-   `RELEASE_SIZE_BOUNDS`（当前上下界按 macOS 实测设定：浏览器树 320–420 MiB、整包
-   340–700 MiB）；
+4. 记录 Windows 实测体积（安装包与安装目录），并校准
+   `release_size_bounds(platform)`：浏览器树仍为 320–420 MiB，整包按 macOS/Windows
+   各自基线与该平台最小 `media-toolchain` 推导；总窗口必须小于最小完整运行时，不得
+   再把两平台各项最大值相加，否则余量会藏下第二份完整运行时；
 5. Authenticode 签名（含时间戳）与 SmartScreen 表现——本机无 Windows 代码签名证书，
    属 🔍 待凭据；
 6. 首次安装（`currentUser` NSIS）、启动正式包 App、退出后无 `chrome.exe` /
@@ -536,6 +563,34 @@ Windows 侧待补（需真实 Windows 环境）：
    权限时会自动 skip 相关用例（`_REQUIRES_SYMLINKS`），其余用例——含"内置浏览器存在即
    强制跑摘要门禁"这条关键机制用例——仍会真实执行。记录实际 skip 数；
 8. 通过后更新 `docs/development/EB-16.md` 遗留项。
+
+2026-08-02 在 `winbox` 隔离工作树完成 1～4、6～7：生产 release NSIS 构建命令为
+`tauri build --bundles nsis`，无测试 feature/WebDriver；正常用户路径使用的首包
+415,886,806 bytes，
+已安装树 3,800 files / 1,289,778,258 bytes，内置 Chromium 308 files /
+435,574,347 bytes / 149.0.7827.55。P9-05 扫描 3,492 files、EB-17 扫描 3,398 files，
+未发现系统浏览器来源；包内 Chromium 断网真启动并退出，安装根 `debug.log` 为 0。
+`test_embedded_browser_package.py` 在 Windows 为 **36 OK / 6 skipped**，skip 均是系统
+不具备非管理员符号链接能力的 macOS 形态 fixture，Windows 等价 reparse/摘要门禁仍执行。
+
+正式 App 另用隔离包身份安装，以可见窗口按正常页面完成设置→零件指定→一句话出片→播放；
+安装包不含固定调试入口，自动化端口只在本次启动时从外部挂载。产物、截图与测量摘要位于
+`.local/embedded-browser-video-studio/pc16-formal-app/`（不入 Git）。
+
+首次卸载真实抓到 `embedded-browser\chrome-win64\Dictionaries` 三层空目录残留，验收
+没有修复后继续报绿。生产配置新增 `NSIS_HOOK_POSTUNINSTALL` 后重建安装包
+415,924,136 bytes、安装树 3,800 files / 1,289,778,223 bytes；生产包审计和 Chromium
+断网探针复跑通过，随后新包自己的 uninstaller 使安装根、HKCU 注册、Roaming/Local
+隔离 AppData、Docker project、8765/29227 端口与三个本轮计划任务全部为 0。
+
+提交前 `codex review` 指出初版 `RMDir /r` 遇到被替换的 junction/reparse point 可能沿目标
+越界删除。契约现禁止递归删除，hook 只把 `Dictionaries → chrome-win64 → embedded-browser`
+三个已知空目录由深到浅执行非递归 `RMDir`；意外文件或重解析点会留下残余并让验收失败。
+同轮审查要求 BM-16 累计并终止清理期间出现的迟到 PID，并在 run 目录删除后再次复查；
+对应 RED/GREEN 契约已补，Windows 正式包重建与两类卸载复验见本节后续证据。
+
+第 5 项仍未完成：两份 NSIS 的 Authenticode 均实测为 `NotSigned`，验收机没有 Windows
+代码签名证书，故签名、可信时间戳与 SmartScreen 保持待凭据。
 
 ### 18. PB-05 抖音发布前流程 Windows 待补
 

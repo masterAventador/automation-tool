@@ -41,7 +41,7 @@ from automation_tool.protocol.safe_text import is_sha256_hex
 EXECUTOR_LEDGER_FILE_NAME: Final = "executor-ledger.sqlite3"
 # The durable shape callers and contracts pin against; bump it in the same
 # change that adds a migration.
-EXECUTOR_LEDGER_SCHEMA_VERSION: Final = 8
+EXECUTOR_LEDGER_SCHEMA_VERSION: Final = 9
 _SCHEMA_VERSION: Final = EXECUTOR_LEDGER_SCHEMA_VERSION
 _MAX_OUTBOX_BATCH: Final = 1000
 _MAX_PENDING_OUTBOX_ENTRIES: Final = 1000
@@ -2423,10 +2423,80 @@ class ExecutorLedger:
             with closing(self._connect()) as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 updated = connection.execute(
-                    "UPDATE executor_outbox SET delivered = 0 WHERE delivered = 1"
+                    """
+                    UPDATE executor_outbox SET delivered = 0
+                    WHERE delivered = 1 AND expired = 0
+                    """
                 )
                 connection.commit()
                 return updated.rowcount
+        except Exception:
+            raise ExecutorLedgerRejected from None
+
+    def outbox_for_delivery(
+        self,
+        *,
+        observed_at: datetime,
+        recover_delivered: bool,
+    ) -> tuple[OutboxEntry, ...]:
+        try:
+            canonical_observed_at = _canonical_utc(observed_at)
+            if canonical_observed_at is None or type(recover_delivered) is not bool:
+                raise ValueError
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                deliverable: list[OutboxEntry] = []
+                last_ordinal = 0
+                while True:
+                    rows = connection.execute(
+                        """
+                        SELECT ordinal, envelope, source_message_id, delivered
+                        FROM executor_outbox
+                        WHERE expired = 0 AND (delivered = 0 OR ? = 1)
+                          AND ordinal > ?
+                        ORDER BY ordinal
+                        LIMIT ?
+                        """,
+                        (int(recover_delivered), last_ordinal, _MAX_OUTBOX_BATCH),
+                    ).fetchall()
+                    if not rows:
+                        break
+                    recovered_ids: list[tuple[str]] = []
+                    expired_ids: list[tuple[str]] = []
+                    for row in rows:
+                        message = _parse_outbound(str(row[1]))
+                        delivered = int(row[3])
+                        if delivered not in {0, 1}:
+                            raise ValueError
+                        if canonical_observed_at >= message.deadline_at:
+                            expired_ids.append((str(message.message_id),))
+                            continue
+                        deliverable.append(
+                            OutboxEntry(
+                                message=message,
+                                source_message_id=str(row[2]),
+                                replayed=True,
+                            )
+                        )
+                        if recover_delivered and delivered == 1:
+                            recovered_ids.append((str(message.message_id),))
+                    if recovered_ids:
+                        connection.executemany(
+                            "UPDATE executor_outbox SET delivered = 0 WHERE message_id = ?",
+                            recovered_ids,
+                        )
+                    if expired_ids:
+                        connection.executemany(
+                            "UPDATE executor_outbox SET expired = 1 WHERE message_id = ?",
+                            expired_ids,
+                        )
+                    last_ordinal = int(rows[-1][0])
+                    if last_ordinal <= 0:
+                        raise ValueError
+                    if len(rows) < _MAX_OUTBOX_BATCH:
+                        break
+                connection.commit()
+            return tuple(deliverable)
         except Exception:
             raise ExecutorLedgerRejected from None
 
@@ -2439,7 +2509,7 @@ class ExecutorLedger:
                     """
                     SELECT envelope, source_message_id
                     FROM executor_outbox
-                    WHERE delivered = 0
+                    WHERE delivered = 0 AND expired = 0
                     ORDER BY ordinal
                     LIMIT ?
                     """,
@@ -2619,6 +2689,9 @@ class ExecutorLedger:
             if version == 7:
                 _migrate_v8(connection)
                 version = 8
+            if version == 8:
+                _migrate_v9(connection)
+                version = 9
             if version != _SCHEMA_VERSION:
                 raise ValueError
             identity = connection.execute(
@@ -3062,6 +3135,19 @@ def _migrate_v8(connection: sqlite3.Connection) -> None:
     connection.execute("PRAGMA user_version = 8")
 
 
+def _migrate_v9(connection: sqlite3.Connection) -> None:
+    """Retain expired outbox facts without counting them as pending delivery."""
+
+    connection.execute(
+        """
+        ALTER TABLE executor_outbox
+        ADD COLUMN expired INTEGER NOT NULL DEFAULT 0
+        CHECK (expired IN (0, 1))
+        """
+    )
+    connection.execute("PRAGMA user_version = 9")
+
+
 def _require_pending_outbox_capacity(
     connection: sqlite3.Connection,
     envelopes: tuple[str, ...],
@@ -3069,7 +3155,7 @@ def _require_pending_outbox_capacity(
     pending = connection.execute(
         """
         SELECT COUNT(*), COALESCE(SUM(length(CAST(envelope AS BLOB))), 0)
-        FROM executor_outbox WHERE delivered = 0
+        FROM executor_outbox WHERE delivered = 0 AND expired = 0
         """
     ).fetchone()
     pending_entries, pending_bytes = cast(tuple[int, int], pending)

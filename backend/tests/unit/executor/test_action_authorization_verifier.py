@@ -83,7 +83,7 @@ def token(private_key: bytes = PRIVATE_KEY) -> str:
     signature = Ed25519PrivateKey.from_private_bytes(private_key).sign(
         action_authorization_signing_input(value)
     )
-    return encode_action_authorization_token(value, signature)
+    return str(encode_action_authorization_token(value, signature))
 
 
 def expectation(**changes: object) -> ActionAuthorizationExpectation:

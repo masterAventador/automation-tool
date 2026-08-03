@@ -5,6 +5,10 @@ import os
 import platform
 import subprocess
 import sys
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 # `conftest.py` puts the repository root on `sys.path`; this is the same route
@@ -17,6 +21,7 @@ from automation_tool.executor.package_manifest import (
     EXECUTOR_MANIFEST_FILE_NAME,
     EXECUTOR_SIGNATURE_FILE_NAME,
 )
+from automation_tool.executor.silero_vad import audit_packaged_silero_vad_runtime
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 BUNDLE_NAME = "automation-tool-executor"
@@ -25,12 +30,12 @@ LOCAL_SESSION_TOKEN = "06" * 32
 TEST_SIGNING_KEY = bytes(range(32))
 
 
-def bootstrap(state_directory: Path) -> bytes:
+def bootstrap(state_directory: Path, *, websocket_port: int = 9) -> bytes:
     return (
         json.dumps(
             {
                 "bootstrap_version": "1",
-                "websocket_url": "ws://127.0.0.1:9/api/v1/executors/connect",
+                "websocket_url": (f"ws://127.0.0.1:{websocket_port}/api/v1/executors/connect"),
                 "local_session_token": LOCAL_SESSION_TOKEN,
                 "session_token": PRIVATE_SESSION,
                 "installation_id": "123e4567-e89b-42d3-a456-426614174003",
@@ -44,7 +49,30 @@ def bootstrap(state_directory: Path) -> bytes:
     ).encode()
 
 
-def test_pyinstaller_onedir_bundle_starts_without_python_and_contains_playwright(
+@contextmanager
+def rejecting_websocket_endpoint() -> Iterator[int]:
+    class RejectedWebSocket(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(403)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), RejectedWebSocket)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield int(server.server_address[1])
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+
+
+def test_pyinstaller_onedir_bundle_contains_locked_runtimes_and_starts_without_python(
     tmp_path: Path,
 ) -> None:
     distribution_root = tmp_path / "dist"
@@ -73,6 +101,7 @@ def test_pyinstaller_onedir_bundle_starts_without_python_and_contains_playwright
     suffix = ".exe" if sys.platform == "win32" else ""
     executable = distribution_root / BUNDLE_NAME / f"{BUNDLE_NAME}{suffix}"
     assert executable.is_file()
+    audit_packaged_silero_vad_runtime(executable.parent)
 
     manifest = subprocess.run(
         [
@@ -114,14 +143,30 @@ def test_pyinstaller_onedir_bundle_starts_without_python_and_contains_playwright
     assert startup.stdout == b""
     assert startup.stderr == b"Local Executor bootstrap is rejected\n"
 
-    unavailable = subprocess.run(
-        [os.fspath(executable)],
-        input=bootstrap(tmp_path / "executor-state"),
+    authoring = subprocess.run(
+        [os.fspath(executable), "--author-motion"],
+        input=b"",
         capture_output=True,
         check=False,
-        timeout=45,
+        timeout=30,
         env=frozen_artifact_environment(),
     )
+    assert authoring.returncode == 70
+    assert json.loads(authoring.stdout) == {"schemaVersion": 1, "status": "rejected"}
+    assert authoring.stderr == b""
+
+    with rejecting_websocket_endpoint() as websocket_port:
+        unavailable = subprocess.run(
+            [os.fspath(executable)],
+            input=bootstrap(
+                tmp_path / "executor-state",
+                websocket_port=websocket_port,
+            ),
+            capture_output=True,
+            check=False,
+            timeout=45,
+            env=frozen_artifact_environment(),
+        )
     assert unavailable.returncode == 1
     assert unavailable.stdout == b""
     assert unavailable.stderr == b"Local Executor process is unavailable\n"
@@ -134,6 +179,17 @@ def test_pyinstaller_onedir_bundle_starts_without_python_and_contains_playwright
         path.name.lower() for path in executable.parent.rglob("*") if path.is_dir()
     )
     assert any("playwright" in path.lower() for path in inventory)
+    assert "_internal/speech/silero-vad/silero_vad_16k_op15.onnx" in inventory
+    assert "_internal/speech/silero-vad/SILERO-VAD-LICENSE.txt" in inventory
+    assert "_internal/onnxruntime/LICENSE" in inventory
+    packaged_component_sources = tuple(
+        path
+        for path in inventory
+        if path.startswith("_internal/vendor/hyperframes/registry/components/")
+        and path.endswith(".html")
+    )
+    assert len(packaged_component_sources) == 25
+    assert all(not path.endswith("/demo.html") for path in packaged_component_sources)
     assert not any(
         name == ".local-browsers"
         or name.startswith(("chromium-", "firefox-", "webkit-", "ffmpeg-"))
@@ -143,4 +199,8 @@ def test_pyinstaller_onedir_bundle_starts_without_python_and_contains_playwright
         path.read_text(encoding="utf-8", errors="ignore") for path in work_root.rglob("*.toc")
     )
     assert "playwright" in analysis_text.lower()
+    assert "onnxruntime" in analysis_text.lower()
     assert "automation_tool.executor.browser_runtime" in analysis_text
+    assert "automation_tool.executor.silero_vad" in analysis_text
+    assert "automation_tool.executor.material_speech_pipeline" in analysis_text
+    assert "automation_tool.executor.material_speech_transcription" in analysis_text

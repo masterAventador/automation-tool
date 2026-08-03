@@ -48,9 +48,22 @@ import urllib.request
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from itertools import pairwise
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Never
 
+from automation_tool.executor.motion_authoring.authoring_workspace import (
+    AuthoringWorkspace,
+    MotionAuthoringPersistenceError,
+    MotionAuthoringRejected,
+    _validate_relative,
+)
+from automation_tool.executor.motion_authoring.component_host import (
+    ComponentFilmMetadata,
+    ComponentHostRejected,
+    component_film_metadata,
+    reviewed_visual_part_copy_mode,
+)
 from automation_tool.executor.motion_authoring.composition_template import (
     AUTHORING_RUNTIME_ASSET,
     MAX_SCENE_ITEMS,
@@ -74,19 +87,11 @@ from automation_tool.executor.motion_authoring.slot_overflow_probe import (
 # --------------------------------------------------------------------------- #
 
 
-class MotionAuthoringRejected(RuntimeError):
-    """A closed-surface, containment or validation boundary was violated."""
-
-
-class MotionAuthoringPersistenceError(RuntimeError):
-    """A workspace write failed after entering the authoring transaction."""
-
-
 class MotionAuthoringUnavailable(RuntimeError):
     """The one-sentence path was invoked without a configured model."""
 
 
-def _reject(message: str) -> None:
+def _reject(message: str) -> Never:
     raise MotionAuthoringRejected(f"motion authoring rejected: {message}")
 
 
@@ -129,27 +134,15 @@ _API_KEY: Final = re.compile(r"^sk-[A-Za-z0-9._-]{17,253}$")
 _RESOURCE_ROOT: Final = RESOURCE_ROOT
 _CONTRACTS_ROOT: Final = CONTRACTS_ROOT
 AUTHORING_VENDOR_ROOT: Final = _RESOURCE_ROOT / "vendor/hyperframes"
-AUTHORING_WORKFLOW_CONTRACT: Final = (
-    _CONTRACTS_ROOT / "video/motion-authoring-workflow.v1.json"
-)
+AUTHORING_WORKFLOW_CONTRACT: Final = _CONTRACTS_ROOT / "video/motion-authoring-workflow.v1.json"
 
 _MOTION_CATALOG_PATH: Final = _CONTRACTS_ROOT / "quality/motion-catalog.v1.json"
 
 
-_MOTION_PART_USABILITY_PATH: Final = (
-    _CONTRACTS_ROOT / "video/motion-part-usability.v1.json"
-)
+_MOTION_PART_USABILITY_PATH: Final = _CONTRACTS_ROOT / "video/motion-part-usability.v1.json"
 _MOTION_PART_SLOTS_PATH: Final = _CONTRACTS_ROOT / "video/motion-part-slots.v1.json"
-_MOTION_PART_SLOT_BUDGET_PATH: Final = (
-    _CONTRACTS_ROOT / "video/motion-part-slot-budget.v1.json"
-)
-
-# Where `write_part_working_copy` puts a part inside the RenderJob workspace.
-# Imported from the writer rather than restated: the two have to name the same
-# directory or the sandbox allowlist and the files on disk describe different
-# trees. Imported lazily at module scope is not possible here without a cycle,
-# so it is re-exported from the module that owns it.
-from .part_workspace import WORKING_COPY_DIRECTORY as PART_WORKING_COPY_DIRECTORY  # noqa: E402
+_MOTION_PART_SLOT_BUDGET_PATH: Final = _CONTRACTS_ROOT / "video/motion-part-slot-budget.v1.json"
+_DURATION_CONTRACT_PATH: Final = _CONTRACTS_ROOT / "video/motion-storyboard-duration.v1.json"
 
 # The stage `composition_template` draws on. Mirrors width/height/
 # deviceScaleFactor in `motion-render-canvas.v1.json`; a catalog part carries
@@ -161,6 +154,12 @@ TEMPLATE_CANVAS: Final[dict[str, int]] = {
 }
 
 
+def _string_keyed_object(value: object) -> dict[str, Any] | None:
+    if not isinstance(value, dict) or any(type(key) is not str for key in value):
+        return None
+    return {key: item for key, item in value.items() if isinstance(key, str)}
+
+
 def _load_json_document(path: Path) -> dict[str, Any]:
     """One packaged contract, or a refusal that names it.
 
@@ -169,11 +168,35 @@ def _load_json_document(path: Path) -> dict[str, Any]:
     packaging gate.
     """
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise MotionAuthoringRejected(
             f"motion authoring rejected: packaged contract is unreadable: {path.name}"
         ) from error
+    document = _string_keyed_object(value)
+    if document is None:
+        raise MotionAuthoringRejected(
+            f"motion authoring rejected: packaged contract is unreadable: {path.name}"
+        )
+    return document
+
+
+def _load_catalog_segment_seconds_maximum() -> int:
+    contract = _load_json_document(_DURATION_CONTRACT_PATH)
+    seconds = contract.get("totalSecondsMaximum")
+    if (
+        contract.get("schemaVersion") != 1
+        or contract.get("policy") != "fail_closed"
+        or type(seconds) is not int
+        or not (1 <= seconds <= 600)
+    ):
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: storyboard duration contract drifted"
+        )
+    return seconds
+
+
+CATALOG_SEGMENT_SECONDS_MAXIMUM: Final = _load_catalog_segment_seconds_maximum()
 
 
 class PartsCatalog:
@@ -189,19 +212,25 @@ class PartsCatalog:
         self.slot_table = _load_json_document(_MOTION_PART_SLOTS_PATH)
         self.slot_budget = _load_json_document(_MOTION_PART_SLOT_BUDGET_PATH)
         catalog = _load_json_document(_MOTION_CATALOG_PATH)
-        self.durations = {
-            item["name"]: item["duration"]
-            for item in catalog["items"]
-            if item.get("duration")
-        }
-        self.dimensions = {
-            item["name"]: (item["dimensions"]["width"], item["dimensions"]["height"])
-            for item in catalog["items"]
-            if (item.get("dimensions") or {}).get("width")
-        }
-        self._slots_by_part = {
-            part["name"]: part["slots"] for part in self.slot_table["parts"]
-        }
+        self.types = {str(item["name"]): str(item["type"]) for item in catalog["items"]}
+        self.durations: dict[str, float] = {}
+        self.dimensions: dict[str, tuple[int, int]] = {}
+        for item in catalog["items"]:
+            name = str(item["name"])
+            duration = item.get("duration")
+            dimensions = item.get("dimensions") or {}
+            if duration:
+                self.durations[name] = float(duration)
+            if dimensions.get("width") and dimensions.get("height"):
+                self.dimensions[name] = (
+                    int(dimensions["width"]),
+                    int(dimensions["height"]),
+                )
+            if self.types[name] == "component":
+                metadata = LOCKED_COMPONENT_METADATA[name]
+                self.durations[name] = metadata.duration_seconds
+                self.dimensions[name] = (metadata.width, metadata.height)
+        self._slots_by_part = {part["name"]: part["slots"] for part in self.slot_table["parts"]}
 
     def document_for(self, name: str) -> Path:
         documents = sorted((self.root / "items" / name).glob("*.html"))
@@ -225,18 +254,16 @@ class PartsCatalog:
             return {}
         slots = self._slots_by_part.get(beat.catalog_parts[0], ())
         available = [text for text in (beat.headline, beat.body, *beat.items) if text]
-        return {
-            slot["index"]: text for slot, text in zip(slots, available)
-        }
+        return {slot["index"]: text for slot, text in zip(slots, available, strict=False)}
 
     def assets_for(self, entry_html: str, workspace: AuthoringWorkspace) -> tuple[str, ...]:
         """Everything the working copy of this part needs, as the sandbox lists it.
 
-        The whole working-copy tree, not the part's own folder. Every part
-        reaches GSAP, Draco and its typefaces through `../../offline-deps/…`,
-        which is why `write_part_working_copy` mirrors the catalog's layout
-        instead of flattening — and a prefix of `catalog/items` leaves all of it
-        outside the sandbox's allowlist.
+        Every part reaches GSAP, Draco and its typefaces through
+        `../../offline-deps/…`, so a folder-prefix allowlist misses shared files.
+        The inverse is also wrong: giving every segment the entire multi-part
+        working tree can exceed the Worker's 128-entry ceiling. Resolve this
+        document's actual reference graph from the final workspace instead.
 
         Measured 2026-07-28 on the first film that used parts: 14 files were
         written into the workspace and each part segment declared one. The
@@ -245,16 +272,9 @@ class PartsCatalog:
         reports by drawing the first frame and holding it. The still-frame gate
         would have caught the result and blamed the composition.
         """
-        prefix = f"{PART_WORKING_COPY_DIRECTORY}/"
-        if not entry_html.startswith(prefix):
-            return ()
-        return tuple(
-            sorted(
-                asset
-                for asset in workspace.provided_assets()
-                if asset != entry_html and asset.startswith(prefix)
-            )
-        )
+        from .part_workspace import working_copy_assets
+
+        return working_copy_assets(entry_html, workspace)
 
 
 def _load_locked_catalog_items() -> tuple[dict[str, Any], ...]:
@@ -267,12 +287,8 @@ def _load_locked_catalog_items() -> tuple[dict[str, Any], ...]:
         raise MotionAuthoringRejected(
             "motion authoring rejected: locked motion catalog is unreadable"
         ) from error
-    if len(ids) != 134 or not all(
-        _CATALOG_PART_ID.fullmatch(part) is not None for part in ids
-    ):
-        raise MotionAuthoringRejected(
-            "motion authoring rejected: locked motion catalog drifted"
-        )
+    if len(ids) != 134 or not all(_CATALOG_PART_ID.fullmatch(part) is not None for part in ids):
+        raise MotionAuthoringRejected("motion authoring rejected: locked motion catalog drifted")
     return items
 
 
@@ -282,40 +298,58 @@ LOCKED_CATALOG_PART_IDS: Final[frozenset[str]] = frozenset(
 )
 
 
+def _load_locked_component_metadata() -> dict[str, ComponentFilmMetadata]:
+    loaded: dict[str, ComponentFilmMetadata] = {}
+    for item in _LOCKED_CATALOG_ITEMS:
+        if str(item.get("type")) != "component":
+            continue
+        name = str(item.get("name", ""))
+        directory = AUTHORING_VENDOR_ROOT / str(item.get("path", ""))
+        document = directory / f"{name}.html"
+        if not document.is_file():
+            raise MotionAuthoringRejected(
+                "motion authoring rejected: locked component source is unreadable"
+            )
+        try:
+            loaded[name] = component_film_metadata(
+                name=name,
+                source=document.read_text(encoding="utf-8"),
+            )
+        except (OSError, ComponentHostRejected) as error:
+            raise MotionAuthoringRejected(
+                "motion authoring rejected: locked component metadata drifted"
+            ) from error
+    if len(loaded) != 25:
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: locked component metadata drifted"
+        )
+    return loaded
+
+
+LOCKED_COMPONENT_METADATA: Final = _load_locked_component_metadata()
+
+
+def _locked_item_duration(item: Mapping[str, Any]) -> float:
+    duration = item.get("duration")
+    if duration:
+        return min(float(duration), CATALOG_SEGMENT_SECONDS_MAXIMUM)
+    name = str(item.get("name", ""))
+    metadata = LOCKED_COMPONENT_METADATA.get(name)
+    if metadata is None:
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: locked motion catalog has no part duration"
+        )
+    return min(metadata.duration_seconds, CATALOG_SEGMENT_SECONDS_MAXIMUM)
+
+
 def _load_selectable_catalog_parts() -> tuple[dict[str, Any], ...]:
-    """The parts this product can actually put the user's words into.
+    """All locked parts the product can place into a shot.
 
-    Cataloguing a part and being able to fill it are different questions, and
-    reading all 134 sources (PC-02) found two shapes where the answer is no:
-
-    * every transition is a *demo page* rather than a shot — rendered as-is it
-      reads "SCENE A | SCENE B / Glitch / Prompt / use glitch shader
-      transition", with the two panels standing in for your own scenes;
-    * the script-driven parts keep their copy in JavaScript alongside per-word
-      timestamps, so replacing it is re-timing an animation rather than
-      substituting a string.
-
-    Offering either to the model spends a choice on something that cannot be
-    delivered, so the closed set it selects from is the graded remainder.
-
-    That grading answers "can this part be filled". `assemble_film` asks a
-    second question — "can a shot be built from it" — and needs three things to
-    say yes: a declared duration, a declared stage, and a frozen slot table.
-    Measured 2026-07-28 on the first run where the catalog actually reached this
-    agent, the model chose `shimmer-sweep`, a pure visual effect with none of
-    the three, and the film died with "the catalog does not carry" rather than
-    that one shot. 39 of the 76 parts offered were choices like that, so a
-    three-beat film had almost no chance of surviving. The offered set is now
-    the intersection: a part the model can pick is a part a film can be made
-    from.
-
-    `deferred` still draws the first line, and it is still a property of the
-    part rather than of the schedule — the first/second split in the same
-    contract is only about which slot tables were built first. The slot table's
-    presence is a schedule fact today, which means a part joins this set the
-    moment its table is frozen, with nothing about the part changing. That is
-    the intended behaviour: an offer this process cannot honour is worse than a
-    smaller catalog.
+    The usability and slot contracts still distinguish copy-editable parts
+    from visual-only ones. They no longer decide whether a part may be chosen:
+    BM-16 proved every locked release item renders offline, and BM-15 promises
+    selection and override across the whole catalog. A component without its
+    own stage uses the reviewed three-second 1920x1080 host at assembly time.
     """
     try:
         usability = json.loads(_MOTION_PART_USABILITY_PATH.read_text(encoding="utf-8"))
@@ -344,20 +378,19 @@ def _load_selectable_catalog_parts() -> tuple[dict[str, Any], ...]:
             "name": str(item["name"]),
             "title": str(item["title"]),
             "category": str(item["category"]),
-            "duration": item["duration"],
+            "duration": _locked_item_duration(item),
             "description": str(item["description"]),
+            "copyMode": (
+                "text_slots"
+                if str(item["name"]) in anchored
+                else reviewed_visual_part_copy_mode(str(item["name"]))
+            ),
         }
         for item in _LOCKED_CATALOG_ITEMS
-        if graded[str(item["name"])] != "deferred"
-        # The three `assemble_film` needs. Asked of the same contracts it reads,
-        # so an offer cannot outlive what makes it deliverable.
-        and item.get("duration")
-        and (item.get("dimensions") or {}).get("width")
-        and str(item["name"]) in anchored
     )
-    if not selectable:
+    if len(selectable) != 134:
         raise MotionAuthoringRejected(
-            "motion authoring rejected: no motion part is selectable"
+            "motion authoring rejected: selectable motion catalog drifted"
         )
     return selectable
 
@@ -393,24 +426,15 @@ def _load_render_canvas() -> tuple[int, int]:
         or not (16 <= width <= 7680)
         or not (16 <= height <= 4320)
     ):
-        raise MotionAuthoringRejected(
-            "motion authoring rejected: render canvas contract drifted"
-        )
+        raise MotionAuthoringRejected("motion authoring rejected: render canvas contract drifted")
     return width, height
 
 
 RENDER_CANVAS_WIDTH, RENDER_CANVAS_HEIGHT = _load_render_canvas()
 
 
-_BRIEF_CONTRACT_PATH: Final = (
-    _CONTRACTS_ROOT / "video/motion-one-sentence-brief.v1.json"
-)
-_DURATION_CONTRACT_PATH: Final = (
-    _CONTRACTS_ROOT / "video/motion-storyboard-duration.v1.json"
-)
-_MODEL_CALL_CONTRACT_PATH: Final = (
-    _CONTRACTS_ROOT / "video/motion-authoring-model-call.v1.json"
-)
+_BRIEF_CONTRACT_PATH: Final = _CONTRACTS_ROOT / "video/motion-one-sentence-brief.v1.json"
+_MODEL_CALL_CONTRACT_PATH: Final = _CONTRACTS_ROOT / "video/motion-authoring-model-call.v1.json"
 
 
 def _load_brief_bounds() -> tuple[int, int, frozenset[str], frozenset[str]]:
@@ -529,9 +553,7 @@ def load_thinking_default() -> bool:
             "motion authoring rejected: model call contract is unreadable"
         ) from error
     if type(value) is not bool:
-        raise MotionAuthoringRejected(
-            "motion authoring rejected: model call contract drifted"
-        )
+        raise MotionAuthoringRejected("motion authoring rejected: model call contract drifted")
     return value
 
 
@@ -559,9 +581,7 @@ def _load_model_stream_idle_timeout_seconds() -> int:
         or type(seconds) is not int
         or not (1 <= seconds <= MAX_MODEL_TIMEOUT_SECONDS)
     ):
-        raise MotionAuthoringRejected(
-            "motion authoring rejected: model call contract drifted"
-        )
+        raise MotionAuthoringRejected("motion authoring rejected: model call contract drifted")
     return seconds
 
 
@@ -607,171 +627,6 @@ SANDBOX_CPU_PARALLELISM_MAXIMUM: Final = 8
 MAX_MODEL_TIMEOUT_SECONDS: Final = 3600
 MODEL_TIMEOUT_SECONDS: Final = _load_model_stream_idle_timeout_seconds()
 MAX_MODEL_RESPONSE_BYTES: Final = 262_144
-
-
-# --------------------------------------------------------------------------- #
-# Workspace-relative path containment
-# --------------------------------------------------------------------------- #
-
-
-_RESERVED_DEVICE_NAMES: Final = frozenset(
-    {"con", "prn", "aux", "nul"}
-    | {f"com{digit}" for digit in "123456789"}
-    | {f"lpt{digit}" for digit in "123456789"}
-)
-
-
-def _validate_relative(path: object) -> str:
-    """Return a clean workspace-relative POSIX path or fail closed.
-
-    Beyond the POSIX escapes, this rejects three names that only Windows
-    reinterprets — all three were observed being accepted on a real NTFS
-    volume while the audit scan could not see the result:
-
-    * `a.html:hidden` writes an alternate data stream that a directory scan
-      never lists, so the agent could leave bytes no audit reports;
-    * a segment ending in a dot or space is silently stripped by Windows, so
-      two distinct keys collapse onto one file;
-    * a reserved device name (`NUL`, `CON`, `COM1`, …) swallows the bytes.
-    """
-    if type(path) is not str or not path:
-        _reject("path must be a non-empty string")
-        raise AssertionError  # pragma: no cover
-    if "\x00" in path or "\\" in path or path.startswith("/"):
-        _reject("path must be a clean relative posix path")
-    segments = path.split("/")
-    if any(segment in ("", ".", "..") for segment in segments):
-        _reject("path must not contain empty, current or parent segments")
-    for segment in segments:
-        if ":" in segment:
-            _reject("path must not name an alternate data stream")
-        if segment != segment.rstrip(" ."):
-            _reject("path segment must not end with a dot or a space")
-        if segment.split(".", 1)[0].casefold() in _RESERVED_DEVICE_NAMES:
-            _reject("path must not name a reserved device")
-    return path
-
-
-def _require_no_case_collision(root: Path, relative: str) -> None:
-    """Reject a name that differs only by case from one already present.
-
-    NTFS and the default APFS volume are case-insensitive, so writing
-    `MAIN.html` next to `main.html` overwrites it while a directory scan keeps
-    reporting the original name — a reviewed artifact replaced through a key
-    no audit ever sees. Observed on a real Windows host.
-
-    The comparison must use the requested segments, never a resolved path:
-    Windows resolves through `GetFinalPathNameByHandle`, which hands back the
-    on-disk casing, so a resolved name always equals the existing entry and the
-    check would silently pass. That is exactly how the first version of this
-    guard failed on a real Windows host while passing on macOS.
-    """
-    current = root
-    for segment in relative.split("/"):
-        if not current.is_dir():
-            return
-        folded = segment.casefold()
-        for existing in current.iterdir():
-            if existing.name != segment and existing.name.casefold() == folded:
-                _reject("path collides with an existing entry that differs only by case")
-        current = current / segment
-
-
-class AuthoringWorkspace:
-    """A RenderJob private directory the agent may write inside — and nowhere else."""
-
-    def __init__(self, root: Path) -> None:
-        if not isinstance(root, Path) or not root.is_absolute():
-            _reject("workspace root must be an absolute path")
-        if root.is_symlink() or not root.is_dir():
-            _reject("workspace root must be a real, non-symlink directory")
-        self._root = root.resolve(strict=True)
-        # Snapshot the seeded assets (offline runtime + brand material) that
-        # existed before authoring; the composition may reference only these.
-        self._seeded_assets = self.provided_assets()
-        self._authored_targets: set[Path] = set()
-
-    @property
-    def root(self) -> Path:
-        return self._root
-
-    def resolve(self, relative: str) -> Path:
-        clean = _validate_relative(relative)
-        target = (self._root / clean).resolve()
-        try:
-            target.relative_to(self._root)
-        except ValueError:
-            _reject("path escapes the workspace")
-        _require_no_case_collision(self._root, clean)
-        return target
-
-    def _write(self, relative: str, emit: Callable[[Path], object]) -> Path:
-        """Containment, symlink refusal and rollback, once for every writer.
-
-        Text and audio differ only in the last statement; duplicating the rest
-        would leave two copies of the rule that decides where bytes may land.
-        """
-        try:
-            target = self.resolve(relative)
-            if target.relative_to(self._root).as_posix() not in self._seeded_assets:
-                # Record before the write: a short write may create a partial
-                # file and then raise, so recording only after success cannot
-                # roll it back at the process boundary.
-                self._authored_targets.add(target)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if target.is_symlink():
-                _reject("refusing to write through a symlink")
-            emit(target)
-        except MotionAuthoringRejected:
-            raise
-        except OSError as error:
-            self.rollback_authored_files()
-            raise MotionAuthoringPersistenceError(
-                "motion authoring workspace persistence failed"
-            ) from error
-        return target
-
-    def write_text(self, relative: str, text: str) -> Path:
-        return self._write(relative, lambda target: target.write_text(text, encoding="utf-8"))
-
-    def write_bytes(self, relative: str, payload: bytes) -> Path:
-        """Synthesized narration lands here, under the same containment rules."""
-        if not isinstance(payload, (bytes, bytearray)):
-            _reject("workspace bytes must be a bytes payload")
-        return self._write(relative, lambda target: target.write_bytes(bytes(payload)))
-
-    def rollback_authored_files(self) -> None:
-        """Remove files this run introduced without touching seeded assets.
-
-        Cleanup is best-effort because the same disk or permission failure may
-        also prevent unlinking. The caller still has to close the original
-        error into the fixed process response rather than replacing it with a
-        second local-path-bearing exception.
-        """
-        for target in self._authored_targets:
-            try:
-                if target.is_file() and not target.is_symlink():
-                    target.unlink()
-            except OSError:
-                continue
-
-    def read_text(self, relative: str) -> str:
-        target = self.resolve(relative)
-        if target.is_symlink() or not target.is_file():
-            _reject("expected a regular file inside the workspace")
-        return target.read_text(encoding="utf-8")
-
-    def provided_assets(self) -> frozenset[str]:
-        """Scan the workspace for regular, non-symlink files."""
-        found: set[str] = set()
-        for path in self._root.rglob("*"):
-            if path.is_symlink() or not path.is_file():
-                continue
-            found.add(path.relative_to(self._root).as_posix())
-        return frozenset(found)
-
-    def seeded_assets(self) -> frozenset[str]:
-        return self._seeded_assets
 
 
 # --------------------------------------------------------------------------- #
@@ -832,9 +687,7 @@ class DesignArtifact:
         )
 
 
-def require_repair_changed_only_copy(
-    before: StoryboardArtifact, after: StoryboardArtifact
-) -> None:
+def require_repair_changed_only_copy(before: StoryboardArtifact, after: StoryboardArtifact) -> None:
     """The repair round may shorten copy and touch nothing else.
 
     T92 dropped the repair loop because rewriting 13KB of HTML was too costly;
@@ -845,7 +698,7 @@ def require_repair_changed_only_copy(
     """
     if len(before.beats) != len(after.beats):
         _reject("repair round altered more than copy")
-    for original, revised in zip(before.beats, after.beats):
+    for original, revised in zip(before.beats, after.beats, strict=True):
         if (
             original.beat_id != revised.beat_id
             or original.purpose != revised.purpose
@@ -965,10 +818,7 @@ class StoryboardBeat:
         _require(
             isinstance(parts, list)
             and len(parts) <= 16
-            and all(
-                type(part) is str and part in SELECTABLE_CATALOG_PART_IDS
-                for part in parts
-            ),
+            and all(type(part) is str and part in SELECTABLE_CATALOG_PART_IDS for part in parts),
             "catalog_parts must be selectable catalog ids",
         )
         _require(data["layout"] in SCENE_LAYOUTS, "beat layout is not published")
@@ -1282,9 +1132,7 @@ def check_composition(html: str, *, duration_seconds: int) -> CheckResult:
     if match is None:
         findings.append(LintFinding("missing_duration", "no root data-duration"))
     elif abs(float(match.group(1)) - float(duration_seconds)) > _TOLERANCE:
-        findings.append(
-            LintFinding("duration_mismatch", f"{match.group(1)} != {duration_seconds}")
-        )
+        findings.append(LintFinding("duration_mismatch", f"{match.group(1)} != {duration_seconds}"))
     findings.extend(_canvas_findings(html))
     findings.extend(_runtime_findings(html))
     findings.extend(_clip_findings(html, duration_seconds=duration_seconds))
@@ -1336,8 +1184,7 @@ def _canvas_findings(html: str) -> list[LintFinding]:
         return [
             LintFinding(
                 "canvas_mismatch",
-                f"{declared[0]}x{declared[1]} != "
-                f"{RENDER_CANVAS_WIDTH}x{RENDER_CANVAS_HEIGHT}",
+                f"{declared[0]}x{declared[1]} != {RENDER_CANVAS_WIDTH}x{RENDER_CANVAS_HEIGHT}",
             )
         ]
     return []
@@ -1357,16 +1204,12 @@ def _clip_findings(html: str, *, duration_seconds: int) -> list[LintFinding]:
     if not intervals:
         return []
     findings: list[LintFinding] = []
-    for (_, earlier_end, earlier_id), (later_start, _, later_id) in zip(
-        intervals, intervals[1:]
-    ):
+    for (_, earlier_end, earlier_id), (later_start, _, later_id) in pairwise(intervals):
         if later_start < earlier_end - _TOLERANCE:
-            findings.append(
-                LintFinding("clip_overlap", f"{earlier_id} overlaps {later_id}")
-            )
+            findings.append(LintFinding("clip_overlap", f"{earlier_id} overlaps {later_id}"))
     covered = abs(intervals[0][0]) <= _TOLERANCE and all(
         abs(later_start - earlier_end) <= _TOLERANCE
-        for (_, earlier_end, _), (later_start, _, _) in zip(intervals, intervals[1:])
+        for (_, earlier_end, _), (later_start, _, _) in pairwise(intervals)
     )
     if not covered or abs(intervals[-1][1] - float(duration_seconds)) > _TOLERANCE:
         findings.append(
@@ -1384,9 +1227,7 @@ def _clip_findings(html: str, *, duration_seconds: int) -> list[LintFinding]:
                 )
             )
         uncontrolled = [
-            clip_id
-            for (_, _, clip_id) in intervals
-            if not _clip_visibility_control(html, clip_id)
+            clip_id for (_, _, clip_id) in intervals if not _clip_visibility_control(html, clip_id)
         ]
         if uncontrolled:
             findings.append(
@@ -1581,7 +1422,10 @@ class MotionAuthoringTools:
         return storyboard
 
     def write_composition(self, relative_path: str, html: str) -> str:
-        _require(type(html) is str and html, "composition html must be a non-empty string")
+        _require(
+            type(html) is str and bool(html),
+            "composition html must be a non-empty string",
+        )
         self._workspace.write_text(relative_path, html)
         return _validate_relative(relative_path)
 
@@ -1662,9 +1506,7 @@ class WorkflowReference:
     text: str
 
 
-def load_locked_authoring_workflow(
-    *, vendor_root: Path, contract_path: Path
-) -> WorkflowReference:
+def load_locked_authoring_workflow(*, vendor_root: Path, contract_path: Path) -> WorkflowReference:
     """Read only the pinned, digest-verified skill files as authoring rules."""
     try:
         document = json.loads(contract_path.read_text(encoding="utf-8"))
@@ -1746,10 +1588,19 @@ def load_video_creation_model_config(
     base_url = secret.get("openAiCompatibleBaseUrl") or catalog.get("base_url")
     purposes = catalog.get("purposes")
     _require(isinstance(purposes, list), "catalog purposes missing")
-    creative = next((item for item in purposes if item.get("id") == "video_creative"), None)
+    creative = next(
+        (
+            item
+            for item in purposes
+            if isinstance(item, dict) and item.get("id") == "video_creative"
+        ),
+        None,
+    )
     _require(isinstance(creative, dict), "video_creative purpose missing")
+    assert isinstance(creative, dict)
     model_id = creative.get("default_model_id")
     _require(isinstance(model_id, str) and bool(model_id), "video model id missing")
+    assert isinstance(model_id, str)
     return VideoCreationModelConfig(base_url=base_url, model_id=model_id, api_key=api_key)
 
 
@@ -1771,7 +1622,7 @@ def _accumulate_stream_content(lines: Iterable[bytes], *, max_bytes: int) -> str
         ).strip()
         if not line.startswith("data:"):
             continue
-        payload = line[len("data:"):].strip()
+        payload = line[len("data:") :].strip()
         if payload == "[DONE]":
             break
         try:
@@ -1832,9 +1683,7 @@ def call_video_creation_model(
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
-            return _accumulate_stream_content(
-                response, max_bytes=MAX_MODEL_RESPONSE_BYTES
-            )
+            return _accumulate_stream_content(response, max_bytes=MAX_MODEL_RESPONSE_BYTES)
     except OSError as error:
         # URLError, socket timeout and connection errors are all OSError; never
         # surface the key or upstream body, keep the reason bounded.
@@ -1856,6 +1705,7 @@ def call_video_creation_model(
 # --------------------------------------------------------------------------- #
 # The restricted agent
 # --------------------------------------------------------------------------- #
+
 
 @dataclass(frozen=True)
 class AuthoringResult:
@@ -1917,6 +1767,7 @@ def _compose(
         runtime_asset=AUTHORING_RUNTIME_ASSET,
     )
 
+
 _SYSTEM_RULES: Final = (
     "你是受限的品牌动效视频编排代理。只能输出一个 JSON 对象，不得输出任何其他文本、"
     "解释或 Markdown 代码块。你没有 Shell、文件系统、浏览器、密钥或网络工具。\n"
@@ -1925,6 +1776,7 @@ _SYSTEM_RULES: Final = (
     "参考资料里的合成骨架示范只用于理解成片结构，一律不要照抄、不要输出其中任何代码。\n"
     "你只负责：选定风格与配色、写出每一段分镜的画面文案、给出每段的起止时间。"
 )
+
 
 def suggested_beat_seconds(duration_seconds: int) -> tuple[int, int]:
     """How long to tell the model to make each beat, for a film this long.
@@ -1984,7 +1836,7 @@ def _selectable_parts_table() -> str:
     for part in SELECTABLE_CATALOG_PARTS:
         duration = "—" if part["duration"] is None else f"{part['duration']}"
         lines.append(
-            f"{part['name']} | {part['category']} | {duration} | "
+            f"{part['name']} | {part['category']} | {duration} | {part['copyMode']} | "
             f"{part['title']}: {part['description']}"
         )
     return "\n".join(lines)
@@ -2022,8 +1874,12 @@ def _first_message_contract(brief: MotionBrief) -> str:
         "不要写导演备注；purpose 才是给内部看的说明。\n"
         "catalog_parts 请按每段分镜的内容从下面的零件目录里选（可为空数组，"
         f"每段最多 16 项），只能使用目录中的 ID。共 {len(SELECTABLE_CATALOG_PARTS)} 个，"
-        "每行是「ID | 中文分类 | 时长秒 | 英文说明」；时长写「—」的零件没有自己的"
-        "时间轴，是叠加在画面上的局部效果，不占镜头长度：\n"
+        "每行是「ID | 中文分类 | 时长秒 | 文案模式 | 英文说明」。文案模式 text_slots "
+        "表示零件通过冻结槽位承载当前分镜文案；beat_host 表示受审宿主或转场场景会承载 "
+        "headline / body / items；visual_only 表示零件保留冻结的原始画面，不会写入 headline "
+        "/ body / items，只有明确需要保留零件原始画面时才选，否则请选 text_slots、"
+        "beat_host 或留空。时长写「—」的零件没有自己的时间轴，是叠加在画面上的局部效果，"
+        "不占镜头长度：\n"
         f"{_selectable_parts_table()}\n"
         # Stated because the model does not otherwise connect the two: given the
         # durations and a 12s brief it picked parts totalling 26s of animation
@@ -2072,9 +1928,7 @@ def apply_catalog_part_overrides(
         beats=tuple(
             replace(
                 beat,
-                catalog_parts=(override,)
-                if override is not None
-                else beat.catalog_parts,
+                catalog_parts=(override,) if override is not None else beat.catalog_parts,
             )
             for beat, override in zip(storyboard.beats, overrides, strict=True)
         )
@@ -2137,8 +1991,7 @@ class MotionAuthoringAgent:
                 or any(part is not None for part in catalog_part_overrides)
             )
             and all(
-                part is None
-                or (type(part) is str and part in SELECTABLE_CATALOG_PART_IDS)
+                part is None or (type(part) is str and part in SELECTABLE_CATALOG_PART_IDS)
                 for part in catalog_part_overrides
             ),
             "catalog part overrides must be selectable catalog ids",
@@ -2169,12 +2022,15 @@ class MotionAuthoringAgent:
         except json.JSONDecodeError:
             _reject("model output was not JSON")
             raise AssertionError from None  # pragma: no cover
-        _require(isinstance(data, dict), "model output must be a JSON object")
-        return data
+        document = _string_keyed_object(data)
+        if document is None:
+            _reject("model output must be a JSON object")
+            raise AssertionError from None  # pragma: no cover
+        return document
 
     def _segments_for(
         self,
-        storyboard: Storyboard,
+        storyboard: StoryboardArtifact,
         *,
         template_entry: str,
         template_assets: tuple[str, ...],
@@ -2247,6 +2103,9 @@ class MotionAuthoringAgent:
                     ),
                     declared_seconds=beat.duration_seconds,
                     start_seconds=beat.start_seconds,
+                    headline=beat.headline,
+                    body=beat.body,
+                    items=beat.items,
                 )
                 for beat in storyboard.beats
             ],
@@ -2256,6 +2115,7 @@ class MotionAuthoringAgent:
             slot_budget=catalog.slot_budget,
             part_durations=catalog.durations,
             part_dimensions=catalog.dimensions,
+            part_types=catalog.types,
             template_canvas=TEMPLATE_CANVAS,
             template_entry=template_entry,
             frames_per_second=self._fps,
@@ -2315,18 +2175,14 @@ class MotionAuthoringAgent:
             write_part_working_copy,
         )
 
-        slots_by_part = {
-            part["name"]: part["slots"] for part in catalog.slot_table["parts"]
-        }
+        slots_by_part = {part["name"]: part["slots"] for part in catalog.slot_table["parts"]}
         judged = []
         documents: list[Path] = []
         for segment in film.segments:
             if segment.part is None or not segment.slot_budgets:
                 continue
             filled = copies.get(segment.beat_id) or {}
-            budgets = tuple(
-                budget for budget in segment.slot_budgets if budget.index in filled
-            )
+            budgets = tuple(budget for budget in segment.slot_budgets if budget.index in filled)
             if not budgets:
                 continue
             frozen = slots_by_part[segment.part]
@@ -2343,9 +2199,7 @@ class MotionAuthoringAgent:
                     for slot in frozen
                 ),
                 copy={
-                    slot["index"]: slot["original"]
-                    for slot in frozen
-                    if slot["index"] in filled
+                    slot["index"]: slot["original"] for slot in frozen if slot["index"] in filled
                 },
                 font_css=font_css_for(segment.part),
                 directory=BASELINE_COPY_DIRECTORY,
@@ -2371,9 +2225,7 @@ class MotionAuthoringAgent:
         offences: list[str] = []
         for position, budgets in enumerate(judged):
             try:
-                require_no_new_overflow(
-                    budgets, readings[2 * position], readings[2 * position + 1]
-                )
+                require_no_new_overflow(budgets, readings[2 * position], readings[2 * position + 1])
             except SlotProbeUnmeasured:
                 _reject("slot overflow probe failed to measure")
             except SlotProbeRejected as overflow:
@@ -2397,18 +2249,14 @@ class MotionAuthoringAgent:
         # an installation with no parts catalog: there the composition *is* the
         # film and is captured in one pass, so the sandbox's limit is the film's.
         film_frames_maximum = (
-            MAX_FRAME_COUNT
-            if self._catalog is None
-            else MAX_DURATION_SECONDS * self._fps
+            MAX_FRAME_COUNT if self._catalog is None else MAX_DURATION_SECONDS * self._fps
         )
         _require(
             brief.duration_seconds * self._fps <= film_frames_maximum,
             "duration exceeds the snapshot frame budget for this fps",
         )
 
-        allowed_assets = tuple(
-            sorted(self._workspace.seeded_assets() | set(brief.brand_assets))
-        )
+        allowed_assets = tuple(sorted(self._workspace.seeded_assets() | set(brief.brand_assets)))
         messages: list[dict[str, str]] = [
             {"role": "system", "content": _SYSTEM_RULES + "\n\n" + self._workflow.text},
             {
@@ -2447,7 +2295,7 @@ class MotionAuthoringAgent:
                 "script beats must match storyboard beats one to one",
             )
             narration = {}
-            for beat, line in zip(storyboard.beats, script.beats):
+            for beat, line in zip(storyboard.beats, script.beats, strict=True):
                 try:
                     audio, seconds = self._narrator(beat.beat_id, line)
                 except Exception:
@@ -2461,12 +2309,8 @@ class MotionAuthoringAgent:
         # a further model round can actually fix — the fix is shorter copy, a
         # few dozen bytes, not the 13KB document rewrite T92 removed.
         for repair_rounds_left in (1, 0):
-            composition_html = _compose(
-                design, storyboard, duration_seconds=brief.duration_seconds
-            )
-            composition_path = self._tools.write_composition(
-                COMPOSITION_PATH, composition_html
-            )
+            composition_html = _compose(design, storyboard, duration_seconds=brief.duration_seconds)
+            composition_path = self._tools.write_composition(COMPOSITION_PATH, composition_html)
             lint = self._tools.lint(composition_path)
             check = self._tools.check(composition_path, brief.duration_seconds)
 
@@ -2475,10 +2319,7 @@ class MotionAuthoringAgent:
             # template or in the beat timings — neither of which a further
             # model round can see or repair.
             if not lint.ok or not check.ok:
-                _reject(
-                    "composition failed static gates: "
-                    f"{sorted(lint.codes() | check.codes())}"
-                )
+                _reject(f"composition failed static gates: {sorted(lint.codes() | check.codes())}")
 
             snapshot = self._tools.snapshot(
                 composition_path, brief.duration_seconds, self._fps, film_frames_maximum
@@ -2500,9 +2341,7 @@ class MotionAuthoringAgent:
                 if not repair_rounds_left:
                     _reject("copy overflows its slot after the repair round")
                 messages.append({"role": "assistant", "content": json.dumps(data)})
-                messages.append(
-                    {"role": "user", "content": _repair_message(str(overflow))}
-                )
+                messages.append({"role": "user", "content": _repair_message(str(overflow))})
                 data = self._call(messages)
                 _require(
                     set(data) == {"storyboard"},
@@ -2538,6 +2377,7 @@ __all__ = [
     "AUTHORING_WORKFLOW_CONTRACT",
     "BRIEF_ASPECT_RATIOS",
     "BRIEF_LANGUAGES",
+    "COMPOSITION_PATH",
     "MAX_BRAND_ASSETS",
     "MAX_BRIEF_CHARS",
     "MAX_DURATION_SECONDS",
@@ -2553,7 +2393,6 @@ __all__ = [
     "MotionAuthoringPersistenceError",
     "MotionAuthoringRejected",
     "MotionAuthoringTools",
-    "COMPOSITION_PATH",
     "MotionAuthoringUnavailable",
     "MotionBrief",
     "RenderJobSubmission",

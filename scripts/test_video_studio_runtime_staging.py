@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from prepare_video_runtime import host_platform  # noqa: E402
 from release_assembly import VIDEO_RUNTIME_RESOURCES  # noqa: E402
+import run_bm_08_acceptance as bm08_acceptance  # noqa: E402
 from run_vf_06_acceptance import (  # noqa: E402
     DEBUG_APP_RESOURCE_ROOT,
     EMBEDDED_BROWSER_MANIFEST,
@@ -236,6 +237,32 @@ def check_native_video_drivers_stage_the_runtime_instead_of_injecting_dead_paths
     )
 
 
+def check_bm08_builds_frontend_before_tauri_compile() -> None:
+    """A fresh worktree has no dist directory for Tauri's generate_context macro."""
+
+    commands: list[list[str]] = []
+    with (
+        mock.patch.object(bm08_acceptance, "pnpm_executable", return_value="pnpm"),
+        mock.patch.object(
+            bm08_acceptance,
+            "_run",
+            side_effect=lambda arguments, **_options: commands.append(arguments),
+        ),
+    ):
+        bm08_acceptance.run_deterministic_gates()
+
+    frontend_build = ["pnpm", "--dir", "frontend", "build"]
+    cargo_test = next(
+        command for command in commands if command[:2] == ["cargo", "test"]
+    )
+    assert frontend_build in commands, (
+        "BM-08 starts Tauri compilation without first creating frontend/dist"
+    )
+    assert commands.index(frontend_build) < commands.index(cargo_test), (
+        "BM-08 creates frontend/dist only after Tauri already needed it"
+    )
+
+
 def check_the_staging_fixture_matches_what_the_checker_requires_on_every_platform() -> (
     None
 ):
@@ -317,6 +344,7 @@ CHECKS = (
     check_restaging_breaks_a_resource_link_without_touching_its_target,
     check_a_missing_embedded_browser_names_the_provisioning_step,
     check_native_video_drivers_stage_the_runtime_instead_of_injecting_dead_paths,
+    check_bm08_builds_frontend_before_tauri_compile,
     check_the_staging_fixture_matches_what_the_checker_requires_on_every_platform,
     check_every_declared_check_is_registered,
 )

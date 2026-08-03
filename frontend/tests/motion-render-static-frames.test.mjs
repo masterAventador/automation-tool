@@ -1,14 +1,13 @@
 // A render that never moves must fail loudly instead of shipping a still image.
 //
-// The observed defect: the packaged authoring reference
+// The original defect: the packaged authoring reference
 // (`vendor/hyperframes/.../minimal-composition.md`) demonstrates the animation
 // runtime as a CDN `<script src="https://...gsap...">`. The render sandbox is
 // offline by construction, so that tag resolves to nothing, `gsap` stays
 // undefined, and the inline setup throws before it can register
-// `window.__timelines`. The Worker then finds no seekable timeline, skips the
-// per-frame seek entirely (`if (seekableDuration > 0)`), screenshots the same
-// untouched first paint `frameCount` times and reports `status: "complete"`.
-// Every gate is green and the deliverable is a static picture.
+// `window.__timelines`. The Worker must now reject that declared-but-missing
+// timeline after bounded warm-up as a static render instead of capturing an
+// untouched first paint and reporting `status: "complete"`.
 //
 // These tests drive the real `workers/motion_composition/worker.mjs` through
 // its real stdin protocol against a real Chromium, because the whole point is
@@ -23,7 +22,7 @@ import { copyFile, mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -66,6 +65,16 @@ function locateRenderBrowser() {
 }
 
 async function chromiumMajor(executable) {
+  const explicit = Number(process.env.AUTOMATION_TOOL_RENDER_BROWSER_MAJOR);
+  if (Number.isInteger(explicit) && explicit > 0) return explicit;
+  if (process.platform === "win32") {
+    const manifest = (await readdir(dirname(executable))).find((name) =>
+      /^\d+\.\d+\.\d+\.\d+\.manifest$/u.test(name)
+    );
+    const major = Number(manifest?.split(".", 1)[0]);
+    assert.ok(Number.isInteger(major), `could not read Chromium major beside ${executable}`);
+    return major;
+  }
   const { stdout } = await execFileAsync(executable, ["--version"]);
   const major = Number(/(\d+)\.\d+\.\d+\.\d+/u.exec(stdout)?.[1]);
   assert.ok(Number.isInteger(major), `could not read a Chromium major from ${stdout}`);
@@ -154,6 +163,9 @@ const RUNTIME_CANDIDATES = [
   ".local/offline-motion-deps/catalog/offline-deps/js/gsap-3.14.2/gsap.min.js",
   ".local/release/cargo-target/release/bundle/macos/自动化运营工具.app/Contents/Resources/motion-video-worker/package/runtime/gsap.min.js",
 ];
+const RELEASE_CATALOG = fileURLToPath(
+  new URL(".local/motion-catalog-release/1.0.0", repositoryRoot),
+);
 
 function locateAnimationRuntime() {
   const explicit = process.env.AUTOMATION_TOOL_RENDER_RUNTIME;
@@ -167,11 +179,20 @@ function locateAnimationRuntime() {
   return null;
 }
 
-async function renderPage(html, executable, major, assets = [], window = null) {
+async function renderPage(
+  html,
+  executable,
+  major,
+  assets = [],
+  window = null,
+  entryHtml = "entry.html",
+) {
   const base = await mkdtemp(join(tmpdir(), "t86-static-"));
   const workspace = join(base, "workspace");
   await mkdir(workspace, { recursive: true });
-  await writeFile(join(workspace, "entry.html"), html, "utf8");
+  const entry = join(workspace, entryHtml);
+  await mkdir(join(entry, ".."), { recursive: true });
+  await writeFile(entry, html, "utf8");
   for (const asset of assets) {
     const target = join(workspace, asset.relative);
     await mkdir(join(target, ".."), { recursive: true });
@@ -187,7 +208,7 @@ async function renderPage(html, executable, major, assets = [], window = null) {
     // The Worker holds no cancellation name of its own; the caller supplies the
     // declared one. See `contracts/video/motion-render-cancel-marker.v1.json`.
     cancelMarker: CANCEL_MARKER,
-    entryHtml: "entry.html",
+    entryHtml,
     frameCount: FRAME_COUNT,
     // Which stretch of the entry's own timeline this render covers. Default is
     // the whole of it, which is what a film captured in one pass asks for.
@@ -263,7 +284,7 @@ test("a composition whose animation runtime never loads fails instead of shippin
   assert.equal(
     event.reasonCode,
     "render_static_frames",
-    `a render where every frame is identical must be reported as a failure, got ${JSON.stringify(event)}`,
+    `a document that declares but never registers its timeline must be rejected as static, got ${JSON.stringify(event)}`,
   );
   assert.equal(event.event, "worker.render.failed");
 });
@@ -290,7 +311,11 @@ test("a composition that actually animates still renders", async (t) => {
 // real Chromium: the deterministic Python tests can only prove the document
 // passes the *static* gates, and a document that passes all of them while never
 // repainting is exactly the defect T86 shipped.
-const PYTHON = fileURLToPath(new URL("backend/.venv/bin/python", repositoryRoot));
+const PYTHON = process.env.AUTOMATION_TOOL_TEST_PYTHON
+  ?? ["backend/.venv/bin/python", "backend/.venv/Scripts/python.exe"]
+    .map((candidate) => fileURLToPath(new URL(candidate, repositoryRoot)))
+    .find((candidate) => existsSync(candidate))
+  ?? "python3";
 const TEMPLATE_DURATION = 3;
 const RENDER_TEMPLATE = `
 import sys
@@ -308,6 +333,124 @@ sys.stdout.write(render_composition(
     runtime_asset=AUTHORING_RUNTIME_ASSET,
 ))
 `;
+
+const RENDER_FRAGMENT_COMPONENT = `
+import sys
+sys.path.insert(0, "backend/src")
+from pathlib import Path
+from automation_tool.executor.motion_authoring.component_host import build_component_film_html
+name = sys.argv[1]
+source = Path(f"vendor/hyperframes/registry/components/{name}/{name}.html").read_text(encoding="utf-8")
+sys.stdout.write(build_component_film_html(
+    name=name, source=source, headline="本周销售增长",
+    body="方向性拖影", items=(),
+))
+`;
+
+const RENDER_STATIC_OVERLAY_WORKING_COPY = `
+import sys
+sys.path.insert(0, "backend/src")
+from pathlib import Path
+from automation_tool.executor.motion_authoring.part_workspace import write_part_working_copy
+class Workspace:
+    def __init__(self): self.text = {}
+    def write_text(self, path, value): self.text[path] = value
+    def write_bytes(self, path, value): pass
+workspace = Workspace()
+entry = write_part_working_copy(
+    workspace=workspace, catalog_root=Path(sys.argv[1]), name="lower-third-bild",
+    slots=(), copy={}, font_css="",
+)
+sys.stdout.write(workspace.text[entry])
+`;
+
+test("the static overlay becomes a moving standalone film shot", async (t) => {
+  const executable = locateRenderBrowser();
+  const runtime = locateAnimationRuntime();
+  const font = join(
+    RELEASE_CATALOG,
+    "items/lower-third-bild/assets/fonts/big-shoulders-display-latin.woff2",
+  );
+  if (executable === null || runtime === null || !existsSync(font)) {
+    t.skip("the staged Chromium or release catalog is unavailable");
+    return;
+  }
+  const { stdout: html } = await execFileAsync(
+    PYTHON,
+    ["-c", RENDER_STATIC_OVERLAY_WORKING_COPY, RELEASE_CATALOG],
+    { cwd: fileURLToPath(repositoryRoot), maxBuffer: 4_000_000 },
+  );
+  const event = await renderPage(
+    html,
+    executable,
+    await chromiumMajor(executable),
+    [
+      {
+        relative: "catalog/offline-deps/js/gsap-3.14.2/gsap.min.js",
+        source: runtime,
+      },
+      {
+        relative: "catalog/items/lower-third-bild/assets/fonts/big-shoulders-display-latin.woff2",
+        source: font,
+      },
+    ],
+    { start: 0, end: 8 },
+    "catalog/items/lower-third-bild/lower-third-bild.html",
+  );
+  assert.equal(
+    event.event,
+    "worker.render.sandboxed",
+    `the selectable overlay must animate, got ${JSON.stringify(event)}`,
+  );
+});
+
+test("every production fragment component host renders a moving offline shot", async (t) => {
+  const executable = locateRenderBrowser();
+  if (executable === null) {
+    t.skip("no staged embedded Chromium on this machine");
+    return;
+  }
+  const runtime = locateAnimationRuntime();
+  if (runtime === null) {
+    t.skip("no staged animation runtime on this machine");
+    return;
+  }
+  const major = await chromiumMajor(executable);
+  const names = [
+    "caption-blend-difference",
+    "grain-overlay",
+    "grid-pixelate-wipe",
+    "motion-blur",
+    "parallax-unzoom",
+    "parallax-zoom",
+    "shimmer-sweep",
+    "texture-mask-text",
+    "vignette",
+  ];
+  for (const name of names) {
+    const { stdout: html } = await execFileAsync(
+      PYTHON,
+      ["-c", RENDER_FRAGMENT_COMPONENT, name],
+      { cwd: fileURLToPath(repositoryRoot), maxBuffer: 4_000_000 },
+    );
+    const event = await renderPage(
+      html,
+      executable,
+      major,
+      [{
+        relative: "catalog/offline-deps/js/gsap-3.14.2/gsap.min.js",
+        source: runtime,
+      }],
+      { start: 0, end: 3 },
+      `catalog/items/${name}/${name}.html`,
+    );
+    assert.equal(
+      event.event,
+      "worker.render.sandboxed",
+      `${name} must animate, got ${JSON.stringify(event)}`,
+    );
+  }
+});
 
 test("the local composition template renders a film that actually moves", async (t) => {
   const executable = locateRenderBrowser();

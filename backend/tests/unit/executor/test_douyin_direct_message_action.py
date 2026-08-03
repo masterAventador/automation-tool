@@ -863,7 +863,7 @@ def test_intent_execution_and_receipt_contracts_are_closed_and_redacted(
         },
     ):
         with pytest.raises(DouyinDirectMessageActionRejected):
-            DouyinDirectMessageActionIntent(**values)  # type: ignore[arg-type]
+            DouyinDirectMessageActionIntent(**values)
 
     for values in (
         {"window": object(), "action_gate": gate, "ledger": ledger, "clock": clock},

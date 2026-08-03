@@ -36,8 +36,10 @@ has empty boxes where the Chinese should be.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
+import re
 import struct
 import urllib.error
 import urllib.request
@@ -69,7 +71,21 @@ CACHE_NAME = "subtitle-fonts"
 FONT_SOURCE_URL_PREFIX = (
     "https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/"
 )
+PLANGOTHIC_FONT_SOURCE_URL_PREFIX = (
+    "https://github.com/Fitzgerald-Porthmouth-Koenigsegg/Plangothic_Project/"
+    "releases/download/V2.9.5795/"
+)
+PLANGOTHIC_LICENSE_SOURCE_URL_PREFIX = (
+    "https://raw.githubusercontent.com/Fitzgerald-Porthmouth-Koenigsegg/"
+    "Plangothic_Project/V2.9.5795/"
+)
+LOCKED_SOURCE_URL_PREFIXES = (
+    FONT_SOURCE_URL_PREFIX,
+    PLANGOTHIC_FONT_SOURCE_URL_PREFIX,
+    PLANGOTHIC_LICENSE_SOURCE_URL_PREFIX,
+)
 FETCH_TIMEOUT_SECONDS = 120
+FETCH_ATTEMPTS = 3
 MAXIMUM_FETCH_BYTES = 64 * 1024 * 1024
 
 # The SIL OFL is a template: unlike MIT or Apache-2.0 its text names no
@@ -114,6 +130,19 @@ class PackagedLicenseNotice:
     bytes: int
 
 
+@dataclass(frozen=True)
+class BundledFontFamily:
+    """One user-visible SBOM component derived from its cleared font entries."""
+
+    component_id: str
+    display_name: str
+    version: str
+    project_url: str
+    license_text_id: str
+    attribution: str
+    packaged_license_name: str
+
+
 def _reject(message: str) -> None:
     raise SubtitleFontRightsError(message)
 
@@ -139,7 +168,7 @@ def load_worker_contract(path: Path = WORKER_CONTRACT_PATH) -> dict:
 
 
 def _locked_url(value: object, field: str) -> str:
-    if not isinstance(value, str) or not value.startswith(FONT_SOURCE_URL_PREFIX):
+    if not isinstance(value, str) or not value.startswith(LOCKED_SOURCE_URL_PREFIXES):
         _reject(f"{field} must point at the locked upstream release")
     assert isinstance(value, str)
     return value
@@ -256,6 +285,50 @@ def verify_license_payload(notice: PackagedLicenseNotice, payload: bytes) -> Non
         )
 
 
+def committed_font_license_source(entry: dict, root: Path = REPOSITORY_ROOT) -> Path:
+    """Resolve and verify a reviewed licence text committed inside the checkout."""
+    identifier = entry.get("id")
+    if not isinstance(identifier, str) or not identifier:
+        _reject("a committed font licence entry has no id")
+    raw_path = entry.get("licensePath")
+    if not isinstance(raw_path, str) or not raw_path or "\\" in raw_path:
+        _reject(f"{identifier}: licensePath must be repository-relative")
+    relative = PurePosixPath(raw_path)
+    if (
+        relative.is_absolute()
+        or ".." in relative.parts
+        or relative.as_posix() != raw_path
+    ):
+        _reject(f"{identifier}: licensePath must be repository-relative")
+    source = root / Path(*relative.parts)
+    try:
+        resolved_root = root.resolve(strict=True)
+        resolved = source.resolve(strict=True)
+    except OSError as error:
+        _reject(f"{identifier}: licensePath is not a readable file: {error}")
+    if (
+        resolved_root not in resolved.parents
+        or not source.is_file()
+        or source.is_symlink()
+    ):
+        _reject(f"{identifier}: licensePath is not a regular repository file")
+    payload = source.read_bytes()
+    expected_length = _positive_length(
+        entry.get("licenseTextBytes"), f"{identifier}: licenseTextBytes"
+    )
+    expected_digest = _digest(
+        entry.get("licenseTextSha256"), f"{identifier}: licenseTextSha256"
+    )
+    if (
+        len(payload) != expected_length
+        or hashlib.sha256(payload).hexdigest() != expected_digest
+    ):
+        _reject(f"{identifier}: committed font licence bytes drifted")
+    if OPEN_FONT_LICENSE_MARKER not in payload.decode("utf-8", errors="replace"):
+        _reject(f"{identifier}: committed font licence is not OFL-1.1")
+    return source
+
+
 def _required_fields(rights: dict) -> tuple[str, ...]:
     shared = rights.get("distributionRequiredFields")
     categories = rights.get("requiredCategories")
@@ -318,7 +391,9 @@ def bundled_subtitle_fonts(
             if entry.get(permission) is not True:
                 _reject(f"{identifier}: rights entry does not clear {permission}")
         if entry.get("license") != OPEN_FONT_LICENSE:
-            _reject(f"{identifier}: only {OPEN_FONT_LICENSE} fonts may be redistributed")
+            _reject(
+                f"{identifier}: only {OPEN_FONT_LICENSE} fonts may be redistributed"
+            )
         packaged_name = _packaged_file_name(
             entry.get("packagedName"), f"{identifier}: packagedName"
         )
@@ -354,8 +429,65 @@ def bundled_subtitle_fonts(
     return tuple(sorted(fonts, key=lambda font: font.packaged_name))
 
 
-def packaged_license_notice(rights: dict | None = None) -> PackagedLicenseNotice:
-    """Return the single licence text that ships beside the cleared fonts."""
+def _nonempty_text(value: object, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        _reject(f"{field} must be a non-empty string")
+    return value
+
+
+def bundled_font_families(
+    rights: dict | None = None,
+) -> tuple[BundledFontFamily, ...]:
+    """Group cleared faces into the rights-derived components shown to users."""
+    rights = load_asset_rights() if rights is None else rights
+    bundled_subtitle_fonts(rights)
+    families: set[BundledFontFamily] = set()
+    for entry in _font_entries(rights):
+        identifier = _nonempty_text(entry.get("id"), "font id")
+        component_id = _nonempty_text(
+            entry.get("noticeComponentId"), f"{identifier}: noticeComponentId"
+        )
+        if re.fullmatch(r"[a-z][a-z0-9-]{0,63}", component_id) is None:
+            _reject(f"{identifier}: noticeComponentId is malformed")
+        project_url = _nonempty_text(
+            entry.get("projectUrl"), f"{identifier}: projectUrl"
+        )
+        if not project_url.startswith("https://github.com/"):
+            _reject(f"{identifier}: projectUrl must be an HTTPS GitHub repository")
+        families.add(
+            BundledFontFamily(
+                component_id=component_id,
+                display_name=_nonempty_text(
+                    entry.get("displayName"), f"{identifier}: displayName"
+                ),
+                version=_nonempty_text(entry.get("version"), f"{identifier}: version"),
+                project_url=project_url,
+                license_text_id=_nonempty_text(
+                    entry.get("licenseTextId"), f"{identifier}: licenseTextId"
+                ),
+                attribution=_nonempty_text(
+                    entry.get("attribution"), f"{identifier}: attribution"
+                ),
+                packaged_license_name=_packaged_file_name(
+                    entry.get("packagedLicenseName"),
+                    f"{identifier}: packagedLicenseName",
+                ),
+            )
+        )
+    component_ids = [family.component_id for family in families]
+    if len(set(component_ids)) != len(component_ids):
+        _reject("faces in one font family disagree on their SBOM metadata")
+    notice_names = {notice.packaged_name for notice in packaged_license_notices(rights)}
+    for family in families:
+        if family.packaged_license_name not in notice_names:
+            _reject(f"{family.component_id}: font family has no packaged licence text")
+    return tuple(sorted(families, key=lambda family: family.component_id))
+
+
+def packaged_license_notices(
+    rights: dict | None = None,
+) -> tuple[PackagedLicenseNotice, ...]:
+    """Return every upstream licence text that ships beside the cleared fonts."""
     rights = load_asset_rights() if rights is None else rights
     declared = {
         (
@@ -366,15 +498,36 @@ def packaged_license_notice(rights: dict | None = None) -> PackagedLicenseNotice
         )
         for entry in _font_entries(rights)
     }
-    if len(declared) != 1:
-        _reject("the cleared fonts do not share exactly one licence text")
-    packaged, url, digest, length = next(iter(declared))
-    return PackagedLicenseNotice(
-        packaged_name=_packaged_file_name(packaged, "packagedLicenseName"),
-        source_url=_locked_url(url, "licenseTextUrl"),
-        sha256=_digest(digest, "licenseTextSha256"),
-        bytes=_positive_length(length, "licenseTextBytes"),
+    if not declared:
+        _reject("the cleared fonts declare no licence text")
+    notices = tuple(
+        PackagedLicenseNotice(
+            packaged_name=_packaged_file_name(packaged, "packagedLicenseName"),
+            source_url=_locked_url(url, "licenseTextUrl"),
+            sha256=_digest(digest, "licenseTextSha256"),
+            bytes=_positive_length(length, "licenseTextBytes"),
+        )
+        for packaged, url, digest, length in declared
     )
+    names = [notice.packaged_name for notice in notices]
+    if len(set(names)) != len(names):
+        _reject("two upstream licence texts would land on the same packaged file name")
+    return tuple(sorted(notices, key=lambda notice: notice.packaged_name))
+
+
+def packaged_license_notice(rights: dict | None = None) -> PackagedLicenseNotice:
+    """Return the original Noto notice for compatibility with its UI projection.
+
+    New packing code must use :func:`packaged_license_notices`; this singular
+    accessor remains until the third-party notice projection is split into one
+    component per font family.
+    """
+    notices = packaged_license_notices(rights)
+    for notice in notices:
+        if notice.packaged_name == "NotoSansCJK-LICENSE.txt":
+            return notice
+    _reject("the cleared fonts declare no Noto Sans CJK licence text")
+    raise AssertionError("unreachable")
 
 
 def default_subtitle_font_name(contract: dict | None = None) -> str:
@@ -398,13 +551,21 @@ def default_subtitle_font_name(contract: dict | None = None) -> str:
 
 def _fetch_locked_url(url: str) -> bytes:
     """Fetch one locked artifact, refusing anything unexpected."""
-    if not url.startswith(FONT_SOURCE_URL_PREFIX):
+    if not url.startswith(LOCKED_SOURCE_URL_PREFIXES):
         raise SubtitleFontUnavailable(f"{url} is not the locked upstream release")
-    try:
-        with urllib.request.urlopen(url, timeout=FETCH_TIMEOUT_SECONDS) as response:
-            payload = response.read(MAXIMUM_FETCH_BYTES + 1)
-    except (urllib.error.URLError, OSError, ValueError) as error:
-        raise SubtitleFontUnavailable(f"cannot fetch {url}: {error}") from error
+    last_error: urllib.error.URLError | OSError | ValueError | None = None
+    for _attempt in range(FETCH_ATTEMPTS):
+        try:
+            with urllib.request.urlopen(url, timeout=FETCH_TIMEOUT_SECONDS) as response:
+                payload = response.read(MAXIMUM_FETCH_BYTES + 1)
+            break
+        except (urllib.error.URLError, OSError, ValueError) as error:
+            last_error = error
+    else:
+        assert last_error is not None
+        raise SubtitleFontUnavailable(
+            f"cannot fetch {url}: {last_error}"
+        ) from last_error
     if len(payload) > MAXIMUM_FETCH_BYTES:
         raise SubtitleFontUnavailable(f"{url} is larger than the fetch limit")
     return payload
@@ -416,6 +577,7 @@ def ensure_subtitle_fonts(
     rights: dict | None = None,
     fonts: tuple[BundledSubtitleFont, ...] | None = None,
     notice: PackagedLicenseNotice | None = None,
+    notices: tuple[PackagedLicenseNotice, ...] | None = None,
     fetch: Callable[[str], bytes] | None = None,
 ) -> Path:
     """Return the cached directory holding every cleared font and its licence.
@@ -428,7 +590,22 @@ def ensure_subtitle_fonts(
     from video_runtime_cache import ensure_cached
 
     resolved_fonts = bundled_subtitle_fonts(rights) if fonts is None else fonts
-    resolved_notice = packaged_license_notice(rights) if notice is None else notice
+    if notice is not None and notices is not None:
+        raise SubtitleFontRightsError("pass notice or notices, not both")
+    resolved_notices = (
+        tuple(notices)
+        if notices is not None
+        else ((notice,) if notice is not None else packaged_license_notices(rights))
+    )
+    if not resolved_notices:
+        raise SubtitleFontRightsError("the font cache manifest has no licence text")
+    cache_names = [font.packaged_name for font in resolved_fonts] + [
+        item.packaged_name for item in resolved_notices
+    ]
+    if len(set(cache_names)) != len(cache_names):
+        raise SubtitleFontRightsError(
+            "a font and licence would use the same cache file name"
+        )
     download = _fetch_locked_url if fetch is None else fetch
 
     def obtain(url: str) -> bytes:
@@ -436,7 +613,7 @@ def ensure_subtitle_fonts(
             return download(url)
         except SubtitleFontUnavailable:
             raise
-        except Exception as error:  # noqa: BLE001
+        except Exception as error:
             raise SubtitleFontUnavailable(f"cannot fetch {url}: {error}") from error
 
     def build(destination: Path) -> None:
@@ -445,13 +622,27 @@ def ensure_subtitle_fonts(
             payload = obtain(font.source_url)
             verify_font_payload(font, payload)
             (destination / font.packaged_name).write_bytes(payload)
-        payload = obtain(resolved_notice.source_url)
-        verify_license_payload(resolved_notice, payload)
-        (destination / resolved_notice.packaged_name).write_bytes(payload)
+        for resolved_notice in resolved_notices:
+            payload = obtain(resolved_notice.source_url)
+            verify_license_payload(resolved_notice, payload)
+            (destination / resolved_notice.packaged_name).write_bytes(payload)
 
     return ensure_cached(
         name=CACHE_NAME, contracts=[ASSET_RIGHTS_PATH], build=build, root=root
     )
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Fetch and verify the locked font bundle for a build machine."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--root",
+        type=Path,
+        help="project build-cache root (defaults to the platform cache directory)",
+    )
+    arguments = parser.parse_args(argv)
+    print(ensure_subtitle_fonts(root=arguments.root))
+    return 0
 
 
 __all__ = [
@@ -459,19 +650,30 @@ __all__ = [
     "BUNDLE_TARGET",
     "CACHE_NAME",
     "FONT_SOURCE_URL_PREFIX",
-    "BundledSubtitleFont",
+    "LOCKED_SOURCE_URL_PREFIXES",
     "OPEN_FONT_LICENSE",
     "PACKAGED_FONT_DIRECTORY",
+    "PLANGOTHIC_FONT_SOURCE_URL_PREFIX",
+    "PLANGOTHIC_LICENSE_SOURCE_URL_PREFIX",
+    "BundledFontFamily",
+    "BundledSubtitleFont",
     "PackagedLicenseNotice",
     "SubtitleFontRightsError",
     "SubtitleFontUnavailable",
+    "bundled_font_families",
     "bundled_subtitle_fonts",
+    "committed_font_license_source",
     "default_subtitle_font_name",
     "ensure_subtitle_fonts",
     "font_copyright_notice",
     "load_asset_rights",
     "load_worker_contract",
     "packaged_license_notice",
+    "packaged_license_notices",
     "verify_font_payload",
     "verify_license_payload",
 ]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

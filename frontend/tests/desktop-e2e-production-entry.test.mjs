@@ -41,7 +41,7 @@ test("desktop-e2e mounts the production composition through its controlled nativ
     "TauriAppUpdateGateway",
     "TauriAccountSessionGateway",
     "TauriModelServiceGateway",
-    "TauriVideoEditingServiceGateway",
+    "TauriVideoEditingGateway",
     "TauriMaterialVideoStudioGateway",
     "TauriPublishWorkspaceGateway",
   ]) {

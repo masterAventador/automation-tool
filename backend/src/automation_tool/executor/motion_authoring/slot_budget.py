@@ -43,9 +43,7 @@ class SlotOverflow(RuntimeError):
     """
 
 
-def require_within_budget(
-    budget: SlotBudget, *, overflows_x: bool, overflows_y: bool
-) -> None:
+def require_within_budget(budget: SlotBudget, *, overflows_x: bool, overflows_y: bool) -> None:
     """Accept copy that is no worse than what the part shipped with."""
     introduced = []
     if overflows_x and not budget.baseline_overflows_x:

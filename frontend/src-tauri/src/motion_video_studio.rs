@@ -9,6 +9,8 @@ use crate::video_job_workspace::{
     RenderedVideoArtifactPayload, VideoArtifactRecord, VideoJobWorkspace, VideoJobWorkspaceStore,
     VideoWorkspaceDisposition, VideoWorkspaceError, VideoWorkspaceErrorCode,
 };
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -25,6 +27,7 @@ pub const MOTION_FRAMES_PER_SECOND: u32 = 30;
 const MAX_TEXT_CHARS: usize = 160;
 const MAX_SUBJECT_CHARS: usize = 80;
 const MAX_LOGO_BYTES: usize = 4 * 1024 * 1024;
+const MAX_FONT_BYTES: usize = 32 * 1024 * 1024;
 const MILLIS_PER_SECOND: u32 = 1000;
 const STYLE_CONTRACT: &str = include_str!("../../../contracts/video/motion-style-freeze.v1.json");
 const MODEL_CALL_CONTRACT: &str =
@@ -33,8 +36,8 @@ const DURATION_CONTRACT: &str =
     include_str!("../../../contracts/video/motion-storyboard-duration.v1.json");
 const BRIEF_CONTRACT: &str =
     include_str!("../../../contracts/video/motion-one-sentence-brief.v1.json");
-const MOTION_PART_SLOTS_CONTRACT: &str =
-    include_str!("../../../contracts/video/motion-part-slots.v1.json");
+const MOTION_CATALOG_UI_CONTRACT: &str =
+    include_str!("../../../contracts/video/motion-catalog-ui.v1.json");
 const AUTHORING_REFUSAL_CONTRACT: &str =
     include_str!("../../../contracts/video/motion-authoring-refusal.v1.json");
 const OFFLINE_MOTION_DEPENDENCIES: &str =
@@ -229,6 +232,161 @@ pub struct MotionVideoLogoDraft {
     bytes: Vec<u8>,
 }
 
+#[derive(Clone, Copy)]
+struct ValidatedMotionFont<'a> {
+    family: &'a str,
+    file_name: &'static str,
+    format: &'static str,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MotionVideoFontDraft {
+    family: String,
+    file_name: String,
+    base64: String,
+}
+
+impl MotionVideoFontDraft {
+    fn validated(&self) -> Result<(ValidatedMotionFont<'_>, Vec<u8>), MotionVideoStudioError> {
+        if self.family.is_empty()
+            || self.family.chars().count() > 80
+            || !self.family.chars().all(|character| {
+                character.is_alphanumeric()
+                    || character == ' '
+                    || matches!(character, '.' | '(' | ')' | '\'' | '-')
+            })
+            || self.file_name.is_empty()
+            || self.file_name.chars().count() > 128
+            || self.file_name.contains(['/', '\\', '\0'])
+            || self.base64.is_empty()
+            || self.base64.len() > MAX_FONT_BYTES.div_ceil(3) * 4
+        {
+            return Err(draft_invalid());
+        }
+        let bytes = STANDARD.decode(&self.base64).map_err(|_| draft_invalid())?;
+        if bytes.is_empty() || bytes.len() > MAX_FONT_BYTES {
+            return Err(draft_invalid());
+        }
+        let lower = self.file_name.to_ascii_lowercase();
+        let (file_name, format) = if lower.ends_with(".woff2") && valid_woff2(&bytes) {
+            ("brand-font.woff2", "woff2")
+        } else if lower.ends_with(".woff") && valid_woff(&bytes) {
+            ("brand-font.woff", "woff")
+        } else if lower.ends_with(".ttf") && valid_sfnt(&bytes, &[b"\x00\x01\x00\x00", b"true"]) {
+            ("brand-font.ttf", "truetype")
+        } else if lower.ends_with(".otf") && valid_sfnt(&bytes, &[b"OTTO"]) {
+            ("brand-font.otf", "opentype")
+        } else {
+            return Err(draft_invalid());
+        };
+        Ok((
+            ValidatedMotionFont {
+                family: &self.family,
+                file_name,
+                format,
+            },
+            bytes,
+        ))
+    }
+}
+
+fn big_endian_u16(bytes: &[u8], offset: usize) -> Option<usize> {
+    Some(u16::from_be_bytes(bytes.get(offset..offset + 2)?.try_into().ok()?) as usize)
+}
+
+fn big_endian_u32(bytes: &[u8], offset: usize) -> Option<usize> {
+    usize::try_from(u32::from_be_bytes(
+        bytes.get(offset..offset + 4)?.try_into().ok()?,
+    ))
+    .ok()
+}
+
+fn valid_woff2(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"wOF2")
+        && bytes.len() >= 48
+        && big_endian_u32(bytes, 8) == Some(bytes.len())
+        && big_endian_u16(bytes, 12).is_some_and(|tables| tables > 0)
+        && big_endian_u16(bytes, 14) == Some(0)
+        && big_endian_u32(bytes, 16).is_some_and(|size| size >= 12)
+        && big_endian_u32(bytes, 20).is_some_and(|size| size > 0 && size < bytes.len())
+}
+
+fn valid_woff(bytes: &[u8]) -> bool {
+    let Some(tables) = big_endian_u16(bytes, 12) else {
+        return false;
+    };
+    if !bytes.starts_with(b"wOFF")
+        || bytes.len() < 44
+        || big_endian_u32(bytes, 8) != Some(bytes.len())
+        || tables == 0
+        || big_endian_u16(bytes, 14) != Some(0)
+        || 44usize
+            .checked_add(tables.saturating_mul(20))
+            .is_none_or(|end| end > bytes.len())
+    {
+        return false;
+    }
+    (0..tables).all(|index| {
+        let record = 44 + index * 20;
+        let Some(offset) = big_endian_u32(bytes, record + 4) else {
+            return false;
+        };
+        let Some(compressed) = big_endian_u32(bytes, record + 8) else {
+            return false;
+        };
+        let Some(original) = big_endian_u32(bytes, record + 12) else {
+            return false;
+        };
+        compressed > 0
+            && compressed <= original
+            && offset
+                .checked_add(compressed)
+                .is_some_and(|end| end <= bytes.len())
+    })
+}
+
+fn valid_sfnt(bytes: &[u8], signatures: &[&[u8; 4]]) -> bool {
+    let Some(tables) = big_endian_u16(bytes, 4) else {
+        return false;
+    };
+    if !signatures
+        .iter()
+        .any(|signature| bytes.starts_with(*signature))
+        || tables == 0
+    {
+        return false;
+    }
+    let Some(directory_end) = 12usize.checked_add(tables.saturating_mul(16)) else {
+        return false;
+    };
+    if directory_end > bytes.len() {
+        return false;
+    }
+    let mut has_cmap = false;
+    let mut has_glyphs = false;
+    for index in 0..tables {
+        let record = 12 + index * 16;
+        let tag = &bytes[record..record + 4];
+        let Some(offset) = big_endian_u32(bytes, record + 8) else {
+            return false;
+        };
+        let Some(length) = big_endian_u32(bytes, record + 12) else {
+            return false;
+        };
+        if length == 0
+            || offset
+                .checked_add(length)
+                .is_none_or(|end| end > bytes.len())
+        {
+            return false;
+        }
+        has_cmap |= tag == b"cmap";
+        has_glyphs |= matches!(tag, b"glyf" | b"CFF " | b"CFF2");
+    }
+    has_cmap && has_glyphs
+}
+
 impl MotionVideoLogoDraft {
     fn validated_file_name(&self) -> Result<&'static str, MotionVideoStudioError> {
         if self.file_name.is_empty()
@@ -274,6 +432,7 @@ pub struct MotionVideoDraftRequest {
     secondary_color: String,
     seconds_per_beat: u32,
     beats: Vec<MotionVideoBeatDraft>,
+    font: Option<MotionVideoFontDraft>,
     logo: Option<MotionVideoLogoDraft>,
 }
 
@@ -295,6 +454,7 @@ impl MotionVideoDraftRequest {
             secondary_color,
             seconds_per_beat,
             beats,
+            font: None,
             logo,
         };
         value.validate()?;
@@ -312,6 +472,9 @@ impl MotionVideoDraftRequest {
         validate_copy(&self.subject, MAX_SUBJECT_CHARS)?;
         for beat in &self.beats {
             beat.validate()?;
+        }
+        if let Some(font) = &self.font {
+            font.validated()?;
         }
         if let Some(logo) = &self.logo {
             logo.validated_file_name()?;
@@ -539,20 +702,19 @@ fn selectable_catalog_part_ids() -> Result<&'static BTreeSet<String>, MotionVide
     IDENTIFIERS
         .get_or_init(|| {
             let document: serde_json::Value =
-                serde_json::from_str(MOTION_PART_SLOTS_CONTRACT).ok()?;
-            if document.get("schemaVersion")?.as_u64()? != 1
-                || document.get("id")?.as_str()? != "motion-part-slots.v1"
-                || document.get("policy")?.as_str()? != "fail_closed"
-                || document.get("counts")?.get("parts")?.as_u64()? != 37
+                serde_json::from_str(MOTION_CATALOG_UI_CONTRACT).ok()?;
+            if document.get("schemaVersion")?.as_str()? != "1.0"
+                || document.get("id")?.as_str()? != "automation-tool.motion-catalog-ui.v1"
+                || document.get("counts")?.get("total")?.as_u64()? != 134
             {
                 return None;
             }
-            let items = document.get("parts")?.as_array()?;
+            let items = document.get("items")?.as_array()?;
             let identifiers = items
                 .iter()
-                .map(|item| item.get("name")?.as_str().map(str::to_owned))
+                .map(|item| item.get("id")?.as_str().map(str::to_owned))
                 .collect::<Option<BTreeSet<_>>>()?;
-            (items.len() == 37 && identifiers.len() == 37).then_some(identifiers)
+            (items.len() == 134 && identifiers.len() == 134).then_some(identifiers)
         })
         .as_ref()
         .ok_or_else(authoring_installation_damaged)
@@ -1122,9 +1284,18 @@ struct StyleFreeze<'a> {
     upstream_version: &'a str,
     upstream_commit: &'a str,
     source_frame_sha256: &'a str,
+    font_asset: Option<StyleFreezeAsset<'a>>,
     brand_tokens_sha256: String,
     frozen_frame_sha256: String,
     frame_artifact_path: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StyleFreezeAsset<'a> {
+    path: &'a str,
+    sha256: &'a str,
+    size_bytes: usize,
 }
 
 #[derive(Serialize)]
@@ -1164,16 +1335,28 @@ fn prepare_inside_workspace(
     let work = store
         .worker_asset_directory(workspace)
         .map_err(map_workspace_error)?;
+    let validated_font = draft
+        .font
+        .as_ref()
+        .map(MotionVideoFontDraft::validated)
+        .transpose()?;
+    let font = validated_font.as_ref().map(|(metadata, _)| *metadata);
+    let font_bytes = validated_font.as_ref().map(|(_, bytes)| bytes.as_slice());
     let logo_file = draft
         .logo
         .as_ref()
         .map(MotionVideoLogoDraft::validated_file_name)
         .transpose()?;
     let mut allowed_assets = Vec::new();
+    if let (Some(font), Some(bytes)) = (font, font_bytes) {
+        write_private_file(&work.join(font.file_name), bytes)?;
+        allowed_assets.push(font.file_name.to_owned());
+    }
     if let (Some(logo), Some(file_name)) = (&draft.logo, logo_file) {
         write_private_file(&work.join(file_name), &logo.bytes)?;
         allowed_assets.push(file_name.to_owned());
     }
+    let font_asset_sha256 = font_bytes.map(sha256_hex);
 
     let script = serde_json::to_vec(&serde_json::json!({
         "schemaVersion": 1,
@@ -1199,11 +1382,22 @@ fn prepare_inside_workspace(
     .map_err(|_| storage_unavailable())?;
     write_private_file(&work.join("STORYBOARD.json"), &storyboard)?;
 
-    let frame_markdown = manual_frame_markdown(draft, style, logo_file, plan);
+    let frame_markdown = manual_frame_markdown(
+        draft,
+        style,
+        font,
+        font_asset_sha256.as_deref(),
+        logo_file,
+        plan,
+    );
     write_private_file(&work.join("frame.md"), frame_markdown.as_bytes())?;
     let brand_tokens = serde_json::json!({
         "primaryColor": draft.primary_color,
         "secondaryColor": draft.secondary_color,
+        "fontFamily": font.map(|value| value.family),
+        "fontAsset": font.map(|value| value.file_name),
+        "fontAssetSha256": font_asset_sha256,
+        "fontAssetSizeBytes": font_bytes.map(<[u8]>::len),
         "logoAsset": logo_file,
     });
     let brand_raw = serde_json::to_vec(&brand_tokens).map_err(|_| storage_unavailable())?;
@@ -1214,6 +1408,13 @@ fn prepare_inside_workspace(
         upstream_version: &style.upstream_version,
         upstream_commit: &style.upstream_commit,
         source_frame_sha256: &style.source_sha256,
+        font_asset: font
+            .zip(font_asset_sha256.as_deref())
+            .map(|(value, sha256)| StyleFreezeAsset {
+                path: value.file_name,
+                sha256,
+                size_bytes: font_bytes.map_or(0, <[u8]>::len),
+            }),
         brand_tokens_sha256: sha256_hex(&brand_raw),
         frozen_frame_sha256: sha256_hex(frame_markdown.as_bytes()),
         frame_artifact_path: "frame.md",
@@ -1223,7 +1424,7 @@ fn prepare_inside_workspace(
         &serde_json::to_vec(&freeze).map_err(|_| storage_unavailable())?,
     )?;
 
-    let composition = manual_composition(draft, style, logo_file, plan);
+    let composition = manual_composition(draft, style, font, logo_file, plan);
     write_private_file(&work.join(MOTION_COMPOSITION_FILE), composition.as_bytes())?;
     let render_job = RenderJobDocument {
         schema_version: 1,
@@ -1557,6 +1758,36 @@ fn code_for_non_refusal_class(class: &str) -> MotionVideoStudioError {
         "model_transport_failed" => authoring_model_transport_failed(),
         _ => authoring_crashed(),
     }
+}
+
+/// Describe a failed child using only vocabulary from the built-in contract.
+///
+/// The child response may be malformed or attacker-controlled, so arbitrary
+/// status/reason text must never reach App logs. Closed tokens are safe and are
+/// the only useful distinction when several executor defects share one UI code.
+pub fn safe_failed_authoring_diagnostic(answer: &str) -> String {
+    let (Some(contract), Ok(document)) = (
+        refusal_contract(),
+        serde_json::from_str::<RefusedAuthoringAnswer>(answer),
+    ) else {
+        return "status=unknown reason=unknown".to_owned();
+    };
+    if document.schema_version != 1 {
+        return "status=unknown reason=unknown".to_owned();
+    }
+    let status = if document.status == REFUSED_STATUS
+        || contract.non_refusal_outcomes.contains_key(&document.status)
+    {
+        document.status.as_str()
+    } else {
+        "unknown"
+    };
+    let reason = match document.rejection_reason.as_deref() {
+        None => "absent",
+        Some(reason) if rejection_reason_is_closed(&contract, reason) => reason,
+        Some(_) => "unknown",
+    };
+    format!("status={status} reason={reason}")
 }
 
 /// What actually happened to a child that exited non-zero.
@@ -2865,26 +3096,48 @@ fn locked_style(id: &str) -> Result<LockedStyle, MotionVideoStudioError> {
 fn manual_frame_markdown(
     draft: &MotionVideoDraftRequest,
     style: &LockedStyle,
+    font: Option<ValidatedMotionFont<'_>>,
+    font_asset_sha256: Option<&str>,
     logo_file: Option<&str>,
     plan: MotionStoryboardPlan,
 ) -> String {
+    let font_family = font.map_or("system-ui", |value| value.family);
+    let font_loading = font.map_or_else(String::new, |value| {
+        format!(
+            "\n\n## Font loading\n\n```html\n<style>\n@font-face{{font-family:\"{}\";font-display:block;src:url(\"{}\") format(\"{}\");}}\n</style>\n```\n",
+            value.family, value.file_name, value.format,
+        )
+    });
     format!(
-        "---\nversion: 1\nname: {}\ncolors:\n  primary: {}\n  secondary: {}\n  ink: #17213a\ntypography:\n  fontFamily: system-ui\n---\n\n固定模板手工制作；{} 段分镜，每段 {} 秒；Logo: {}\n",
+        "---\nversion: 1\nname: {}\ncolors:\n  primary: {}\n  secondary: {}\n  ink: #17213a\ntypography:\n  fontFamily: \"{}\"\n  fontAssetSha256: \"{}\"\n---\n\n固定模板手工制作；{} 段分镜，每段 {} 秒；Logo: {}\n{}",
         style.display_name,
         draft.primary_color,
         draft.secondary_color,
+        font_family,
+        font_asset_sha256.unwrap_or("none"),
         plan.beat_count(),
         plan.seconds_per_beat(),
         logo_file.unwrap_or("none"),
+        font_loading,
     )
 }
 
 fn manual_composition(
     draft: &MotionVideoDraftRequest,
     style: &LockedStyle,
+    font: Option<ValidatedMotionFont<'_>>,
     logo_file: Option<&str>,
     plan: MotionStoryboardPlan,
 ) -> String {
+    let font_face = font.map_or_else(String::new, |value| {
+        format!(
+            "@font-face{{font-family:\"{}\";font-display:block;src:url(\"{}\") format(\"{}\")}}",
+            html_escape(value.family),
+            html_escape(value.file_name),
+            value.format,
+        )
+    });
+    let font_family = font.map_or("system-ui", |value| value.family);
     let logo = logo_file.map_or_else(String::new, |file| {
         format!(
             "<img class=\"logo\" src=\"{}\" alt=\"品牌 Logo\">",
@@ -2909,8 +3162,8 @@ fn manual_composition(
         .collect::<String>();
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"><style>\
-         *{{box-sizing:border-box}}html,body{{margin:0;width:100%;height:100%;overflow:hidden}}\
-         body{{font-family:system-ui,-apple-system,sans-serif;background:{secondary};color:#17213a}}\
+         {font_face}*{{box-sizing:border-box}}html,body{{margin:0;width:100%;height:100%;overflow:hidden}}\
+         body{{font-family:\"{font_family}\",system-ui,-apple-system,sans-serif;background:{secondary};color:#17213a}}\
          main{{position:relative;width:640px;height:360px;overflow:hidden;\
          background:linear-gradient(135deg,{secondary} 0%,#fff 58%,{primary}22 100%)}}\
          main:before{{content:'';position:absolute;width:280px;height:280px;border-radius:50%;\
@@ -2928,7 +3181,7 @@ fn manual_composition(
          left:58px;right:58px;bottom:34px;height:6px;border-radius:99px;background:#17213a18;\
          overflow:hidden}}.meter i{{display:block;height:100%;width:0;background:{primary}}}\
          </style></head><body>\
-         <main data-composition-id=\"manual-template\" data-duration=\"{total}\">\
+         <main data-composition-id=\"manual-template\" data-duration=\"{total}\"{required_font}>\
          <div class=\"brand\">{subject}</div>{logo}{scenes}</main><script>\
          (function(){{const scenes=Array.from(document.querySelectorAll('.scene'));\
          const per={per},last={last},total={total};\
@@ -2941,6 +3194,12 @@ fn manual_composition(
          </script></body></html>",
         primary = draft.primary_color,
         secondary = draft.secondary_color,
+        font_face = font_face,
+        font_family = html_escape(font_family),
+        required_font = font.map_or_else(String::new, |value| format!(
+            " data-required-font-family=\"{}\"",
+            html_escape(value.family)
+        )),
         subject = html_escape(draft.subject.trim()),
         per = plan.seconds_per_beat(),
         last = plan.beat_count() - 1,

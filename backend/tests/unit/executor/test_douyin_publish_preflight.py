@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
 from automation_tool.executor.browser_runtime import BrowserWindow
 from automation_tool.executor.browser_surface_lease import BrowserSurfaceLeaseManager
 from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
@@ -25,7 +27,6 @@ from automation_tool.executor.rpa.douyin.publish_preflight import (
     DouyinPublishPreflightRejected,
     DouyinPublishPreflightState,
 )
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 CONTRACT_PATH = REPOSITORY_ROOT / "contracts/publishing/douyin-browser-use-preflight.v1.json"

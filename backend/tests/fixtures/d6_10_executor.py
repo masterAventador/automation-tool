@@ -110,9 +110,7 @@ class AcceptanceDouyinDiscoveryOperation:
 
 
 def main() -> None:
-    vars(executor_cli)["ProductionDouyinDiscoveryOperation"] = (
-        AcceptanceDouyinDiscoveryOperation
-    )
+    vars(executor_cli)["ProductionDouyinDiscoveryOperation"] = AcceptanceDouyinDiscoveryOperation
     executor_cli.main()
 
 

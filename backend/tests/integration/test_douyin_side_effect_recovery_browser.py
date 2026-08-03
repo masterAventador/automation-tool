@@ -89,7 +89,8 @@ def seed_dispatched(
 
 
 def test_production_recovery_reads_both_final_facts_without_dispatching(
-    tmp_path: Path, staged_embedded_chromium: Path,
+    tmp_path: Path,
+    staged_embedded_chromium: Path,
 ) -> None:
     profile = tmp_path / "automation-tool-a7-13-profile"
     create_private_profile_directory(profile)

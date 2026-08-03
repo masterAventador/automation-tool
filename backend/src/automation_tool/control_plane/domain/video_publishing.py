@@ -17,7 +17,7 @@ PUBLISHING_CAPABILITIES_CONTRACT_VERSION: Final = 1
 MAX_PUBLISH_TITLE_CHARACTERS: Final = 200
 MAX_PUBLISH_DESCRIPTION_CHARACTERS: Final = 4_000
 
-_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}\Z")
 
 
 class InvalidVideoPublishingModel(ValueError):

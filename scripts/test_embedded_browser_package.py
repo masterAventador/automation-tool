@@ -36,26 +36,39 @@ from build_embedded_chromium_staging import (  # noqa: E402
     sha256_file,
 )
 from check_embedded_browser_package import (  # noqa: E402
+    MINIMUM_COMPLETE_RUNTIME_BYTES,
+    RELEASE_PACKAGE_BASELINE_BYTES,
     RELEASE_PAYLOAD_PARTS_MIB,
-    RELEASE_SIZE_BOUNDS,
     PackageRejected,
     PackageSizeBounds,
     audit_embedded_browser_package,
     browser_resource_root,
+    release_size_bounds,
 )
 
 STAGING_CONTRACT_PATH = ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
 RELEASE_BUNDLE_AUDIT = ROOT / "frontend/scripts/audit-release-bundle.mjs"
 PRODUCTION_PACKAGE_AUDIT = ROOT / "frontend/scripts/audit-production-package.mjs"
 
-TARGET_ID = "macos-arm64"
-PLATFORM = "macos"
-ROOT_ENTRY = "chrome-mac-arm64"
+_WINDOWS_HOST = os.name == "nt"
+TARGET_ID = "windows-x86_64" if _WINDOWS_HOST else "macos-arm64"
+OTHER_TARGET_ID = "macos-arm64" if _WINDOWS_HOST else "windows-x86_64"
+MACOS_AUDIT_TARGET_ID = "macos-arm64"
+PLATFORM = "windows" if _WINDOWS_HOST else "macos"
+ROOT_ENTRY = "chrome-win64" if _WINDOWS_HOST else "chrome-mac-arm64"
 EXECUTABLE = (
-    "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/"
-    "Google Chrome for Testing"
+    "chrome-win64/chrome.exe"
+    if _WINDOWS_HOST
+    else (
+        "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/"
+        "Google Chrome for Testing"
+    )
 )
-MUTABLE_FILE = "chrome-mac-arm64/Google Chrome for Testing.app/Contents/Info.plist"
+MUTABLE_FILE = (
+    "chrome-win64/resources.pak"
+    if _WINDOWS_HOST
+    else "chrome-mac-arm64/Google Chrome for Testing.app/Contents/Info.plist"
+)
 
 TINY_BOUNDS = PackageSizeBounds(
     min_browser_bytes=1,
@@ -68,6 +81,11 @@ TINY_BOUNDS = PackageSizeBounds(
 _SYMLINK_MODE = 0xA1FF
 
 
+def _temporary_prefix(descriptive: str) -> str:
+    """Keep deep macOS-shaped fixtures below legacy Windows path limits."""
+    return "e-" if os.name == "nt" else descriptive
+
+
 def _symlinks_creatable() -> bool:
     """Whether this process may create symlinks.
 
@@ -77,7 +95,9 @@ def _symlinks_creatable() -> bool:
     (`allow_symlinks` is macOS-only in EB-03), so skipping these fixtures loses
     no Windows coverage — but silently erroring the whole suite would.
     """
-    with tempfile.TemporaryDirectory(prefix="eb16-symlink-probe-") as directory:
+    with tempfile.TemporaryDirectory(
+        prefix=_temporary_prefix("eb16-symlink-probe-")
+    ) as directory:
         try:
             Path(directory, "link").symlink_to("target")
         except (NotImplementedError, OSError):
@@ -88,29 +108,76 @@ def _symlinks_creatable() -> bool:
 _REQUIRES_SYMLINKS = unittest.skipUnless(
     _symlinks_creatable(), "creating symlinks requires a privilege this process lacks"
 )
+_REQUIRES_MACOS_SYMLINK_FIXTURE = unittest.skipUnless(
+    not _WINDOWS_HOST and _symlinks_creatable(),
+    "the macOS Chromium symlink fixture only runs on a POSIX host",
+)
 
 
 class ReleaseSizeBoundsTests(unittest.TestCase):
     """Pure release-envelope checks must run even without macOS fixture support."""
 
     def test_release_size_bounds_are_a_real_gate(self) -> None:
-        bounds = RELEASE_SIZE_BOUNDS
-        self.assertLess(bounds.min_browser_bytes, bounds.max_browser_bytes)
-        self.assertLess(bounds.min_package_bytes, bounds.max_package_bytes)
-        self.assertGreaterEqual(bounds.min_browser_bytes, 300 * 1024 * 1024)
-        self.assertLessEqual(bounds.max_browser_bytes, 500 * 1024 * 1024)
-        self.assertGreaterEqual(bounds.min_package_bytes, bounds.min_browser_bytes)
+        for platform in ("macos", "windows"):
+            bounds = release_size_bounds(platform)
+            self.assertLess(bounds.min_browser_bytes, bounds.max_browser_bytes)
+            self.assertLess(bounds.min_package_bytes, bounds.max_package_bytes)
+            self.assertGreaterEqual(bounds.min_browser_bytes, 300 * 1024 * 1024)
+            self.assertLessEqual(bounds.max_browser_bytes, 500 * 1024 * 1024)
+            self.assertGreaterEqual(bounds.min_package_bytes, bounds.min_browser_bytes)
 
-    def test_release_size_bounds_admit_the_declared_production_payload(self) -> None:
-        payload = sum(RELEASE_PAYLOAD_PARTS_MIB.values()) * 1024 * 1024
+    def test_release_size_bounds_admit_each_target_baseline_without_a_runtime_gap(
+        self,
+    ) -> None:
+        self.assertEqual(RELEASE_PAYLOAD_PARTS_MIB["embedded-chromium"], 416)
+        self.assertEqual(RELEASE_PAYLOAD_PARTS_MIB["local-executor"], 246)
+        for platform, baseline in RELEASE_PACKAGE_BASELINE_BYTES.items():
+            minimum_runtime = MINIMUM_COMPLETE_RUNTIME_BYTES[platform]
+            bounds = release_size_bounds(platform)
+            self.assertLessEqual(bounds.min_package_bytes, baseline)
+            self.assertGreaterEqual(bounds.max_package_bytes, baseline)
+            self.assertGreater(bounds.min_package_bytes, baseline - minimum_runtime)
+            self.assertLess(bounds.max_package_bytes, baseline + minimum_runtime)
+            self.assertGreater(
+                bounds.min_package_bytes + minimum_runtime,
+                bounds.max_package_bytes,
+            )
+            self.assertLess(
+                bounds.max_package_bytes - minimum_runtime,
+                bounds.min_package_bytes,
+            )
+
+    def test_windows_bound_rejects_one_more_complete_motion_worker(self) -> None:
+        measured_package = 1_289_130_572
+        measured_motion_worker = 113_124_957
+        bounds = release_size_bounds("windows")
+        self.assertGreaterEqual(bounds.max_package_bytes, measured_package)
+        self.assertLess(
+            bounds.max_package_bytes,
+            measured_package + measured_motion_worker,
+        )
+
+    def test_macos_bound_uses_the_signed_media_toolchain_size(self) -> None:
+        signed_media_toolchain = 43_950_318
+        measured_complete_package = 1_301_102_222
+        baseline = RELEASE_PACKAGE_BASELINE_BYTES["macos"]
+        bounds = release_size_bounds("macos")
+
+        self.assertEqual(baseline, measured_complete_package)
         self.assertEqual(
-            RELEASE_SIZE_BOUNDS.max_package_bytes,
-            ((payload * 11 + 9) // 10),
+            MINIMUM_COMPLETE_RUNTIME_BYTES["macos"],
+            signed_media_toolchain,
         )
-        self.assertGreaterEqual(RELEASE_SIZE_BOUNDS.max_package_bytes, payload)
-        self.assertLessEqual(
-            RELEASE_SIZE_BOUNDS.max_package_bytes, payload + (payload + 9) // 10
+        self.assertGreater(
+            bounds.min_package_bytes + signed_media_toolchain,
+            bounds.max_package_bytes,
         )
+        self.assertLess(
+            bounds.max_package_bytes - signed_media_toolchain,
+            bounds.min_package_bytes,
+        )
+        self.assertLessEqual(bounds.min_package_bytes, baseline)
+        self.assertGreaterEqual(bounds.max_package_bytes, baseline)
 
     def test_declared_production_payload_lists_every_shipped_part(self) -> None:
         self.assertEqual(
@@ -144,6 +211,11 @@ def _write_zip(
 
 
 def _synthetic_entries() -> dict[str, bytes]:
+    if _WINDOWS_HOST:
+        return {
+            EXECUTABLE: b"MZ synthetic browser binary",
+            f"{ROOT_ENTRY}/resources.pak": b"synthetic browser resources",
+        }
     contents = "chrome-mac-arm64/Google Chrome for Testing.app/Contents"
     widevine = (
         f"{contents}/Frameworks/Google Chrome for Testing Framework.framework/"
@@ -162,11 +234,16 @@ def _synthetic_entries() -> dict[str, bytes]:
 
 class EmbeddedBrowserPackageTests(unittest.TestCase):
     def setUp(self) -> None:
-        self._directory = tempfile.TemporaryDirectory(prefix="eb16-test-")
+        self._directory = tempfile.TemporaryDirectory(
+            prefix=_temporary_prefix("eb16-test-")
+        )
         self.addCleanup(self._directory.cleanup)
         self.base = Path(self._directory.name)
         self.bundle = self.base / "Automation Tool.app"
         self.browser = browser_resource_root(self.bundle, PLATFORM)
+        self.resources = (
+            self.bundle if _WINDOWS_HOST else self.bundle / "Contents/Resources"
+        )
         self.browser.parent.mkdir(parents=True)
         archive = self.base / "archive.zip"
         digest = _write_zip(archive, _synthetic_entries())
@@ -180,11 +257,16 @@ class EmbeddedBrowserPackageTests(unittest.TestCase):
         build_distribution_manifest(
             staging=self.browser, target_id=TARGET_ID, enforce_archive_lock=False
         )
-        binary = self.bundle / "Contents/MacOS/Automation Tool"
-        binary.parent.mkdir(parents=True)
-        binary.write_bytes(b"synthetic release binary")
-        binary.chmod(0o755)
-        (self.bundle / "Contents/Info.plist").write_bytes(b"<plist/>")
+        self.binary = (
+            self.bundle / "Automation Tool.exe"
+            if _WINDOWS_HOST
+            else self.bundle / "Contents/MacOS/Automation Tool"
+        )
+        self.binary.parent.mkdir(parents=True, exist_ok=True)
+        self.binary.write_bytes(b"synthetic release binary")
+        self.binary.chmod(0o755)
+        if not _WINDOWS_HOST:
+            (self.bundle / "Contents/Info.plist").write_bytes(b"<plist/>")
 
     def _audit(self, **overrides: object) -> object:
         arguments: dict[str, object] = {
@@ -218,7 +300,7 @@ class EmbeddedBrowserPackageTests(unittest.TestCase):
 
     def test_target_and_platform_mismatch_is_rejected(self) -> None:
         with self.assertRaises(PackageRejected):
-            self._audit(target_id="windows-x86_64")
+            self._audit(target_id=OTHER_TARGET_ID)
 
     @_REQUIRES_SYMLINKS
     def test_bundle_root_must_be_a_real_directory(self) -> None:
@@ -227,7 +309,7 @@ class EmbeddedBrowserPackageTests(unittest.TestCase):
         with self.assertRaises(PackageRejected):
             self._audit(bundle_root=link)
         with self.assertRaises(PackageRejected):
-            self._audit(bundle_root=self.bundle / "Contents/Info.plist")
+            self._audit(bundle_root=self.binary)
 
     def test_tampered_packaged_browser_file_is_rejected(self) -> None:
         (self.browser / MUTABLE_FILE).write_bytes(b"<tampered/>")
@@ -235,28 +317,30 @@ class EmbeddedBrowserPackageTests(unittest.TestCase):
             self._audit()
 
     def test_second_target_browser_in_the_package_is_rejected(self) -> None:
-        second = self.bundle / "Contents/Resources/chrome-win64"
+        second = self.resources / (
+            "chrome-mac-arm64" if _WINDOWS_HOST else "chrome-win64"
+        )
         second.mkdir(parents=True)
         (second / "resources.pak").write_bytes(b"second target payload")
         with self.assertRaises(PackageRejected):
             self._audit()
 
     def test_second_browser_executable_in_the_package_is_rejected(self) -> None:
-        extra = self.bundle / "Contents/Resources/vendor/chrome.exe"
+        extra = self.resources / "vendor/chrome.exe"
         extra.parent.mkdir(parents=True)
         extra.write_bytes(b"MZ")
         with self.assertRaises(PackageRejected):
             self._audit()
 
     def test_headless_shell_outside_the_browser_root_is_rejected(self) -> None:
-        extra = self.bundle / "Contents/Resources/chrome-headless-shell"
+        extra = self.resources / "chrome-headless-shell"
         extra.write_bytes(b"headless")
         with self.assertRaises(PackageRejected):
             self._audit()
 
     def test_webdriver_binary_in_the_package_is_rejected(self) -> None:
         for name in ("chromedriver", "tauri-driver", "msedgedriver.exe"):
-            extra = self.bundle / "Contents/Resources" / name
+            extra = self.resources / name
             extra.write_bytes(b"driver")
             with self.assertRaises(PackageRejected):
                 self._audit()
@@ -265,11 +349,12 @@ class EmbeddedBrowserPackageTests(unittest.TestCase):
 
     @_REQUIRES_SYMLINKS
     def test_symlink_outside_the_browser_root_is_rejected(self) -> None:
-        link = self.bundle / "Contents/Resources/escape"
+        link = self.resources / "escape"
         link.symlink_to(self.base)
         with self.assertRaises(PackageRejected):
             self._audit()
 
+    @_REQUIRES_MACOS_SYMLINK_FIXTURE
     def test_a_relative_symlink_that_stays_inside_the_package_is_allowed(self) -> None:
         """PyInstaller trees legitimately carry these and cannot ship without them.
 
@@ -281,45 +366,49 @@ class EmbeddedBrowserPackageTests(unittest.TestCase):
         not free now, and "points somewhere else in this same package" is not
         the thing the rule exists to stop.
         """
-        worker = self.bundle / "Contents/Resources/material-video-worker/package"
+        worker = self.resources / "material-video-worker/package"
         (worker / "vendor").mkdir(parents=True)
         (worker / "vendor/libexample.dylib").write_bytes(b"payload")
         (worker / "libexample.dylib").symlink_to("vendor/libexample.dylib")
         self._audit()
 
+    @_REQUIRES_SYMLINKS
     def test_a_relative_symlink_climbing_out_of_the_package_is_rejected(self) -> None:
         # `../` chains resolve outside just as surely as an absolute path does.
-        worker = self.bundle / "Contents/Resources/material-video-worker/package"
+        worker = self.resources / "material-video-worker/package"
         worker.mkdir(parents=True)
         (worker / "escape").symlink_to("../../../../..")
         with self.assertRaises(PackageRejected):
             self._audit()
 
+    @_REQUIRES_SYMLINKS
     def test_a_symlink_into_the_browser_distribution_is_rejected(self) -> None:
         # Resolving inside the package is not sufficient: a link into the
         # browser tree lets a second, unverified path reach the browser without
         # passing the manifest check.
-        worker = self.bundle / "Contents/Resources/material-video-worker/package"
+        worker = self.resources / "material-video-worker/package"
         worker.mkdir(parents=True)
         (worker / "browser").symlink_to("../../embedded-browser")
         with self.assertRaises(PackageRejected):
             self._audit()
 
+    @_REQUIRES_SYMLINKS
     def test_a_directory_symlink_inside_the_package_is_rejected(self) -> None:
         # Only file links are legitimate. A directory link gives one tree two
         # paths, which would let a payload sit somewhere the "this resource
         # lives here" checks never look. PyInstaller only links libraries.
-        worker = self.bundle / "Contents/Resources/material-video-worker/package"
+        worker = self.resources / "material-video-worker/package"
         (worker / "vendor").mkdir(parents=True)
         (worker / "vendor/libexample.dylib").write_bytes(b"payload")
         (worker / "mirror").symlink_to("vendor")
         with self.assertRaises(PackageRejected):
             self._audit()
 
+    @_REQUIRES_SYMLINKS
     def test_a_dangling_symlink_is_rejected(self) -> None:
         # A link with no target cannot be shown to stay inside the package, and
         # at runtime it is an unexplained failure rather than a missing file.
-        worker = self.bundle / "Contents/Resources/material-video-worker/package"
+        worker = self.resources / "material-video-worker/package"
         worker.mkdir(parents=True)
         (worker / "missing").symlink_to("nowhere.dylib")
         with self.assertRaises(PackageRejected):
@@ -346,7 +435,7 @@ class EmbeddedBrowserPackageTests(unittest.TestCase):
             self._audit(size_bounds=bounds)
 
 
-@_REQUIRES_SYMLINKS
+@_REQUIRES_MACOS_SYMLINK_FIXTURE
 class DistributionInstallationTests(unittest.TestCase):
     """Installing the distribution into a bundle must keep declared symlinks.
 
@@ -357,7 +446,9 @@ class DistributionInstallationTests(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self._directory = tempfile.TemporaryDirectory(prefix="eb16-install-")
+        self._directory = tempfile.TemporaryDirectory(
+            prefix=_temporary_prefix("eb16-install-")
+        )
         self.addCleanup(self._directory.cleanup)
         self.base = Path(self._directory.name)
         self.staging = self.base / "staging"
@@ -412,10 +503,13 @@ class DistributionInstallationTests(unittest.TestCase):
 
     def test_failed_install_leaves_no_half_written_destination(self) -> None:
         destination = self.base / "Resources/embedded-browser"
-        with unittest.mock.patch(
-            "build_embedded_browser_distribution.shutil.copytree",
-            side_effect=OSError("disk full"),
-        ), self.assertRaises(OSError):
+        with (
+            unittest.mock.patch(
+                "build_embedded_browser_distribution.shutil.copytree",
+                side_effect=OSError("disk full"),
+            ),
+            self.assertRaises(OSError),
+        ):
             install_distribution(staging=self.staging, destination=destination)
         self.assertFalse(destination.exists())
         install_distribution(staging=self.staging, destination=destination)
@@ -453,7 +547,9 @@ class ReleaseBundleAuditTests(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self._directory = tempfile.TemporaryDirectory(prefix="eb16-bundle-")
+        self._directory = tempfile.TemporaryDirectory(
+            prefix=_temporary_prefix("eb16-bundle-")
+        )
         self.addCleanup(self._directory.cleanup)
         self.base = Path(self._directory.name)
         self.bundle = self.base / "Automation Tool.app"
@@ -471,7 +567,7 @@ class ReleaseBundleAuditTests(unittest.TestCase):
         if _symlinks_creatable():
             (self.browser / "chrome-mac-arm64/Current").symlink_to("resources.pak")
         (self.browser / "distribution-manifest.v1.json").write_text(
-            json.dumps({"target": TARGET_ID}), encoding="utf-8"
+            json.dumps({"target": MACOS_AUDIT_TARGET_ID}), encoding="utf-8"
         )
 
     def _run(self, *extra: str) -> subprocess.CompletedProcess[str]:
@@ -491,6 +587,24 @@ class ReleaseBundleAuditTests(unittest.TestCase):
             capture_output=True,
             text=True,
         )
+
+    def test_macos_audit_fixture_target_does_not_follow_the_native_host(self) -> None:
+        fixture = ReleaseBundleAuditTests(
+            "test_a_packaged_browser_always_runs_the_digest_gate"
+        )
+        with unittest.mock.patch.object(
+            sys.modules[__name__], "TARGET_ID", "windows-x86_64"
+        ):
+            fixture.setUp()
+        try:
+            manifest = json.loads(
+                (fixture.browser / "distribution-manifest.v1.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(manifest["target"], "macos-arm64")
+        finally:
+            fixture.doCleanups()
 
     def test_bundle_without_an_embedded_browser_keeps_the_original_contract(
         self,
@@ -573,7 +687,9 @@ class ProductionPackageAuditTests(unittest.TestCase):
     """The E4-15 binary audit must reject hidden test window configuration."""
 
     def setUp(self) -> None:
-        self._directory = tempfile.TemporaryDirectory(prefix="eb16-production-")
+        self._directory = tempfile.TemporaryDirectory(
+            prefix=_temporary_prefix("eb16-production-")
+        )
         self.addCleanup(self._directory.cleanup)
         self.base = Path(self._directory.name)
         self.distribution = self.base / "dist"
@@ -655,8 +771,7 @@ class ProductionPackageAuditTests(unittest.TestCase):
     def test_webdriver_binary_marker_is_rejected(self) -> None:
         binary = self.base / "webdriver-binary"
         binary.write_bytes(
-            b"tauri-driver --port 4444"
-            b"ZGVtby1lYjE2LXJlbGVhc2Uta2V5LWJ5dGVzLTMyISE"
+            b"tauri-driver --port 4444ZGVtby1lYjE2LXJlbGVhc2Uta2V5LWJ5dGVzLTMyISE"
         )
         result = self._audit(binary)
         self.assertNotEqual(result.returncode, 0)

@@ -4,9 +4,7 @@ from typing import Any, cast
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 OPENAPI = REPOSITORY_ROOT / "contracts/openapi/control-plane.v1.json"
-REVOCATION_CONTRACT = (
-    REPOSITORY_ROOT / "contracts/security/customer-demo-revocation-v1.json"
-)
+REVOCATION_CONTRACT = REPOSITORY_ROOT / "contracts/security/customer-demo-revocation-v1.json"
 MUTATING_METHODS = frozenset({"post", "put", "delete"})
 
 
@@ -31,9 +29,7 @@ def test_customer_demo_has_no_anonymous_business_write_operation() -> None:
     contract = json.loads(REVOCATION_CONTRACT.read_text(encoding="utf-8"))
     operations = mutating_operations(openapi)
     anonymous_mutation_allowlist = set(contract["anonymousMutationAllowlist"])
-    anonymous = {
-        operation["operationId"] for operation in operations if not operation["security"]
-    }
+    anonymous = {operation["operationId"] for operation in operations if not operation["security"]}
 
     assert contract["anonymousBusinessWrites"] == 0
     assert anonymous == anonymous_mutation_allowlist == {"loginAccountSession"}
@@ -64,17 +60,24 @@ def test_customer_demo_has_no_anonymous_business_write_operation() -> None:
         if operation["security"] == [{"AppSession": []}]
     }
     assert app_business_writes == {
+        "applySmartEditMaterialWriteback",
         "cancelBilibiliPublishSession",
         "cancelTask",
         "confirmTaskTargetPreview",
+        "createEditingProject",
         "createTask",
+        "deleteEditingMaterial",
         "emergencyStopTask",
         "pauseTask",
         "prepareBilibiliPublish",
         "prepareDouyinPlatformSessionLogout",
+        "registerEditingMaterial",
         "replaceTaskTargetExclusions",
         "resumeTask",
+        "saveEditingProjectTimeline",
         "startTaskDiscovery",
         "submitBilibiliPublish",
+        "submitEditingJob",
+        "updateEditingMaterialDescription",
         "uploadBilibiliPublishVideo",
     }

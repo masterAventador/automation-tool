@@ -13,6 +13,7 @@ export interface BrandStyleDraftInput {
   readonly primaryColor: string;
   readonly secondaryColor: string;
   readonly fontFamily: string;
+  readonly fontFileName: string;
   readonly logoFileName: string;
 }
 
@@ -20,6 +21,7 @@ export interface BrandStyleDraft {
   readonly primaryColor: string | null;
   readonly secondaryColor: string | null;
   readonly fontFamily: string | null;
+  readonly fontFileName: string | null;
   readonly logoFileName: string | null;
 }
 
@@ -33,6 +35,7 @@ export interface MotionStyleActualPreview extends MotionStyleActualContent {
   readonly accent: string;
   readonly ink: string;
   readonly fontFamily: string | null;
+  readonly fontFileName: string | null;
   readonly logoFileName: string | null;
 }
 
@@ -94,6 +97,7 @@ const RECOMMENDATION_SIGNALS: Readonly<Record<string, RecommendationSignal>> = {
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/u;
 const FONT_FAMILY = /^[\p{L}\p{N} .()'-]{1,80}$/u;
+const FONT_FILE = /^[^/\\\0]{1,128}\.(?:woff2?|ttf|otf)$/iu;
 const LOGO_FILE = /^[^/\\\0]{1,128}\.(?:png|jpe?g|webp)$/iu;
 
 function requireBoundedText(value: string, label: string, maxLength: number): string {
@@ -166,6 +170,13 @@ export function validateBrandStyleDraft(input: BrandStyleDraftInput): BrandStyle
   if (font !== "" && !FONT_FAMILY.test(font)) {
     throw new Error("font family is malformed");
   }
+  const fontFile = input.fontFileName.trim();
+  if ((font === "") !== (fontFile === "")) {
+    throw new Error("font family and local font file must be provided together");
+  }
+  if (fontFile !== "" && !FONT_FILE.test(fontFile)) {
+    throw new Error("font file name is malformed");
+  }
   const logo = input.logoFileName.trim();
   if (logo !== "" && !LOGO_FILE.test(logo)) {
     throw new Error("logo file name is malformed");
@@ -174,6 +185,7 @@ export function validateBrandStyleDraft(input: BrandStyleDraftInput): BrandStyle
     primaryColor,
     secondaryColor,
     fontFamily: font === "" ? null : font,
+    fontFileName: fontFile === "" ? null : fontFile,
     logoFileName: logo === "" ? null : logo,
   };
 }
@@ -192,6 +204,7 @@ export function buildMotionStylePreview(
     accent: brand.primaryColor ?? style.preview.accent,
     ink: style.preview.ink,
     fontFamily: brand.fontFamily,
+    fontFileName: brand.fontFileName,
     logoFileName: brand.logoFileName,
   };
 }

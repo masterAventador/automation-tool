@@ -527,7 +527,7 @@ async def test_recovery_dispatch_is_explicit_and_inputs_fail_closed() -> None:
             TaskCommandDeliveryRejected, match=r"^Task command delivery is rejected$"
         ):
             await service.dispatch_current(
-                installation_id=invalid,  # type: ignore[arg-type]
+                installation_id=invalid,
                 executor_id=EXECUTOR_ID,
                 connection_id=CONNECTION_ID,
             )
@@ -768,7 +768,7 @@ async def test_acknowledgement_failure_expiry_and_wire_validation_are_closed() -
         clock=MutableClock(),
     )
     with pytest.raises(TaskCommandDeliveryRejected):
-        await service.acknowledge(object())  # type: ignore[arg-type]
+        await service.acknowledge(object())
 
     for failure, error in (
         ("rejected", TaskCommandDeliveryRejected),

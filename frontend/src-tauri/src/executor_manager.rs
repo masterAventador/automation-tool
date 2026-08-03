@@ -6,7 +6,9 @@ use crate::executor_bootstrap::{
     LocalSessionToken,
 };
 use crate::executor_diagnostics::{ExecutorDiagnostics, MAX_DIAGNOSTIC_LINE_BYTES};
-use crate::executor_package::{ExecutorPackageVerifier, VerifiedExecutorPackage};
+use crate::executor_package::{
+    ExecutorPackageErrorCode, ExecutorPackageVerifier, VerifiedExecutorPackage,
+};
 use crate::managed_process_tree::{configure_managed_process, ManagedProcessTree};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -465,11 +467,15 @@ impl ExecutorManager {
     }
 
     pub fn validate_installed_package(&self) -> Result<(), ExecutorManagerError> {
-        self.core
-            .verifier
-            .verify_current(&self.core.package_root)
-            .map(|_| ())
-            .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::PackageRejected))
+        match self.core.verifier.verify_current(&self.core.package_root) {
+            Ok(_) => Ok(()),
+            Err(error) => {
+                crate::app_logging::record(executor_package_rejection_event(error.code()));
+                Err(ExecutorManagerError::new(
+                    ExecutorManagerErrorCode::PackageRejected,
+                ))
+            }
+        }
     }
 
     pub fn execute_platform_command(
@@ -676,6 +682,34 @@ impl ExecutorManager {
             .slot
             .lock()
             .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::ProcessUnavailable))
+    }
+}
+
+fn executor_package_rejection_event(
+    code: ExecutorPackageErrorCode,
+) -> crate::app_logging::DesktopLogEvent {
+    match code {
+        ExecutorPackageErrorCode::ConfigurationInvalid => {
+            crate::app_logging::DesktopLogEvent::StartupExecutorPackageConfigurationRejected
+        }
+        ExecutorPackageErrorCode::SignatureInvalid => {
+            crate::app_logging::DesktopLogEvent::StartupExecutorPackageSignatureRejected
+        }
+        ExecutorPackageErrorCode::ManifestInvalid => {
+            crate::app_logging::DesktopLogEvent::StartupExecutorPackageManifestRejected
+        }
+        ExecutorPackageErrorCode::PlatformMismatch => {
+            crate::app_logging::DesktopLogEvent::StartupExecutorPackagePlatformRejected
+        }
+        ExecutorPackageErrorCode::VersionRejected | ExecutorPackageErrorCode::RollbackRejected => {
+            crate::app_logging::DesktopLogEvent::StartupExecutorPackageVersionRejected
+        }
+        ExecutorPackageErrorCode::PackageInvalid | ExecutorPackageErrorCode::DigestMismatch => {
+            crate::app_logging::DesktopLogEvent::StartupExecutorPackageInventoryRejected
+        }
+        ExecutorPackageErrorCode::IoUnavailable => {
+            crate::app_logging::DesktopLogEvent::StartupExecutorPackageIoRejected
+        }
     }
 }
 

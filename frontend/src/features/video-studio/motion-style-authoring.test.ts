@@ -31,6 +31,7 @@ describe("BM-07 motion style recommendation and brand preview", () => {
       primaryColor: "#1234ab",
       secondaryColor: "#f2eadb",
       fontFamily: "Acme Sans",
+      fontFileName: "AcmeSans-Regular.woff2",
       logoFileName: "acme-logo.png",
     });
     const preview = buildMotionStylePreview(
@@ -47,6 +48,7 @@ describe("BM-07 motion style recommendation and brand preview", () => {
     expect(preview.accent).toBe("#1234ab");
     expect(preview.paper).toBe("#f2eadb");
     expect(preview.fontFamily).toBe("Acme Sans");
+    expect(preview.fontFileName).toBe("AcmeSans-Regular.woff2");
     expect(preview.logoFileName).toBe("acme-logo.png");
   });
 
@@ -56,6 +58,7 @@ describe("BM-07 motion style recommendation and brand preview", () => {
         primaryColor: "red",
         secondaryColor: "#ffffff",
         fontFamily: "Inter",
+        fontFileName: "Inter.woff2",
         logoFileName: "logo.png",
       }),
     ).toThrow();
@@ -64,6 +67,7 @@ describe("BM-07 motion style recommendation and brand preview", () => {
         primaryColor: "#112233",
         secondaryColor: "#ffffff",
         fontFamily: "Acme; background:url(https://evil.example)",
+        fontFileName: "Acme.woff2",
         logoFileName: "logo.png",
       }),
     ).toThrow();
@@ -72,9 +76,28 @@ describe("BM-07 motion style recommendation and brand preview", () => {
         primaryColor: "#112233",
         secondaryColor: "#ffffff",
         fontFamily: "Acme Sans",
+        fontFileName: "AcmeSans-Regular.woff2",
         logoFileName: "../logo.svg",
       }),
     ).toThrow();
+    expect(() =>
+      validateBrandStyleDraft({
+        primaryColor: "#112233",
+        secondaryColor: "#ffffff",
+        fontFamily: "Acme Sans",
+        fontFileName: "",
+        logoFileName: "logo.png",
+      }),
+    ).toThrow(/font family and local font file/u);
+    expect(() =>
+      validateBrandStyleDraft({
+        primaryColor: "#112233",
+        secondaryColor: "#ffffff",
+        fontFamily: "",
+        fontFileName: "AcmeSans-Regular.woff2",
+        logoFileName: "logo.png",
+      }),
+    ).toThrow(/font family and local font file/u);
   });
 
   it("rejects empty or oversized actual content", () => {
@@ -83,6 +106,7 @@ describe("BM-07 motion style recommendation and brand preview", () => {
       primaryColor: "",
       secondaryColor: "",
       fontFamily: "",
+      fontFileName: "",
       logoFileName: "",
     });
     expect(() =>

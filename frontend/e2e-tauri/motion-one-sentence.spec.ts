@@ -185,14 +185,14 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
     await studio.$("div[role='tab']=动效零件").click();
     const parts = await studio.$("section[aria-label='动效零件目录']");
     await parts
-      .$("//label[contains(@class,'ant-radio-button-wrapper') and contains(., '数据与地图')]")
+      .$("//label[contains(@class,'ant-radio-button-wrapper') and contains(., '其他')]")
       .click();
-    const dataChart = await parts.$(
-      "//li[contains(@class,'motion-parts-card') and .//*[normalize-space()='数据图表动画']]",
+    const motionBlur = await parts.$(
+      "//li[contains(@class,'motion-parts-card') and .//*[normalize-space()='运动模糊拖影']]",
     );
-    await dataChart.$("button=指定给第 1 镜头").click();
+    await motionBlur.$("button=指定给第 1 镜头").click();
     await expect(studio).toHaveText(
-      expect.stringContaining("第 1 镜头：已指定数据图表动画"),
+      expect.stringContaining("第 1 镜头：已指定运动模糊拖影"),
     );
     await studio.$("div[role='tab']=新建视频").click();
 
@@ -328,7 +328,7 @@ describe("T36 一句话自动制作的真实 App 用户路径", () => {
     );
     assert.equal(
       shotStructure[0]?.part,
-      "data-chart",
+      "motion-blur",
       "the first-shot catalog choice did not reach the retained RenderJob",
     );
     writeFileSync(evidenceShots, JSON.stringify(settled.shotStructure), { flag: "wx" });

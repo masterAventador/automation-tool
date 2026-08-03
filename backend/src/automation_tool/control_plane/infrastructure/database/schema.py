@@ -1,26 +1,26 @@
 """Versioned SQLAlchemy schema metadata for Control Plane persistence."""
 
 from sqlalchemy import (
+    CHAR,
     BigInteger,
     Boolean,
     CheckConstraint,
     Column,
     Date,
     DateTime,
-    ForeignKey,
+    Double,
     ForeignKeyConstraint,
     Index,
     Integer,
     LargeBinary,
     MetaData,
-    Numeric,
     PrimaryKeyConstraint,
     String,
     Table,
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from automation_tool.control_plane.application.task_target_previews import (
     TASK_TARGET_CONFIRMATION_INTENT_VERSION,
@@ -30,12 +30,15 @@ from automation_tool.control_plane.domain import (
     DOUYIN_CANDIDATE_POLICY_VERSION,
     DOUYIN_SEARCH_EXPOSURE_TEMPLATE,
     MAX_ACTION_RISK_LIMIT,
+    MAX_DESCRIPTION_CHARACTERS,
     MAX_MESSAGE_TEMPLATE_CHARACTERS,
+    MAX_PROJECT_TITLE_CHARACTERS,
     MAX_SAFE_TASK_EVENT_MESSAGE_CHARACTERS,
     MAX_SEARCH_KEYWORD_CHARACTERS,
     MAX_TASK_EVENT_SEQUENCE,
     MAX_TASK_INTERVAL_SECONDS,
     MAX_TASK_TARGET_LIMIT,
+    MAX_TRANSCRIPT_CHARACTERS,
     TERMINAL_EXECUTION_ATTEMPT_STATUSES,
     AccountAuditActorKind,
     AccountAuditEventType,
@@ -2339,183 +2342,282 @@ bilibili_upload_parts = Table(
     ),
 )
 
-
-aliyun_editing_intents = Table(
-    "aliyun_editing_intents",
+editing_projects = Table(
+    "editing_projects",
     metadata,
-    Column("editing_job_id", UUID(as_uuid=True), nullable=False),
-    Column("request_hash", String(length=64), nullable=False),
-    Column("state", String(length=16), nullable=False),
-    Column("vendor_job_id", String(length=128), nullable=True),
-    Column("status", String(length=20), nullable=False),
-    Column("failure_code", String(length=32), nullable=True),
-    Column("output_artifact_ids", ARRAY(UUID(as_uuid=True)), nullable=False),
-    Column(
-        "created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")
+    Column("project_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("title", String(length=MAX_PROJECT_TITLE_CHARACTERS), nullable=False),
+    Column("output_width", Integer(), nullable=False),
+    Column("output_height", Integer(), nullable=False),
+    Column("output_fps", Integer(), nullable=False),
+    # `EditingProject`'s font-key pattern admits at most 64 characters.
+    Column("caption_font_key", String(length=64), nullable=False),
+    Column("caption_font_px", Integer(), nullable=False),
+    Column("caption_stroke_px", Integer(), nullable=False),
+    Column("caption_line_spacing", Double(), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    ForeignKeyConstraint(
+        ["installation_id"],
+        ["installations.id"],
+        name="fk_editing_projects_installation",
+        ondelete="RESTRICT",
     ),
-    Column(
-        "updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")
+    PrimaryKeyConstraint("project_id", name="pk_editing_projects"),
+    UniqueConstraint(
+        "project_id",
+        "installation_id",
+        name="uq_editing_projects_project_installation",
     ),
-    CheckConstraint(
-        "state in ('prepared', 'dispatched', 'uncertain')",
-        name="ck_aliyun_editing_intents_state",
-    ),
-    CheckConstraint(
-        "status in ('queued', 'running', 'paused', 'cancelling', 'succeeded', "
-        "'failed', 'cancelled', 'outcome_uncertain')",
-        name="ck_aliyun_editing_intents_status",
-    ),
-    CheckConstraint(
-        "request_hash ~ '^[0-9a-f]{64}$'",
-        name="ck_aliyun_editing_intents_request_hash",
-    ),
-    CheckConstraint(
-        "vendor_job_id is null or vendor_job_id ~ '^[A-Za-z0-9-]{8,128}$'",
-        name="ck_aliyun_editing_intents_vendor_job_id",
-    ),
-    CheckConstraint(
-        "state <> 'prepared' or (vendor_job_id is null and status = 'queued'"
-        " and failure_code is null and cardinality(output_artifact_ids) = 0)",
-        name="ck_aliyun_editing_intents_prepared_shape",
-    ),
-    CheckConstraint(
-        "state <> 'uncertain' or (vendor_job_id is null"
-        " and status = 'outcome_uncertain' and failure_code is null"
-        " and cardinality(output_artifact_ids) = 0)",
-        name="ck_aliyun_editing_intents_uncertain_shape",
-    ),
-    CheckConstraint(
-        "state <> 'dispatched' or vendor_job_id is not null",
-        name="ck_aliyun_editing_intents_dispatched_shape",
-    ),
-    CheckConstraint(
-        "status <> 'succeeded' or (cardinality(output_artifact_ids) > 0"
-        " and failure_code is null)",
-        name="ck_aliyun_editing_intents_succeeded_facts",
-    ),
-    CheckConstraint(
-        "status = 'succeeded' or status = 'failed'"
-        " or (cardinality(output_artifact_ids) = 0 and failure_code is null)",
-        name="ck_aliyun_editing_intents_non_terminal_facts",
-    ),
-    CheckConstraint(
-        "status <> 'failed' or (cardinality(output_artifact_ids) = 0"
-        " and failure_code is not null)",
-        name="ck_aliyun_editing_intents_failed_facts",
-    ),
-    PrimaryKeyConstraint("editing_job_id", name="pk_aliyun_editing_intents"),
 )
 
 Index(
-    "ux_aliyun_editing_intents_vendor_job_id",
-    aliyun_editing_intents.c.vendor_job_id,
-    unique=True,
-    postgresql_where=text("vendor_job_id is not null"),
+    "ix_editing_projects_installation_created_project",
+    editing_projects.c.installation_id,
+    editing_projects.c.created_at,
+    editing_projects.c.project_id,
 )
 
-editing_output_lineages = Table(
-    "editing_output_lineages",
+materials = Table(
+    "materials",
     metadata,
-    Column("editing_job_id", UUID(as_uuid=True), nullable=False),
+    Column("material_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("kind", String(length=16), nullable=False),
+    # Nullable because the domain says so, not because the value is optional
+    # paperwork: an image has no duration and audio has no frame size, and both
+    # are refused if they carry one. The column cannot express which absence
+    # goes with which kind, so it permits all four and `Material` decides.
+    Column("duration_ms", Integer(), nullable=True),
+    Column("width", Integer(), nullable=True),
+    Column("height", Integer(), nullable=True),
+    # Fixed width, because a SHA-256 hex digest is exactly 64 characters. Note
+    # that `CHAR` is `bpchar`: it blank-pads anything shorter and compares
+    # ignoring trailing blanks. Neither touches a digest written through the
+    # repository -- there is nothing to pad -- but a row arriving any other way
+    # comes back padded, and hydration refuses it because spaces are not hex.
+    Column("content_digest", CHAR(length=64), nullable=False),
+    Column("has_audio", Boolean(), nullable=False),
+    Column("audio_loudness_lufs", Double(), nullable=True),
+    Column("has_speech", Boolean(), nullable=False),
+    # The three JSONB columns are NOT NULL: "no speech" is an empty array, not
+    # an absent one, which keeps `[]` and NULL from both meaning nothing.
+    # PostgreSQL never looks inside these, so their shape is entirely on
+    # hydration -- see the migration's docstring.
+    Column("speech_segments_ms", JSONB(), nullable=False),
+    Column("speech_transcript", String(length=MAX_TRANSCRIPT_CHARACTERS), nullable=True),
+    Column("shot_boundaries_ms", JSONB(), nullable=False),
+    Column("ai_description", String(length=MAX_DESCRIPTION_CHARACTERS), nullable=True),
+    Column("ai_tags", JSONB(), nullable=False),
+    Column("description_source", String(length=16), nullable=False),
+    # The one genuinely optional value here: a material nobody has described
+    # yet, and one whose description a person wrote, both leave this NULL.
+    Column("described_at", DateTime(timezone=True), nullable=True),
+    PrimaryKeyConstraint("material_id", name="pk_materials"),
+    ForeignKeyConstraint(
+        ["installation_id"],
+        ["installations.id"],
+        name="fk_materials_installation",
+        ondelete="RESTRICT",
+    ),
+    UniqueConstraint(
+        "material_id",
+        "installation_id",
+        name="uq_materials_material_installation",
+    ),
+)
+
+Index(
+    "uq_materials_installation_content_digest",
+    materials.c.installation_id,
+    materials.c.content_digest,
+    unique=True,
+)
+
+Index(
+    "ix_materials_installation_material",
+    materials.c.installation_id,
+    materials.c.material_id,
+)
+
+editing_project_timelines = Table(
+    "editing_project_timelines",
+    metadata,
     Column("project_id", UUID(as_uuid=True), nullable=False),
     Column("timeline_id", UUID(as_uuid=True), nullable=False),
-    Column("timeline_revision", Integer, nullable=False),
-    Column("provider_id", String(length=64), nullable=False),
-    Column("provider_contract_verified_at", String(length=10), nullable=False),
-    Column("input_artifact_ids", ARRAY(UUID(as_uuid=True)), nullable=False),
-    Column("cost_source", String(length=16), nullable=False),
-    Column("cost_currency", String(length=3), nullable=False),
-    Column("cost_billed_minutes", Integer, nullable=False),
-    Column("cost_tier_id", String(length=64), nullable=False),
-    Column("cost_unit_price_cny", Numeric(12, 4), nullable=False),
-    Column("cost_total_cny", Numeric(14, 4), nullable=False),
-    Column("created_at", DateTime(timezone=True), nullable=False),
-    Column(
-        "recorded_at", DateTime(timezone=True), nullable=False, server_default=text("now()")
+    PrimaryKeyConstraint("project_id", name="pk_editing_project_timelines"),
+    ForeignKeyConstraint(
+        ["project_id"],
+        ["editing_projects.project_id"],
+        name="fk_editing_project_timelines_project",
     ),
-    CheckConstraint(
-        "timeline_revision >= 1", name="ck_editing_output_lineages_revision"
+    UniqueConstraint(
+        "timeline_id",
+        name="uq_editing_project_timelines_timeline",
     ),
-    CheckConstraint(
-        "provider_id ~ '^[a-z0-9_]{2,64}$'", name="ck_editing_output_lineages_provider"
+    # PostgreSQL requires the exact referenced column set to be unique. The
+    # project primary key already makes this pair unique, but the pair itself
+    # is the target that lets each revision prove both halves of its lineage.
+    UniqueConstraint(
+        "project_id",
+        "timeline_id",
+        name="uq_editing_project_timelines_project_timeline",
     ),
-    CheckConstraint(
-        "provider_contract_verified_at ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'",
-        name="ck_editing_output_lineages_verified_at",
-    ),
-    CheckConstraint(
-        "cardinality(input_artifact_ids) >= 1",
-        name="ck_editing_output_lineages_inputs",
-    ),
-    CheckConstraint(
-        "cost_source in ('estimated', 'billed')",
-        name="ck_editing_output_lineages_cost_source",
-    ),
-    CheckConstraint("cost_currency = 'CNY'", name="ck_editing_output_lineages_currency"),
-    CheckConstraint(
-        "cost_billed_minutes >= 1", name="ck_editing_output_lineages_minutes"
-    ),
-    CheckConstraint(
-        "cost_tier_id ~ '^[a-z0-9][a-z0-9_-]{0,63}$'",
-        name="ck_editing_output_lineages_tier",
-    ),
-    CheckConstraint(
-        "cost_unit_price_cny >= 0", name="ck_editing_output_lineages_unit_price"
-    ),
-    CheckConstraint(
-        "cost_total_cny = cost_unit_price_cny * cost_billed_minutes",
-        name="ck_editing_output_lineages_cost_total",
-    ),
-    PrimaryKeyConstraint("editing_job_id", name="pk_editing_output_lineages"),
 )
 
-editing_output_artifacts = Table(
-    "editing_output_artifacts",
+timelines = Table(
+    "timelines",
     metadata,
-    Column("artifact_id", UUID(as_uuid=True), nullable=False),
-    Column(
-        "editing_job_id",
-        UUID(as_uuid=True),
-        ForeignKey(
-            "editing_output_lineages.editing_job_id",
-            name="fk_editing_output_artifacts_lineage",
-            ondelete="CASCADE",
-        ),
-        nullable=False,
-    ),
-    Column("position", Integer, nullable=False),
-    Column("kind", String(length=16), nullable=False),
-    Column("media_type", String(length=64), nullable=False),
-    Column("byte_size", BigInteger, nullable=False),
-    Column("sha256_hex", String(length=64), nullable=False),
+    Column("timeline_id", UUID(as_uuid=True), nullable=False),
+    Column("revision", Integer(), nullable=False),
+    Column("project_id", UUID(as_uuid=True), nullable=False),
+    Column("duration_ms", Integer(), nullable=False),
+    # The whole cut as one document: tracks, their clips, and a clip's incoming
+    # transition. Not split into a clips table because a revision is an
+    # immutable snapshot that the renderer reads whole, and nothing in this
+    # release queries across clips. PostgreSQL never looks inside it, so its
+    # shape is entirely hydration's problem -- see the migration's docstring.
+    Column("tracks", JSONB(), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
-    CheckConstraint("position >= 0", name="ck_editing_output_artifacts_position"),
-    CheckConstraint(
-        "kind in ('video', 'cover', 'subtitle', 'metadata')",
-        name="ck_editing_output_artifacts_kind",
+    # Composite, because a revision is a snapshot rather than a version counter
+    # on one mutable row: every revision of a timeline is its own row and none
+    # of them is ever updated. This is also what refuses a second write of the
+    # same revision, whoever is racing.
+    PrimaryKeyConstraint("timeline_id", "revision", name="pk_timelines"),
+    ForeignKeyConstraint(
+        ["project_id", "timeline_id"],
+        [
+            "editing_project_timelines.project_id",
+            "editing_project_timelines.timeline_id",
+        ],
+        name="fk_timelines_project_timeline",
     ),
-    CheckConstraint(
-        "(kind = 'video' and media_type in ('video/mp4', 'video/webm'))"
-        " or (kind = 'cover' and media_type in ('image/jpeg', 'image/png'))"
-        " or (kind = 'subtitle' and media_type in ('text/vtt', 'application/x-subrip'))"
-        " or (kind = 'metadata' and media_type = 'application/json')",
-        name="ck_editing_output_artifacts_media",
+    # A superkey of the primary key, so it refuses nothing the primary key would
+    # not have refused already. **Its only reason to exist is to be the target
+    # of `editing_jobs`'s composite foreign key**, which is what makes "a job's
+    # project is the project its timeline belongs to" a structural fact rather
+    # than an application check two concurrent callers can both pass. PostgreSQL
+    # requires a foreign key's target columns to be covered by a unique
+    # constraint spelling exactly those columns, and the primary key spells only
+    # two of the three. Dropping this as redundant would silently remove that
+    # invariant's only enforcement.
+    UniqueConstraint("timeline_id", "revision", "project_id", name="uq_timelines_revision_project"),
+)
+
+timeline_material_references = Table(
+    "timeline_material_references",
+    metadata,
+    Column("timeline_id", UUID(as_uuid=True), nullable=False),
+    Column("timeline_revision", Integer(), nullable=False),
+    Column("project_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("material_id", UUID(as_uuid=True), nullable=False),
+    PrimaryKeyConstraint(
+        "timeline_id",
+        "timeline_revision",
+        "material_id",
+        name="pk_timeline_material_references",
     ),
-    CheckConstraint("byte_size >= 1", name="ck_editing_output_artifacts_bytes"),
-    CheckConstraint(
-        "sha256_hex ~ '^[0-9a-f]{64}$'", name="ck_editing_output_artifacts_sha256"
+    ForeignKeyConstraint(
+        ["timeline_id", "timeline_revision", "project_id"],
+        ["timelines.timeline_id", "timelines.revision", "timelines.project_id"],
+        name="fk_timeline_material_references_timeline",
+        ondelete="CASCADE",
     ),
-    PrimaryKeyConstraint("artifact_id", name="pk_editing_output_artifacts"),
-    UniqueConstraint(
-        "editing_job_id", "position", name="ux_editing_output_artifacts_position"
+    ForeignKeyConstraint(
+        ["project_id", "installation_id"],
+        ["editing_projects.project_id", "editing_projects.installation_id"],
+        name="fk_timeline_material_references_project_owner",
+    ),
+    ForeignKeyConstraint(
+        ["material_id", "installation_id"],
+        ["materials.material_id", "materials.installation_id"],
+        name="fk_timeline_material_references_material_owner",
+        ondelete="RESTRICT",
     ),
 )
 
 Index(
-    "ux_editing_output_artifacts_one_video",
-    editing_output_artifacts.c.editing_job_id,
+    "ix_timeline_material_references_installation_material",
+    timeline_material_references.c.installation_id,
+    timeline_material_references.c.material_id,
+)
+
+editing_jobs = Table(
+    "editing_jobs",
+    metadata,
+    Column("job_id", UUID(as_uuid=True), nullable=False),
+    # Carried here as well as on the timeline. The redundancy is deliberate --
+    # every read of a job needs its project without a join -- and it is exactly
+    # why the two have to be made to agree; see the foreign key below.
+    Column("project_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("timeline_id", UUID(as_uuid=True), nullable=False),
+    Column("timeline_revision", Integer(), nullable=False),
+    # Wide enough for every member of the two enumerations with room to spare.
+    # The domain owns the values; a unit test asserts the longest member of each
+    # still fits, so a width narrowed below what the domain can produce fails
+    # there rather than as a truncation on whichever job hits it first.
+    Column("status", String(length=16), nullable=False),
+    # Both nullable because most states carry neither, which is all a column can
+    # say. *Which* absence belongs to which state -- a succeeded job has an
+    # artifact and no failure code, a failed one the reverse, every other state
+    # neither -- is `EditingJob._validate_facts_match_status`, and hydration is
+    # where a stored row has to meet it.
+    Column("failure_code", String(length=32), nullable=True),
+    Column("output_artifact_id", UUID(as_uuid=True), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    PrimaryKeyConstraint("job_id", name="pk_editing_jobs"),
+    ForeignKeyConstraint(
+        ["project_id", "installation_id"],
+        ["editing_projects.project_id", "editing_projects.installation_id"],
+        name="fk_editing_jobs_project_owner",
+    ),
+    # One key holding two rules that no domain object can hold, because no
+    # aggregate here references another: that the revision a job names really
+    # exists, and that the project it claims is the project that revision
+    # belongs to. A plain foreign key on `project_id` alone would be satisfied
+    # by any stored project, including the wrong one, and an application check
+    # comparing the two is one that two concurrent callers both pass.
+    #
+    # The target is `uq_timelines_revision_project`, which exists for this and
+    # nothing else: PostgreSQL requires a foreign key's referenced columns to be
+    # covered by a unique constraint spelling exactly those columns, and
+    # `pk_timelines` covers only two of the three. The order here matches that
+    # constraint's declared order, and a reference in any other order is one
+    # PostgreSQL refuses to create.
+    ForeignKeyConstraint(
+        ["timeline_id", "timeline_revision", "project_id"],
+        ["timelines.timeline_id", "timelines.revision", "timelines.project_id"],
+        name="fk_editing_jobs_timeline_revision",
+    ),
+)
+
+# At most one render of a revision may be waiting to start. Two callers asking
+# to render the same cut is a duplicate request rather than two pieces of work,
+# and looking for an existing one before inserting is a check both of them pass.
+#
+# **The predicate is load-bearing, not a refinement.** Without it this would be
+# a plain unique index and a revision could be rendered exactly once ever: a
+# failed render could not be retried and a cancelled one could not be resumed,
+# because the finished row would still occupy the slot. Restricting it to queued
+# rows is what makes the slot free itself as soon as the job starts, finishes or
+# is cancelled.
+Index(
+    "uq_editing_jobs_queued_timeline_revision",
+    editing_jobs.c.timeline_id,
+    editing_jobs.c.timeline_revision,
     unique=True,
-    postgresql_where=text("kind = 'video'"),
+    postgresql_where=editing_jobs.c.status == "queued",
+)
+
+Index(
+    "ix_editing_jobs_installation_project_updated_job",
+    editing_jobs.c.installation_id,
+    editing_jobs.c.project_id,
+    editing_jobs.c.updated_at,
+    editing_jobs.c.job_id,
 )
 
 __all__ = [
@@ -2526,18 +2628,19 @@ __all__ = [
     "account_session_families",
     "account_session_tokens",
     "action_risk_authorizations",
-    "aliyun_editing_intents",
     "bilibili_publish_attempts",
     "bilibili_publish_reconciliations",
     "bilibili_upload_parts",
     "device_credentials",
     "device_sessions",
     "douyin_search_exposure_definitions",
-    "editing_output_artifacts",
-    "editing_output_lineages",
+    "editing_jobs",
+    "editing_project_timelines",
+    "editing_projects",
     "execution_attempts",
     "installation_registration_challenges",
     "installations",
+    "materials",
     "metadata",
     "platform_session_gates",
     "platform_session_health",
@@ -2546,6 +2649,8 @@ __all__ = [
     "task_events",
     "task_targets",
     "tasks",
+    "timeline_material_references",
+    "timelines",
     "user_password_credentials",
     "users",
 ]

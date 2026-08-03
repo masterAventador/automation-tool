@@ -207,6 +207,24 @@ fn current_target_package_is_verified_with_semver_policy_and_complete_inventory(
     assert_eq!(verified.package_size(), 31);
 }
 
+#[cfg(windows)]
+#[test]
+fn current_target_package_is_verified_from_a_windows_verbatim_resource_path() {
+    let (package, signing_key) =
+        create_signed_package("1.3.0", current_platform(), current_architecture());
+    let verbatim = PathBuf::from(format!(r"\\?\{}", package.path.display()));
+
+    let verified = verifier(&signing_key)
+        .verify_current(&verbatim)
+        .expect("verify the path shape returned by Tauri resource_dir on Windows");
+
+    assert_eq!(verified.version().to_string(), "1.3.0");
+    assert_eq!(
+        verified.entrypoint_path(),
+        verbatim.join("automation-tool-executor.exe")
+    );
+}
+
 #[test]
 fn version_range_rollback_platform_and_architecture_are_all_fail_closed() {
     let (rollback, signing_key) =

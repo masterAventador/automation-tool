@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
-from typing import Final
+from typing import Final, Protocol
 from urllib.parse import urlsplit
 
 from model_service_adapter import ScriptModelConfiguration, parse_script_model
@@ -24,6 +24,8 @@ BOOTSTRAP_VERSION: Final = "1"
 MAX_BOOTSTRAP_BYTES: Final = 16 * 1024
 MAX_BODY_BYTES: Final = 64 * 1024
 MAX_ASSET_BYTES: Final = 2 * 1024 * 1024 * 1024
+PREVIEW_CHUNK_BYTES: Final = 64 * 1024
+MAX_RANGE_HEADER_BYTES: Final = 128
 REQUEST_TIMEOUT_SECONDS: Final = 10
 TOKEN_PATTERN: Final = re.compile(r"^[0-9a-f]{64}$")
 REQUEST_ID_PATTERN: Final = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -40,19 +42,61 @@ ALLOWED_ROUTES: Final = frozenset(
 EVENT_DOMAIN: Final = b"automation-tool.video-worker-event.v1\0"
 COMMAND_DOMAIN: Final = b"automation-tool.video-worker-command.v1\0"
 WINDOWS_REPARSE_POINT: Final = 0x400
+PREVIEW_CAPABILITY_DOMAIN: Final = b"automation-tool.material-preview-capability.v1\0"
+PREVIEW_CAPABILITY_PREFIX: Final = "material-preview-v1-"
+PREVIEW_ROUTE_PREFIX: Final = "/api/v1/material-previews/"
+PREVIEW_CONTENT_TYPES: Final = frozenset(
+    {
+        "audio/aac",
+        "audio/flac",
+        "audio/mp4",
+        "audio/mpeg",
+        "audio/ogg",
+        "audio/wav",
+        "audio/webm",
+        "image/gif",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "video/mp4",
+        "video/ogg",
+        "video/quicktime",
+        "video/webm",
+        "video/x-matroska",
+    }
+)
+_BYTE_RANGE = re.compile(r"^bytes=(0|[1-9][0-9]*)-(?:(0|[1-9][0-9]*))?$")
+_SUFFIX_RANGE = re.compile(r"^bytes=-(0|[1-9][0-9]*)$")
 
 
 class GatewayRejected(ValueError):
     """Fixed boundary for invalid bootstrap, request, or private paths."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class GatewayBootstrap:
     token_text: str
     token_bytes: bytes
     asset_root: Path
     script_model: ScriptModelConfiguration | None = None
     web_ui: bool = False
+    local_editing: bool = False
+
+    def __repr__(self) -> str:
+        return "GatewayBootstrap(<redacted>)"
+
+
+class MaterialPreviewLease(Protocol):
+    content_type: str
+    size_bytes: int
+
+    def read(self, start: int, length: int) -> bytes: ...
+
+    def close(self) -> None: ...
+
+
+class MaterialPreviewSource(Protocol):
+    def open(self, material_id: uuid.UUID) -> MaterialPreviewLease: ...
 
 
 def _fixed_json(code: str) -> bytes:
@@ -103,7 +147,7 @@ def parse_bootstrap(line: bytes) -> GatewayBootstrap:
     if not line.endswith(b"\n") or not 1 < len(line) <= MAX_BOOTSTRAP_BYTES:
         raise GatewayRejected("invalid bootstrap")
     value = _load_object(line[:-1])
-    if set(value) != {
+    base_keys = {
         "assetRoot",
         "bootstrapVersion",
         "enableWebUi",
@@ -112,8 +156,28 @@ def parse_bootstrap(line: bytes) -> GatewayBootstrap:
         "renderBrowser",
         "scriptModel",
         "workerKind",
-    }:
+    }
+    keys = set(value)
+    local_editing = keys == base_keys | {"mediaTools"}
+    if keys != base_keys and not local_editing:
         raise GatewayRejected("invalid bootstrap")
+    if local_editing:
+        media_tools = value.get("mediaTools")
+        if not isinstance(media_tools, dict) or set(media_tools) != {
+            "ffmpegPath",
+            "ffprobePath",
+        }:
+            raise GatewayRejected("invalid bootstrap")
+        ffmpeg = media_tools.get("ffmpegPath")
+        ffprobe = media_tools.get("ffprobePath")
+        if (
+            not isinstance(ffmpeg, str)
+            or not isinstance(ffprobe, str)
+            or not Path(ffmpeg).is_absolute()
+            or not Path(ffprobe).is_absolute()
+            or ffmpeg == ffprobe
+        ):
+            raise GatewayRejected("invalid bootstrap")
     token = value.get("localSessionToken")
     if (
         value.get("bootstrapVersion") != BOOTSTRAP_VERSION
@@ -131,6 +195,7 @@ def parse_bootstrap(line: bytes) -> GatewayBootstrap:
         asset_root=validate_asset_root(value.get("assetRoot")),
         script_model=parse_script_model(value.get("scriptModel")),
         web_ui=value["enableWebUi"],
+        local_editing=local_editing,
     )
 
 
@@ -141,6 +206,69 @@ def event_proof(bootstrap: GatewayBootstrap, event: str, detail: str) -> str:
     )
     digest = hmac.digest(bootstrap.token_bytes, message, hashlib.sha256)
     return "atvwp1." + base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+
+def material_preview_capability_path(bootstrap: GatewayBootstrap) -> str:
+    """Derive a preview-only capability without exposing the session bearer."""
+
+    if not isinstance(bootstrap, GatewayBootstrap) or not bootstrap.local_editing:
+        raise GatewayRejected("material preview unavailable")
+    digest = hmac.digest(
+        bootstrap.token_bytes, PREVIEW_CAPABILITY_DOMAIN, hashlib.sha256
+    )
+    encoded = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+    return PREVIEW_CAPABILITY_PREFIX + encoded
+
+
+def _preview_material_id(
+    bootstrap: GatewayBootstrap,
+    path: str,
+) -> uuid.UUID | None:
+    if not path.startswith(PREVIEW_ROUTE_PREFIX):
+        return None
+    remainder = path.removeprefix(PREVIEW_ROUTE_PREFIX)
+    parts = remainder.split("/")
+    if len(parts) != 2:
+        return None
+    supplied_capability, supplied_material_id = parts
+    try:
+        expected_capability = material_preview_capability_path(bootstrap)
+        material_id = uuid.UUID(supplied_material_id)
+    except (GatewayRejected, ValueError):
+        return None
+    if (
+        not hmac.compare_digest(supplied_capability, expected_capability)
+        or material_id.version != 4
+        or str(material_id) != supplied_material_id
+    ):
+        return None
+    return material_id
+
+
+def _requested_byte_window(value: str | None, size: int) -> tuple[int, int] | None:
+    if value is None:
+        return 0, size
+    if not value.isascii() or len(value) > MAX_RANGE_HEADER_BYTES:
+        return None
+    matched = _BYTE_RANGE.fullmatch(value)
+    if matched is not None:
+        start = int(matched.group(1))
+        end_text = matched.group(2)
+        if start >= size:
+            return None
+        end = size - 1 if end_text is None else int(end_text)
+        if end < start:
+            return None
+        end = min(end, size - 1)
+        return start, end - start + 1
+    matched = _SUFFIX_RANGE.fullmatch(value)
+    if matched is None:
+        return None
+    suffix = int(matched.group(1))
+    if suffix == 0:
+        return None
+    length = min(suffix, size)
+    return size - length, length
 
 
 def verify_cancel_proof(
@@ -215,7 +343,9 @@ def inspect_asset(root: Path, value: object) -> int:
 
 
 def gateway_handler(
-    bootstrap: GatewayBootstrap, port: int
+    bootstrap: GatewayBootstrap,
+    port: int,
+    material_preview: MaterialPreviewSource | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     class GatewayHandler(BaseHTTPRequestHandler):
         server_version = "AutomationTool"
@@ -253,7 +383,13 @@ def gateway_handler(
 
         def _path(self) -> str:
             parsed = urlsplit(self.path)
-            if parsed.query or parsed.fragment or not parsed.path.startswith("/"):
+            if (
+                parsed.scheme
+                or parsed.netloc
+                or parsed.query
+                or parsed.fragment
+                or not parsed.path.startswith("/")
+            ):
                 raise GatewayRejected("path rejected")
             return parsed.path
 
@@ -327,13 +463,34 @@ def gateway_handler(
         def do_GET(self) -> None:
             self._dispatch("GET")
 
+        def do_HEAD(self) -> None:
+            self._dispatch("HEAD")
+
         def do_POST(self) -> None:
             self._dispatch("POST")
 
         def _dispatch(self, method: str) -> None:
+            preview_shape = urlsplit(self.path).path.startswith(PREVIEW_ROUTE_PREFIX)
             try:
                 origin = self._origin()
+            except GatewayRejected:
+                if preview_shape:
+                    self._respond_preview_empty(403)
+                else:
+                    self._respond(400, _fixed_json("request_rejected"))
+                return
+            try:
                 path = self._path()
+            except GatewayRejected:
+                if preview_shape:
+                    self._respond_preview_empty(404, origin=origin)
+                else:
+                    self._respond(400, _fixed_json("request_rejected"), origin)
+                return
+            if preview_shape:
+                self._dispatch_preview(method, path, origin)
+                return
+            try:
                 if not self._authorized():
                     self._respond(401, _fixed_json("authentication_required"), origin)
                     return
@@ -388,6 +545,122 @@ def gateway_handler(
             except (TimeoutError, GatewayRejected, OSError):
                 self._respond(400, _fixed_json("request_rejected"))
 
+        def _dispatch_preview(
+            self,
+            method: str,
+            path: str,
+            origin: str | None,
+        ) -> None:
+            material_id = _preview_material_id(bootstrap, path)
+            hosts = self.headers.get_all("Host", [])
+            if (
+                method not in {"GET", "HEAD"}
+                or material_preview is None
+                or material_id is None
+                or self.headers.get("Transfer-Encoding") is not None
+                or self.headers.get("Content-Length") is not None
+            ):
+                self._respond_preview_empty(404, origin=origin)
+                return
+            if len(hosts) != 1 or hosts[0] != f"{HOST}:{port}":
+                self._respond_preview_empty(403, origin=origin)
+                return
+            ranges = self.headers.get_all("Range", [])
+            lease: MaterialPreviewLease | None = None
+            try:
+                lease = material_preview.open(material_id)
+                size = lease.size_bytes
+                content_type = lease.content_type
+                if (
+                    type(size) is not int
+                    or not 0 < size <= MAX_ASSET_BYTES
+                    or content_type not in PREVIEW_CONTENT_TYPES
+                ):
+                    self._respond_preview_empty(404, origin=origin)
+                    return
+                if len(ranges) > 1:
+                    self._respond_preview_empty(416, size=size, origin=origin)
+                    return
+                supplied_range = ranges[0] if ranges else None
+                window = _requested_byte_window(supplied_range, size)
+                if window is None:
+                    self._respond_preview_empty(
+                        416,
+                        size=size,
+                        origin=origin,
+                    )
+                    return
+                start, length = window
+                partial = supplied_range is not None
+                self.send_response(206 if partial else 200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(length))
+                self.send_header("Accept-Ranges", "bytes")
+                if partial:
+                    self.send_header(
+                        "Content-Range",
+                        f"bytes {start}-{start + length - 1}/{size}",
+                    )
+                self._preview_security_headers(origin)
+                self.end_headers()
+                if method == "GET":
+                    offset = start
+                    remaining = length
+                    while remaining:
+                        chunk_length = min(remaining, PREVIEW_CHUNK_BYTES)
+                        chunk = lease.read(offset, chunk_length)
+                        if not isinstance(chunk, bytes) or len(chunk) != chunk_length:
+                            raise GatewayRejected("preview read rejected")
+                        self.wfile.write(chunk)
+                        offset += chunk_length
+                        remaining -= chunk_length
+                self.close_connection = True
+            except (GatewayRejected, OSError, TimeoutError, ValueError):
+                if not self.wfile.closed:
+                    self.close_connection = True
+            except Exception:
+                # The preview provider's closed exception type lives in the
+                # packaged backend.  It is deliberately not rendered here:
+                # exception chains can contain the private source path.
+                if lease is None:
+                    self._respond_preview_empty(404, origin=origin)
+                else:
+                    self.close_connection = True
+            finally:
+                if lease is not None:
+                    try:
+                        lease.close()
+                    except Exception:
+                        # A provider must not make its private file exception
+                        # escape into BaseHTTPRequestHandler's traceback.
+                        pass
+
+        def _preview_security_headers(self, origin: str | None) -> None:
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Content-Security-Policy", "default-src 'none'; sandbox")
+            self.send_header("Connection", "close")
+            if origin is not None:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+
+        def _respond_preview_empty(
+            self,
+            status_code: int,
+            *,
+            size: int | None = None,
+            origin: str | None = None,
+        ) -> None:
+            self.send_response(status_code)
+            self.send_header("Content-Length", "0")
+            self.send_header("Accept-Ranges", "bytes")
+            if status_code == 416 and size is not None:
+                self.send_header("Content-Range", f"bytes */{size}")
+            self._preview_security_headers(origin)
+            self.end_headers()
+            self.close_connection = True
+
     return GatewayHandler
 
 
@@ -396,12 +669,20 @@ class LoopbackGateway(ThreadingHTTPServer):
     allow_reuse_address = False
 
 
-def create_gateway(bootstrap: GatewayBootstrap) -> LoopbackGateway:
+def create_gateway(
+    bootstrap: GatewayBootstrap,
+    *,
+    material_preview: MaterialPreviewSource | None = None,
+) -> LoopbackGateway:
+    if bootstrap.local_editing != (material_preview is not None):
+        raise GatewayRejected("material preview configuration rejected")
     server = LoopbackGateway(
-        (HOST, 0), gateway_handler(bootstrap, 0), bind_and_activate=False
+        (HOST, 0),
+        gateway_handler(bootstrap, 0, material_preview),
+        bind_and_activate=False,
     )
     server.server_bind()
     port = int(server.server_address[1])
-    server.RequestHandlerClass = gateway_handler(bootstrap, port)
+    server.RequestHandlerClass = gateway_handler(bootstrap, port, material_preview)
     server.server_activate()
     return server

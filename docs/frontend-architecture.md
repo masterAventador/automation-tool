@@ -414,31 +414,6 @@ React 只消费封闭状态和业务结果，不能取得浏览器路径、Profi
 - 两条链路共享同一套已校验 Chromium 与媒体工具发行物，但 Worker 进程、会话、任务目录
   和 checkpoint 相互隔离，失败、取消、崩溃恢复与 App 退出都由各自受管进程树清理。
 
-### 6.8 独立剪辑设备执行链
-
-T4 把正式 `videoEditingGateway` 从 WebView `sessionStorage` 替身替换为
-`TauriVideoEditingGateway`。React 只消费 VE-03 的 provider 中性 DTO；项目、时间线、作业
-与成片读取通过固定 Command 进入 Rust，返回值在 IPC 两侧都按严格字段和封闭枚举复验，未知
-错误不会把路径、凭据或上游响应带回 WebView。
-
-设备侧 `VideoEditingWorkspace` 固定落在 App 私有数据目录，状态写入先生成私有临时文件、
-fsync，再原子替换并同步目录。作业必须在任何云副作用前持久化为 `queued`，随后才能进入
-`running`；重启遗留的活跃态先收敛为 `outcome_uncertain`，不得凭空说“没提交”或自动重提。
-
-执行时，`VideoJobWorkspaceStore` 从统一 Artifact 库重新校验并复制
-`<artifactId>.<ext>` 私有输入。Rust 从私有设置读取地域、同地域 OSS Bucket 与 AccessKey，
-验证 Executor 发行物后通过 stdin 启动 `--execute-video-editing` 一次性进程；凭据不进
-argv、环境、日志、React 或 Control Plane。Executor 的生产 Transport 串起 OSS staging、
-`AliyunImsEditingProvider`、轮询对账、输出导入和临时对象清理。Rust 最后再次核对输出路径、
-摘要和大小，只有成功导入统一 Artifact 库后才落 `succeeded`；预览页按稳定 Artifact ID
-读取 MP4，不获得本机路径。
-
-App 启动后会在后台扫描 `outcome_uncertain` 作业，重新打开原私有 Workspace，复验冻结
-Timeline checkpoint 与保留素材，再启动 reconcile 模式 Executor。持久意图已有 vendor
-JobId 时只续 Query，不重复上传或 Submit；prepared 模糊窗口继续保持待确认。恢复成功或明确
-失败后才原子落最终作业状态并删除 Workspace，React 对已打开任务做有界轮询以自动显示收敛
-结果。正式包双平台真实云验收仍在 T4/CQ-04 遗留项中。
-
 B5-01 已冻结原外部浏览器会话的历史迁移边界。当前 Profile 只能从 Tauri `app_data_dir/browser-profiles/douyin/<canonical UUIDv4 profile_id>` 派生，不能由 React、服务端、平台账号文本或任意路径输入决定；B5-05 负责私有权限、symlink/reparse point 与稳定 identity，B5-06/B5-07 负责跨进程单实例锁和真实 headed 浏览器资源所有权。登录健康只由真实页面检测产生 `missing/healthy/expired/risk/unknown`，只有 `healthy` 关闭熔断；等待扫码/确认和人工接管是本地平台工作流，不是 automation-tool 产品登录。
 
 旧 `SocialOperationsRuntime`、进程内账号表、`EncryptedCookieVault`、`.cookie-key`、`SOC1`、tenant/RBAC/Entitlement 全部不迁移。浏览器持久 Profile 是 Cookie/站点数据的唯一来源，React、Tauri IPC、Executor 账本和 Control Plane 都没有 Cookie 导入导出接口。B5-14 注销必须先持久熔断并阻止新任务，安全停止关联动作、关闭浏览器并释放 Profile 锁，最后才定向删除目标目录和递增 `session_revision`；停止失败或最终副作用不确定时保留 Profile 并进入可诊断/`OUTCOME_UNCERTAIN` 状态。
@@ -666,15 +641,17 @@ H8-19 已实现 `UpdatePolicyService`，并在正式 Tauri setup 中以当前 `p
 
 策略转换固定如下：新的更高版本清除旧暂缓/跳过；`defer` 仅关闭本次提示，下一次启动、周期或手动检查重新观察同一发布时再次提示；`skip_version` 只压制 identity 不变的当前版本；`install_now` 作为待安装意图跨重启保留，直到实际 App 版本达到候选才清除。强制发布不接受任何用户决策；低于版本下限/最高已见版本的发布、同版本换策略/摘要/目标、一次提示上的第二次点击，以及被压制或已请求安装状态下的过期决策均拒绝。H8-20/H8-21 只能消费该策略结果，不能在 scheduler、React 或安装器中复制另一套判断。
 
-H8-21 的安装交接位于 Rust `AppUpdateInstallationCoordinator`。`install_now` 只在当前状态为 `ready/prompt` 时接受；强更或先前已持久化的 `install_requested` 只有在 startup 检查发现 identity 精确匹配的既有缓存时自动安装，因此同一次启动刚下载的强更不会提前执行。安装前从私有 package 重新读取并校验长度、SHA-256 和当前 official response 的 Minisign；随后隐藏窗口、通过 `shutdown_for_app_exit` 停止完整 Executor 树并释放 Profile，最后把内存 bytes 交给 official `Update::install`。Windows 官方路径启动安装器后退出进程；macOS 官方路径替换 App 后由 Tauri restart。预检失败不会停止运行环境；停止或安装失败会恢复窗口并投影固定 `failed/install`，不会暴露包内容、内部错误或路径。H8-22 已用 ad-hoc macOS 实包证明上述替换、重启与失败恢复语义，并准备了 Windows `currentUser` 普通未签名 NSIS 的隔离原路径验收器；Windows 实机事实、Developer ID/notarization 与 Authenticode 仍是发布门禁。
+H8-21 的安装交接位于 Rust `AppUpdateInstallationCoordinator`。`install_now` 只在当前状态为 `ready/prompt` 时接受；强更或先前已持久化的 `install_requested` 只有在 startup 检查发现 identity 精确匹配的既有缓存时自动安装，因此同一次启动刚下载的强更不会提前执行。安装前从私有 package 重新读取并校验长度、SHA-256 和当前 official response 的 Minisign；随后隐藏窗口、通过 `shutdown_for_app_exit` 停止完整 Executor 树并释放 Profile，最后把内存 bytes 交给 official `Update::install`。Windows 官方路径启动安装器后退出进程；macOS 官方路径替换 App 后由 Tauri restart。预检失败不会停止运行环境；停止或安装失败会恢复窗口并投影固定 `failed/install`，不会暴露包内容、内部错误或路径。H8-22 已分别用 ad-hoc macOS 实包与 Windows `currentUser` 普通未签名 NSIS 证明上述替换、重启与失败恢复语义；Developer ID/notarization 与 Authenticode 仍是发布门禁。
 
-H8-22 的 UI 边界位于 `features/app-updates/AppUpdateCenter.tsx` 与 `platform/tauri/app-update-gateway.ts`。生产组合根唯一构造 `TauriAppUpdateGateway`，经 `App → WorkbenchShell` 注入；更新中心常驻轮询只读状态，使提示不依赖用户先进入设置页，而设置卡片只在“设置与诊断”展示状态、进度与主动检查。Rust `UpdateState` enum 字段固定为 camelCase，使 `downloadedBytes/totalBytes` 与 exact-field Zod 契约一致；用户主动检查或决策持有同一个本地 operation gate，期间轮询直接跳过，防止并发调用原生协调器。可选 `ready/prompt` 才渲染立即安装、稍后提醒和跳过版本；强制 `ready/forced` 使用不可关闭提示且没有用户决策。Zod 还验证 release policy 与 action 一致，未知原生字段、底层错误、URL、签名和路径均不会进入组件。三轮隐藏 App 已验证更新决策与安装交接；专用 `tauri.update-macos-package-e2e.conf.json`/runner 进一步用临时 Minisign、ad-hoc codesign、真实 DMG 和无安装探针 official updater 验证 macOS 覆盖/重启/失败恢复，所有安装根固定在无 symlink 的 `/private/tmp` 并在 finally 清理。Windows 专用配置/WDIO/spec/runner 则固定唯一 `currentUser` product、identifier、binary 和 AppData，从普通 `NotSigned` NSIS 进入同一 production feed/Rust/official updater 路径；外层只在安装后二进制 PE 版本/哈希命中并等待 updater 安装器退出后接受预期断连，同时核对 HKCU 安装版本/路径/卸载记录，每轮由专属卸载器还原。该 runner 尚未在 Windows 实体机执行，因此普通包实体证据、Developer ID/notarization 与 Authenticode 发布验收仍待补。
+H8-22 的 UI 边界位于 `features/app-updates/AppUpdateCenter.tsx` 与 `platform/tauri/app-update-gateway.ts`。生产组合根唯一构造 `TauriAppUpdateGateway`，经 `App → WorkbenchShell` 注入；更新中心常驻轮询只读状态，使提示不依赖用户先进入设置页，而设置卡片只在“设置与诊断”展示状态、进度与主动检查。Rust `UpdateState` enum 字段固定为 camelCase，使 `downloadedBytes/totalBytes` 与 exact-field Zod 契约一致；用户主动检查或决策持有同一个本地 operation gate，期间轮询直接跳过，防止并发调用原生协调器。可选 `ready/prompt` 才渲染立即安装、稍后提醒和跳过版本；强制 `ready/forced` 使用不可关闭提示且没有用户决策。Zod 还验证 release policy 与 action 一致，未知原生字段、底层错误、URL、签名和路径均不会进入组件。三轮隐藏 App 已验证更新决策与安装交接；专用 `tauri.update-macos-package-e2e.conf.json`/runner 进一步用临时 Minisign、ad-hoc codesign、真实 DMG 和无安装探针 official updater 验证 macOS 覆盖/重启/失败恢复，所有安装根固定在无 symlink 的 `/private/tmp` 并在 finally 清理。Windows 专用配置/WDIO/spec/runner 则固定唯一 `currentUser` product、identifier、binary 和 AppData，从普通 `NotSigned` NSIS 进入同一 production feed/Rust/official updater 路径；外层只在安装后二进制 PE 版本/哈希命中并等待 updater 安装器退出后接受预期断连，同时核对 HKCU 安装版本/路径/卸载记录，每轮由专属卸载器还原。该 runner 已在 Windows 11 x86_64 非提权实体机会话通过；剩余发布门禁是 Developer ID/notarization 与 Authenticode，而不是普通包实体路径。
 
 P9-03 不新增 IPC、Capability 或运行时安装器。debug 仍从 AppData 的 `local-executor/package` 使用开发/验收包；release setup 则由 Tauri `resource_dir()` 固定派生 `.app/Contents/Resources/local-executor/package`，再与 AppData 下的 `local-executor/state` 组成同一个 `ExecutorPlatformService`。两棵目录必须是无 `.`/`..` 的绝对非重叠路径，实际启动前仍由 E4-05 对 Resources 内 Manifest、签名、平台/架构和完整目录做 fail-closed 复验。独立候选配置只选择 `app/dmg`、不锁死发布 identity，并继承生产 `withGlobalTauri=false`、单一 `main` capability、空权限表和 CSP；普通包 runner 才在临时生成配置中强制 ad-hoc。正式 Developer ID Application、公证与 Gatekeeper 分发不由普通候选冒充。
 
-P9-04 沿同一个 release Resources 组合根构建 Windows NSIS，不新增第二个 Executor 路径或安装服务。正式候选覆盖只声明 `targets=["nsis"]` 和 `installMode="currentUser"`，不覆盖 product/identifier/main binary、App、plugin、Capability、CSP、Updater passive 模式或 Windows 签名字段。原生 runner 从 P9-02 候选生成一次性 Manifest，以无测试 Feature release 执行 E4-15 审计；为避免破坏用户可能已有的正式安装，安装阶段才生成唯一隔离 identity，并在非提权进程中核对普通 `NotSigned` installer/App/uninstaller、主二进制版本/哈希、HKCU-only 卸载记录、LocalAppData 根、Resources 清单/Manifest/PE 以及专属卸载零残留。Windows 实机运行与正式 Authenticode 是独立待验收事实。
+P9-04 沿同一个 release Resources 组合根构建 Windows NSIS，不新增第二个 Executor 路径或安装服务。正式候选覆盖只声明 `targets=["nsis"]` 和 `installMode="currentUser"`，不覆盖 product/identifier/main binary、App、plugin、Capability、CSP、Updater passive 模式或 Windows 签名字段。原生 runner 从 P9-02 候选生成一次性 Manifest，以无测试 Feature release 执行 E4-15 审计；为避免破坏用户可能已有的正式安装，安装阶段才生成唯一隔离 identity，并在非提权进程中核对普通 `NotSigned` installer/App/uninstaller、主二进制版本/哈希、HKCU-only 卸载记录、LocalAppData 根、Resources 清单/Manifest/PE 以及专属卸载零残留。普通候选的 Windows 实机路径已经通过，正式 Authenticode 仍是独立发布门禁。
 
-P9-05 在 E4-15 既有主二进制、生产配置、Vite assets 和无测试 Feature Cargo tree 审计之外，新增最终 bundle 全树边界。`audit-release-bundle.mjs` 只接受 macOS `Contents/Resources/local-executor/package` 或 Windows `local-executor/package`，要求平台入口及 Manifest/签名 metadata 存在；递归读取时拒绝 symlink/特殊文件、20,000 文件/16 GiB 以上包、测试/WDIO/安装探针/1420 origin、开发公钥/测试 Session/private key，以及 Profile/Cookie/SQLite/log/diagnostic/upload/download/material 路径。扫描按 1 MiB 流式分块并保留最大 marker overlap。P9-03 已在真实 build App 和 DMG 挂载副本各通过 304 文件/204,479,153 bytes，P9-04 已在 Windows 卸载前接入同一规则；Windows 原生结果仍待补。
+P9-05 在 E4-15 既有主二进制、生产配置、Vite assets 和无测试 Feature Cargo tree 审计之外，新增最终 bundle 全树边界。`audit-release-bundle.mjs` 只接受 macOS `Contents/Resources/local-executor/package` 或 Windows `local-executor/package`，要求平台入口及 Manifest/签名 metadata 存在；递归读取时拒绝 symlink/特殊文件、20,000 文件/16 GiB 以上包、测试/WDIO/安装探针/1420 origin、开发公钥/测试 Session/private key，以及 Profile/Cookie/SQLite/log/diagnostic/upload/download/material 路径。扫描按 1 MiB 流式分块并保留最大 marker overlap。P9-03 已在真实 build App 和 DMG 挂载副本各通过 304 文件/204,479,153 bytes，P9-04 已在 Windows 卸载前接入同一规则并通过原生实装根扫描。
+
+Windows 正式 `tauri.conf.json` 通过 `windows-installer-hooks.nsh` 接入唯一生产 NSIS 卸载钩子，仅把浏览器树中已知会残留的空目录由深到浅执行非递归 `RMDir`，随后重试空安装根。路径一旦被替换为 junction/reparse point 或含有意外文件，卸载器宁可留下残余也不会沿目标递归删除；该钩子不读取用户输入、注册表路径或运行期 AppData，发布装配契约固定检查 hook 文件、宏名、非递归边界与四个精确目录。
 
 P9-06 不给正式 App 增加测试 Feature、IPC 或运行时配置口。显式设备 runner 消费已经完成 Developer ID 签名、公证 staple 和 Gatekeeper 认可的唯一 DMG，复用 P9-05 完整包审计后复制到不存在的用户级验收 App；生产 identifier/AppData 保持不变，因此任何既有 AppData 都在启动前拒绝。目标 App 环境只保留必要用户变量和系统 `PATH`，移除 Python/虚拟环境/`AUTOMATION_TOOL_*`；外部扫码窗口打开时，OS 进程树必须证明正式 Executor、一个 Chrome/Edge、`app_data_dir/browser-profiles` 和零 Python 后代。人工 checkpoint 只允许授权账号的无写入 browse 旅程，重启后必须观察登录态/任务快照复用和零重复动作；证据是 path-free 的 `0600` JSON，安装和 AppData 可从废纸篓恢复。该入口显式可见且不进入 CI；签名包、真实账号以及本地 Control Plane/首次设备注册链未具备时保持 fail closed。
 

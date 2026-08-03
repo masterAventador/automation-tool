@@ -16,7 +16,6 @@ from automation_tool.control_plane.bootstrap.runtime_secrets import (
     runtime_secret,
 )
 
-
 # File delivery authenticates a secret with POSIX ownership, permission bits and
 # `dir_fd`-relative opens. Windows has none of the three, so the mode is refused
 # there instead of approximated -- and the cases below, which assert the POSIX

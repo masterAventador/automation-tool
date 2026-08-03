@@ -745,7 +745,7 @@ def test_intent_execution_and_receipt_contracts_are_closed_and_redacted(
         },
     ):
         with pytest.raises(DouyinCommentActionRejected):
-            DouyinCommentActionIntent(**values)  # type: ignore[arg-type]
+            DouyinCommentActionIntent(**values)
 
     for values in (
         {"window": object(), "action_gate": gate, "ledger": ledger, "clock": clock},

@@ -1,0 +1,64 @@
+{
+  "$comment": "The one Silero model the Local Executor may ship and load. The build cache, PyInstaller spec, runtime resolver and candidate audit all consume this contract; no runtime download or alternative model discovery is allowed.",
+  "schemaVersion": 1,
+  "id": "automation-tool.silero-vad-runtime.v1",
+  "policy": {
+    "runtimeDownloadAllowed": false,
+    "missingAssetBehavior": "fail_closed"
+  },
+  "upstream": {
+    "repository": "https://github.com/snakers4/silero-vad",
+    "tag": "v6.2.1",
+    "commit": "7e30209a3e901f9842f81b225f3e93d8199902b1"
+  },
+  "model": {
+    "sourcePath": "src/silero_vad/data/silero_vad_16k_op15.onnx",
+    "sourceUrl": "https://raw.githubusercontent.com/snakers4/silero-vad/v6.2.1/src/silero_vad/data/silero_vad_16k_op15.onnx",
+    "bytes": 1289603,
+    "sha256": "7ed98ddbad84ccac4cd0aeb3099049280713df825c610a8ed34543318f1b2c49",
+    "packagedPath": "speech/silero-vad/silero_vad_16k_op15.onnx",
+    "sampleRateHz": 16000,
+    "chunkSamples": 512,
+    "contextSamples": 64,
+    "stateShape": [
+      2,
+      1,
+      128
+    ],
+    "inputNames": [
+      "input",
+      "state",
+      "sr"
+    ],
+    "outputNames": [
+      "output",
+      "stateN"
+    ],
+    "onnxOpset": 15
+  },
+  "license": {
+    "spdx": "MIT",
+    "sourceUrl": "https://raw.githubusercontent.com/snakers4/silero-vad/v6.2.1/LICENSE",
+    "bytes": 1075,
+    "sha256": "2e63e9a38b6e8fc0c7bc37ce174caca1862870856c6daf5697cfb785e925520b",
+    "packagedPath": "speech/silero-vad/SILERO-VAD-LICENSE.txt",
+    "copyright": "Copyright (c) 2020-present Silero Team"
+  },
+  "runtime": {
+    "distribution": "onnxruntime",
+    "version": "1.23.2",
+    "provider": "CPUExecutionProvider",
+    "licenseSpdx": "MIT",
+    "packagedLicensePath": "onnxruntime/LICENSE",
+    "licenseArtifacts": {
+      "lf": {
+        "bytes": 1073,
+        "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+      },
+      "crlf": {
+        "bytes": 1094,
+        "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674"
+      }
+    }
+  }
+}

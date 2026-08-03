@@ -589,7 +589,7 @@ def parse_upload_init(
 
 def parse_transfer_ack(
     contract: BilibiliOpenApiContract, payload: object
-) -> None | BilibiliPlatformRejection:
+) -> BilibiliPlatformRejection | None:
     """Parse the bodyless part-upload and merge acknowledgements."""
     data = _parse_envelope(contract, payload)
     if isinstance(data, BilibiliPlatformRejection):

@@ -89,21 +89,22 @@ const forbiddenContentMarkers = [
   "ws://localhost:1420",
   developmentVerifyingKey,
 ].map((marker) => Buffer.from(marker));
-// FFmpeg and other crypto-capable binaries legitimately embed the names of
-// supported PEM formats as null-terminated strings. A private key header is a
-// line, so require its line ending instead of rejecting a compiled capability
-// string that contains no key material.
-for (const header of [
+const privateKeyHeaders = [
   "-----BEGIN PRIVATE KEY-----",
   "-----BEGIN RSA PRIVATE KEY-----",
   "-----BEGIN EC PRIVATE KEY-----",
   "-----BEGIN OPENSSH PRIVATE KEY-----",
-]) {
-  forbiddenContentMarkers.push(Buffer.from(`${header}\n`));
-  forbiddenContentMarkers.push(Buffer.from(`${header}\r\n`));
-}
+].map((header) => Buffer.from(header));
+const privateKeyLineWhitespace = new Set([0x09, 0x0b, 0x0c, 0x0d, 0x20]);
+// FFmpeg and other crypto-capable binaries legitimately embed the names of
+// supported PEM formats as null-terminated strings. A private key header is a
+// line, so require optional OpenSSL-accepted whitespace (including CR before
+// LF) plus the final LF instead of rejecting a compiled capability string.
 forbiddenContentMarkers.push(Buffer.from(developmentVerifyingKey, "base64url"));
-const maximumMarkerLength = Math.max(...forbiddenContentMarkers.map((marker) => marker.length));
+const maximumMarkerLength = Math.max(
+  ...forbiddenContentMarkers.map((marker) => marker.length),
+  ...privateKeyHeaders.map((header) => header.length),
+);
 const rejectionPrefix = "Release bundle is rejected";
 
 class ReleaseBundleRejection extends Error {
@@ -233,10 +234,54 @@ function assertSafePath(rendered, state) {
 
 async function assertSafeContent(path, rendered) {
   let tail = Buffer.alloc(0);
+  let pendingPrivateKeyWhitespace = false;
   for await (const chunk of createReadStream(path, { highWaterMark: scanChunkSize })) {
-    const combined = Buffer.concat([tail, chunk]);
+    let offset = 0;
+    while (pendingPrivateKeyWhitespace && offset < chunk.length) {
+      const byte = chunk[offset];
+      if (byte === 0x0a) {
+        throw rejected("forbidden content marker", rendered);
+      }
+      const nextWhitespace = privateKeyLineWhitespace.has(byte);
+      pendingPrivateKeyWhitespace = nextWhitespace;
+      if (!nextWhitespace) {
+        break;
+      }
+      offset += 1;
+    }
+    if (pendingPrivateKeyWhitespace && offset === chunk.length) {
+      tail = Buffer.alloc(0);
+      continue;
+    }
+    const combined = Buffer.concat([tail, chunk.subarray(offset)]);
     if (forbiddenContentMarkers.some((marker) => combined.indexOf(marker) !== -1)) {
       throw rejected("forbidden content marker", rendered);
+    }
+    let nextPendingWhitespace = false;
+    for (const header of privateKeyHeaders) {
+      let index = combined.indexOf(header);
+      while (index !== -1) {
+        let cursor = index + header.length;
+        while (
+          cursor < combined.length &&
+          privateKeyLineWhitespace.has(combined[cursor])
+        ) {
+          cursor += 1;
+        }
+        if (cursor === combined.length) {
+          nextPendingWhitespace = true;
+          break;
+        }
+        if (combined[cursor] === 0x0a) {
+          throw rejected("forbidden content marker", rendered);
+        }
+        index = combined.indexOf(header, index + 1);
+      }
+    }
+    pendingPrivateKeyWhitespace = nextPendingWhitespace;
+    if (pendingPrivateKeyWhitespace) {
+      tail = Buffer.alloc(0);
+      continue;
     }
     tail = combined.subarray(Math.max(0, combined.length - maximumMarkerLength + 1));
   }

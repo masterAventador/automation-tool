@@ -1,7 +1,7 @@
 use super::{BrowserProfileError, CreateProfileError};
 use std::ffi::{c_void, OsStr};
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::mem::{size_of, zeroed};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::fs::OpenOptionsExt;
@@ -45,7 +45,9 @@ use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken}
 use windows_sys::Win32::System::IO::{IO_STATUS_BLOCK, OVERLAPPED};
 
 const MAX_WINDOWS_PATH_UNITS: usize = 32_768;
-const PROFILE_LOCK_FILE: &str = ".automation-tool-profile-lock-v1";
+// The lease lives beside, never inside, Chromium's user-data-dir. The frozen
+// Playwright runtime rejects a profile containing any file locked by the App.
+const PROFILE_LEASE_FILE_PREFIX: &str = ".automation-tool-profile-lease-v1-";
 const ACTIVE_LOCK_MARKER: &[u8] = br#"{"state":"active","version":1}"#;
 const MAX_LOCK_STATE_BYTES: usize = 64;
 const DIRECTORY_ACE_FLAGS: u32 = OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE;
@@ -164,12 +166,16 @@ pub(super) struct PlatformProfileStore {
 
 pub(super) struct PlatformProfile {
     directory: DirectoryHandle,
+    lease_directory: DirectoryHandle,
+    lease_name: String,
 }
 
 pub(super) struct PlatformProfileLock {
     file: File,
     file_identity: FileIdentity,
     profile_directory: DirectoryHandle,
+    lease_directory: DirectoryHandle,
+    lease_name: String,
     share_delete: bool,
 }
 
@@ -195,7 +201,11 @@ impl PlatformProfile {
         if directory_identity(&self.directory.file)? != self.directory.identity {
             return Err(BrowserProfileError::identity_changed());
         }
+        if directory_identity(&self.lease_directory.file)? != self.lease_directory.identity {
+            return Err(BrowserProfileError::identity_changed());
+        }
         verify_private_acl(&self.directory.file)?;
+        verify_private_acl(&self.lease_directory.file)?;
         let profile_directory = DirectoryHandle {
             file: self
                 .directory
@@ -205,9 +215,18 @@ impl PlatformProfile {
             identity: self.directory.identity,
             path: self.directory.path.clone(),
         };
+        let lease_directory = DirectoryHandle {
+            file: self
+                .lease_directory
+                .file
+                .try_clone()
+                .map_err(|_| BrowserProfileError::storage_unavailable())?,
+            identity: self.lease_directory.identity,
+            path: self.lease_directory.path.clone(),
+        };
         let mut file = match open_relative_lock_file(
-            &profile_directory,
-            PROFILE_LOCK_FILE,
+            &lease_directory,
+            &self.lease_name,
             FILE_CREATE,
             AclPolicy::Repair,
             allow_abandoned_active_marker,
@@ -215,8 +234,8 @@ impl PlatformProfile {
             Ok(file) => file,
             Err(error) if error.code() == super::BrowserProfileErrorCode::ProfileNotFound => {
                 open_relative_lock_file(
-                    &profile_directory,
-                    PROFILE_LOCK_FILE,
+                    &lease_directory,
+                    &self.lease_name,
                     FILE_OPEN,
                     AclPolicy::Require,
                     allow_abandoned_active_marker,
@@ -244,14 +263,15 @@ impl PlatformProfile {
             });
         }
         let reopened = open_relative_lock_file(
-            &profile_directory,
-            PROFILE_LOCK_FILE,
+            &lease_directory,
+            &self.lease_name,
             FILE_OPEN,
             AclPolicy::Require,
             allow_abandoned_active_marker,
         )?;
         if lock_file_identity(&reopened)? != file_identity
             || directory_identity(&profile_directory.file)? != profile_directory.identity
+            || directory_identity(&lease_directory.file)? != lease_directory.identity
         {
             return Err(BrowserProfileError::identity_changed());
         }
@@ -261,14 +281,15 @@ impl PlatformProfile {
         }
         write_lock_state(&mut file, ACTIVE_LOCK_MARKER)?;
         let reopened = open_relative_lock_file(
-            &profile_directory,
-            PROFILE_LOCK_FILE,
+            &lease_directory,
+            &self.lease_name,
             FILE_OPEN,
             AclPolicy::Require,
             allow_abandoned_active_marker,
         )?;
         if lock_file_identity(&reopened)? != file_identity
             || directory_identity(&profile_directory.file)? != profile_directory.identity
+            || directory_identity(&lease_directory.file)? != lease_directory.identity
         {
             return Err(BrowserProfileError::identity_changed());
         }
@@ -276,6 +297,8 @@ impl PlatformProfile {
             file,
             file_identity,
             profile_directory,
+            lease_directory,
+            lease_name: self.lease_name.clone(),
             share_delete: allow_abandoned_active_marker,
         })
     }
@@ -286,9 +309,12 @@ impl PlatformProfileLock {
         if directory_identity(&self.profile_directory.file)? != self.profile_directory.identity {
             return Err(BrowserProfileError::identity_changed());
         }
+        if directory_identity(&self.lease_directory.file)? != self.lease_directory.identity {
+            return Err(BrowserProfileError::identity_changed());
+        }
         let reopened = open_relative_lock_file(
-            &self.profile_directory,
-            PROFILE_LOCK_FILE,
+            &self.lease_directory,
+            &self.lease_name,
             FILE_OPEN,
             AclPolicy::Require,
             self.share_delete,
@@ -365,7 +391,8 @@ impl PlatformProfileStore {
                 BrowserProfileError::identity_changed(),
             ));
         }
-        Ok(PlatformProfile { directory })
+        self.profile(profile_id, directory)
+            .map_err(CreateProfileError::Failure)
     }
 
     pub(super) fn open_profile(
@@ -381,7 +408,7 @@ impl PlatformProfileStore {
         if reopened.identity != directory.identity {
             return Err(BrowserProfileError::identity_changed());
         }
-        Ok(PlatformProfile { directory })
+        self.profile(profile_id, directory)
     }
 
     pub(super) fn revalidate_profile(
@@ -391,6 +418,9 @@ impl PlatformProfileStore {
     ) -> Result<(), BrowserProfileError> {
         self.revalidate_layout()?;
         if directory_identity(&profile.directory.file)? != profile.directory.identity {
+            return Err(BrowserProfileError::identity_changed());
+        }
+        if directory_identity(&profile.lease_directory.file)? != self.platform.identity {
             return Err(BrowserProfileError::identity_changed());
         }
         let reopened =
@@ -406,6 +436,7 @@ impl PlatformProfileStore {
         }
         verify_private_acl(&profile.directory.file)?;
         verify_private_acl(&reopened.file)?;
+        verify_private_acl(&profile.lease_directory.file)?;
         self.revalidate_layout()
     }
 
@@ -433,13 +464,8 @@ impl PlatformProfileStore {
         }
         if let Some(directory) = original {
             verify_private_acl(&directory.file)?;
-            let profile = PlatformProfile { directory };
+            let profile = self.profile(profile_id, directory)?;
             let lock = profile.try_acquire_removal_lock()?;
-            // Windows will not rename a directory while a descendant lock-file
-            // handle is open. Dropping this lock without releasing it preserves
-            // the active marker as a durable fence: normal launchers fail closed,
-            // while a later removal attempt can resume the staged operation.
-            drop(lock);
             let staged_path = self.platform.path.join(&removal_id);
             fs::rename(&profile.directory.path, &staged_path)
                 .map_err(|_| BrowserProfileError::storage_unavailable())?;
@@ -453,24 +479,22 @@ impl PlatformProfileStore {
             if reopened.identity != profile.directory.identity {
                 return Err(BrowserProfileError::identity_changed());
             }
+            lock.release()?;
             drop(profile);
-            let staged_profile = PlatformProfile {
-                directory: reopened,
-            };
-            staged_profile.try_acquire_removal_lock()?.release()?;
-            drop(staged_profile);
+            drop(reopened);
         } else if let Some(directory) = staged {
             verify_private_acl(&directory.file)?;
-            let profile = PlatformProfile { directory };
+            let profile = self.profile(profile_id, directory)?;
             let lock = profile.try_acquire_removal_lock()?;
             lock.release()?;
             drop(profile);
         } else {
-            return Ok(());
+            return self.remove_profile_lease(profile_id);
         }
         self.revalidate_layout()?;
         fs::remove_dir_all(self.platform.path.join(&removal_id))
             .map_err(|_| BrowserProfileError::storage_unavailable())?;
+        self.remove_profile_lease(profile_id)?;
         crate::app_logging::record(crate::app_logging::DesktopLogEvent::ProfileRemovalDeleted);
         if open_optional_directory(&self.platform, profile_id)?.is_some()
             || open_optional_directory(&self.platform, &removal_id)?.is_some()
@@ -478,6 +502,34 @@ impl PlatformProfileStore {
             return Err(BrowserProfileError::identity_changed());
         }
         self.revalidate_layout()
+    }
+
+    fn remove_profile_lease(&self, profile_id: &str) -> Result<(), BrowserProfileError> {
+        match fs::remove_file(self.platform.path.join(profile_lease_name(profile_id)?)) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(BrowserProfileError::storage_unavailable()),
+        }
+    }
+
+    fn profile(
+        &self,
+        profile_id: &str,
+        directory: DirectoryHandle,
+    ) -> Result<PlatformProfile, BrowserProfileError> {
+        Ok(PlatformProfile {
+            directory,
+            lease_directory: DirectoryHandle {
+                file: self
+                    .platform
+                    .file
+                    .try_clone()
+                    .map_err(|_| BrowserProfileError::storage_unavailable())?,
+                identity: self.platform.identity,
+                path: self.platform.path.clone(),
+            },
+            lease_name: profile_lease_name(profile_id)?,
+        })
     }
 
     pub(super) fn revalidate_layout(&self) -> Result<(), BrowserProfileError> {
@@ -516,6 +568,13 @@ impl PlatformProfileStore {
         verify_private_acl(&platform.file)?;
         Ok(())
     }
+}
+
+fn profile_lease_name(profile_id: &str) -> Result<String, BrowserProfileError> {
+    require_safe_name(profile_id)?;
+    let name = format!("{PROFILE_LEASE_FILE_PREFIX}{profile_id}");
+    require_safe_relative_name(&name)?;
+    Ok(name)
 }
 
 fn open_absolute_directory(
@@ -655,9 +714,7 @@ fn open_relative_lock_file(
     acl_policy: AclPolicy,
     share_delete: bool,
 ) -> Result<File, BrowserProfileError> {
-    if name != PROFILE_LOCK_FILE {
-        return Err(BrowserProfileError::unsafe_directory());
-    }
+    require_safe_relative_name(name)?;
     if directory_identity(&parent.file)? != parent.identity {
         return Err(BrowserProfileError::identity_changed());
     }
@@ -1093,6 +1150,8 @@ fn require_safe_name(value: &str) -> Result<(), BrowserProfileError> {
 
 fn require_safe_relative_name(value: &str) -> Result<(), BrowserProfileError> {
     if let Some(profile_id) = value.strip_prefix(".removing-") {
+        require_safe_name(profile_id)
+    } else if let Some(profile_id) = value.strip_prefix(PROFILE_LEASE_FILE_PREFIX) {
         require_safe_name(profile_id)
     } else {
         require_safe_name(value)

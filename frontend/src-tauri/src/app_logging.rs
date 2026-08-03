@@ -37,6 +37,50 @@ pub(crate) enum DesktopLogEvent {
     ExecutorServiceInitialized,
     CredentialsInitialized,
     AppSetupCompleted,
+    StartupLocalCheckStarted,
+    StartupAppDataCheckCompleted,
+    StartupBrowserCheckCompleted,
+    StartupExecutorCheckStarted,
+    StartupExecutorConfigurationReady,
+    StartupExecutorConfigurationRejected,
+    StartupExecutorManagerStatusReady,
+    StartupExecutorManagerStatusRejected,
+    StartupExecutorPackageReady,
+    StartupExecutorPackageRejected,
+    StartupExecutorPackageConfigurationRejected,
+    StartupExecutorPackageSignatureRejected,
+    StartupExecutorPackageManifestRejected,
+    StartupExecutorPackagePlatformRejected,
+    StartupExecutorPackageVersionRejected,
+    StartupExecutorPackageInventoryRejected,
+    StartupExecutorPackageIoRejected,
+    ExecutorPackageRootReady,
+    ExecutorPackageManifestRead,
+    ExecutorPackageSignatureRead,
+    ExecutorPackageSignatureVerified,
+    ExecutorPackageIdentityVerified,
+    ExecutorPackageInventoryStarted,
+    ExecutorPackageInventoryPathsVerified,
+    ExecutorPackageInventoryHashesVerified,
+    ExecutorPackageInventoryDigestVerified,
+    ExecutorPackageInventoryRewalkVerified,
+    StartupExecutorCheckCompleted,
+    StartupLocalCheckCompleted,
+    StartupLocalCheckRejected,
+    ControlPlaneHealthCheckStarted,
+    ControlPlaneServiceHealthCompleted,
+    #[cfg_attr(
+        all(feature = "desktop-e2e", not(feature = "control-plane-e2e")),
+        allow(dead_code)
+    )]
+    ControlPlaneRegistrationCompleted,
+    #[cfg_attr(
+        all(feature = "desktop-e2e", not(feature = "control-plane-e2e")),
+        allow(dead_code)
+    )]
+    ControlPlaneInstallationAccessCompleted,
+    ControlPlaneHealthCheckCompleted,
+    ControlPlaneHealthCheckRejected,
     // Startup found persisted state it could not use and put the App back into
     // a state it can launch from. Recovery that leaves no trace is the failure
     // this project keeps meeting, so each of these is worth one line.
@@ -98,6 +142,74 @@ impl DesktopLogEvent {
             Self::ExecutorServiceInitialized => "app.setup.executor_service.initialized",
             Self::CredentialsInitialized => "app.setup.credentials.initialized",
             Self::AppSetupCompleted => "app.setup.completed",
+            Self::StartupLocalCheckStarted => "startup.local.started",
+            Self::StartupAppDataCheckCompleted => "startup.local.app_data.completed",
+            Self::StartupBrowserCheckCompleted => "startup.local.browser.completed",
+            Self::StartupExecutorCheckStarted => "startup.local.executor.started",
+            Self::StartupExecutorConfigurationReady => "startup.local.executor.configuration.ready",
+            Self::StartupExecutorConfigurationRejected => {
+                "startup.local.executor.configuration.rejected"
+            }
+            Self::StartupExecutorManagerStatusReady => {
+                "startup.local.executor.manager_status.ready"
+            }
+            Self::StartupExecutorManagerStatusRejected => {
+                "startup.local.executor.manager_status.rejected"
+            }
+            Self::StartupExecutorPackageReady => "startup.local.executor.package.ready",
+            Self::StartupExecutorPackageRejected => "startup.local.executor.package.rejected",
+            Self::StartupExecutorPackageConfigurationRejected => {
+                "startup.local.executor.package.configuration_rejected"
+            }
+            Self::StartupExecutorPackageSignatureRejected => {
+                "startup.local.executor.package.signature_rejected"
+            }
+            Self::StartupExecutorPackageManifestRejected => {
+                "startup.local.executor.package.manifest_rejected"
+            }
+            Self::StartupExecutorPackagePlatformRejected => {
+                "startup.local.executor.package.platform_rejected"
+            }
+            Self::StartupExecutorPackageVersionRejected => {
+                "startup.local.executor.package.version_rejected"
+            }
+            Self::StartupExecutorPackageInventoryRejected => {
+                "startup.local.executor.package.inventory_rejected"
+            }
+            Self::StartupExecutorPackageIoRejected => "startup.local.executor.package.io_rejected",
+            Self::ExecutorPackageRootReady => "executor.package.root.ready",
+            Self::ExecutorPackageManifestRead => "executor.package.manifest.read",
+            Self::ExecutorPackageSignatureRead => "executor.package.signature.read",
+            Self::ExecutorPackageSignatureVerified => "executor.package.signature.verified",
+            Self::ExecutorPackageIdentityVerified => "executor.package.identity.verified",
+            Self::ExecutorPackageInventoryStarted => "executor.package.inventory.started",
+            Self::ExecutorPackageInventoryPathsVerified => {
+                "executor.package.inventory.paths_verified"
+            }
+            Self::ExecutorPackageInventoryHashesVerified => {
+                "executor.package.inventory.hashes_verified"
+            }
+            Self::ExecutorPackageInventoryDigestVerified => {
+                "executor.package.inventory.digest_verified"
+            }
+            Self::ExecutorPackageInventoryRewalkVerified => {
+                "executor.package.inventory.rewalk_verified"
+            }
+            Self::StartupExecutorCheckCompleted => "startup.local.executor.completed",
+            Self::StartupLocalCheckCompleted => "startup.local.completed",
+            Self::StartupLocalCheckRejected => "startup.local.rejected",
+            Self::ControlPlaneHealthCheckStarted => "startup.control_plane.started",
+            Self::ControlPlaneServiceHealthCompleted => {
+                "startup.control_plane.service_health.completed"
+            }
+            Self::ControlPlaneRegistrationCompleted => {
+                "startup.control_plane.registration.completed"
+            }
+            Self::ControlPlaneInstallationAccessCompleted => {
+                "startup.control_plane.installation_access.completed"
+            }
+            Self::ControlPlaneHealthCheckCompleted => "startup.control_plane.completed",
+            Self::ControlPlaneHealthCheckRejected => "startup.control_plane.rejected",
             Self::UpdatePolicyDocumentMigrated => "app_update.policy_document.migrated",
             Self::UpdatePolicyDocumentReplaced => "app_update.policy_document.replaced",
             Self::UpdateCacheStateRecovered => "app_update.cache_state.recovered",
@@ -722,6 +834,160 @@ mod tests {
             DesktopLogEvent::TaskStatusUnknown.as_str(),
             task_status_event("atas1.private-access-secret").as_str()
         );
+    }
+
+    #[test]
+    fn startup_probe_events_are_fixed_and_stage_specific() {
+        let events = [
+            (
+                DesktopLogEvent::StartupLocalCheckStarted,
+                "startup.local.started",
+            ),
+            (
+                DesktopLogEvent::StartupAppDataCheckCompleted,
+                "startup.local.app_data.completed",
+            ),
+            (
+                DesktopLogEvent::StartupBrowserCheckCompleted,
+                "startup.local.browser.completed",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorCheckStarted,
+                "startup.local.executor.started",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorCheckCompleted,
+                "startup.local.executor.completed",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorConfigurationReady,
+                "startup.local.executor.configuration.ready",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorConfigurationRejected,
+                "startup.local.executor.configuration.rejected",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorManagerStatusReady,
+                "startup.local.executor.manager_status.ready",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorManagerStatusRejected,
+                "startup.local.executor.manager_status.rejected",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorPackageReady,
+                "startup.local.executor.package.ready",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorPackageRejected,
+                "startup.local.executor.package.rejected",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorPackageConfigurationRejected,
+                "startup.local.executor.package.configuration_rejected",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorPackageSignatureRejected,
+                "startup.local.executor.package.signature_rejected",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorPackageManifestRejected,
+                "startup.local.executor.package.manifest_rejected",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorPackagePlatformRejected,
+                "startup.local.executor.package.platform_rejected",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorPackageVersionRejected,
+                "startup.local.executor.package.version_rejected",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorPackageInventoryRejected,
+                "startup.local.executor.package.inventory_rejected",
+            ),
+            (
+                DesktopLogEvent::StartupExecutorPackageIoRejected,
+                "startup.local.executor.package.io_rejected",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageRootReady,
+                "executor.package.root.ready",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageManifestRead,
+                "executor.package.manifest.read",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageSignatureRead,
+                "executor.package.signature.read",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageSignatureVerified,
+                "executor.package.signature.verified",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageIdentityVerified,
+                "executor.package.identity.verified",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageInventoryStarted,
+                "executor.package.inventory.started",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageInventoryPathsVerified,
+                "executor.package.inventory.paths_verified",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageInventoryHashesVerified,
+                "executor.package.inventory.hashes_verified",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageInventoryDigestVerified,
+                "executor.package.inventory.digest_verified",
+            ),
+            (
+                DesktopLogEvent::ExecutorPackageInventoryRewalkVerified,
+                "executor.package.inventory.rewalk_verified",
+            ),
+            (
+                DesktopLogEvent::StartupLocalCheckCompleted,
+                "startup.local.completed",
+            ),
+            (
+                DesktopLogEvent::StartupLocalCheckRejected,
+                "startup.local.rejected",
+            ),
+            (
+                DesktopLogEvent::ControlPlaneHealthCheckStarted,
+                "startup.control_plane.started",
+            ),
+            (
+                DesktopLogEvent::ControlPlaneServiceHealthCompleted,
+                "startup.control_plane.service_health.completed",
+            ),
+            (
+                DesktopLogEvent::ControlPlaneRegistrationCompleted,
+                "startup.control_plane.registration.completed",
+            ),
+            (
+                DesktopLogEvent::ControlPlaneInstallationAccessCompleted,
+                "startup.control_plane.installation_access.completed",
+            ),
+            (
+                DesktopLogEvent::ControlPlaneHealthCheckCompleted,
+                "startup.control_plane.completed",
+            ),
+            (
+                DesktopLogEvent::ControlPlaneHealthCheckRejected,
+                "startup.control_plane.rejected",
+            ),
+        ];
+
+        for (event, expected) in events {
+            assert_eq!(event.as_str(), expected);
+        }
     }
 
     #[test]

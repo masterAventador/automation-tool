@@ -6,7 +6,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { access, lstat, mkdir, mkdtemp, open, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { extname, isAbsolute, join, sep } from "node:path";
+import { dirname, extname, isAbsolute, join, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -145,6 +145,7 @@ const RESOURCE_MONITOR_INTERVAL_MS = 300;
 const FRAME_TIME_TOLERANCE_SECONDS = 0.001;
 const SANDBOX_FAILURES = {
   cancelled: "render_cancelled",
+  font: "render_font_unavailable",
   mismatch: "chromium_major_mismatch",
   output: "render_output_exceeded",
   protocol: "render_protocol_invalid",
@@ -234,7 +235,11 @@ async function executableFileMetadata(path) {
 }
 
 function renderProcessEnvironment(jobDirectory) {
-  const environment = { HOME: jobDirectory, TMPDIR: jobDirectory };
+  const environment = {
+    CHROME_LOG_FILE: join(jobDirectory, "chrome-debug.log"),
+    HOME: jobDirectory,
+    TMPDIR: jobDirectory,
+  };
   if (process.platform !== "win32") return environment;
   environment.USERPROFILE = jobDirectory;
   environment.TEMP = jobDirectory;
@@ -286,6 +291,9 @@ async function parseBootstrap(line) {
   const metadata = await lstat(value.assetRoot);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error("rejected");
   value.assetRoot = await realpath(value.assetRoot);
+  if (value.renderBrowser !== null) {
+    value.renderBrowser = Object.freeze({ ...value.renderBrowser });
+  }
   return value;
 }
 
@@ -489,11 +497,18 @@ function validSandboxCommand(bootstrap, command) {
   return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);
 }
 
-function runBrowserProcess(executablePath, browserArguments, environment, timeoutMs) {
+function runBrowserProcess(
+  executablePath,
+  browserArguments,
+  environment,
+  workingDirectory,
+  timeoutMs,
+) {
   return new Promise((resolve) => {
     let child;
     try {
       child = spawn(executablePath, browserArguments, {
+        cwd: workingDirectory,
         detached: true,
         env: environment,
         stdio: ["ignore", "pipe", "ignore"],
@@ -533,11 +548,18 @@ function runBrowserProcess(executablePath, browserArguments, environment, timeou
  * listening debug port), confirm the running product version over CDP and
  * shut it down with `Browser.close`. The process group is killed on timeout.
  */
-function runHeadlessProbe(executablePath, browserArguments, environment, timeoutMs) {
+function runHeadlessProbe(
+  executablePath,
+  browserArguments,
+  environment,
+  workingDirectory,
+  timeoutMs,
+) {
   return new Promise((resolve) => {
     let child;
     try {
       child = spawn(executablePath, browserArguments, {
+        cwd: workingDirectory,
         detached: true,
         env: environment,
         stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"],
@@ -596,13 +618,13 @@ function runHeadlessProbe(executablePath, browserArguments, environment, timeout
           continue;
         }
         if (response?.id !== 2) continue;
-        // Windows Chrome acknowledges Browser.close but retains the root
-        // process while its inherited CDP pipe handles remain open. Kill the
-        // still-live owned tree only after that acknowledgement, then report
-        // the already authenticated Browser.getVersion result.
+        // Browser.close is acknowledged before the inherited CDP pipe handles
+        // disappear. Close both local pipe ends now so Windows Chrome and its
+        // crash reporter can finish normally; the outer timer still owns the
+        // process-tree kill if that graceful shutdown ever stalls.
         if (process.platform === "win32") {
-          killProcessGroup();
-          finish({ status: "exit", product });
+          child.stdio[3].end();
+          child.stdio[4].destroy();
         }
         return;
       }
@@ -642,6 +664,7 @@ async function renderVerify(renderBrowser, jobId) {
         renderBrowser.executablePath,
         ["--version"],
         environment,
+        jobDirectory,
         timeoutMs,
       );
       if (version.status === "timeout") return { failed: "render_timeout" };
@@ -659,6 +682,11 @@ async function renderVerify(renderBrowser, jobId) {
       [
         "--headless",
         "--remote-debugging-pipe",
+        "--disable-breakpad",
+        "--disable-crashpad-for-testing",
+        "--disable-crash-reporter",
+        "--disable-logging",
+        `--log-file=${join(jobDirectory, "chrome-debug.log")}`,
         "--use-mock-keychain",
         "--password-store=basic",
         "--disable-gpu",
@@ -674,6 +702,7 @@ async function renderVerify(renderBrowser, jobId) {
         "about:blank",
       ],
       environment,
+      jobDirectory,
       timeoutMs,
     );
     if (probe.status === "timeout") return { failed: "render_timeout" };
@@ -890,6 +919,11 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
       child = spawn(renderBrowser.executablePath, [
         "--headless",
         "--remote-debugging-pipe",
+        "--disable-breakpad",
+        "--disable-crashpad-for-testing",
+        "--disable-crash-reporter",
+        "--disable-logging",
+        `--log-file=${join(jobDirectory, "chrome-debug.log")}`,
         "--use-mock-keychain",
         "--password-store=basic",
         "--disable-gpu",
@@ -927,6 +961,7 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         `--window-size=${canvas.width},${canvas.height}`,
         "about:blank",
       ], {
+        cwd: jobDirectory,
         detached: true,
         env: environment,
         stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"],
@@ -1123,6 +1158,25 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
         finish({ status: "protocol" });
         return;
       }
+      const requiredFontReady = await pipe.send("Runtime.evaluate", {
+        expression: `(() => {
+          const required = document.querySelector('[data-composition-id][data-duration]')
+            ?.getAttribute('data-required-font-family');
+          if (required === null || required === undefined) return true;
+          return Array.from(document.fonts).some((face) => {
+            const family = face.family.replace(/^["']|["']$/g, '');
+            return family === required && face.status === "loaded";
+          });
+        })()`,
+        returnByValue: true,
+      }, sessionId);
+      if (
+        requiredFontReady?.result?.exceptionDetails !== undefined
+        || requiredFontReady?.result?.result?.value !== true
+      ) {
+        finish({ status: "font" });
+        return;
+      }
       const readTimelineMetadata = async () => {
         const probe = await pipe.send("Runtime.evaluate", {
           expression: `(() => {
@@ -1166,8 +1220,8 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
       // twelve-style sweep. Capturing until two probes agree removes that
       // dependency on how loaded the host happens to be.
       let previousProbe = null;
+      let visualStable = false;
       let stable = false;
-      let stableWithoutTimeline = false;
       for (let attempt = 0; attempt < WARM_UP_STABLE_ATTEMPTS; attempt += 1) {
         const warmed = await pipe.send("Runtime.evaluate", {
           expression: `(async () => {
@@ -1195,29 +1249,35 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
           finish({ status: "protocol" });
           return;
         }
+        visualStable = data === previousProbe;
         // A stable background is not a ready composition when the document
         // declares that it will register a timeline. Give its bounded async
         // initialisation the entire warm-up budget instead of freezing the
         // initial zero-timeline result forever.
-        if (data === previousProbe) {
-          if (
+        if (
+          visualStable
+          && !(
             timelineMetadata.timelineExpected === true
             && timelineMetadata.timelineCount === 0
-          ) {
-            stableWithoutTimeline = true;
-          } else {
-            stable = true;
-            break;
-          }
+          )
+        ) {
+          stable = true;
+          break;
         }
         previousProbe = data;
       }
       if (!stable) {
-        if (stableWithoutTimeline) {
-          // The document promised a seekable timeline but never registered
-          // one, while its pixels stayed identical throughout the bounded
-          // warm-up. That is a proved static composition, not a wall-clock
-          // timeout; keep the two diagnostics distinct.
+        // A document that declares an animation timeline but never registers
+        // it has settled into the exact still-image failure this gate exists
+        // to identify. Waiting through every warm-up round protects slow
+        // asynchronous initialisation; once the final probes still agree,
+        // report the closed static-frame reason rather than mislabelling the
+        // deterministic failure as a wall-clock timeout.
+        if (
+          visualStable
+          && timelineMetadata.timelineExpected === true
+          && timelineMetadata.timelineCount === 0
+        ) {
           finish({ status: "static" });
           return;
         }
@@ -1332,7 +1392,8 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
           finish({ status: "protocol" });
           return;
         }
-        finish({ counters, framesCaptured, outputBytes, status: "complete" });
+        child.stdio[3].end();
+        child.stdio[4].destroy();
       }
     })().catch(() => finish({ status: "protocol" }));
   });
@@ -1359,6 +1420,7 @@ async function renderSandbox(renderBrowser, jobId, spec) {
         renderBrowser.executablePath,
         ["--version"],
         environment,
+        jobDirectory,
         renderBrowser.launchTimeoutSeconds * 1000,
       );
       if (version.status === "timeout") return { failed: "render_timeout" };
@@ -1377,13 +1439,16 @@ async function renderSandbox(renderBrowser, jobId, spec) {
     succeeded = true;
     return { sandboxed: { chromiumMajor: renderBrowser.chromiumMajor, ...outcome } };
   } finally {
-    await rm(jobDirectory, {
-      force: true,
-      maxRetries: process.platform === "win32" ? 20 : 0,
-      recursive: true,
-      retryDelay: 100,
-    });
-    if (!succeeded) await rm(resolved.framesDirectory, { recursive: true, force: true });
+    try {
+      await rm(jobDirectory, {
+        force: true,
+        maxRetries: process.platform === "win32" ? 20 : 0,
+        recursive: true,
+        retryDelay: 100,
+      });
+    } finally {
+      if (!succeeded) await rm(resolved.framesDirectory, { recursive: true, force: true });
+    }
   }
 }
 

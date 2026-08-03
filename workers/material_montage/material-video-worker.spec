@@ -2,26 +2,64 @@
 
 import json
 import sys
+import tomllib
 from pathlib import Path, PurePosixPath
 
-from PyInstaller.utils.hooks import collect_all, collect_submodules, copy_metadata
+from PyInstaller.utils.hooks import (
+    collect_all,
+    collect_data_files,
+    collect_dynamic_libs,
+    collect_submodules,
+    copy_metadata,
+)
 
 
 worker_root = Path(SPECPATH)
 repository_root = worker_root.parents[1]
 upstream_root = repository_root / "vendor/moneyprinterturbo"
+backend_source_root = repository_root / "backend" / "src"
+sys.path.insert(0, str(backend_source_root))
 sys.path.insert(0, str(upstream_root))
 sys.path.insert(0, str(repository_root / "scripts"))
+
+contract_path = repository_root / "contracts/quality/material-video-worker-package.v1.json"
+contract = json.loads(contract_path.read_text(encoding="utf-8"))
+backend_project = tomllib.loads(
+    (repository_root / "backend/pyproject.toml").read_text(encoding="utf-8")
+)
+backend_version = backend_project["project"]["version"]
+backend_metadata = Path(workpath) / f"automation_tool-{backend_version}.dist-info"
+backend_metadata.mkdir(parents=True, exist_ok=False)
+(backend_metadata / "METADATA").write_text(
+    "Metadata-Version: 2.3\n"
+    "Name: automation-tool\n"
+    f"Version: {backend_version}\n",
+    encoding="utf-8",
+)
+# Importing any production automation_tool module resolves __version__ through
+# importlib.metadata. The Worker's locked Python 3.11 runtime cannot install the
+# Python-3.12 backend project, so expose the same synthetic metadata that is
+# frozen below before importing the shared caption registry.
+sys.path.insert(0, str(Path(workpath)))
 
 from subtitle_font_assets import (  # noqa: E402
     PACKAGED_FONT_DIRECTORY,
     bundled_subtitle_fonts,
+    committed_font_license_source,
     ensure_subtitle_fonts,
-    packaged_license_notice,
+    load_asset_rights,
+    packaged_license_notices,
+)
+from automation_tool.executor.captions.fonts import (  # noqa: E402
+    REGISTERED_CAPTION_FONTS,
+    packaged_relative_path,
+    resolve_font_file,
+)
+from silero_vad_assets import (  # noqa: E402
+    ensure_silero_vad_assets,
+    load_silero_vad_contract,
 )
 
-contract_path = repository_root / "contracts/quality/material-video-worker-package.v1.json"
-contract = json.loads(contract_path.read_text(encoding="utf-8"))
 excluded_modules = list(contract["build"]["excludedModules"])
 excluded_upstream_resources = set(contract["build"]["excludedUpstreamResources"])
 # `excludedUpstreamResourceFiles` removes individual proprietary assets from a
@@ -38,6 +76,8 @@ imageio_datas, imageio_binaries, imageio_hiddenimports = collect_all("imageio")
 ffmpeg_datas, ffmpeg_binaries, ffmpeg_hiddenimports = collect_all("imageio_ffmpeg")
 streamlit_datas, streamlit_binaries, streamlit_hiddenimports = collect_all("streamlit")
 tour_datas, tour_binaries, tour_hiddenimports = collect_all("streamlit_tour")
+onnxruntime_datas = collect_data_files("onnxruntime", includes=["LICENSE"])
+onnxruntime_binaries = collect_dynamic_libs("onnxruntime")
 
 runtime_distributions = [
     "moviepy",
@@ -54,8 +94,16 @@ runtime_distributions = [
     "pydub",
     "litellm",
     "google-genai",
+    "brotli",
+    "fonttools",
+    "numpy",
+    "onnxruntime",
 ]
 hiddenimports = [
+    "automation_tool.executor.local_editing_worker",
+    "automation_tool.executor.local_editing_worker_process",
+    "automation_tool.executor.local_material_preview",
+    "automation_tool.executor.smart_edit_worker_process",
     "app",
     "moviepy",
     "streamlit",
@@ -71,6 +119,7 @@ hiddenimports = [
     "pydub",
     "litellm",
     "google.genai",
+    "onnxruntime",
     *moviepy_hiddenimports,
     *imageio_hiddenimports,
     *ffmpeg_hiddenimports,
@@ -84,9 +133,11 @@ datas = [
     *ffmpeg_datas,
     *streamlit_datas,
     *tour_datas,
+    *onnxruntime_datas,
 ]
 for distribution in runtime_distributions:
     datas += copy_metadata(distribution)
+datas.append((str(backend_metadata), backend_metadata.name))
 upstream_resource_root = upstream_root / "resource"
 for entry in sorted(upstream_resource_root.rglob("*")):
     if not entry.is_file():
@@ -108,8 +159,43 @@ for entry in sorted(upstream_resource_root.rglob("*")):
 font_cache = ensure_subtitle_fonts()
 for font in bundled_subtitle_fonts():
     datas.append((str(font_cache / font.packaged_name), PACKAGED_FONT_DIRECTORY))
-font_license = packaged_license_notice()
-datas.append((str(font_cache / font_license.packaged_name), PACKAGED_FONT_DIRECTORY))
+for font_license in packaged_license_notices():
+    datas.append((str(font_cache / font_license.packaged_name), PACKAGED_FONT_DIRECTORY))
+
+# The upstream WebUI and the product caption renderer intentionally use
+# different directories.  The registry owns the renderer layout, so the spec
+# asks it for every destination rather than restating names or bundles here.
+for font_key in REGISTERED_CAPTION_FONTS:
+    source = resolve_font_file(font_key)
+    destination = packaged_relative_path(font_key).parent
+    datas.append((str(source), str(destination)))
+
+# Each runtime bundle carries the exact upstream licence registered for its
+# faces.  Fetched material faces take it from the verified font cache; the one
+# committed motion face takes its equally locked text from `licensePath`.
+font_rights = load_asset_rights()
+font_entries = {
+    (entry.get("bundledIn"), entry.get("packagedName")): entry
+    for entry in font_rights["entries"]
+    if entry.get("category") == "font"
+}
+caption_licenses = set()
+for registered in REGISTERED_CAPTION_FONTS.values():
+    entry = font_entries[(registered.bundle, registered.packaged_name)]
+    license_name = entry["packagedLicenseName"]
+    if registered.bundle == "material-video-worker":
+        license_source = font_cache / license_name
+    else:
+        license_source = committed_font_license_source(entry, repository_root)
+    license_destination = PurePosixPath("fonts") / registered.bundle
+    caption_licenses.add((str(license_source), str(license_destination)))
+datas.extend(sorted(caption_licenses))
+silero_contract_path = repository_root / "contracts/quality/silero-vad-runtime.v1.json"
+silero_contract = load_silero_vad_contract(silero_contract_path)
+silero_cache = ensure_silero_vad_assets(contract_path=silero_contract_path)
+bailian_catalog_path = (
+    repository_root / "contracts/video/bailian-model-catalog.v1.json"
+)
 datas += [
     (str(upstream_root / "webui"), "upstream/webui"),
     (str(upstream_root / "config.example.toml"), "upstream"),
@@ -117,6 +203,16 @@ datas += [
     # The runtime reads `build.defaultSubtitleFontName` from here rather than
     # carrying a second copy of the font name.
     (str(contract_path), "contracts"),
+    (str(bailian_catalog_path), "contracts/video"),
+    (str(silero_contract_path), "contracts/quality"),
+    (
+        str(silero_cache / silero_contract.model.cached_name),
+        "speech/silero-vad",
+    ),
+    (
+        str(silero_cache / silero_contract.license.cached_name),
+        "speech/silero-vad",
+    ),
 ]
 for source in (upstream_root / "app").rglob("*"):
     if source.is_file() and "__pycache__" not in source.parts and source.suffix != ".pyc":
@@ -125,13 +221,14 @@ for source in (upstream_root / "app").rglob("*"):
 
 analysis = Analysis(
     [str(worker_root / "worker_main.py")],
-    pathex=[str(worker_root), str(upstream_root)],
+    pathex=[str(worker_root), str(upstream_root), str(backend_source_root)],
     binaries=[
         *moviepy_binaries,
         *imageio_binaries,
         *ffmpeg_binaries,
         *streamlit_binaries,
         *tour_binaries,
+        *onnxruntime_binaries,
     ],
     datas=datas,
     hiddenimports=hiddenimports,

@@ -56,9 +56,7 @@ def test_embedded_chromium_runs_the_complete_qr_flow_states(
         page = cast(Any, runtime.primary_window().playwright_page)
         page.context.route(
             PROBE_URL_PATTERN,
-            lambda route: route.fulfill(
-                status=200, content_type="text/html", body=fixture
-            ),
+            lambda route: route.fulfill(status=200, content_type="text/html", body=fixture),
         )
         flow = DouyinQrLoginFlow(runtime)
         awaiting_scan = flow.begin()
@@ -106,9 +104,7 @@ def test_embedded_chromium_probes_session_health_and_invalidation(
         page = cast(Any, window.playwright_page)
         page.route(
             "https://www.douyin.com/automation-tool-eb-11-fixture*",
-            lambda route: route.fulfill(
-                status=200, content_type="text/html", body=fixture
-            ),
+            lambda route: route.fulfill(status=200, content_type="text/html", body=fixture),
         )
         expected = {
             "healthy": (
@@ -139,9 +135,7 @@ def _open_state_page(runtime: BrowserRuntime) -> Any:
     page = cast(Any, runtime.primary_window().playwright_page)
     page.route(
         f"{_STATE_PAGE_URL}*",
-        lambda route: route.fulfill(
-            status=200, content_type="text/html", body=_STATE_PAGE_BODY
-        ),
+        lambda route: route.fulfill(status=200, content_type="text/html", body=_STATE_PAGE_BODY),
     )
     page.goto(_STATE_PAGE_URL, wait_until="domcontentloaded", timeout=30_000)
     return page
@@ -156,9 +150,7 @@ def test_embedded_profile_restart_reuses_the_persisted_login_state(
     runtime = BrowserRuntime()
     with runtime.running(_launch(staged_embedded_chromium, profile)):
         page = _open_state_page(runtime)
-        page.evaluate(
-            "marker => window.localStorage.setItem('eb11', marker)", marker
-        )
+        page.evaluate("marker => window.localStorage.setItem('eb11', marker)", marker)
     assert not runtime.is_running
 
     second = BrowserRuntime()
@@ -221,9 +213,7 @@ def test_production_login_command_surface_drives_the_embedded_chromium(
             page = cast(Any, self.primary_window().playwright_page)
             page.context.route(
                 PROBE_URL_PATTERN,
-                lambda route: route.fulfill(
-                    status=200, content_type="text/html", body=fixture
-                ),
+                lambda route: route.fulfill(status=200, content_type="text/html", body=fixture),
             )
 
     def runtime_factory() -> BrowserRuntime:
@@ -288,6 +278,7 @@ def test_production_login_command_surface_drives_the_embedded_chromium(
     while not outbound.empty():
         envelopes.append(outbound.get_nowait())
     assert len(envelopes) == 3, "open + recheck + logout must each report health"
+
     def dump(envelope: object) -> object:
         model_dump = getattr(envelope, "model_dump", None)
         return model_dump() if callable(model_dump) else str(envelope)

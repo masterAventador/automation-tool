@@ -259,7 +259,6 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
 # itself: it answers one request and exits, so it is selected by argument rather
 # than by anything in the bootstrap the long-lived process reads.
 AUTHOR_MOTION_ARGUMENT = "--author-motion"
-VIDEO_EDITING_ARGUMENT = "--execute-video-editing"
 
 
 def main() -> None:
@@ -271,23 +270,7 @@ def main() -> None:
         )
 
         raise SystemExit(serve_one_motion_authoring_request(input_stream, sys.stdout))
-    if sys.argv[1:] == [VIDEO_EDITING_ARGUMENT]:
-        from automation_tool.executor.video_editing import (
-            MAX_REQUEST_BYTES,
-            serve_one_video_editing_request,
-        )
-
-        source = input_stream.read(MAX_REQUEST_BYTES + 1)
-        raise SystemExit(
-            serve_one_video_editing_request(source, stdout=sys.stdout, stderr=sys.stderr)
-        )
     raise SystemExit(run_executor(input_stream, sys.stdout, sys.stderr))
 
 
-__all__ = [
-    "AUTHOR_MOTION_ARGUMENT",
-    "VIDEO_EDITING_ARGUMENT",
-    "main",
-    "run_executor",
-    "stop_signal_event",
-]
+__all__ = ["AUTHOR_MOTION_ARGUMENT", "main", "run_executor", "stop_signal_event"]

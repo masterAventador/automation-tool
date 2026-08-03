@@ -83,6 +83,16 @@ _FORBIDDEN_PATH_SEGMENTS: Final = frozenset({"ms-playwright"})
 
 _MEBIBYTE: Final = 1024 * 1024
 
+# The smallest required video runtime on each platform is the media toolchain.
+# The macOS value is measured after the release path re-signs ffmpeg/ffprobe;
+# the Windows value is measured from the installed package recorded in PC-16.md.
+# The whole-package drift window is derived from these facts below; it must
+# never be wide enough to hide a second copy.
+MINIMUM_COMPLETE_RUNTIME_BYTES: Final = {
+    "macos": 43_950_318,
+    "windows": 51_168_139,
+}
+
 
 @dataclass(frozen=True)
 class PackageSizeBounds:
@@ -94,16 +104,19 @@ class PackageSizeBounds:
     max_package_bytes: int
 
 
-# Declared composition of one single-architecture release bundle, taking the
-# larger measured value across macOS arm64 and Windows x86_64. Every entry is a
-# resource the product cannot run without, so the package ceiling is derived
-# from their sum instead of being picked by hand.
+# Declared composition of one single-architecture release bundle. This remains
+# a reviewable list of every payload; platform-specific measured baselines below
+# set the actual size envelope because summing each platform's larger component
+# creates a package that has never existed and leaves enough room for a duplicate
+# runtime.
 RELEASE_PAYLOAD_PARTS_MIB: Final = {
     # Locked Chrome for Testing 149.0.7827.55 after Widevine exclusion
     # (Windows x86_64: 310 files, 435,703,601 bytes).
     "embedded-chromium": 416,
-    # Frozen RPA Executor sidecar (284 files, 184,686,384 bytes).
-    "local-executor": 177,
+    # Frozen Executor with the minimal Silero/ONNX inference runtime. The
+    # measured macOS arm64 payload (349 files, 257,004,128 bytes) is larger
+    # than the Windows x86_64 payload (284 files, 184,686,384 bytes).
+    "local-executor": 246,
     # Frozen intelligent-material worker after the unreachable-module trim, the
     # unlicensed background-music removal and the replacement of the four
     # proprietary system fonts with two open-licensed ones (Windows x86_64:
@@ -111,8 +124,8 @@ RELEASE_PAYLOAD_PARTS_MIB: Final = {
     "material-video-worker": 462,
     # Frozen brand-motion worker with its private Node runtime (113,124,957 bytes).
     "motion-video-worker": 108,
-    # Packaged ffmpeg/ffprobe plus the GPL source archive (Windows x86_64:
-    # 51,168,139 bytes).
+    # Packaged ffmpeg/ffprobe plus the GPL source archive. Exact target values
+    # live in MINIMUM_COMPLETE_RUNTIME_BYTES because they define the gate.
     "media-toolchain": 49,
     # Frozen 134-part catalog including its manifest and offline assets
     # (338 files, 47,671,952 bytes).
@@ -121,19 +134,33 @@ RELEASE_PAYLOAD_PARTS_MIB: Final = {
     "app-shell-and-web-assets": 24,
 }
 
-# The browser ceiling stays deliberately below two architectures so a
-# mixed-target package is rejected by weight alone. The package ceiling is the
-# declared payload plus a 10% margin: large enough for normal drift, small
-# enough that a duplicated browser, executor or video worker still trips it.
-RELEASE_SIZE_BOUNDS: Final = PackageSizeBounds(
-    min_browser_bytes=320 * _MEBIBYTE,
-    max_browser_bytes=420 * _MEBIBYTE,
-    min_package_bytes=340 * _MEBIBYTE,
-    max_package_bytes=(
-        sum(RELEASE_PAYLOAD_PARTS_MIB.values()) * _MEBIBYTE * 11 + 9
+# Windows is the 2026-07-31 installed-package audit. The macOS baseline is the
+# 2026-08-03 complete signed candidate after the material Worker trim, LE-14
+# Executor and PC-16 catalog all landed. Both are target-shaped packages, never
+# a sum of unrelated cross-platform maxima.
+RELEASE_PACKAGE_BASELINE_BYTES: Final = {
+    "macos": 1_301_102_222,
+    "windows": 1_289_130_572,
+}
+
+
+def release_size_bounds(platform: str) -> PackageSizeBounds:
+    """Return the size envelope for one real target-shaped package."""
+    baseline = RELEASE_PACKAGE_BASELINE_BYTES.get(platform)
+    minimum_runtime = MINIMUM_COMPLETE_RUNTIME_BYTES.get(platform)
+    if baseline is None or minimum_runtime is None:
+        _reject("unsupported package platform")
+        raise AssertionError("unreachable")
+    # Keep the *whole* symmetric window strictly below the smallest required
+    # runtime on this target. From either inclusive endpoint, adding or removing
+    # a complete runtime must therefore cross the opposite endpoint.
+    drift = (minimum_runtime - 1) // 2
+    return PackageSizeBounds(
+        min_browser_bytes=320 * _MEBIBYTE,
+        max_browser_bytes=420 * _MEBIBYTE,
+        min_package_bytes=baseline - drift,
+        max_package_bytes=baseline + drift,
     )
-    // 10,
-)
 
 
 class PackageRejected(RuntimeError):
@@ -175,7 +202,9 @@ def _other_root_entries(target_id: str) -> frozenset[str]:
     )
 
 
-def _require_contained_symlink(link: Path, bundle_root: Path, browser_root: Path) -> None:
+def _require_contained_symlink(
+    link: Path, bundle_root: Path, browser_root: Path
+) -> None:
     """Allow a symlink only when it resolves to another file in this package.
 
     Rejecting every symlink outside the browser cost nothing while the executor
@@ -194,7 +223,7 @@ def _require_contained_symlink(link: Path, bundle_root: Path, browser_root: Path
         # Missing target, or a symlink loop. Either way it cannot be shown to
         # stay inside, and at runtime it is an unexplained failure.
         _reject("package contains a symlink that does not resolve")
-        raise AssertionError("unreachable")
+        raise AssertionError("unreachable") from None
     package = bundle_root.resolve()
     if not (target == package or package in target.parents):
         _reject("package contains a symlink that resolves outside the package")
@@ -214,7 +243,7 @@ def audit_embedded_browser_package(
     target_id: str,
     platform: str,
     enforce_archive_lock: bool = True,
-    size_bounds: PackageSizeBounds = RELEASE_SIZE_BOUNDS,
+    size_bounds: PackageSizeBounds | None = None,
 ) -> PackageAuditReport:
     """Audit one built release bundle; reject anything that is not the one."""
     prefix = _PLATFORM_TARGET_PREFIX.get(platform)
@@ -222,6 +251,7 @@ def audit_embedded_browser_package(
         _reject("unsupported package platform")
     if not target_id.startswith(str(prefix)):
         _reject("package target does not belong to the package platform")
+    effective_size_bounds = size_bounds or release_size_bounds(platform)
     if bundle_root.is_symlink() or not bundle_root.is_dir():
         _reject("package root is not a real directory")
 
@@ -265,13 +295,15 @@ def audit_embedded_browser_package(
     package_files += distribution.verified_files
     package_bytes += distribution.total_bytes
     if not (
-        size_bounds.min_browser_bytes
+        effective_size_bounds.min_browser_bytes
         <= distribution.total_bytes
-        <= size_bounds.max_browser_bytes
+        <= effective_size_bounds.max_browser_bytes
     ):
         _reject("packaged browser tree is outside the release size bounds")
     if not (
-        size_bounds.min_package_bytes <= package_bytes <= size_bounds.max_package_bytes
+        effective_size_bounds.min_package_bytes
+        <= package_bytes
+        <= effective_size_bounds.max_package_bytes
     ):
         _reject("release package is outside the release size bounds")
 
@@ -309,13 +341,15 @@ def main(argv: list[str] | None = None) -> int:
 
 
 __all__ = [
+    "MINIMUM_COMPLETE_RUNTIME_BYTES",
+    "RELEASE_PACKAGE_BASELINE_BYTES",
     "RELEASE_PAYLOAD_PARTS_MIB",
-    "RELEASE_SIZE_BOUNDS",
     "PackageAuditReport",
     "PackageRejected",
     "PackageSizeBounds",
     "audit_embedded_browser_package",
     "browser_resource_root",
+    "release_size_bounds",
 ]
 
 

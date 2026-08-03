@@ -64,7 +64,7 @@ def claims(**changes: Any) -> ActionAuthorizationClaims:
         "deadline_at": NOW + timedelta(seconds=60),
     }
     values.update(changes)
-    return ActionAuthorizationClaims(**values)  # type: ignore[arg-type]
+    return ActionAuthorizationClaims(**values)
 
 
 def test_claims_are_exact_immutable_redacted_and_have_one_stable_idempotency_key() -> None:
@@ -75,7 +75,7 @@ def test_claims_are_exact_immutable_redacted_and_have_one_stable_idempotency_key
     assert "123e4567" not in repr(value)
     assert "comment" in repr(value)
     with pytest.raises(FrozenInstanceError):
-        value.action = DouyinSearchExposureAction.BROWSE  # type: ignore[misc]
+        value.action = DouyinSearchExposureAction.BROWSE
 
 
 @pytest.mark.parametrize(
@@ -157,7 +157,7 @@ def test_encoder_rejects_non_claims_and_non_ed25519_signatures() -> None:
         (claims(), "private"),
     ):
         with pytest.raises(ActionAuthorizationRejected):
-            encode_action_authorization_token(value, signature)  # type: ignore[arg-type]
+            encode_action_authorization_token(value, signature)
 
 
 def test_protocol_helpers_reject_broken_time_wrong_id_and_noncanonical_payloads() -> None:
@@ -169,11 +169,11 @@ def test_protocol_helpers_reject_broken_time_wrong_id_and_noncanonical_payloads(
         with pytest.raises(ActionAuthorizationRejected):
             authorization_module._parse_timestamp(timestamp)
     with pytest.raises(ActionAuthorizationRejected):
-        action_authorization_idempotency_key(TARGET_ID)  # type: ignore[arg-type]
+        action_authorization_idempotency_key(TARGET_ID)
     with pytest.raises(ActionAuthorizationRejected):
         authorization_module._document(object())  # type: ignore[arg-type]
     with pytest.raises(ActionAuthorizationRejected):
-        action_authorization_signing_input(object())  # type: ignore[arg-type]
+        action_authorization_signing_input(object())
     with pytest.raises(ActionAuthorizationRejected):
         authorization_module._unique_object((("version", 1), ("version", 1)))
 

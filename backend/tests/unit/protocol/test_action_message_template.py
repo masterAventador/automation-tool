@@ -100,7 +100,7 @@ def test_template_and_task_definition_reject_the_same_invalid_copy_without_discl
 @pytest.mark.parametrize("source", (None, 7, b"copy", True))
 def test_template_rejects_non_strings(source: object) -> None:
     with pytest.raises(ActionMessageTemplateRejected):
-        ActionMessageTemplate(source=source)  # type: ignore[arg-type]
+        ActionMessageTemplate(source=source)
 
 
 def test_template_is_immutable_and_repr_redacts_copy() -> None:
@@ -108,7 +108,7 @@ def test_template_is_immutable_and_repr_redacts_copy() -> None:
 
     assert repr(template) == "ActionMessageTemplate(<redacted>)"
     with pytest.raises((AttributeError, TypeError)):
-        template.source = "replacement"  # type: ignore[misc]
+        template.source = "replacement"
 
 
 def test_template_constants_are_the_exact_mvp_contract() -> None:

@@ -4,20 +4,39 @@ use automation_tool_desktop_lib::local_video_orchestrator::{
 use automation_tool_desktop_lib::motion_video_studio::{
     advance, cancel, cancel_marker_file_name, cancellation_requested, delete_artifact,
     duration_limits, import_rendered_output, prepare_manual_render_job,
-    record_rendered_shot_frames, render_sandbox_budget, rendered_film_is_static, snapshot,
-    MotionRenderFailureCode, MotionRenderJobStatus, MotionVideoBeatDraft, MotionVideoDraftRequest,
-    MotionVideoStudioErrorCode, TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR, TEMPLATE_CANVAS_HEIGHT,
-    TEMPLATE_CANVAS_WIDTH,
+    record_rendered_shot_frames, render_sandbox_budget, rendered_film_is_static,
+    safe_failed_authoring_diagnostic, snapshot, MotionRenderFailureCode, MotionRenderJobStatus,
+    MotionVideoBeatDraft, MotionVideoDraftRequest, MotionVideoStudioErrorCode,
+    TEMPLATE_CANVAS_DEVICE_SCALE_FACTOR, TEMPLATE_CANVAS_HEIGHT, TEMPLATE_CANVAS_WIDTH,
 };
 use automation_tool_desktop_lib::video_job_workspace::{
     VideoJobWorkspacePolicy, VideoJobWorkspaceStore,
 };
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine as _;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 static TEMPORARY_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+#[test]
+fn failed_child_diagnostics_keep_closed_tokens_and_drop_arbitrary_text() {
+    let closed = r#"{"schemaVersion":1,"status":"executor_defect","rejectionReason":"agent_slot_overflow_probe_failed_to_measure"}"#;
+    assert_eq!(
+        safe_failed_authoring_diagnostic(closed),
+        "status=executor_defect reason=agent_slot_overflow_probe_failed_to_measure",
+    );
+
+    let arbitrary = safe_failed_authoring_diagnostic(
+        r#"{"schemaVersion":1,"status":"executor_defect","rejectionReason":"sk-secret /Users/private/input"}"#,
+    );
+    assert_eq!(arbitrary, "status=executor_defect reason=unknown");
+    assert!(!arbitrary.contains("secret"));
+    assert!(!arbitrary.contains("private"));
+}
 
 struct TempDirectory(PathBuf);
 
@@ -61,6 +80,24 @@ fn store(root: &Path) -> VideoJobWorkspaceStore {
         .unwrap(),
     )
     .unwrap()
+}
+
+fn inter_woff2() -> &'static [u8] {
+    include_bytes!(
+        "../../../vendor/hyperframes/skills/talking-head-recut/assets/fonts/Inter-400-latin.woff2"
+    )
+}
+
+fn big_shoulders_woff2() -> &'static [u8] {
+    include_bytes!("../../../assets/motion-catalog-overlay/fonts/big-shoulders-display-latin.woff2")
+}
+
+fn legacy_true_ttf() -> Vec<u8> {
+    let mut bytes =
+        include_bytes!("../../../vendor/moneyprinterturbo/resource/fonts/BeVietnamPro-Medium.ttf")
+            .to_vec();
+    bytes[..4].copy_from_slice(b"true");
+    bytes
 }
 
 /// The seconds-per-beat every fixture below uses; the storyboard length each
@@ -275,6 +312,234 @@ fn manual_template_freezes_editable_copy_and_seekable_composition_in_private_ren
     assert_eq!(prepared.total_seconds(), 3 * FIXTURE_SECONDS_PER_BEAT);
     assert_eq!(prepared.frames_per_second(), 30);
     assert_eq!(prepared.frame_count(), 3 * FIXTURE_SECONDS_PER_BEAT * 30);
+}
+
+#[test]
+fn local_font_is_frozen_reproducibly_and_used_by_the_rendered_composition() {
+    let root = TempDirectory::new();
+    let store = store(&root.0);
+    let font_bytes = inter_woff2();
+    let request: MotionVideoDraftRequest = serde_json::from_value(serde_json::json!({
+        "creationMode": "manual_template_v1",
+        "subject": "新品发布",
+        "stylePresetId": "blue-professional",
+        "primaryColor": "#1234ab",
+        "secondaryColor": "#f2eadb",
+        "secondsPerBeat": FIXTURE_SECONDS_PER_BEAT,
+        "beats": [
+            {"title": "增长看得见", "caption": "字幕：本周销售增长 38%"},
+            {"title": "来自续费", "caption": "字幕：客户持续选择我们"},
+            {"title": "下一步行动", "caption": "字幕：立即查看新版能力"}
+        ],
+        "font": {
+            "family": "Acme Sans",
+            "fileName": "AcmeSans-Regular.woff2",
+            "base64": STANDARD.encode(font_bytes)
+        },
+        "logo": null
+    }))
+    .expect("a paired local font is a valid manual draft");
+
+    let first = prepare_manual_render_job(&store, &request).unwrap();
+    let second = prepare_manual_render_job(&store, &request).unwrap();
+    let first_workspace = store.open(first.render_job_id()).unwrap();
+    let second_workspace = store.open(second.render_job_id()).unwrap();
+    let first_assets = store.worker_asset_directory(&first_workspace).unwrap();
+    let second_assets = store.worker_asset_directory(&second_workspace).unwrap();
+
+    assert_eq!(
+        fs::read(first_assets.join("brand-font.woff2")).unwrap(),
+        fs::read(second_assets.join("brand-font.woff2")).unwrap(),
+        "the same selected font must reopen as the same frozen bytes",
+    );
+    assert_eq!(
+        fs::read(first_assets.join("style-freeze.json")).unwrap(),
+        fs::read(second_assets.join("style-freeze.json")).unwrap(),
+        "the same brand tokens must reproduce the same freeze metadata",
+    );
+    let frame = fs::read_to_string(first_assets.join("frame.md")).unwrap();
+    assert!(frame.contains("fontFamily: \"Acme Sans\""));
+    assert!(frame.contains("url(\"brand-font.woff2\")"));
+    let composition = fs::read_to_string(first_assets.join("composition.html")).unwrap();
+    assert!(composition.contains("@font-face"));
+    assert!(composition.contains("font-family:\"Acme Sans\""));
+    assert!(composition.contains("data-required-font-family=\"Acme Sans\""));
+    let render_job: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(first_assets.join("renderjob.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        render_job["allowedAssets"],
+        serde_json::json!(["brand-font.woff2"])
+    );
+
+    let freeze: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(first_assets.join("style-freeze.json")).unwrap())
+            .unwrap();
+    assert_eq!(freeze["fontAsset"]["path"], "brand-font.woff2");
+    assert_eq!(freeze["fontAsset"]["sizeBytes"], font_bytes.len());
+    assert_eq!(
+        freeze["fontAsset"]["sha256"],
+        Sha256::digest(font_bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    );
+
+    let different_font_request: MotionVideoDraftRequest =
+        serde_json::from_value(serde_json::json!({
+            "creationMode": "manual_template_v1",
+            "subject": "新品发布",
+            "stylePresetId": "blue-professional",
+            "primaryColor": "#1234ab",
+            "secondaryColor": "#f2eadb",
+            "secondsPerBeat": FIXTURE_SECONDS_PER_BEAT,
+            "beats": [
+                {"title": "增长看得见", "caption": "字幕：本周销售增长 38%"},
+                {"title": "来自续费", "caption": "字幕：客户持续选择我们"},
+                {"title": "下一步行动", "caption": "字幕：立即查看新版能力"}
+            ],
+            "font": {
+                "family": "Acme Sans",
+                "fileName": "AcmeSans-Regular.woff2",
+                "base64": STANDARD.encode(big_shoulders_woff2())
+            },
+            "logo": null
+        }))
+        .unwrap();
+    let different = prepare_manual_render_job(&store, &different_font_request).unwrap();
+    let different_workspace = store.open(different.render_job_id()).unwrap();
+    let different_assets = store.worker_asset_directory(&different_workspace).unwrap();
+    let different_freeze: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(different_assets.join("style-freeze.json")).unwrap(),
+    )
+    .unwrap();
+    assert_ne!(
+        freeze["brandTokensSha256"],
+        different_freeze["brandTokensSha256"]
+    );
+    assert_ne!(
+        freeze["frozenFrameSha256"],
+        different_freeze["frozenFrameSha256"]
+    );
+}
+
+#[test]
+fn legacy_true_scaler_type_is_accepted_for_a_ttf_font() {
+    let root = TempDirectory::new();
+    let store = store(&root.0);
+    let font_bytes = legacy_true_ttf();
+    let request: MotionVideoDraftRequest = serde_json::from_value(serde_json::json!({
+        "creationMode": "manual_template_v1",
+        "subject": "新品发布",
+        "stylePresetId": "blue-professional",
+        "primaryColor": "#1234ab",
+        "secondaryColor": "#f2eadb",
+        "secondsPerBeat": FIXTURE_SECONDS_PER_BEAT,
+        "beats": [
+            {"title": "增长看得见", "caption": "字幕：本周销售增长 38%"},
+            {"title": "来自续费", "caption": "字幕：客户持续选择我们"},
+            {"title": "下一步行动", "caption": "字幕：立即查看新版能力"}
+        ],
+        "font": {
+            "family": "Legacy Sans",
+            "fileName": "LegacySans.ttf",
+            "base64": STANDARD.encode(&font_bytes)
+        },
+        "logo": null
+    }))
+    .unwrap();
+
+    let prepared = prepare_manual_render_job(&store, &request).unwrap();
+    let workspace = store.open(prepared.render_job_id()).unwrap();
+    let assets = store.worker_asset_directory(&workspace).unwrap();
+    assert_eq!(fs::read(assets.join("brand-font.ttf")).unwrap(), font_bytes);
+}
+
+#[test]
+fn a_signature_only_font_is_rejected_before_a_render_job_is_created() {
+    let root = TempDirectory::new();
+    let store = store(&root.0);
+    let request: MotionVideoDraftRequest = serde_json::from_value(serde_json::json!({
+        "creationMode": "manual_template_v1",
+        "subject": "新品发布",
+        "stylePresetId": "blue-professional",
+        "primaryColor": "#1234ab",
+        "secondaryColor": "#f2eadb",
+        "secondsPerBeat": FIXTURE_SECONDS_PER_BEAT,
+        "beats": [
+            {"title": "增长看得见", "caption": "字幕：本周销售增长 38%"},
+            {"title": "来自续费", "caption": "字幕：客户持续选择我们"},
+            {"title": "下一步行动", "caption": "字幕：立即查看新版能力"}
+        ],
+        "font": {
+            "family": "Broken Sans",
+            "fileName": "broken.woff2",
+            "base64": STANDARD.encode(b"wOF2\x01\x02\x03\x04")
+        },
+        "logo": null
+    }))
+    .unwrap();
+
+    assert!(prepare_manual_render_job(&store, &request).is_err());
+    assert!(store.list_workspaces().unwrap().is_empty());
+}
+
+#[test]
+fn a_font_family_with_a_line_break_is_rejected_before_workspace_creation() {
+    let root = TempDirectory::new();
+    let store = store(&root.0);
+    let request: MotionVideoDraftRequest = serde_json::from_value(serde_json::json!({
+        "creationMode": "manual_template_v1",
+        "subject": "新品发布",
+        "stylePresetId": "blue-professional",
+        "primaryColor": "#1234ab",
+        "secondaryColor": "#f2eadb",
+        "secondsPerBeat": FIXTURE_SECONDS_PER_BEAT,
+        "beats": [
+            {"title": "增长看得见", "caption": "字幕：本周销售增长 38%"},
+            {"title": "来自续费", "caption": "字幕：客户持续选择我们"},
+            {"title": "下一步行动", "caption": "字幕：立即查看新版能力"}
+        ],
+        "font": {
+            "family": "Acme\nSans",
+            "fileName": "AcmeSans-Regular.woff2",
+            "base64": STANDARD.encode(inter_woff2())
+        },
+        "logo": null
+    }))
+    .unwrap();
+
+    assert!(prepare_manual_render_job(&store, &request).is_err());
+    assert!(store.list_workspaces().unwrap().is_empty());
+}
+
+#[test]
+fn a_renamed_non_font_is_rejected_before_a_render_job_is_created() {
+    let root = TempDirectory::new();
+    let store = store(&root.0);
+    let request: MotionVideoDraftRequest = serde_json::from_value(serde_json::json!({
+        "creationMode": "manual_template_v1",
+        "subject": "新品发布",
+        "stylePresetId": "blue-professional",
+        "primaryColor": "#1234ab",
+        "secondaryColor": "#f2eadb",
+        "secondsPerBeat": FIXTURE_SECONDS_PER_BEAT,
+        "beats": [
+            {"title": "增长看得见", "caption": "字幕：本周销售增长 38%"},
+            {"title": "来自续费", "caption": "字幕：客户持续选择我们"},
+            {"title": "下一步行动", "caption": "字幕：立即查看新版能力"}
+        ],
+        "font": {
+            "family": "Acme Sans",
+            "fileName": "renamed.woff2",
+            "base64": STANDARD.encode(b"not a font")
+        },
+        "logo": null
+    }))
+    .unwrap();
+
+    assert!(prepare_manual_render_job(&store, &request).is_err());
+    assert!(store.list_workspaces().unwrap().is_empty());
 }
 
 #[test]

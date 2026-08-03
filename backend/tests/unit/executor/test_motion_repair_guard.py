@@ -16,7 +16,7 @@ from automation_tool.executor.motion_authoring.agent import (
 )
 
 
-def _payload(headline: str = "本周销售增长", duration: float = 3.0) -> dict:
+def _payload(headline: str = "本周销售增长", duration: float = 3.0) -> dict[str, object]:
     return {
         "beats": [
             {
@@ -50,7 +50,9 @@ def test_a_repair_that_moves_a_beat_is_refused() -> None:
 def test_a_repair_that_changes_the_beat_count_is_refused() -> None:
     before = StoryboardArtifact.from_payload(_payload())
     extended = _payload()
-    extended["beats"].append(
+    beats = extended["beats"]
+    assert isinstance(beats, list)
+    beats.append(
         {
             "beat_id": "b2",
             "purpose": "收尾",

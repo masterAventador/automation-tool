@@ -62,9 +62,7 @@ def test_the_part_keeps_the_family_name_it_wrote() -> None:
     — but the part is read-only and still writes `font-family: 'SF Pro'`. The
     rule has to answer that name or the substitution does not take effect.
     """
-    faces = (
-        ResolvedFace(css_family="SF Pro", source_family="Inter", weight=400),
-    )
+    faces = (ResolvedFace(css_family="SF Pro", source_family="Inter", weight=400),)
     css = part_font_css(
         faces,
         chinese_artifact="assets/noto-sans-sc.woff2",

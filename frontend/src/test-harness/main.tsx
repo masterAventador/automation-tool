@@ -13,6 +13,7 @@ import { createLocalVideoEditingGateway } from "../features/video-editing/local-
 import { HARNESS_SELECTED_VIDEO, TestHarnessPublishing } from "./publishing";
 import { TestHarnessTaskLifecycle } from "./task-lifecycle";
 import { TestHarnessVideoStudio, type HarnessRenderEnding } from "./video-studio";
+import { TestHarnessSmartEditGateway } from "./smart-edit";
 import "../styles/global.css";
 
 const HARNESS_RUNTIME_MARKER = "automation-tool-test-harness";
@@ -96,6 +97,7 @@ const taskLifecycleProps =
  * Playwright gives each test a fresh context, so the store starts empty.
  */
 const videoEditingGateway = createLocalVideoEditingGateway(window.sessionStorage);
+const smartEditGateway = new TestHarnessSmartEditGateway();
 
 /**
  * `?account=signed-in` renders the customer Demo shape: an account bar above
@@ -112,6 +114,7 @@ createRoot(root).render(
     <App
       startupCheck={createTransportStartupCheck(transport)}
       videoEditingGateway={videoEditingGateway}
+      smartEditGateway={smartEditGateway}
       {...taskLifecycleProps}
       {...publishingProps}
       {...videoStudioProps}

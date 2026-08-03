@@ -13,6 +13,7 @@ from automation_tool.executor.macos_candidate import (
     audit_macos_executor_candidate,
     build_macos_executor_candidate,
 )
+from automation_tool.executor.silero_vad import SileroVadUnavailable
 
 # This module audits the *macOS* candidate, and several of its fixtures are
 # POSIX artefacts rather than incidental spellings: a permission bit that
@@ -24,6 +25,17 @@ requires_posix_filesystem = pytest.mark.skipif(
     os.name == "nt",
     reason="the fixture needs POSIX permission bits, FIFOs or POSIX absolute paths",
 )
+
+
+@pytest.fixture(autouse=True)
+def _accept_synthetic_silero_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        macos_candidate,
+        "audit_packaged_silero_vad_runtime",
+        lambda bundle: None,
+    )
 
 
 def _write(path: Path, content: bytes = b"fixture") -> Path:
@@ -73,6 +85,25 @@ def test_audit_accepts_a_native_signing_ready_candidate(
     assert result.file_count == 4
     assert result.mach_o_file_count == 1
     assert verified == [bundle / "automation-tool-executor"]
+
+
+def test_audit_rejects_a_candidate_that_fails_the_silero_runtime_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = _candidate(tmp_path)
+    monkeypatch.setattr(macos_candidate, "_verify_code_signatures", lambda paths: None)
+
+    def reject(_bundle: Path) -> None:
+        raise SileroVadUnavailable()
+
+    monkeypatch.setattr(macos_candidate, "audit_packaged_silero_vad_runtime", reject)
+    with pytest.raises(MacOSExecutorCandidateRejected):
+        audit_macos_executor_candidate(
+            bundle_directory=bundle,
+            expected_architecture="aarch64",
+            forbidden_development_roots=(),
+        )
 
 
 @pytest.mark.parametrize(
@@ -226,9 +257,7 @@ def test_audit_rejects_each_browser_cache_directory_form(
 # Split out: `os.mkfifo` is absent on Windows, and one AttributeError used to
 # take the root and resource-limit checks down with it.
 @requires_posix_filesystem
-def test_audit_rejects_special_files(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_audit_rejects_special_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(macos_candidate, "_verify_code_signatures", lambda paths: None)
     bundle = _candidate(tmp_path / "special")
     fifo = bundle / "_internal/fifo"
@@ -511,7 +540,7 @@ def test_a_failed_pyinstaller_run_carries_its_own_reason(
             stderr=b"",
         )
 
-    monkeypatch.setattr(macos_candidate.subprocess, "run", failing_run)
+    monkeypatch.setattr(subprocess, "run", failing_run)
 
     with pytest.raises(MacOSExecutorCandidateRejected) as captured:
         macos_candidate._run_pyinstaller(
@@ -531,7 +560,7 @@ def test_a_pyinstaller_run_that_says_nothing_still_reports_that_it_said_nothing(
     def silent_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         return subprocess.CompletedProcess(args=[], returncode=1, stdout=b"", stderr=b"")
 
-    monkeypatch.setattr(macos_candidate.subprocess, "run", silent_run)
+    monkeypatch.setattr(subprocess, "run", silent_run)
 
     with pytest.raises(MacOSExecutorCandidateRejected) as captured:
         macos_candidate._run_pyinstaller(

@@ -2,10 +2,10 @@
 """PC-16 Windows package acceptance through one installed NSIS App.
 
 This is the Windows counterpart of ``run_pc_16_macos_package_acceptance.py``.
-It deliberately builds an acceptance-only App shell (hidden window + WebDriver
-mount), but every packaged runtime byte follows the production Windows release
-path: digest-locked Chromium, signed Local Executor, three video resources and
-the frozen motion catalog are assembled before the NSIS bundler runs.
+It deliberately builds a release-mode acceptance App shell (hidden window +
+WebDriver mount), but every packaged runtime byte follows the production Windows
+release path: digest-locked Chromium, signed Local Executor, three video resources
+and the frozen motion catalog are assembled before the NSIS bundler runs.
 
 The runner then installs the package under an isolated current-user product
 identity, verifies all 134 catalog documents and every manifest digest from the
@@ -28,10 +28,12 @@ import json
 import os
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -39,12 +41,15 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 FRONTEND_ROOT = REPOSITORY_ROOT / "frontend"
 TAURI_ROOT = FRONTEND_ROOT / "src-tauri"
+CARGO_MANIFEST = TAURI_ROOT / "Cargo.toml"
 
 sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
 sys.path.insert(0, str(BACKEND_ROOT / "src"))
 
 from build_motion_catalog_release import (  # noqa: E402
     aggregate_digest,
+)
+from build_motion_catalog_release import (
     stage_for_release as stage_motion_catalog,
 )
 from desktop_e2e_prerequisites import startup_gate_environment  # noqa: E402
@@ -66,7 +71,10 @@ from release_configuration import (  # noqa: E402
     merge_configuration,
     write_windows_release_configuration,
 )
-from run_e4_14_acceptance import require_port_available, start_control_plane  # noqa: E402
+from run_e4_14_acceptance import (  # noqa: E402
+    require_port_available,
+    start_control_plane,
+)
 from run_eb_16_windows_acceptance import (  # noqa: E402
     build_executor_candidate,
     pnpm_executable,
@@ -75,6 +83,7 @@ from run_eb_16_windows_acceptance import (  # noqa: E402
     stage_browser_distribution,
     terminate_processes_matching,
 )
+from run_i2_13_acceptance import compose_command  # noqa: E402
 from run_p9_04_acceptance import (  # noqa: E402
     install_root,
     installer_environment,
@@ -91,7 +100,6 @@ from run_t36_acceptance import (  # noqa: E402
     inspect_film,
     read_model_key,
 )
-from run_i2_13_acceptance import compose_command  # noqa: E402
 from run_vf_06_acceptance import (  # noqa: E402
     require_port_closed,
     unused_loopback_port,
@@ -142,6 +150,59 @@ def installed_binary(root: Path) -> Path:
     if not binary.is_file():
         raise AcceptanceFailed(f"installed App binary is missing at {binary}")
     return binary
+
+
+def windows_verbatim_path(path: Path) -> str:
+    """Add the Windows device prefix without following the owned path."""
+    rendered = os.path.abspath(os.fspath(path))
+    if rendered.startswith("\\\\?\\"):
+        return rendered
+    if rendered.startswith("\\\\"):
+        return f"\\\\?\\UNC\\{rendered[2:]}"
+    return f"\\\\?\\{rendered}"
+
+
+def windows_profile_probe_app_data(temporary_root: Path) -> str:
+    """Use the real spelling of the runner-owned root for the profile gate."""
+    try:
+        real_root = temporary_root.resolve(strict=True)
+    except OSError as error:
+        raise AcceptanceFailed(
+            "PC-16 Windows could not resolve its profile-probe temporary root"
+        ) from error
+    return os.fspath(real_root / "app-data")
+
+
+def remove_owned_tree(
+    path: Path,
+    *,
+    platform: str = os.name,
+    remove: Callable[[str | os.PathLike[str]], None] = shutil.rmtree,
+) -> None:
+    """Remove one owned tree without losing Windows paths beyond ``MAX_PATH``."""
+    try:
+        metadata = os.lstat(path)
+    except FileNotFoundError:
+        return
+    if stat.S_ISLNK(metadata.st_mode) or (
+        platform == "nt"
+        and getattr(metadata, "st_file_attributes", 0) & 0x400
+    ):
+        raise AcceptanceFailed(
+            f"PC-16 Windows refuses to remove a reparse-point owned tree: {path}"
+        )
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise AcceptanceFailed(f"PC-16 Windows owned tree is not a directory: {path}")
+    target: str | os.PathLike[str] = (
+        windows_verbatim_path(path) if platform == "nt" else path
+    )
+    remove(target)
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return
+    else:
+        raise AcceptanceFailed(f"PC-16 Windows left its owned tree behind: {path}")
 
 
 def isolated_ports() -> tuple[int, int, int]:
@@ -224,8 +285,8 @@ def build_installer(
     environment: dict[str, str],
     cargo_target: Path,
 ) -> tuple[Path, Path]:
-    announce("Building the isolated debug NSIS package with production resources")
-    bundle_root = cargo_target / "debug/bundle"
+    announce("Building the isolated release-mode NSIS package with production resources")
+    bundle_root = cargo_target / "release/bundle"
     if bundle_root.exists():
         shutil.rmtree(bundle_root)
     run_checked(
@@ -234,7 +295,6 @@ def build_installer(
             "exec",
             "tauri",
             "build",
-            "--debug",
             "--features",
             "control-plane-e2e",
             "--bundles",
@@ -245,11 +305,11 @@ def build_installer(
         ],
         environment=environment,
     )
-    binary = cargo_target / "debug" / f"{MAIN_BINARY_NAME}.exe"
+    binary = cargo_target / "release" / f"{MAIN_BINARY_NAME}.exe"
     if not binary.is_file():
         raise AcceptanceFailed("PC-16 Windows built App binary is missing")
     installer = one_file(
-        cargo_target / "debug/bundle/nsis",
+        cargo_target / "release/bundle/nsis",
         "*-setup.exe",
         "PC-16 Windows NSIS installer was not generated exactly once",
     )
@@ -357,7 +417,7 @@ def audit_installed_motion_catalog(root: Path) -> dict[str, object]:
         )
 
     typography = json.loads(TYPOGRAPHY_CONTRACT.read_text(encoding="utf-8"))
-    font_relative = typography.get("cjk", {}).get("artifactPath")
+    font_relative = typography.get("chineseFace", {}).get("artifactPath")
     if not isinstance(font_relative, str) or font_relative not in inventory:
         raise AcceptanceFailed("installed Windows package carries no locked CJK font")
     font_bytes, font_digest = inventory[font_relative]
@@ -420,6 +480,89 @@ def verify_catalog_failure_matrix(catalog: Path) -> dict[str, str]:
 
     announce(f"Catalog failure matrix: {json.dumps(outcomes, sort_keys=True)}")
     return outcomes
+
+
+def verify_installed_startup_gate_inputs(
+    *, root: Path, environment: dict[str, str], cargo_target: Path
+) -> None:
+    """Probe the installed trees through the path shape used by the real App."""
+    cargo = shutil.which("cargo")
+    if cargo is None:
+        raise AcceptanceFailed("cargo is unavailable for the installed startup probe")
+    announce("Checking the installed startup gate through the Windows resource path")
+    with tempfile.TemporaryDirectory(
+        prefix="automation-tool-pc16-windows-startup-"
+    ) as temporary:
+        probe_environment = {
+            **environment,
+            "EB16_INSTALLED_RESOURCES": windows_verbatim_path(root),
+            "EB16_APP_DATA": windows_profile_probe_app_data(Path(temporary)),
+            "AUTOMATION_TOOL_WINDOWS_PACKAGE_PAYLOAD": os.fspath(root),
+            "CARGO_TARGET_DIR": os.fspath(cargo_target),
+        }
+        run_checked(
+            [
+                cargo,
+                "test",
+                "--release",
+                "--features",
+                "control-plane-e2e",
+                "--manifest-path",
+                os.fspath(CARGO_MANIFEST),
+                "--test",
+                "installed_release_startup",
+                "--locked",
+                "installed_release_package_satisfies_every_startup_gate_input",
+                "--",
+                "--ignored",
+                "--exact",
+                "--nocapture",
+            ],
+            cwd=REPOSITORY_ROOT,
+            environment=probe_environment,
+        )
+        run_checked(
+            [
+                cargo,
+                "test",
+                "--release",
+                "--features",
+                "control-plane-e2e",
+                "--manifest-path",
+                os.fspath(CARGO_MANIFEST),
+                "--test",
+                "motion_authoring_runtime",
+                "--locked",
+                "the_windows_packaged_motion_worker_starts_from_the_verbatim_resource_path",
+                "--",
+                "--ignored",
+                "--exact",
+                "--nocapture",
+            ],
+            cwd=REPOSITORY_ROOT,
+            environment=probe_environment,
+        )
+        run_checked(
+            [
+                cargo,
+                "test",
+                "--release",
+                "--features",
+                "control-plane-e2e",
+                "--manifest-path",
+                os.fspath(CARGO_MANIFEST),
+                "--test",
+                "video_media_toolchain",
+                "--locked",
+                "the_windows_packaged_ffmpeg_runs_from_the_verbatim_resource_path",
+                "--",
+                "--ignored",
+                "--exact",
+                "--nocapture",
+            ],
+            cwd=REPOSITORY_ROOT,
+            environment=probe_environment,
+        )
 
 
 def run_desktop_acceptance(
@@ -514,7 +657,7 @@ def main() -> int:
     evidence_video = EVIDENCE / "pc16-windows-package-one-sentence.mp4"
     evidence_shots = EVIDENCE / "pc16-windows-package-shot-structure.json"
     if app_data.exists():
-        shutil.rmtree(app_data)
+        remove_owned_tree(app_data)
     if build_directory.exists():
         shutil.rmtree(build_directory)
     build_directory.mkdir(parents=True)
@@ -588,9 +731,14 @@ def main() -> int:
         require_packaged_browser(
             application=root, target_id=TARGET_ID, platform="windows"
         )
-        require_packaged_video_runtime(application=root, platform="windows")
+        installed_video_runtime = require_packaged_video_runtime(
+            application=root, platform="windows"
+        )
         audit = audit_installed_motion_catalog(root)
         matrix = verify_catalog_failure_matrix(root / "motion-catalog")
+        verify_installed_startup_gate_inputs(
+            root=root, environment=environment, cargo_target=cargo_target
+        )
 
         require_port_available(database_port)
         announce(f"Starting isolated PostgreSQL as {project_name}")
@@ -618,7 +766,12 @@ def main() -> int:
             evidence_shots=evidence_shots,
             environment=environment,
         )
-        inspect_film(evidence_video, evidence_shots)
+        inspect_film(
+            evidence_video,
+            evidence_shots,
+            ffprobe=installed_video_runtime["media-toolchain"] / "bin/ffprobe.exe",
+            ffmpeg=installed_video_runtime["media-toolchain"] / "bin/ffmpeg.exe",
+        )
         run_failed = False
     finally:
         if server is not None:
@@ -648,7 +801,7 @@ def main() -> int:
         if owns_installation:
             uninstall_and_check(root)
         if app_data.exists():
-            shutil.rmtree(app_data)
+            remove_owned_tree(app_data)
         require_port_closed(control_plane_port)
         require_port_closed(database_port)
         require_port_closed(webdriver_port)

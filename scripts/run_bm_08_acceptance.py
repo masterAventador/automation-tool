@@ -60,6 +60,7 @@ def _run(
 def run_deterministic_gates() -> None:
     _run(["node", "--check", "workers/motion_composition/worker.mjs"])
     _run([sys.executable, "scripts/test_motion_video_render_sandbox.py"])
+    _run([pnpm_executable(), "--dir", "frontend", "build"])
     _run(
         [
             "cargo",

@@ -64,17 +64,13 @@ class TestTakeoverGrant:
             "not-a-url",
         ):
             with pytest.raises(SurfaceLeaseRejected):
-                lease.begin_takeover(
-                    cdp_url=invalid, timeout_seconds=60, pause_confirmed=True
-                )
+                lease.begin_takeover(cdp_url=invalid, timeout_seconds=60, pause_confirmed=True)
 
     def test_timeout_bounds_are_enforced(self) -> None:
         lease = manager(FakeClock())
         for invalid in (0, -1, 3601):
             with pytest.raises(SurfaceLeaseRejected):
-                lease.begin_takeover(
-                    cdp_url=CDP, timeout_seconds=invalid, pause_confirmed=True
-                )
+                lease.begin_takeover(cdp_url=CDP, timeout_seconds=invalid, pause_confirmed=True)
 
 
 class TestReleaseAndExpiry:

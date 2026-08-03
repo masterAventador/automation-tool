@@ -156,8 +156,13 @@ describe("Tauri material video studio gateway", () => {
         { title: "来自续费", caption: "字幕：客户持续选择我们" },
         { title: "下一步行动", caption: "字幕：立即查看新版能力" },
       ],
+      font: {
+        family: "Acme Sans",
+        fileName: "AcmeSans-Regular.woff2",
+        base64: "d09GMgECAwQ=",
+      },
       logo: null,
-    };
+    } as unknown as Parameters<TauriMaterialVideoStudioGateway["submitMotionDraft"]>[0];
     invoke.mockResolvedValueOnce({
       renderJobId: "f89d8f18-6b4e-4f5a-8325-8da45f71d7e2",
       revision: 1,
@@ -291,7 +296,6 @@ describe("Tauri material video studio gateway", () => {
     for (const catalogPartOverrides of [
       [null, null, null],
       ["not-a-locked-part", null, null],
-      ["caption-kinetic-slam", null, null],
     ]) {
       await expect(
         gateway.submitMotionBrief({
@@ -414,6 +418,7 @@ describe("Tauri material video studio gateway", () => {
       secondaryColor: "#f2eadb",
       secondsPerBeat: 4,
       beats: [beat(1), beat(2), beat(3)],
+      font: null,
       logo: null,
     };
 
@@ -430,6 +435,34 @@ describe("Tauri material video studio gateway", () => {
         code: "protocol_mismatch",
       });
     }
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("refuses a malformed local font before touching the native command", async () => {
+    const gateway = new TauriMaterialVideoStudioGateway();
+    const request = {
+      creationMode: "manual_template_v1" as const,
+      subject: "新品发布",
+      stylePresetId: "blue-professional",
+      primaryColor: "#1234ab",
+      secondaryColor: "#f2eadb",
+      secondsPerBeat: 4,
+      beats: [
+        { title: "增长看得见", caption: "字幕：本周销售增长 38%" },
+        { title: "来自续费", caption: "字幕：客户持续选择我们" },
+        { title: "下一步行动", caption: "字幕：立即查看新版能力" },
+      ],
+      font: {
+        family: "Acme Sans",
+        fileName: "../AcmeSans-Regular.woff2",
+        base64: "d09GMg==",
+      },
+      logo: null,
+    } as unknown as Parameters<TauriMaterialVideoStudioGateway["submitMotionDraft"]>[0];
+
+    await expect(gateway.submitMotionDraft(request)).rejects.toMatchObject({
+      code: "protocol_mismatch",
+    });
     expect(invoke).not.toHaveBeenCalled();
   });
 });
