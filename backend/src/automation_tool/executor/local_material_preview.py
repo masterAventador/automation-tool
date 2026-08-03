@@ -96,8 +96,13 @@ def safe_preview_content_type(kind: ProbedMaterialKind, header: bytes) -> str:
     if len(header) >= 12 and header[4:8] == b"ftyp":
         if kind is ProbedMaterialKind.AUDIO:
             return "audio/mp4"
-        if kind is ProbedMaterialKind.VIDEO:
-            return "video/quicktime" if header[8:12] == b"qt  " else "video/mp4"
+        # Only VIDEO can be left: the kind was checked against the closed set on
+        # entry and IMAGE either returned or was refused above. Asserted rather
+        # than asked again, so that a kind added later fails loudly here instead
+        # of quietly falling through to the container checks below and being
+        # served under whatever they happen to match.
+        assert kind is ProbedMaterialKind.VIDEO
+        return "video/quicktime" if header[8:12] == b"qt  " else "video/mp4"
     if header.startswith(b"\x1aE\xdf\xa3"):
         lowered = header.lower()
         if b"webm" in lowered:
