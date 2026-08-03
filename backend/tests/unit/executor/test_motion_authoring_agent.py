@@ -24,7 +24,7 @@ import math
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Literal, cast
+from typing import Any, ClassVar, Literal, cast
 from unittest import mock
 
 from automation_tool.executor.motion_authoring import (
@@ -2563,3 +2563,300 @@ class WorkspaceFailClosedTests(unittest.TestCase):
             ]:
                 with self.subTest(label=label), self.assertRaises(MotionAuthoringRejected):
                     workspace.read_text(relative)
+
+
+class PackagedContractLoaderTests(unittest.TestCase):
+    """Every packaged contract has the same two ways of being wrong.
+
+    These are read once at import and then trusted for the life of the process,
+    so their refusals cannot be reached through any public call. Each loader is
+    therefore driven directly, with the module's own path constant pointed at a
+    file this test wrote: one that is not there, and one that parses but says
+    something the contract does not allow.
+
+    An installation defect is not something a brief can be rewritten around --
+    the whole point of these is that they fail closed rather than fall back to a
+    literal nobody reviewed.
+    """
+
+    _LOADERS: ClassVar[tuple[tuple[str, str, str, object], ...]] = (
+        (
+            "storyboard duration",
+            "_DURATION_CONTRACT_PATH",
+            "_load_catalog_segment_seconds_maximum",
+            {"schemaVersion": 1, "policy": "fail_closed", "totalSecondsMaximum": 0},
+        ),
+        (
+            "render canvas",
+            "_RENDER_CANVAS_PATH",
+            "_load_render_canvas",
+            {"schemaVersion": 1, "policy": "fail_closed", "width": 8, "height": 1080},
+        ),
+        (
+            "locked motion catalog",
+            "_MOTION_CATALOG_PATH",
+            "_load_locked_catalog_items",
+            {"items": [{"name": "only-one"}]},
+        ),
+        (
+            "model call",
+            "_MODEL_CALL_CONTRACT_PATH",
+            "_load_model_stream_idle_timeout_seconds",
+            {"schemaVersion": 1, "policy": "fail_closed"},
+        ),
+        (
+            "one-sentence brief",
+            "_BRIEF_CONTRACT_PATH",
+            "_load_brief_bounds",
+            {"schemaVersion": 1, "policy": "fail_closed"},
+        ),
+    )
+
+    def test_a_contract_the_package_does_not_carry_is_refused(self) -> None:
+        for label, attribute, loader, _drifted in self._LOADERS:
+            with (
+                TemporaryDirectory() as raw,
+                self.subTest(label=label),
+                mock.patch.object(
+                    motion_authoring_agent,
+                    attribute,
+                    Path(raw) / "absent.json",
+                ),
+                self.assertRaises(MotionAuthoringRejected),
+            ):
+                getattr(motion_authoring_agent, loader)()
+
+    def test_a_contract_that_will_not_parse_is_refused(self) -> None:
+        for label, attribute, loader, _drifted in self._LOADERS:
+            with TemporaryDirectory() as raw:
+                path = Path(raw) / "contract.json"
+                path.write_text("{not json", encoding="utf-8")
+                with (
+                    self.subTest(label=label),
+                    mock.patch.object(motion_authoring_agent, attribute, path),
+                    self.assertRaises(MotionAuthoringRejected),
+                ):
+                    getattr(motion_authoring_agent, loader)()
+
+    def test_a_contract_that_drifted_from_what_it_declares_is_refused(self) -> None:
+        for label, attribute, loader, drifted in self._LOADERS:
+            with TemporaryDirectory() as raw:
+                path = Path(raw) / "contract.json"
+                path.write_text(json.dumps(drifted), encoding="utf-8")
+                with (
+                    self.subTest(label=label),
+                    mock.patch.object(motion_authoring_agent, attribute, path),
+                    self.assertRaises(MotionAuthoringRejected),
+                ):
+                    getattr(motion_authoring_agent, loader)()
+
+    def test_a_contract_document_that_is_not_an_object_is_refused(self) -> None:
+        """A JSON array parses fine and carries none of the keys anything reads."""
+        with TemporaryDirectory() as raw:
+            path = Path(raw) / "contract.json"
+            path.write_text("[1, 2]", encoding="utf-8")
+
+            with self.assertRaises(MotionAuthoringRejected):
+                motion_authoring_agent._load_json_document(path)
+
+    def test_a_beat_bound_the_duration_contract_does_not_declare_is_refused(self) -> None:
+        """The two beat bounds live in the storyboard duration contract, not the brief one."""
+        with TemporaryDirectory() as raw:
+            path = Path(raw) / "contract.json"
+            path.write_text(
+                json.dumps({"schemaVersion": 1, "policy": "fail_closed"}),
+                encoding="utf-8",
+            )
+            absent = Path(raw) / "absent.json"
+
+            with (
+                mock.patch.object(motion_authoring_agent, "_DURATION_CONTRACT_PATH", path),
+                self.assertRaises(MotionAuthoringRejected),
+            ):
+                motion_authoring_agent._load_brief_beat_bound("briefBeatCountMaximum")
+
+            with (
+                mock.patch.object(motion_authoring_agent, "_DURATION_CONTRACT_PATH", absent),
+                self.assertRaises(MotionAuthoringRejected),
+            ):
+                motion_authoring_agent._load_brief_beat_bound("briefBeatCountMaximum")
+
+    def test_the_thinking_default_is_read_from_its_contract_and_fails_closed(self) -> None:
+        """Written in three places once and read in only one; the other two drifted."""
+        with TemporaryDirectory() as raw:
+            absent = Path(raw) / "absent.json"
+            drifted = Path(raw) / "drifted.json"
+            drifted.write_text(
+                json.dumps({"thinking": {"defaultEnabled": "yes"}}), encoding="utf-8"
+            )
+            declared = Path(raw) / "declared.json"
+            declared.write_text(
+                json.dumps({"thinking": {"defaultEnabled": True}}), encoding="utf-8"
+            )
+
+            for label, path in [("no file", absent), ("a value that is not a bool", drifted)]:
+                with (
+                    self.subTest(label=label),
+                    mock.patch.object(motion_authoring_agent, "_MODEL_CALL_CONTRACT_PATH", path),
+                    self.assertRaises(MotionAuthoringRejected),
+                ):
+                    motion_authoring_agent.load_thinking_default()
+
+            with mock.patch.object(motion_authoring_agent, "_MODEL_CALL_CONTRACT_PATH", declared):
+                self.assertIs(motion_authoring_agent.load_thinking_default(), True)
+
+    def test_a_duration_ceiling_the_contract_does_not_declare_is_refused(self) -> None:
+        with TemporaryDirectory() as raw:
+            path = Path(raw) / "contract.json"
+            path.write_text(
+                json.dumps({"schemaVersion": 1, "policy": "fail_closed"}),
+                encoding="utf-8",
+            )
+
+            with (
+                mock.patch.object(motion_authoring_agent, "_DURATION_CONTRACT_PATH", path),
+                self.assertRaises(MotionAuthoringRejected),
+            ):
+                motion_authoring_agent._load_maximum_duration_seconds()
+
+    def test_a_slot_table_that_cannot_be_read_stops_the_selectable_catalog(self) -> None:
+        with (
+            TemporaryDirectory() as raw,
+            mock.patch.object(
+                motion_authoring_agent,
+                "_MOTION_PART_SLOTS_PATH",
+                Path(raw) / "absent.json",
+            ),
+            self.assertRaises(MotionAuthoringRejected),
+        ):
+            motion_authoring_agent._load_selectable_catalog_parts()
+
+    def test_a_component_document_the_package_does_not_carry_is_refused(self) -> None:
+        with (
+            TemporaryDirectory() as raw,
+            mock.patch.object(
+                motion_authoring_agent,
+                "AUTHORING_VENDOR_ROOT",
+                Path(raw),
+            ),
+            self.assertRaises(MotionAuthoringRejected),
+        ):
+            motion_authoring_agent._load_locked_component_metadata()
+
+
+class VideoCreationModelConfigTests(unittest.TestCase):
+    """The one place that turns a catalog and a secret into a usable model."""
+
+    _CATALOG: ClassVar[dict[str, object]] = {
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "purposes": [
+            {"id": "video_creative", "default_model_id": "qwen3-max-2026-01-25"},
+        ],
+    }
+
+    def _write(self, root: Path, name: str, document: object) -> Path:
+        path = root / name
+        path.write_text(json.dumps(document), encoding="utf-8")
+        return path
+
+    def test_a_catalog_and_secret_that_agree_build_one_config(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            catalog = self._write(root, "catalog.json", self._CATALOG)
+            secret = self._write(root, "secret.json", {"apiKey": "sk-" + "a" * 40})
+
+            config = load_video_creation_model_config(catalog_path=catalog, secret_path=secret)
+
+            assert config is not None
+            self.assertEqual(config.model_id, "qwen3-max-2026-01-25")
+
+    def test_no_secret_means_no_model_rather_than_a_hidden_default(self) -> None:
+        """A symlink counts as no secret: the file the App wrote is the only one read."""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            catalog = self._write(root, "catalog.json", self._CATALOG)
+            real = self._write(root, "real.json", {"apiKey": "sk-" + "a" * 40})
+            linked = root / "linked.json"
+            linked.symlink_to(real)
+
+            for label, secret in [
+                ("no file", root / "absent.json"),
+                ("a symlink standing in for it", linked),
+            ]:
+                with self.subTest(label=label):
+                    self.assertIsNone(
+                        load_video_creation_model_config(catalog_path=catalog, secret_path=secret)
+                    )
+
+    def test_a_secret_without_a_key_means_no_model(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            catalog = self._write(root, "catalog.json", self._CATALOG)
+            secret = self._write(root, "secret.json", {"note": "no key"})
+
+            self.assertIsNone(
+                load_video_creation_model_config(catalog_path=catalog, secret_path=secret)
+            )
+
+    def test_a_catalog_or_secret_that_cannot_be_read_is_refused(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            good_secret = self._write(root, "secret.json", {"apiKey": "sk-" + "a" * 40})
+            good_catalog = self._write(root, "catalog.json", self._CATALOG)
+            broken = root / "broken.json"
+            broken.write_text("{not json", encoding="utf-8")
+
+            for label, catalog, secret in [
+                ("an unreadable catalog", broken, good_secret),
+                ("an unreadable secret", good_catalog, broken),
+            ]:
+                with self.subTest(label=label), self.assertRaises(MotionAuthoringRejected):
+                    load_video_creation_model_config(catalog_path=catalog, secret_path=secret)
+
+    def test_a_catalog_that_declares_no_usable_video_model_is_refused(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            secret = self._write(root, "secret.json", {"apiKey": "sk-" + "a" * 40})
+
+            cases: list[tuple[str, object]] = [
+                ("a document that is not an object", [1, 2]),
+                ("no purposes list", {"base_url": "https://x", "purposes": {}}),
+                (
+                    "no video_creative purpose",
+                    {"base_url": "https://x", "purposes": [{"id": "voiceover"}]},
+                ),
+                (
+                    "a purpose with no model id",
+                    {"base_url": "https://x", "purposes": [{"id": "video_creative"}]},
+                ),
+                (
+                    "a model id that is empty",
+                    {
+                        "base_url": "https://x",
+                        "purposes": [{"id": "video_creative", "default_model_id": ""}],
+                    },
+                ),
+            ]
+            for label, document in cases:
+                catalog = self._write(root, f"catalog-{abs(hash(label))}.json", document)
+                with self.subTest(label=label), self.assertRaises(MotionAuthoringRejected):
+                    load_video_creation_model_config(catalog_path=catalog, secret_path=secret)
+
+    def test_a_secret_may_override_the_gateway_the_catalog_names(self) -> None:
+        """Both are read; the secret's own base URL wins when it carries one."""
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            catalog = self._write(root, "catalog.json", self._CATALOG)
+            secret = self._write(
+                root,
+                "secret.json",
+                {
+                    "apiKey": "sk-" + "a" * 40,
+                    "openAiCompatibleBaseUrl": "https://gateway.example.com/v1",
+                },
+            )
+
+            config = load_video_creation_model_config(catalog_path=catalog, secret_path=secret)
+
+            assert config is not None
+            self.assertEqual(config.base_url, "https://gateway.example.com/v1")
