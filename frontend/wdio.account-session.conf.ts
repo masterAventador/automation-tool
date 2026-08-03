@@ -40,5 +40,7 @@ export const config: WebdriverIO.Config = {
   connectionRetryCount: 1,
   framework: "mocha",
   reporters: ["spec"],
-  mochaOpts: { ui: "bdd", timeout: 90_000 },
+  // 实测基线 89.3s，原上限 90s——只剩 0.7s 余量，任何一次慢启动都会把它顶成
+  // 抖动红灯。180s 是本仓最常用的取值（11 个配置），产品断言一条未改。
+  mochaOpts: { ui: "bdd", timeout: 180_000 },
 };

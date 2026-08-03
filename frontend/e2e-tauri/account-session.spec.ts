@@ -14,6 +14,12 @@ interface AccountSessionSnapshot {
 describe("U9-04 hidden customer Demo account gate acceptance", () => {
   it("keeps the workbench unmounted and returns only a safe native snapshot", async () => {
     await expect(await browser.$("h2")).toHaveText("登录自动化运营工具");
+    // CQ-01 的五处改名里，这一处此前连单元测试都没有——只有源码。断言写在
+    // 具体元素上而不是 body 上：元素不存在时 toHaveText 会失败，而 body 里
+    // 找子串在文案被删掉时只会静默变成另一种「通过」。
+    await expect(await browser.$(".ant-typography-secondary")).toHaveText(
+      "客户演示版需要产品账号；平台扫码登录将在进入工作台后单独处理。",
+    );
     const body = await browser.$("body").getText();
     // 工作台是否挂载改成问 shell 本身：改版把那个工作台标题删了，
     // 而这一句是「未登录不得进工作台」的那道闸——字符串一旦不存在，
