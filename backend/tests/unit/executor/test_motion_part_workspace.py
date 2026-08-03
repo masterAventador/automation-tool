@@ -24,9 +24,9 @@ that includes `<script>` and `<style>`, not the nth *visible* run.
 
 from __future__ import annotations
 
-import pytest
-
 from pathlib import Path
+
+import pytest
 
 from automation_tool.executor.motion_authoring.part_workspace import (
     PartSlot,
@@ -294,6 +294,44 @@ def test_the_written_document_carries_the_copy_and_the_font_rules(tmp_path) -> N
     assert document.count(FONT_CSS) == 1
 
 
+def test_a_transition_working_copy_replaces_demo_scenes_with_the_beat(
+    tmp_path,
+) -> None:
+    catalog = tmp_path / "motion-catalog"
+    part = catalog / "items" / "glitch"
+    part.mkdir(parents=True)
+    (part / "glitch.html").write_text(
+        """<!doctype html><html><head></head><body>
+<div data-composition-id="main" data-duration="4" data-width="1920" data-height="1080">
+  <div id="s1"><div class="scene-label">SCENE A</div></div>
+  <div id="s2"><div class="scene-label">SCENE B</div></div>
+  <div class="bp-prompt">use glitch shader transition</div>
+</div><script>window.__timelines={main:{seek(){}}}</script></body></html>""",
+        encoding="utf-8",
+    )
+    workspace = _RecordingWorkspace(tmp_path / "job")
+
+    entry = write_part_working_copy(
+        workspace=workspace,
+        catalog_root=catalog,
+        name="glitch",
+        slots=(),
+        copy={},
+        font_css="",
+        headline="新品发布",
+        body="旧方案切换到新方案",
+        items=("更快", "更稳"),
+        allow_missing_references=True,
+    )
+
+    document = workspace.written[entry].decode("utf-8")
+    assert document.index("data-motion-transition-content") < document.index(
+        "window.__timelines"
+    )
+    assert "新品发布" in document
+    assert "旧方案切换到新方案" in document
+
+
 def test_a_part_the_catalog_does_not_carry_fails_closed(tmp_path) -> None:
     catalog = _catalog(tmp_path)
     workspace = _RecordingWorkspace(tmp_path / "job")
@@ -544,3 +582,29 @@ def test_referenced_assets_can_skip_a_dead_reference_when_told_to(tmp_path) -> N
         html, catalog_root=catalog, origin=part, on_missing="skip"
     )
     assert set(assets) == {"items/demo/poster.png"}
+
+
+def test_a_visual_only_working_copy_skips_upstream_demo_placeholders(tmp_path) -> None:
+    """A dead sample URL must not make a visual-only catalog choice crash."""
+    catalog = _catalog(tmp_path)
+    part = catalog / "items" / "lt-bold-block"
+    (part / "lt-bold-block.html").write_text(
+        CATALOG_PART_HTML.replace(
+            "</body>", '<video src="missing-demo.mp4"></video></body>'
+        ),
+        encoding="utf-8",
+    )
+    workspace = _RecordingWorkspace(tmp_path / "job")
+
+    entry = write_part_working_copy(
+        workspace=workspace,
+        catalog_root=catalog,
+        name="lt-bold-block",
+        slots=(),
+        copy={},
+        font_css="",
+        allow_missing_references=True,
+    )
+
+    assert entry in workspace.written
+    assert not any(path.endswith("missing-demo.mp4") for path in workspace.written)

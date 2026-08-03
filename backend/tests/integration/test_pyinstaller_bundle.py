@@ -143,6 +143,18 @@ def test_pyinstaller_onedir_bundle_contains_locked_runtimes_and_starts_without_p
     assert startup.stdout == b""
     assert startup.stderr == b"Local Executor bootstrap is rejected\n"
 
+    authoring = subprocess.run(
+        [os.fspath(executable), "--author-motion"],
+        input=b"",
+        capture_output=True,
+        check=False,
+        timeout=30,
+        env=frozen_artifact_environment(),
+    )
+    assert authoring.returncode == 70
+    assert json.loads(authoring.stdout) == {"schemaVersion": 1, "status": "rejected"}
+    assert authoring.stderr == b""
+
     with rejecting_websocket_endpoint() as websocket_port:
         unavailable = subprocess.run(
             [os.fspath(executable)],
@@ -170,6 +182,14 @@ def test_pyinstaller_onedir_bundle_contains_locked_runtimes_and_starts_without_p
     assert "_internal/speech/silero-vad/silero_vad_16k_op15.onnx" in inventory
     assert "_internal/speech/silero-vad/SILERO-VAD-LICENSE.txt" in inventory
     assert "_internal/onnxruntime/LICENSE" in inventory
+    packaged_component_sources = tuple(
+        path
+        for path in inventory
+        if path.startswith("_internal/vendor/hyperframes/registry/components/")
+        and path.endswith(".html")
+    )
+    assert len(packaged_component_sources) == 25
+    assert all(not path.endswith("/demo.html") for path in packaged_component_sources)
     assert not any(
         name == ".local-browsers"
         or name.startswith(("chromium-", "firefox-", "webkit-", "ffmpeg-"))

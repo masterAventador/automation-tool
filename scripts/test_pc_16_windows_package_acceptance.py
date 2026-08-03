@@ -12,8 +12,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import run_pc_16_windows_package_acceptance as acceptance
 import run_eb_16_windows_acceptance as production_windows
+import run_pc_16_windows_package_acceptance as acceptance
 from build_motion_catalog_release import aggregate_digest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -110,6 +110,21 @@ class WindowsRunnerWiringTests(unittest.TestCase):
 
             self.assertIn("owned", rendered)
             self.assertNotIn("target", rendered)
+
+    def test_profile_probe_uses_the_real_test_owned_temporary_root(self) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="automation-tool-pc16-profile-probe-"
+        ) as raw:
+            parent = Path(raw)
+            real = parent / "real"
+            real.mkdir()
+            alias = parent / "alias"
+            alias.symlink_to(real, target_is_directory=True)
+
+            rendered = acceptance.windows_profile_probe_app_data(alias)
+
+            self.assertEqual(rendered, os.fspath(real.resolve() / "app-data"))
+            self.assertFalse(rendered.startswith("\\\\?\\"))
 
     def test_non_windows_preflight_uses_pc16_vocabulary_without_a_traceback(self) -> None:
         with patch.object(
@@ -216,6 +231,18 @@ class WindowsRunnerWiringTests(unittest.TestCase):
             source,
         )
         self.assertIn("os.path.abspath(os.fspath(path))", source)
+
+    def test_delivered_film_is_inspected_with_the_installed_media_toolchain(self) -> None:
+        source = RUNNER.read_text(encoding="utf-8")
+
+        self.assertIn(
+            'ffprobe=installed_video_runtime["media-toolchain"] / "bin/ffprobe.exe"',
+            source,
+        )
+        self.assertIn(
+            'ffmpeg=installed_video_runtime["media-toolchain"] / "bin/ffmpeg.exe"',
+            source,
+        )
 
     def test_production_windows_release_installs_and_gates_the_catalog(self) -> None:
         source = PRODUCTION_WINDOWS.read_text(encoding="utf-8")

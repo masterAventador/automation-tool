@@ -720,6 +720,34 @@ def test_sandbox_isolation_flags_and_wall_timeout(assets: Path, decoy: Path) -> 
     assert_workspace_untouched(workspace)
 
 
+def test_windows_diagnostic_cleanup_is_owned_by_the_native_handle_boundary(
+    _assets: Path, _decoy: Path
+) -> None:
+    """Node must not path-delete a package side effect after an identity check."""
+    worker = (ROOT / "workers/motion_composition/worker.mjs").read_text(encoding="utf-8")
+    native = (ROOT / "frontend/src-tauri/src/local_video_orchestrator.rs").read_text(
+        encoding="utf-8"
+    )
+    assert "removeWindowsBrowserDiagnostic" not in worker
+    assert "captureWindowsBrowserDirectoryIdentity" not in worker
+    assert "SetFileInformationByHandle" in native
+    assert "FILE_FLAG_OPEN_REPARSE_POINT" in native
+    assert "GetFinalPathNameByHandleW" in native
+    assert "remove_windows_render_browser_diagnostic" in native
+    assert "fn receive_render_line_or_stop(" in native
+    assert native.count("receive_render_line_or_stop(&mut workers, kind, wait)?") == 2
+    assert "fn force_stop(running: &mut RunningVideoWorker) -> Result<(), VideoWorkerError>" in native
+    public_stop = native[native.index("    pub fn stop(") : native.index("    pub fn stop_all(")]
+    assert "force_stop(&mut running)?" in public_stop
+    stop_all = native[native.index("    pub fn stop_all(") : native.index("    fn lock_workers(")]
+    assert "if force_stop(&mut running).is_err()" in stop_all
+    assert "return Err(process_unavailable())" in stop_all
+    stop = native[native.index("fn force_stop(") : native.index("fn finish_exited_worker(")]
+    assert stop.index("running.child.wait()") < stop.index(
+        "remove_windows_render_browser_diagnostic"
+    )
+
+
 def run_resource_budget_case(
     assets: Path, decoy: Path, mode: str, spec_overrides: dict[str, object]
 ) -> None:
@@ -765,6 +793,7 @@ def main() -> int:
         test_sandbox_forged_or_tampered_command_is_ignored,
         test_sandbox_rejects_chromium_major_mismatch,
         test_sandbox_isolation_flags_and_wall_timeout,
+        test_windows_diagnostic_cleanup_is_owned_by_the_native_handle_boundary,
         test_sandbox_cpu_budget_kills_the_process_group,
         test_sandbox_memory_budget_kills_the_process_group,
     ]

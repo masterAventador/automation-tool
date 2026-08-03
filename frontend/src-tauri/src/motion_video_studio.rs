@@ -36,8 +36,8 @@ const DURATION_CONTRACT: &str =
     include_str!("../../../contracts/video/motion-storyboard-duration.v1.json");
 const BRIEF_CONTRACT: &str =
     include_str!("../../../contracts/video/motion-one-sentence-brief.v1.json");
-const MOTION_PART_SLOTS_CONTRACT: &str =
-    include_str!("../../../contracts/video/motion-part-slots.v1.json");
+const MOTION_CATALOG_UI_CONTRACT: &str =
+    include_str!("../../../contracts/video/motion-catalog-ui.v1.json");
 const AUTHORING_REFUSAL_CONTRACT: &str =
     include_str!("../../../contracts/video/motion-authoring-refusal.v1.json");
 const OFFLINE_MOTION_DEPENDENCIES: &str =
@@ -702,20 +702,19 @@ fn selectable_catalog_part_ids() -> Result<&'static BTreeSet<String>, MotionVide
     IDENTIFIERS
         .get_or_init(|| {
             let document: serde_json::Value =
-                serde_json::from_str(MOTION_PART_SLOTS_CONTRACT).ok()?;
-            if document.get("schemaVersion")?.as_u64()? != 1
-                || document.get("id")?.as_str()? != "motion-part-slots.v1"
-                || document.get("policy")?.as_str()? != "fail_closed"
-                || document.get("counts")?.get("parts")?.as_u64()? != 37
+                serde_json::from_str(MOTION_CATALOG_UI_CONTRACT).ok()?;
+            if document.get("schemaVersion")?.as_str()? != "1.0"
+                || document.get("id")?.as_str()? != "automation-tool.motion-catalog-ui.v1"
+                || document.get("counts")?.get("total")?.as_u64()? != 134
             {
                 return None;
             }
-            let items = document.get("parts")?.as_array()?;
+            let items = document.get("items")?.as_array()?;
             let identifiers = items
                 .iter()
-                .map(|item| item.get("name")?.as_str().map(str::to_owned))
+                .map(|item| item.get("id")?.as_str().map(str::to_owned))
                 .collect::<Option<BTreeSet<_>>>()?;
-            (items.len() == 37 && identifiers.len() == 37).then_some(identifiers)
+            (items.len() == 134 && identifiers.len() == 134).then_some(identifiers)
         })
         .as_ref()
         .ok_or_else(authoring_installation_damaged)

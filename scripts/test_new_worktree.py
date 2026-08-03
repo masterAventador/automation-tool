@@ -13,6 +13,7 @@ Two properties this repository has already been bitten by, in that order:
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -24,7 +25,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from new_worktree import (  # noqa: E402
     clone_directory,
     gitdir_pointer,
+    resolved_command,
     worktree_add_command,
+    write_gitdir_pointer,
 )
 
 
@@ -59,6 +62,94 @@ class WorktreeAddCommand(unittest.TestCase):
         self.assertNotIn("-b", command)
 
 
+class ResolvedCommand(unittest.TestCase):
+    def test_windows_batch_entrypoints_run_through_cmd(self) -> None:
+        command = resolved_command(
+            ["pnpm", "install"],
+            resolved=r"C:\\Tools\\pnpm.CMD",
+            platform="nt",
+            comspec=r"C:\\Windows\\System32\\cmd.exe",
+        )
+
+        self.assertEqual(
+            [
+                r"C:\\Windows\\System32\\cmd.exe",
+                "/d",
+                "/s",
+                "/c",
+                "call",
+                r"C:\\Tools\\pnpm.CMD",
+                "install",
+            ],
+            command,
+        )
+
+    def test_windows_batch_entrypoints_preserve_a_path_with_spaces(self) -> None:
+        command = resolved_command(
+            ["pnpm", "install", "--frozen-lockfile"],
+            resolved=r"C:\\Program Files\\nodejs\\pnpm.cmd",
+            platform="nt",
+            comspec=r"C:\\Windows\\System32\\cmd.exe",
+        )
+
+        self.assertEqual(
+            [
+                r"C:\\Windows\\System32\\cmd.exe",
+                "/d",
+                "/s",
+                "/c",
+                "call",
+                r"C:\\Program Files\\nodejs\\pnpm.cmd",
+                "install",
+                "--frozen-lockfile",
+            ],
+            command,
+        )
+
+    @unittest.skipUnless(os.name == "nt", "Windows cmd.exe behavior")
+    def test_windows_runs_a_real_batch_file_from_a_path_with_spaces(self) -> None:
+        with TemporaryDirectory(prefix="worktree command path ") as directory:
+            batch = Path(directory) / "probe command.cmd"
+            batch.write_text(
+                '@echo off\nif "%~1"=="sentinel arg" exit /b 0\nexit /b 9\n',
+                encoding="utf-8",
+            )
+            command = resolved_command(
+                ["probe", "sentinel arg"],
+                resolved=str(batch),
+                platform="nt",
+                comspec=os.environ.get("COMSPEC", "cmd.exe"),
+            )
+
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(
+                completed.returncode,
+                0,
+                msg=(
+                    f"argv={command!r}\n"
+                    f"command_line={subprocess.list2cmdline(command)}\n"
+                    f"stdout={completed.stdout!r}\nstderr={completed.stderr!r}"
+                ),
+            )
+
+    def test_native_entrypoints_run_directly(self) -> None:
+        self.assertEqual(
+            ["/usr/bin/uv", "sync"],
+            resolved_command(
+                ["uv", "sync"],
+                resolved="/usr/bin/uv",
+                platform="posix",
+                comspec="cmd.exe",
+            ),
+        )
+
+
 class GitdirPointer(unittest.TestCase):
     def test_matches_what_git_itself_writes_for_a_worktree_submodule(self) -> None:
         # Read off a real worktree on 2026-07-26:
@@ -79,6 +170,16 @@ class GitdirPointer(unittest.TestCase):
             "gitdir: ../../../../../.git/worktrees/ui/modules/a/b/c",
             gitdir_pointer("ui", "a/b/c"),
         )
+
+    def test_a_copied_read_only_pointer_is_replaced(self) -> None:
+        with TemporaryDirectory() as directory:
+            destination = Path(directory) / ".git"
+            destination.write_text("copied", encoding="utf-8")
+            destination.chmod(0o444)
+
+            write_gitdir_pointer(destination, "gitdir: replacement")
+
+            self.assertEqual("gitdir: replacement\n", destination.read_text("utf-8"))
 
 
 class CloneDirectory(unittest.TestCase):

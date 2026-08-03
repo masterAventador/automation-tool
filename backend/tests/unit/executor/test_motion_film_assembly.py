@@ -15,7 +15,6 @@ template composition on the template's stage, which is what "本机 4 layout 模
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -94,6 +93,7 @@ def assemble(beats, tmp_path, **overrides):
         "slot_budget": BUDGET,
         "part_durations": DURATIONS,
         "part_dimensions": DIMENSIONS,
+        "part_types": {"lt-bold-block": "block"},
         "template_canvas": TEMPLATE_CANVAS,
         "frames_per_second": 30,
         "segment_frames_maximum": 600,
@@ -229,6 +229,21 @@ def test_narration_longer_than_the_motion_lengthens_the_shot(tmp_path) -> None:
     assert film.segments[0].frames == 240
 
 
+def test_a_long_visual_timeline_is_compressed_into_one_complete_capture(tmp_path) -> None:
+    """Keep the full 24s source window without asking the Worker for 720 frames."""
+    film = assemble(
+        [BeatPlan(beat_id="b1", part="lt-bold-block", copy={}, voice_seconds=None)],
+        tmp_path,
+        part_durations={"lt-bold-block": 24.0},
+        slot_table={"parts": []},
+    )
+
+    segment = film.segments[0]
+    assert segment.frames == 600
+    assert segment.seconds == 20.0
+    assert segment.source_end_millis == 24_000
+
+
 def test_a_part_the_catalog_does_not_carry_is_refused(tmp_path) -> None:
     with pytest.raises(AssemblyRejected):
         assemble(
@@ -237,8 +252,61 @@ def test_a_part_the_catalog_does_not_carry_is_refused(tmp_path) -> None:
         )
 
 
-def test_a_part_with_no_frozen_slots_is_refused(tmp_path) -> None:
-    """A part nobody measured cannot take this film's copy."""
+def test_a_visual_only_part_with_no_frozen_slots_is_rendered_unchanged(tmp_path) -> None:
+    """A missing copy slot must not make an otherwise renderable part unusable."""
+    film = assemble(
+        [BeatPlan(beat_id="b1", part="lt-bold-block", copy={}, voice_seconds=None)],
+        tmp_path,
+        slot_table={"parts": []},
+    )
+
+    assert film.segments[0].part == "lt-bold-block"
+    assert film.segments[0].slot_budgets == ()
+
+
+def test_a_visual_only_part_does_not_request_copy_replacement_fonts(tmp_path) -> None:
+    """No frozen copy means the part keeps its visual text and its font fallback."""
+    def unexpected_font_request(_name: str) -> str:
+        raise AssertionError("visual-only part requested copy replacement fonts")
+
+    film = assemble(
+        [BeatPlan(beat_id="b1", part="lt-bold-block", copy={}, voice_seconds=None)],
+        tmp_path,
+        slot_table={"parts": []},
+        font_css_for=unexpected_font_request,
+    )
+
+    assert film.segments[0].part == "lt-bold-block"
+
+
+def test_reusing_one_part_keeps_each_beats_own_working_copy(tmp_path) -> None:
+    workspace = _Workspace()
+    film = assemble(
+        [
+            BeatPlan(
+                beat_id="b1",
+                part="lt-bold-block",
+                copy={1: "第一镜"},
+                voice_seconds=None,
+            ),
+            BeatPlan(
+                beat_id="b2",
+                part="lt-bold-block",
+                copy={1: "第二镜"},
+                voice_seconds=None,
+            ),
+        ],
+        tmp_path,
+        workspace=workspace,
+    )
+
+    first, second = film.segments
+    assert first.entry_html != second.entry_html
+    assert "第一镜" in workspace.written[first.entry_html].decode("utf-8")
+    assert "第二镜" in workspace.written[second.entry_html].decode("utf-8")
+
+
+def test_a_visual_only_part_refuses_copy_that_has_no_frozen_anchor(tmp_path) -> None:
     with pytest.raises(AssemblyRejected):
         assemble(
             [BeatPlan(beat_id="b1", part="lt-bold-block", copy={1: "张三"}, voice_seconds=None)],

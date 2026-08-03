@@ -32,9 +32,9 @@ as operator copy.)
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Mapping, Sequence
 
 from .film_timeline import (
     RenderCost,
@@ -67,6 +67,9 @@ class BeatPlan:
     # else — but every beat carries it so the two kinds are described the same
     # way.
     start_seconds: float = 0.0
+    headline: str = ""
+    body: str = ""
+    items: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +124,7 @@ def assemble_film(
     slot_budget: Mapping[str, object],
     part_durations: Mapping[str, float],
     part_dimensions: Mapping[str, tuple[int, int]],
+    part_types: Mapping[str, str],
     template_canvas: Mapping[str, int],
     template_entry: str = "composition.html",
     frames_per_second: int,
@@ -146,10 +150,14 @@ def assemble_film(
                 f"beat {beat.beat_id!r} names {beat.part!r}, which the catalog does "
                 "not carry"
             )
-        if beat.part not in slots_by_part:
+        if beat.part not in part_types:
             raise AssemblyRejected(
-                f"beat {beat.beat_id!r} names {beat.part!r}, which has no frozen "
-                "slots — nothing measured where its copy would go"
+                f"beat {beat.beat_id!r} names {beat.part!r}, which has no declared type"
+            )
+        if beat.copy and beat.part not in slots_by_part:
+            raise AssemblyRejected(
+                f"beat {beat.beat_id!r} supplies copy for {beat.part!r}, which has no "
+                "frozen text slots"
             )
 
     # Planned first, in full. A shot that cannot render fails here, before a
@@ -158,7 +166,18 @@ def assemble_film(
         [
             Shot(
                 part=beat.part or "template",
-                motion_seconds=part_durations.get(beat.part) if beat.part else None,
+                # A few complete transitions publish 21–24s timelines while
+                # one Worker capture is 20s. Sample their complete source
+                # window into the maximum legal frame count instead of cutting
+                # off their final action or rejecting a locked catalog choice.
+                motion_seconds=(
+                    min(
+                        part_durations[beat.part],
+                        segment_frames_maximum / frames_per_second,
+                    )
+                    if beat.part
+                    else None
+                ),
                 voice_seconds=beat.voice_seconds,
                 declared_seconds=beat.declared_seconds,
             )
@@ -169,7 +188,7 @@ def assemble_film(
     )
 
     segments: list[FilmSegment] = []
-    for beat, planned in zip(beats, plan.shots):
+    for beat, planned in zip(beats, plan.shots, strict=True):
         if beat.part is None:
             segments.append(
                 FilmSegment(
@@ -201,7 +220,7 @@ def assemble_film(
                 )
             )
             continue
-        frozen = slots_by_part[beat.part]
+        frozen = slots_by_part.get(beat.part, ())
         entry = write_part_working_copy(
             workspace=workspace,
             catalog_root=catalog_root,
@@ -215,7 +234,21 @@ def assemble_film(
                 for slot in frozen
             ),
             copy=beat.copy,
-            font_css=font_css_for(beat.part),
+            # Only a part with frozen copy receives replacement copy and the
+            # matching packaged font rules. Visual-only parts retain their own
+            # typography; asking the resolver about it can reject an upstream
+            # demo weight even though this film changes no text.
+            font_css=font_css_for(beat.part) if frozen else "",
+            component=part_types[beat.part] == "component",
+            headline=beat.headline,
+            body=beat.body,
+            items=beat.items,
+            instance_key=beat.beat_id,
+            # The locked visual-only set carries a few inert sample references
+            # (placeholder videos, wallpaper paths and CSS examples) that the
+            # per-part Worker allowlist intentionally blocks. Copy every real
+            # dependency while leaving those demo placeholders absent.
+            allow_missing_references=not frozen,
         )
         width, height = part_dimensions[beat.part]
         segments.append(
@@ -247,6 +280,7 @@ def assemble_film(
                         baseline_overflows_y=entry_["baselineOverflowsY"],
                     )
                     for entry_ in budget_by_part.get(beat.part, ())
+                    if any(slot["index"] == entry_["index"] for slot in frozen)
                 ),
             )
         )

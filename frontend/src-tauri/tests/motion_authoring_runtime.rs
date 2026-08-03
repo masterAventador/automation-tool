@@ -304,8 +304,8 @@ fn user_part_overrides_are_validated_and_reach_the_authoring_request() {
             true,
             vec![Some("caption-kinetic-slam".to_owned()), None, None],
         )
-        .is_err(),
-        "a catalogued part without a real film slot must not reach the Executor",
+        .is_ok(),
+        "a locked visual-only part must be allowed to reach the Executor",
     );
 }
 
@@ -955,6 +955,14 @@ fn the_windows_packaged_motion_worker_starts_from_the_verbatim_resource_path() {
             .join("chrome-win64")
             .join("chrome.exe"),
     );
+    let browser_debug_log = payload
+        .join("embedded-browser")
+        .join("chrome-win64")
+        .join("debug.log");
+    assert!(
+        !browser_debug_log.exists(),
+        "the sealed installed browser tree must start without runtime diagnostics"
+    );
     let ffmpeg = verbatim(
         &payload
             .join("media-toolchain")
@@ -990,9 +998,18 @@ fn the_windows_packaged_motion_worker_starts_from_the_verbatim_resource_path() {
         )
         .expect("the packaged Worker must launch the verbatim-resource Chromium");
     assert_eq!(major, 149);
+    fs::write(
+        &browser_debug_log,
+        b"owned diagnostic after a failed render",
+    )
+    .expect("simulate the packaged Chromium diagnostic left by a failed render");
     orchestrator
         .stop(VideoWorkerKind::Node)
         .expect("the packaged Worker must stop cleanly");
+    assert!(
+        !browser_debug_log.exists(),
+        "the packaged Chromium probe must not leave diagnostics in the sealed install tree"
+    );
 }
 
 /// PC-26：旁白随段到达。音频必须真在工作区里，秒数必须装得进这一拍——

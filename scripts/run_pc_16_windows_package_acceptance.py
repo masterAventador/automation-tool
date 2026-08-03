@@ -48,6 +48,8 @@ sys.path.insert(0, str(BACKEND_ROOT / "src"))
 
 from build_motion_catalog_release import (  # noqa: E402
     aggregate_digest,
+)
+from build_motion_catalog_release import (
     stage_for_release as stage_motion_catalog,
 )
 from desktop_e2e_prerequisites import startup_gate_environment  # noqa: E402
@@ -69,7 +71,10 @@ from release_configuration import (  # noqa: E402
     merge_configuration,
     write_windows_release_configuration,
 )
-from run_e4_14_acceptance import require_port_available, start_control_plane  # noqa: E402
+from run_e4_14_acceptance import (  # noqa: E402
+    require_port_available,
+    start_control_plane,
+)
 from run_eb_16_windows_acceptance import (  # noqa: E402
     build_executor_candidate,
     pnpm_executable,
@@ -78,6 +83,7 @@ from run_eb_16_windows_acceptance import (  # noqa: E402
     stage_browser_distribution,
     terminate_processes_matching,
 )
+from run_i2_13_acceptance import compose_command  # noqa: E402
 from run_p9_04_acceptance import (  # noqa: E402
     install_root,
     installer_environment,
@@ -94,7 +100,6 @@ from run_t36_acceptance import (  # noqa: E402
     inspect_film,
     read_model_key,
 )
-from run_i2_13_acceptance import compose_command  # noqa: E402
 from run_vf_06_acceptance import (  # noqa: E402
     require_port_closed,
     unused_loopback_port,
@@ -155,6 +160,17 @@ def windows_verbatim_path(path: Path) -> str:
     if rendered.startswith("\\\\"):
         return f"\\\\?\\UNC\\{rendered[2:]}"
     return f"\\\\?\\{rendered}"
+
+
+def windows_profile_probe_app_data(temporary_root: Path) -> str:
+    """Use the real spelling of the runner-owned root for the profile gate."""
+    try:
+        real_root = temporary_root.resolve(strict=True)
+    except OSError as error:
+        raise AcceptanceFailed(
+            "PC-16 Windows could not resolve its profile-probe temporary root"
+        ) from error
+    return os.fspath(real_root / "app-data")
 
 
 def remove_owned_tree(
@@ -480,7 +496,7 @@ def verify_installed_startup_gate_inputs(
         probe_environment = {
             **environment,
             "EB16_INSTALLED_RESOURCES": windows_verbatim_path(root),
-            "EB16_APP_DATA": windows_verbatim_path(Path(temporary) / "app-data"),
+            "EB16_APP_DATA": windows_profile_probe_app_data(Path(temporary)),
             "AUTOMATION_TOOL_WINDOWS_PACKAGE_PAYLOAD": os.fspath(root),
             "CARGO_TARGET_DIR": os.fspath(cargo_target),
         }
@@ -715,7 +731,9 @@ def main() -> int:
         require_packaged_browser(
             application=root, target_id=TARGET_ID, platform="windows"
         )
-        require_packaged_video_runtime(application=root, platform="windows")
+        installed_video_runtime = require_packaged_video_runtime(
+            application=root, platform="windows"
+        )
         audit = audit_installed_motion_catalog(root)
         matrix = verify_catalog_failure_matrix(root / "motion-catalog")
         verify_installed_startup_gate_inputs(
@@ -748,7 +766,12 @@ def main() -> int:
             evidence_shots=evidence_shots,
             environment=environment,
         )
-        inspect_film(evidence_video, evidence_shots)
+        inspect_film(
+            evidence_video,
+            evidence_shots,
+            ffprobe=installed_video_runtime["media-toolchain"] / "bin/ffprobe.exe",
+            ffmpeg=installed_video_runtime["media-toolchain"] / "bin/ffmpeg.exe",
+        )
         run_failed = False
     finally:
         if server is not None:

@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import json
 import sys
 from pathlib import Path
 from PyInstaller.utils.hooks import (
@@ -53,6 +54,11 @@ executor_hiddenimports = [
     "automation_tool.executor.silero_vad",
     "automation_tool.executor.material_speech_pipeline",
     "automation_tool.executor.material_speech_transcription",
+    # `motion_authoring.__init__` deliberately imports the heavyweight one-shot
+    # entry lazily. PyInstaller cannot discover that string import from the
+    # normal CLI graph, so the packaged App needs this explicit root; Analysis
+    # then follows the entry's complete authoring/component dependency graph.
+    "automation_tool.executor.motion_authoring.entry",
 ]
 protocol_hiddenimports = [
     "automation_tool.protocol.action_authorization",
@@ -113,6 +119,22 @@ motion_authoring_resources = [
     "vendor/hyperframes/skills/hyperframes-core/references/minimal-composition.md",
     "vendor/hyperframes/skills/hyperframes-core/references/determinism-rules.md",
 ]
+# The agent lists effective component durations before it receives the App's
+# staged catalog root. Package only the 25 locked source documents that publish
+# those capture windows; demo pages and the rest of registry stay out.
+motion_catalog_document = json.loads(
+    (repository_root / "contracts/quality/motion-catalog.v1.json").read_text(
+        encoding="utf-8"
+    )
+)
+component_source_resources = [
+    f"vendor/hyperframes/{item['path']}/{item['name']}.html"
+    for item in motion_catalog_document["items"]
+    if item["type"] == "component"
+]
+if len(component_source_resources) != 25:
+    raise SystemExit("the Executor package needs exactly 25 locked component sources")
+motion_authoring_resources.extend(component_source_resources)
 motion_authoring_datas = []
 for relative in motion_authoring_resources:
     source = repository_root / relative

@@ -58,6 +58,7 @@ from automation_tool.executor.motion_authoring.agent import (  # noqa: E402
     MotionAuthoringTools,
     MotionAuthoringUnavailable,
     MotionBrief,
+    PartsCatalog,
     RenderJobSubmission,
     ScriptArtifact,
     StoryboardArtifact,
@@ -72,6 +73,9 @@ from automation_tool.executor.motion_authoring.agent import (  # noqa: E402
     load_video_creation_model_config,
     snapshot_plan,
     verify_closed_tool_surface,
+)
+from automation_tool.executor.motion_authoring.component_host import (  # noqa: E402
+    build_visual_part_film_html,
 )
 from automation_tool.executor.motion_authoring.composition_template import (  # noqa: E402
     COMPOSITION_ID,
@@ -376,6 +380,28 @@ class WorkspaceContainmentTests(unittest.TestCase):
         with TemporaryDirectory() as raw:
             workspace = _make_workspace(Path(raw))
             self.assertIn(RUNTIME_ASSET, workspace.provided_assets())
+
+    def test_each_part_segment_declares_only_its_own_referenced_assets(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            workspace = _make_workspace(root)
+            workspace.write_text(
+                "catalog/items/part-a/part-a.html",
+                '<script src="../../offline-deps/a.js"></script>',
+            )
+            workspace.write_text("catalog/offline-deps/a.js", "// a")
+            workspace.write_text(
+                "catalog/items/part-b/part-b.html",
+                '<script src="../../offline-deps/b.js"></script>',
+            )
+            workspace.write_text("catalog/offline-deps/b.js", "// b")
+            catalog = object.__new__(PartsCatalog)
+
+            assets = catalog.assets_for(
+                "catalog/items/part-a/part-a.html", workspace
+            )
+
+            self.assertEqual(assets, ("catalog/offline-deps/a.js",))
 
 
 class ClosedArtifactTests(unittest.TestCase):
@@ -985,100 +1011,74 @@ class CatalogPartSelectionTest(unittest.TestCase):
         self.assertIn("data-chart", prompt)
         self.assertIn("catalog_parts", prompt)
 
-    def test_the_selectable_set_excludes_the_parts_this_product_cannot_fill(self) -> None:
-        """Offering a part we cannot put the user's words into wastes a choice.
-
-        Two shapes are excluded, both measured rather than assumed (PC-02):
-        every transition is a demo page — rendered as-is it reads "SCENE A |
-        SCENE B / Glitch / Prompt / use glitch shader transition" — and the
-        script-driven parts keep their copy in JavaScript with per-word
-        timestamps, so substituting there is re-timing an animation.
-        """
-        usability = json.loads(
-            (ROOT / "contracts/video/motion-part-usability.v1.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        deferred = {
-            item["name"] for item in usability["items"] if item["batch"] == "deferred"
-        }
+    def test_the_selectable_set_covers_all_locked_visual_parts(self) -> None:
+        """A missing copy slot makes a part visual-only, not unselectable."""
         selectable = {part["name"] for part in SELECTABLE_CATALOG_PARTS}
-        self.assertLessEqual(selectable, LOCKED_CATALOG_PART_IDS - deferred)
-        # A transition and a script-driven caption, named so the exclusion is
-        # readable rather than only countable.
-        self.assertNotIn("glitch", selectable)
-        self.assertNotIn("caption-kinetic-slam", selectable)
+        self.assertEqual(selectable, LOCKED_CATALOG_PART_IDS)
+        self.assertIn("glitch", selectable)
+        self.assertIn("caption-kinetic-slam", selectable)
         self.assertIn("lt-bold-block", selectable)
 
     def test_every_offered_part_is_one_a_film_can_actually_be_assembled_from(
         self,
     ) -> None:
-        """Choosing an offered part must never be what kills the film.
-
-        Measured 2026-07-28, the first run in which the catalog actually reached
-        the agent: the model picked `shimmer-sweep` and the run died with
-        `beat 'beat-1' names 'shimmer-sweep', which the catalog does not carry`.
-        It is catalogued, it is not deferred, and it is a pure visual effect —
-        no declared duration, no declared stage, no frozen slots.
-
-        `assemble_film` needs all three, and the grading only ever asked where a
-        part keeps its copy. So 39 of the 76 offered parts were choices that
-        could not be delivered, and picking any one of them failed the whole
-        film rather than that shot. With three beats a film had almost no chance
-        of surviving.
-
-        PC-02 wrote the rule this restates — offering a part we cannot fill
-        spends a choice on nothing. What is new is that "can be filled" and "can
-        be rendered" are different questions, and only the first was being
-        asked.
-        """
+        """Choosing any locked visual part must never be what kills the film."""
         catalog = json.loads(
             (ROOT / "contracts/quality/motion-catalog.v1.json").read_text(
                 encoding="utf-8"
             )
         )
-        slots = json.loads(
-            (ROOT / "contracts/video/motion-part-slots.v1.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        renderable = {
-            str(item["name"])
-            for item in catalog["items"]
-            if item.get("duration") and (item.get("dimensions") or {}).get("width")
-        } & {str(part["name"]) for part in slots["parts"]}
-
         offered = {part["name"] for part in SELECTABLE_CATALOG_PARTS}
-
-        self.assertEqual(
-            offered - renderable,
-            set(),
-            "these parts are offered to the model and cannot be assembled into a film",
-        )
-        # A pure visual effect: catalogued, not deferred, and nothing a shot can
-        # be built from.
-        self.assertNotIn("shimmer-sweep", offered)
+        self.assertEqual(offered, {str(item["name"]) for item in catalog["items"]})
+        self.assertIn("shimmer-sweep", offered)
         self.assertIn("lt-bold-block", offered)
 
-    def test_the_app_and_agent_share_the_exact_frozen_film_slot_set(self) -> None:
-        slots = json.loads(
-            (ROOT / "contracts/video/motion-part-slots.v1.json").read_text(
+    def test_the_app_and_agent_share_the_exact_locked_catalog_set(self) -> None:
+        self.assertEqual(
+            {str(part["name"]) for part in SELECTABLE_CATALOG_PARTS},
+            LOCKED_CATALOG_PART_IDS,
+            "the App enables all locked catalog ids; the Agent must accept that exact set",
+        )
+
+    def test_every_transition_block_binds_real_beat_scenes_before_its_timeline(
+        self,
+    ) -> None:
+        catalog = json.loads(
+            (ROOT / "contracts/quality/motion-catalog.v1.json").read_text(
                 encoding="utf-8"
             )
         )
-        slot_ids = {str(part["name"]) for part in slots["parts"]}
-        self.assertEqual(len(slot_ids), 37)
-        self.assertEqual(
-            {str(part["name"]) for part in SELECTABLE_CATALOG_PARTS},
-            slot_ids,
-            "the App enables slot-contract ids; the Agent must accept that exact set",
-        )
+        transitions = [
+            item
+            for item in catalog["items"]
+            if item["type"] == "block" and item["category"] == "转场"
+        ]
+        self.assertEqual(len(transitions), 27)
+        for item in transitions:
+            name = str(item["name"])
+            source = (
+                VENDOR_ROOT / str(item["path"]) / f"{name}.html"
+            ).read_text(encoding="utf-8")
+            document = build_visual_part_film_html(
+                name=name,
+                source=source,
+                headline="真实场景甲",
+                body="真实场景乙",
+                items=("真实要点",),
+            )
+            self.assertLess(
+                document.index("data-motion-transition-content"),
+                document.index("window.__timelines"),
+                f"{name} captured its upstream demo before the real beat",
+            )
+            self.assertIn("真实场景甲", document)
+            self.assertIn("真实场景乙", document)
 
-    def test_a_deferred_part_is_refused_even_though_the_catalog_lists_it(self) -> None:
+    def test_a_visual_only_part_is_accepted_even_without_a_text_slot(self) -> None:
         payload = _valid_storyboard()
         payload["beats"][0]["catalog_parts"] = ["caption-kinetic-slam"]
-        with self.assertRaises(MotionAuthoringRejected):
-            StoryboardArtifact.from_payload(payload)
+        storyboard = StoryboardArtifact.from_payload(payload)
+        self.assertEqual(storyboard.beats[0].catalog_parts, ("caption-kinetic-slam",))
 
     def test_the_prompt_states_what_each_offered_part_is_and_how_long_it_runs(self) -> None:
         """Bare ids are not a catalog.
@@ -1106,6 +1106,12 @@ class CatalogPartSelectionTest(unittest.TestCase):
             all(part["duration"] for part in SELECTABLE_CATALOG_PARTS),
             "every offered part must declare how long it runs",
         )
+        component_durations = {
+            part["name"]: part["duration"] for part in SELECTABLE_CATALOG_PARTS
+        }
+        self.assertEqual(component_durations["caption-clip-wipe"], 8.0)
+        self.assertEqual(component_durations["morph-text"], 15.0)
+        self.assertEqual(component_durations["transitions-push"], 20.0)
 
     def test_the_prompt_says_a_part_length_spends_the_film_budget(self) -> None:
         """Listing the durations is not enough; the consequence has to be said.
@@ -1121,11 +1127,25 @@ class CatalogPartSelectionTest(unittest.TestCase):
         self.assertIn("选零件时必须同时看时长", prompt)
         self.assertIn(str(_brief().duration_seconds), prompt)
 
-    def test_the_prompt_no_longer_dumps_every_locked_id(self) -> None:
+    def test_the_prompt_offers_visual_only_parts_too(self) -> None:
         prompt = _first_message_contract(_brief())
-        for excluded in ("glitch", "caption-kinetic-slam"):
-            self.assertNotIn(f"`{excluded}`", prompt)
-            self.assertNotIn(f"'{excluded}'", prompt)
+        for offered in ("glitch", "caption-kinetic-slam"):
+            self.assertIn(offered, prompt)
+
+    def test_the_prompt_explains_when_a_part_will_not_carry_the_beat_copy(self) -> None:
+        """The model must knowingly choose a frozen demo, never silently lose copy."""
+        prompt = _first_message_contract(_brief())
+        modes = {str(part["name"]): str(part["copyMode"]) for part in SELECTABLE_CATALOG_PARTS}
+        self.assertEqual(modes["lt-bold-block"], "text_slots")
+        self.assertEqual(modes["motion-blur"], "beat_host")
+        self.assertEqual(modes["glitch"], "beat_host")
+        self.assertEqual(modes["caption-kinetic-slam"], "visual_only")
+        self.assertIn("文案模式", prompt)
+        self.assertIn("text_slots", prompt)
+        self.assertIn("beat_host", prompt)
+        self.assertIn("visual_only", prompt)
+        self.assertIn("不会写入 headline / body / items", prompt)
+        self.assertIn("只有明确需要保留零件原始画面时才选", prompt)
 
 
 class NoPartsCatalogTests(unittest.TestCase):

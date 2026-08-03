@@ -57,6 +57,12 @@ from automation_tool.executor.motion_authoring.authoring_workspace import (
     MotionAuthoringRejected,
     _validate_relative,
 )
+from automation_tool.executor.motion_authoring.component_host import (
+    ComponentFilmMetadata,
+    ComponentHostRejected,
+    component_film_metadata,
+    reviewed_visual_part_copy_mode,
+)
 from automation_tool.executor.motion_authoring.composition_template import (
     AUTHORING_RUNTIME_ASSET,
     MAX_SCENE_ITEMS,
@@ -135,13 +141,7 @@ _MOTION_CATALOG_PATH: Final = _CONTRACTS_ROOT / "quality/motion-catalog.v1.json"
 _MOTION_PART_USABILITY_PATH: Final = _CONTRACTS_ROOT / "video/motion-part-usability.v1.json"
 _MOTION_PART_SLOTS_PATH: Final = _CONTRACTS_ROOT / "video/motion-part-slots.v1.json"
 _MOTION_PART_SLOT_BUDGET_PATH: Final = _CONTRACTS_ROOT / "video/motion-part-slot-budget.v1.json"
-
-# Where `write_part_working_copy` puts a part inside the RenderJob workspace.
-# Imported from the writer rather than restated: the two have to name the same
-# directory or the sandbox allowlist and the files on disk describe different
-# trees. Imported lazily at module scope is not possible here without a cycle,
-# so it is re-exported from the module that owns it.
-from .part_workspace import WORKING_COPY_DIRECTORY as PART_WORKING_COPY_DIRECTORY  # noqa: E402
+_DURATION_CONTRACT_PATH: Final = _CONTRACTS_ROOT / "video/motion-storyboard-duration.v1.json"
 
 # The stage `composition_template` draws on. Mirrors width/height/
 # deviceScaleFactor in `motion-render-canvas.v1.json`; a catalog part carries
@@ -168,6 +168,24 @@ def _load_json_document(path: Path) -> dict[str, Any]:
         ) from error
 
 
+def _load_catalog_segment_seconds_maximum() -> int:
+    contract = _load_json_document(_DURATION_CONTRACT_PATH)
+    seconds = contract.get("totalSecondsMaximum")
+    if (
+        contract.get("schemaVersion") != 1
+        or contract.get("policy") != "fail_closed"
+        or type(seconds) is not int
+        or not (1 <= seconds <= 600)
+    ):
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: storyboard duration contract drifted"
+        )
+    return seconds
+
+
+CATALOG_SEGMENT_SECONDS_MAXIMUM: Final = _load_catalog_segment_seconds_maximum()
+
+
 class PartsCatalog:
     """The packaged parts, and what this process needs to know about them.
 
@@ -181,14 +199,24 @@ class PartsCatalog:
         self.slot_table = _load_json_document(_MOTION_PART_SLOTS_PATH)
         self.slot_budget = _load_json_document(_MOTION_PART_SLOT_BUDGET_PATH)
         catalog = _load_json_document(_MOTION_CATALOG_PATH)
-        self.durations = {
-            item["name"]: item["duration"] for item in catalog["items"] if item.get("duration")
-        }
-        self.dimensions = {
-            item["name"]: (item["dimensions"]["width"], item["dimensions"]["height"])
-            for item in catalog["items"]
-            if (item.get("dimensions") or {}).get("width")
-        }
+        self.types = {str(item["name"]): str(item["type"]) for item in catalog["items"]}
+        self.durations: dict[str, float] = {}
+        self.dimensions: dict[str, tuple[int, int]] = {}
+        for item in catalog["items"]:
+            name = str(item["name"])
+            duration = item.get("duration")
+            dimensions = item.get("dimensions") or {}
+            if duration:
+                self.durations[name] = float(duration)
+            if dimensions.get("width") and dimensions.get("height"):
+                self.dimensions[name] = (
+                    int(dimensions["width"]),
+                    int(dimensions["height"]),
+                )
+            if self.types[name] == "component":
+                metadata = LOCKED_COMPONENT_METADATA[name]
+                self.durations[name] = metadata.duration_seconds
+                self.dimensions[name] = (metadata.width, metadata.height)
         self._slots_by_part = {part["name"]: part["slots"] for part in self.slot_table["parts"]}
 
     def document_for(self, name: str) -> Path:
@@ -213,16 +241,19 @@ class PartsCatalog:
             return {}
         slots = self._slots_by_part.get(beat.catalog_parts[0], ())
         available = [text for text in (beat.headline, beat.body, *beat.items) if text]
-        return {slot["index"]: text for slot, text in zip(slots, available)}
+        return {
+            slot["index"]: text
+            for slot, text in zip(slots, available, strict=False)
+        }
 
     def assets_for(self, entry_html: str, workspace: AuthoringWorkspace) -> tuple[str, ...]:
         """Everything the working copy of this part needs, as the sandbox lists it.
 
-        The whole working-copy tree, not the part's own folder. Every part
-        reaches GSAP, Draco and its typefaces through `../../offline-deps/…`,
-        which is why `write_part_working_copy` mirrors the catalog's layout
-        instead of flattening — and a prefix of `catalog/items` leaves all of it
-        outside the sandbox's allowlist.
+        Every part reaches GSAP, Draco and its typefaces through
+        `../../offline-deps/…`, so a folder-prefix allowlist misses shared files.
+        The inverse is also wrong: giving every segment the entire multi-part
+        working tree can exceed the Worker's 128-entry ceiling. Resolve this
+        document's actual reference graph from the final workspace instead.
 
         Measured 2026-07-28 on the first film that used parts: 14 files were
         written into the workspace and each part segment declared one. The
@@ -231,16 +262,9 @@ class PartsCatalog:
         reports by drawing the first frame and holding it. The still-frame gate
         would have caught the result and blamed the composition.
         """
-        prefix = f"{PART_WORKING_COPY_DIRECTORY}/"
-        if not entry_html.startswith(prefix):
-            return ()
-        return tuple(
-            sorted(
-                asset
-                for asset in workspace.provided_assets()
-                if asset != entry_html and asset.startswith(prefix)
-            )
-        )
+        from .part_workspace import working_copy_assets
+
+        return working_copy_assets(entry_html, workspace)
 
 
 def _load_locked_catalog_items() -> tuple[dict[str, Any], ...]:
@@ -264,40 +288,58 @@ LOCKED_CATALOG_PART_IDS: Final[frozenset[str]] = frozenset(
 )
 
 
+def _load_locked_component_metadata() -> dict[str, ComponentFilmMetadata]:
+    loaded: dict[str, ComponentFilmMetadata] = {}
+    for item in _LOCKED_CATALOG_ITEMS:
+        if str(item.get("type")) != "component":
+            continue
+        name = str(item.get("name", ""))
+        directory = AUTHORING_VENDOR_ROOT / str(item.get("path", ""))
+        document = directory / f"{name}.html"
+        if not document.is_file():
+            raise MotionAuthoringRejected(
+                "motion authoring rejected: locked component source is unreadable"
+            )
+        try:
+            loaded[name] = component_film_metadata(
+                name=name,
+                source=document.read_text(encoding="utf-8"),
+            )
+        except (OSError, ComponentHostRejected) as error:
+            raise MotionAuthoringRejected(
+                "motion authoring rejected: locked component metadata drifted"
+            ) from error
+    if len(loaded) != 25:
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: locked component metadata drifted"
+        )
+    return loaded
+
+
+LOCKED_COMPONENT_METADATA: Final = _load_locked_component_metadata()
+
+
+def _locked_item_duration(item: Mapping[str, Any]) -> float:
+    duration = item.get("duration")
+    if duration:
+        return min(float(duration), CATALOG_SEGMENT_SECONDS_MAXIMUM)
+    name = str(item.get("name", ""))
+    metadata = LOCKED_COMPONENT_METADATA.get(name)
+    if metadata is None:
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: locked motion catalog has no part duration"
+        )
+    return min(metadata.duration_seconds, CATALOG_SEGMENT_SECONDS_MAXIMUM)
+
+
 def _load_selectable_catalog_parts() -> tuple[dict[str, Any], ...]:
-    """The parts this product can actually put the user's words into.
+    """All locked parts the product can place into a shot.
 
-    Cataloguing a part and being able to fill it are different questions, and
-    reading all 134 sources (PC-02) found two shapes where the answer is no:
-
-    * every transition is a *demo page* rather than a shot — rendered as-is it
-      reads "SCENE A | SCENE B / Glitch / Prompt / use glitch shader
-      transition", with the two panels standing in for your own scenes;
-    * the script-driven parts keep their copy in JavaScript alongside per-word
-      timestamps, so replacing it is re-timing an animation rather than
-      substituting a string.
-
-    Offering either to the model spends a choice on something that cannot be
-    delivered, so the closed set it selects from is the graded remainder.
-
-    That grading answers "can this part be filled". `assemble_film` asks a
-    second question — "can a shot be built from it" — and needs three things to
-    say yes: a declared duration, a declared stage, and a frozen slot table.
-    Measured 2026-07-28 on the first run where the catalog actually reached this
-    agent, the model chose `shimmer-sweep`, a pure visual effect with none of
-    the three, and the film died with "the catalog does not carry" rather than
-    that one shot. 39 of the 76 parts offered were choices like that, so a
-    three-beat film had almost no chance of surviving. The offered set is now
-    the intersection: a part the model can pick is a part a film can be made
-    from.
-
-    `deferred` still draws the first line, and it is still a property of the
-    part rather than of the schedule — the first/second split in the same
-    contract is only about which slot tables were built first. The slot table's
-    presence is a schedule fact today, which means a part joins this set the
-    moment its table is frozen, with nothing about the part changing. That is
-    the intended behaviour: an offer this process cannot honour is worse than a
-    smaller catalog.
+    The usability and slot contracts still distinguish copy-editable parts
+    from visual-only ones. They no longer decide whether a part may be chosen:
+    BM-16 proved every locked release item renders offline, and BM-15 promises
+    selection and override across the whole catalog. A component without its
+    own stage uses the reviewed three-second 1920x1080 host at assembly time.
     """
     try:
         usability = json.loads(_MOTION_PART_USABILITY_PATH.read_text(encoding="utf-8"))
@@ -326,19 +368,20 @@ def _load_selectable_catalog_parts() -> tuple[dict[str, Any], ...]:
             "name": str(item["name"]),
             "title": str(item["title"]),
             "category": str(item["category"]),
-            "duration": item["duration"],
+            "duration": _locked_item_duration(item),
             "description": str(item["description"]),
+            "copyMode": (
+                "text_slots"
+                if str(item["name"]) in anchored
+                else reviewed_visual_part_copy_mode(str(item["name"]))
+            ),
         }
         for item in _LOCKED_CATALOG_ITEMS
-        if graded[str(item["name"])] != "deferred"
-        # The three `assemble_film` needs. Asked of the same contracts it reads,
-        # so an offer cannot outlive what makes it deliverable.
-        and item.get("duration")
-        and (item.get("dimensions") or {}).get("width")
-        and str(item["name"]) in anchored
     )
-    if not selectable:
-        raise MotionAuthoringRejected("motion authoring rejected: no motion part is selectable")
+    if len(selectable) != 134:
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: selectable motion catalog drifted"
+        )
     return selectable
 
 
@@ -381,7 +424,6 @@ RENDER_CANVAS_WIDTH, RENDER_CANVAS_HEIGHT = _load_render_canvas()
 
 
 _BRIEF_CONTRACT_PATH: Final = _CONTRACTS_ROOT / "video/motion-one-sentence-brief.v1.json"
-_DURATION_CONTRACT_PATH: Final = _CONTRACTS_ROOT / "video/motion-storyboard-duration.v1.json"
 _MODEL_CALL_CONTRACT_PATH: Final = _CONTRACTS_ROOT / "video/motion-authoring-model-call.v1.json"
 
 
@@ -1772,7 +1814,7 @@ def _selectable_parts_table() -> str:
     for part in SELECTABLE_CATALOG_PARTS:
         duration = "—" if part["duration"] is None else f"{part['duration']}"
         lines.append(
-            f"{part['name']} | {part['category']} | {duration} | "
+            f"{part['name']} | {part['category']} | {duration} | {part['copyMode']} | "
             f"{part['title']}: {part['description']}"
         )
     return "\n".join(lines)
@@ -1810,8 +1852,12 @@ def _first_message_contract(brief: MotionBrief) -> str:
         "不要写导演备注；purpose 才是给内部看的说明。\n"
         "catalog_parts 请按每段分镜的内容从下面的零件目录里选（可为空数组，"
         f"每段最多 16 项），只能使用目录中的 ID。共 {len(SELECTABLE_CATALOG_PARTS)} 个，"
-        "每行是「ID | 中文分类 | 时长秒 | 英文说明」；时长写「—」的零件没有自己的"
-        "时间轴，是叠加在画面上的局部效果，不占镜头长度：\n"
+        "每行是「ID | 中文分类 | 时长秒 | 文案模式 | 英文说明」。文案模式 text_slots "
+        "表示零件通过冻结槽位承载当前分镜文案；beat_host 表示受审宿主或转场场景会承载 "
+        "headline / body / items；visual_only 表示零件保留冻结的原始画面，不会写入 headline "
+        "/ body / items，只有明确需要保留零件原始画面时才选，否则请选 text_slots、"
+        "beat_host 或留空。时长写「—」的零件没有自己的时间轴，是叠加在画面上的局部效果，"
+        "不占镜头长度：\n"
         f"{_selectable_parts_table()}\n"
         # Stated because the model does not otherwise connect the two: given the
         # durations and a 12s brief it picked parts totalling 26s of animation
@@ -1959,7 +2005,7 @@ class MotionAuthoringAgent:
 
     def _segments_for(
         self,
-        storyboard: Storyboard,
+        storyboard: StoryboardArtifact,
         *,
         template_entry: str,
         template_assets: tuple[str, ...],
@@ -2032,6 +2078,9 @@ class MotionAuthoringAgent:
                     ),
                     declared_seconds=beat.duration_seconds,
                     start_seconds=beat.start_seconds,
+                    headline=beat.headline,
+                    body=beat.body,
+                    items=beat.items,
                 )
                 for beat in storyboard.beats
             ],
@@ -2041,6 +2090,7 @@ class MotionAuthoringAgent:
             slot_budget=catalog.slot_budget,
             part_durations=catalog.durations,
             part_dimensions=catalog.dimensions,
+            part_types=catalog.types,
             template_canvas=TEMPLATE_CANVAS,
             template_entry=template_entry,
             frames_per_second=self._fps,

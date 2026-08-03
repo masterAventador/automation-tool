@@ -25,6 +25,33 @@ use std::time::Duration;
 use uuid::{Uuid, Variant};
 use zeroize::{Zeroize, Zeroizing};
 
+#[cfg(windows)]
+use std::ffi::OsStr;
+#[cfg(windows)]
+use std::fs::File;
+#[cfg(windows)]
+use std::mem::{size_of, zeroed};
+#[cfg(windows)]
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
+#[cfg(windows)]
+use std::os::windows::io::{AsRawHandle, FromRawHandle};
+#[cfg(windows)]
+use std::ptr::{null, null_mut};
+#[cfg(windows)]
+use windows_sys::Win32::Foundation::{
+    GetLastError, ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, INVALID_HANDLE_VALUE,
+};
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::{
+    CreateFileW, FileDispositionInfoEx, GetFileInformationByHandle, GetFinalPathNameByHandleW,
+    SetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, DELETE, FILE_ATTRIBUTE_DIRECTORY,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_DISPOSITION_FLAG_DELETE,
+    FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE, FILE_DISPOSITION_FLAG_POSIX_SEMANTICS,
+    FILE_DISPOSITION_INFO_EX, FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED,
+    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    VOLUME_NAME_DOS,
+};
+
 const BOOTSTRAP_VERSION: &str = "1";
 const WORKER_PROTOCOL_VERSION: &str = "1.0";
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -2043,7 +2070,7 @@ impl LocalVideoOrchestrator {
         let mut running = workers
             .remove(&VideoWorkerKind::Python)
             .expect("checked Python Worker exists");
-        force_stop(&mut running);
+        force_stop(&mut running)?;
         Ok(())
     }
 
@@ -2230,7 +2257,7 @@ impl LocalVideoOrchestrator {
         let mut running = workers
             .remove(&VideoWorkerKind::Python)
             .expect("checked Python Worker exists");
-        force_stop(&mut running);
+        force_stop(&mut running)?;
         drop(workers);
         remove_private_smart_edit_job_root(&job_root)
     }
@@ -2388,7 +2415,7 @@ impl LocalVideoOrchestrator {
         let render_browser = running
             .launch
             .render_browser
-            .as_ref()
+            .clone()
             .ok_or_else(configuration_invalid)?;
         // The Worker runs the browser twice (version probe and capture), each
         // bounded by the launch timeout it received in its bootstrap.
@@ -2414,7 +2441,8 @@ impl LocalVideoOrchestrator {
             .write_all(&bytes)
             .and_then(|()| running.stdin.flush())
             .map_err(|_| process_unavailable())?;
-        let line = receive_line(&running.events, wait)?;
+        let line = receive_render_line_or_stop(&mut workers, kind, wait)?;
+        let running = workers.get_mut(&kind).ok_or_else(not_running)?;
         if let Ok(event) = serde_json::from_str::<VideoWorkerRenderVerifiedEvent>(&line) {
             let detail = format!("{job_id}\0{}", event.chromium_major);
             if event.event != "worker.render.verified"
@@ -2473,7 +2501,7 @@ impl LocalVideoOrchestrator {
         let render_browser = running
             .launch
             .render_browser
-            .as_ref()
+            .clone()
             .ok_or_else(configuration_invalid)?;
         let expected_major = render_browser.chromium_major;
         // The Worker runs a version probe (launch timeout) and then the render
@@ -2503,7 +2531,8 @@ impl LocalVideoOrchestrator {
             .write_all(&bytes)
             .and_then(|()| running.stdin.flush())
             .map_err(|_| process_unavailable())?;
-        let line = receive_line(&running.events, wait)?;
+        let line = receive_render_line_or_stop(&mut workers, kind, wait)?;
+        let running = workers.get_mut(&kind).ok_or_else(not_running)?;
         if let Ok(event) = serde_json::from_str::<VideoWorkerRenderSandboxedEvent>(&line) {
             let detail = format!(
                 "{job_id}\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
@@ -2602,14 +2631,20 @@ impl LocalVideoOrchestrator {
     pub fn stop(&self, kind: VideoWorkerKind) -> Result<(), VideoWorkerError> {
         let mut workers = self.lock_workers()?;
         let mut running = workers.remove(&kind).ok_or_else(not_running)?;
-        force_stop(&mut running);
+        force_stop(&mut running)?;
         Ok(())
     }
 
     pub fn stop_all(&self) -> Result<(), VideoWorkerError> {
         let mut workers = self.lock_workers()?;
+        let mut cleanup_failed = false;
         for (_, mut running) in std::mem::take(&mut *workers) {
-            force_stop(&mut running);
+            if force_stop(&mut running).is_err() {
+                cleanup_failed = true;
+            }
+        }
+        if cleanup_failed {
+            return Err(process_unavailable());
         }
         Ok(())
     }
@@ -2626,7 +2661,7 @@ impl Drop for LocalVideoOrchestrator {
     fn drop(&mut self) {
         if let Ok(mut workers) = self.workers.lock() {
             for (_, mut running) in std::mem::take(&mut *workers) {
-                force_stop(&mut running);
+                let _ = force_stop(&mut running);
             }
         }
     }
@@ -3932,7 +3967,7 @@ fn spawn_worker(
         smart_edit_job: None,
     };
     if let Err(error) = verify_health(&running, start_timeout) {
-        force_stop(&mut running);
+        force_stop(&mut running)?;
         return Err(error);
     }
     Ok(running)
@@ -4267,11 +4302,42 @@ fn receive_line(
         .map_err(|()| authentication_rejected())
 }
 
-fn force_stop(running: &mut RunningVideoWorker) {
+fn receive_render_line_or_stop(
+    workers: &mut BTreeMap<VideoWorkerKind, RunningVideoWorker>,
+    kind: VideoWorkerKind,
+    timeout: Duration,
+) -> Result<String, VideoWorkerError> {
+    let received = {
+        let running = workers.get(&kind).ok_or_else(not_running)?;
+        receive_line(&running.events, timeout)
+    };
+    match received {
+        Ok(line) => {
+            let browser = workers
+                .get(&kind)
+                .and_then(|running| running.launch.render_browser.as_ref())
+                .ok_or_else(configuration_invalid)?;
+            remove_windows_render_browser_diagnostic(browser)?;
+            Ok(line)
+        }
+        Err(error) => {
+            let mut running = workers.remove(&kind).ok_or_else(not_running)?;
+            force_stop(&mut running)?;
+            Err(error)
+        }
+    }
+}
+
+fn force_stop(running: &mut RunningVideoWorker) -> Result<(), VideoWorkerError> {
+    let render_browser = running.launch.render_browser.clone();
     let _ = running.process_tree.terminate();
     let _ = running.child.kill();
     let _ = running.child.wait();
     join_readers(running);
+    if let Some(browser) = render_browser.as_ref() {
+        remove_windows_render_browser_diagnostic(browser)?;
+    }
+    Ok(())
 }
 
 fn finish_exited_worker(running: &mut RunningVideoWorker) {
@@ -4392,6 +4458,129 @@ fn child_process_path(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
+/// Chrome for Testing can leave `debug.log` beside `chrome.exe` on Windows
+/// even though every log/crash flag points at the per-job directory. Node must
+/// not remove that file by pathname: a package ancestor can be replaced after
+/// any `lstat` check. The native boundary opens the exact non-reparse file,
+/// verifies the handle's resolved path, then marks that same handle for
+/// deletion; later path replacement cannot redirect the operation.
+#[cfg(windows)]
+fn remove_windows_render_browser_diagnostic(
+    browser: &VideoWorkerRenderBrowserConfiguration,
+) -> Result<(), VideoWorkerError> {
+    let parent = browser
+        .executable_path
+        .parent()
+        .ok_or_else(process_unavailable)?;
+    remove_windows_regular_file_by_handle(&parent.join("debug.log"))
+}
+
+#[cfg(not(windows))]
+fn remove_windows_render_browser_diagnostic(
+    _browser: &VideoWorkerRenderBrowserConfiguration,
+) -> Result<(), VideoWorkerError> {
+    Ok(())
+}
+
+#[cfg(windows)]
+fn remove_windows_regular_file_by_handle(path: &Path) -> Result<(), VideoWorkerError> {
+    let encoded = windows_wide_null(path)?;
+    let handle = unsafe {
+        CreateFileW(
+            encoded.as_ptr(),
+            DELETE | FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            null(),
+            OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT,
+            null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        let error = unsafe { GetLastError() };
+        if error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND {
+            return Ok(());
+        }
+        return Err(process_unavailable());
+    }
+    let file = unsafe { File::from_raw_handle(handle as _) };
+    let mut information: BY_HANDLE_FILE_INFORMATION = unsafe { zeroed() };
+    if unsafe { GetFileInformationByHandle(handle, &mut information) } == 0
+        || information.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)
+            != 0
+        || windows_final_path_key(handle)? != windows_path_key(path)
+    {
+        return Err(process_unavailable());
+    }
+    let disposition = FILE_DISPOSITION_INFO_EX {
+        Flags: FILE_DISPOSITION_FLAG_DELETE
+            | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS
+            | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
+    };
+    if unsafe {
+        SetFileInformationByHandle(
+            file.as_raw_handle() as _,
+            FileDispositionInfoEx,
+            (&disposition as *const FILE_DISPOSITION_INFO_EX).cast(),
+            size_of::<FILE_DISPOSITION_INFO_EX>() as u32,
+        )
+    } == 0
+    {
+        return Err(process_unavailable());
+    }
+    drop(file);
+    Ok(())
+}
+
+#[cfg(windows)]
+fn windows_final_path_key(
+    handle: windows_sys::Win32::Foundation::HANDLE,
+) -> Result<String, VideoWorkerError> {
+    const MAX_WINDOWS_PATH_UNITS: usize = 32_768;
+    let flags = FILE_NAME_NORMALIZED | VOLUME_NAME_DOS;
+    let required = unsafe { GetFinalPathNameByHandleW(handle, null_mut(), 0, flags) };
+    if required == 0 || required as usize >= MAX_WINDOWS_PATH_UNITS {
+        return Err(process_unavailable());
+    }
+    let mut buffer = vec![0_u16; required as usize + 1];
+    let written = unsafe {
+        GetFinalPathNameByHandleW(handle, buffer.as_mut_ptr(), buffer.len() as u32, flags)
+    };
+    if written == 0 || written as usize >= buffer.len() {
+        return Err(process_unavailable());
+    }
+    Ok(windows_path_key(&PathBuf::from(OsString::from_wide(
+        &buffer[..written as usize],
+    ))))
+}
+
+#[cfg(windows)]
+fn windows_path_key(path: &Path) -> String {
+    let mut value = path.to_string_lossy().replace('/', "\\").to_lowercase();
+    if let Some(stripped) = value.strip_prefix("\\\\?\\") {
+        value = match stripped.strip_prefix("unc\\") {
+            Some(share) => format!("\\\\{share}"),
+            None => stripped.to_owned(),
+        };
+    }
+    while value.ends_with('\\') && value.len() > 3 {
+        value.pop();
+    }
+    value
+}
+
+#[cfg(windows)]
+fn windows_wide_null(path: &Path) -> Result<Vec<u16>, VideoWorkerError> {
+    const MAX_WINDOWS_PATH_UNITS: usize = 32_768;
+    let units = OsStr::new(path.as_os_str())
+        .encode_wide()
+        .collect::<Vec<_>>();
+    if units.is_empty() || units.len() >= MAX_WINDOWS_PATH_UNITS || units.contains(&0) {
+        return Err(process_unavailable());
+    }
+    Ok(units.into_iter().chain(std::iter::once(0)).collect())
+}
+
 fn valid_environment_name(value: &str) -> bool {
     (1..=MAX_ENVIRONMENT_NAME_BYTES).contains(&value.len())
         && value.starts_with(|character: char| character.is_ascii_uppercase())
@@ -4487,6 +4676,9 @@ const fn timed_out() -> VideoWorkerError {
 mod tests {
     use super::{unsafe_path_component, VideoWorkerSmartEditResult};
 
+    #[cfg(windows)]
+    use super::remove_windows_regular_file_by_handle;
+
     #[test]
     fn smart_edit_result_accepts_one_static_image_in_multiple_paragraphs() {
         let job_id = "123e4567-e89b-42d3-a456-426614174100";
@@ -4552,5 +4744,53 @@ mod tests {
         assert!(unsafe_path_component(false, Some(0x400)));
         assert!(!unsafe_path_component(false, Some(0x20)));
         assert!(unsafe_path_component(true, None));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_diagnostic_cleanup_deletes_the_opened_file_not_a_replaced_path() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "automation-tool-render-diagnostic-{}-{nonce}",
+            std::process::id()
+        ));
+        let browser = root.join("browser");
+        std::fs::create_dir_all(&browser).expect("browser fixture");
+        let diagnostic = browser.join("debug.log");
+        std::fs::write(&diagnostic, b"owned").expect("diagnostic fixture");
+
+        remove_windows_regular_file_by_handle(&diagnostic).expect("handle-owned delete");
+        assert!(!diagnostic.exists());
+
+        let retained_browser = root.join("retained-browser");
+        std::fs::rename(&browser, &retained_browser).expect("replace browser directory");
+        let outside = root.join("outside");
+        std::fs::create_dir(&outside).expect("outside fixture");
+        let outside_diagnostic = outside.join("debug.log");
+        std::fs::write(&outside_diagnostic, b"outside").expect("outside diagnostic");
+        let output = std::process::Command::new("cmd.exe")
+            .args([
+                "/d",
+                "/c",
+                "mklink",
+                "/J",
+                browser.to_str().expect("junction path"),
+                outside.to_str().expect("outside path"),
+            ])
+            .output()
+            .expect("create replacement junction");
+        assert!(output.status.success(), "mklink /J failed");
+
+        assert!(remove_windows_regular_file_by_handle(&diagnostic).is_err());
+        assert_eq!(
+            std::fs::read(&outside_diagnostic).expect("outside diagnostic remains"),
+            b"outside"
+        );
+
+        std::fs::remove_dir(&browser).expect("remove junction without following it");
+        std::fs::remove_dir_all(&root).expect("remove fixture");
     }
 }

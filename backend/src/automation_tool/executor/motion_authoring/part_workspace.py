@@ -34,10 +34,12 @@ source as operator copy.)
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Mapping, Sequence
+from typing import Final
 
+from .component_host import build_component_film_html, build_visual_part_film_html
 from .composition_template import escape_untrusted_text
 from .part_document import enumerate_text_nodes
 
@@ -214,7 +216,13 @@ def write_part_working_copy(
     slots: Sequence[PartSlot],
     copy: Mapping[int, str],
     font_css: str,
+    component: bool = False,
+    headline: str = "",
+    body: str = "",
+    items: Sequence[str] = (),
+    instance_key: str | None = None,
     directory: str = WORKING_COPY_DIRECTORY,
+    allow_missing_references: bool = False,
 ) -> str:
     """Put one part into the RenderJob workspace, ready to render.
 
@@ -242,13 +250,37 @@ def write_part_working_copy(
         )
     document = documents[0]
 
+    source = document.read_text(encoding="utf-8")
+    if component:
+        source = build_component_film_html(
+            name=name,
+            source=source,
+            headline=headline,
+            body=body,
+            items=items,
+        )
+    else:
+        source = build_visual_part_film_html(
+            name=name,
+            source=source,
+            headline=headline,
+            body=body,
+            items=items,
+        )
     rendered = render_part_working_copy(
-        document.read_text(encoding="utf-8"),
+        source,
         slots=slots,
         copy=copy,
         font_css=font_css,
     )
-    entry = f"{directory}/items/{name}/{document.name}"
+    if instance_key is not None and re.fullmatch(
+        r"[a-z0-9][a-z0-9-]{0,63}", instance_key
+    ) is None:
+        raise SlotAnchorRejected("part working-copy instance key is malformed")
+    entry_name = (
+        f"{instance_key}-{document.name}" if instance_key is not None else document.name
+    )
+    entry = f"{directory}/items/{name}/{entry_name}"
     workspace.write_text(entry, rendered)  # type: ignore[attr-defined]
     _copy_referenced(
         workspace,
@@ -256,6 +288,7 @@ def write_part_working_copy(
         origin=part_directory,
         text=rendered,
         directory=directory,
+        on_missing="skip" if allow_missing_references else "refuse",
     )
     return entry
 
@@ -331,14 +364,36 @@ def _copy_referenced(
     origin: Path,
     text: str,
     directory: str,
+    on_missing: str,
 ) -> None:
     """Copy exactly what `referenced_assets` collects, through the workspace."""
     for relative, target in referenced_assets(
-        text, catalog_root=catalog_root, origin=origin
+        text, catalog_root=catalog_root, origin=origin, on_missing=on_missing
     ).items():
         workspace.write_bytes(  # type: ignore[attr-defined]
             f"{directory}/{relative}", target.read_bytes()
         )
+
+
+def working_copy_assets(entry_html: str, workspace: object) -> tuple[str, ...]:
+    """Return only the files this one part document reaches inside the job."""
+    prefix = f"{WORKING_COPY_DIRECTORY}/"
+    if not entry_html.startswith(prefix):
+        return ()
+    root = workspace.root / WORKING_COPY_DIRECTORY  # type: ignore[attr-defined]
+    document = workspace.resolve(entry_html)  # type: ignore[attr-defined]
+    assets = referenced_assets(
+        workspace.read_text(entry_html),  # type: ignore[attr-defined]
+        catalog_root=root,
+        origin=document.parent,
+        # Visual-only source documents may retain inert upstream demo URLs.
+        # Their requests are absent from the sandbox allowlist and therefore
+        # blocked; they must not pull another shot's files into this segment.
+        on_missing="skip",
+    )
+    return tuple(
+        sorted(f"{WORKING_COPY_DIRECTORY}/{relative}" for relative in assets)
+    )
 
 
 __all__ = [
@@ -350,5 +405,6 @@ __all__ = [
     "WORKING_COPY_DIRECTORY",
     "referenced_assets",
     "render_part_working_copy",
+    "working_copy_assets",
     "write_part_working_copy",
 ]

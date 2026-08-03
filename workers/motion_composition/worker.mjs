@@ -6,7 +6,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { access, lstat, mkdir, mkdtemp, open, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { extname, isAbsolute, join, sep } from "node:path";
+import { dirname, extname, isAbsolute, join, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -291,6 +291,9 @@ async function parseBootstrap(line) {
   const metadata = await lstat(value.assetRoot);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error("rejected");
   value.assetRoot = await realpath(value.assetRoot);
+  if (value.renderBrowser !== null) {
+    value.renderBrowser = Object.freeze({ ...value.renderBrowser });
+  }
   return value;
 }
 
@@ -615,13 +618,13 @@ function runHeadlessProbe(
           continue;
         }
         if (response?.id !== 2) continue;
-        // Windows Chrome acknowledges Browser.close but retains the root
-        // process while its inherited CDP pipe handles remain open. Kill the
-        // still-live owned tree only after that acknowledgement, then report
-        // the already authenticated Browser.getVersion result.
+        // Browser.close is acknowledged before the inherited CDP pipe handles
+        // disappear. Close both local pipe ends now so Windows Chrome and its
+        // crash reporter can finish normally; the outer timer still owns the
+        // process-tree kill if that graceful shutdown ever stalls.
         if (process.platform === "win32") {
-          killProcessGroup();
-          finish({ status: "exit", product });
+          child.stdio[3].end();
+          child.stdio[4].destroy();
         }
         return;
       }
@@ -679,6 +682,11 @@ async function renderVerify(renderBrowser, jobId) {
       [
         "--headless",
         "--remote-debugging-pipe",
+        "--disable-breakpad",
+        "--disable-crashpad-for-testing",
+        "--disable-crash-reporter",
+        "--disable-logging",
+        `--log-file=${join(jobDirectory, "chrome-debug.log")}`,
         "--use-mock-keychain",
         "--password-store=basic",
         "--disable-gpu",
@@ -911,6 +919,11 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
       child = spawn(renderBrowser.executablePath, [
         "--headless",
         "--remote-debugging-pipe",
+        "--disable-breakpad",
+        "--disable-crashpad-for-testing",
+        "--disable-crash-reporter",
+        "--disable-logging",
+        `--log-file=${join(jobDirectory, "chrome-debug.log")}`,
         "--use-mock-keychain",
         "--password-store=basic",
         "--disable-gpu",
@@ -1379,7 +1392,8 @@ function runSandboxBrowser(renderBrowser, spec, resolved, jobDirectory, environm
           finish({ status: "protocol" });
           return;
         }
-        finish({ counters, framesCaptured, outputBytes, status: "complete" });
+        child.stdio[3].end();
+        child.stdio[4].destroy();
       }
     })().catch(() => finish({ status: "protocol" }));
   });
@@ -1425,13 +1439,16 @@ async function renderSandbox(renderBrowser, jobId, spec) {
     succeeded = true;
     return { sandboxed: { chromiumMajor: renderBrowser.chromiumMajor, ...outcome } };
   } finally {
-    await rm(jobDirectory, {
-      force: true,
-      maxRetries: process.platform === "win32" ? 20 : 0,
-      recursive: true,
-      retryDelay: 100,
-    });
-    if (!succeeded) await rm(resolved.framesDirectory, { recursive: true, force: true });
+    try {
+      await rm(jobDirectory, {
+        force: true,
+        maxRetries: process.platform === "win32" ? 20 : 0,
+        recursive: true,
+        retryDelay: 100,
+      });
+    } finally {
+      if (!succeeded) await rm(resolved.framesDirectory, { recursive: true, force: true });
+    }
   }
 }
 

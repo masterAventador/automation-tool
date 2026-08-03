@@ -27,8 +27,8 @@ const UNUSED_PART_ACTION = "本次制作不使用";
 const UNUSED_BEAT_SUMMARY = "本次制作不使用零件";
 const OVERRIDE_NOTICE_DESCRIPTION =
   "这些指定只用于下一次“一句话自动制作”：指定后，该镜头以你的选择为准；" +
-  "没有指定的镜头仍由模型自动选择。134 项都可浏览，其中已具备真实镜头装配条件的 " +
-  "37 项可以指定，其余会标为“当前仅供浏览”。下面“预览”里的固定模板手工制作不会使用这些指定。";
+  "没有指定的镜头仍由模型自动选择。134 项都可以指定；具备文字槽位或受审文案宿主的零件会使用 " +
+  "本镜头文案，其余视觉零件保留原始画面。下面“预览”里的固定模板手工制作不会使用这些指定。";
 
 export interface MotionPartsBeat {
   readonly title: string;
@@ -189,8 +189,6 @@ export function MotionPartsCatalog({
                 >
                   {!selectable
                     ? UNUSED_PART_ACTION
-                    : !partSelectable
-                      ? "当前仅供浏览"
                     : selected
                       ? `取消第 ${activeBeat + 1} 镜头的指定`
                       : `指定给第 ${activeBeat + 1} 镜头`}

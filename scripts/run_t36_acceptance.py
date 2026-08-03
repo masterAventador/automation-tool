@@ -37,6 +37,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from build_motion_catalog_release import (  # noqa: E402
+    stage_for_release as stage_motion_catalog,
+)
 from desktop_e2e_prerequisites import (  # noqa: E402
     EXECUTOR_PACKAGE_CACHE_ROOT,
     SHARED_EXECUTOR_BUILD_ID,
@@ -45,18 +48,22 @@ from desktop_e2e_prerequisites import (  # noqa: E402
     prepare_startup_gate,
     startup_gate_environment,
 )
-from build_motion_catalog_release import (  # noqa: E402
-    stage_for_release as stage_motion_catalog,
-)
-from prepare_video_runtime import install as install_resources  # noqa: E402
-from prepare_video_runtime import prepare as prepare_video_runtime  # noqa: E402
-from release_assembly import MOTION_CATALOG_RESOURCES  # noqa: E402
 from motion_shot_structure import (  # noqa: E402
     describe_shots,
     require_declared_shot_boundaries,
 )
-from run_e4_14_acceptance import require_port_available, start_control_plane  # noqa: E402
-from run_i2_13_acceptance import BACKEND_ROOT, REPOSITORY_ROOT, compose_command  # noqa: E402
+from prepare_video_runtime import install as install_resources  # noqa: E402
+from prepare_video_runtime import prepare as prepare_video_runtime  # noqa: E402
+from release_assembly import MOTION_CATALOG_RESOURCES  # noqa: E402
+from run_e4_14_acceptance import (  # noqa: E402
+    require_port_available,
+    start_control_plane,
+)
+from run_i2_13_acceptance import (  # noqa: E402
+    BACKEND_ROOT,
+    REPOSITORY_ROOT,
+    compose_command,
+)
 from run_vf_06_acceptance import (  # noqa: E402
     DEBUG_APP_RESOURCE_ROOT,
     FRONTEND,
@@ -365,14 +372,20 @@ def run_desktop_acceptance(
             raise RuntimeError("T36 failed to restore production Vite assets")
 
 
-def inspect_film(video: Path, evidence_shots: Path | None = None) -> None:
+def inspect_film(
+    video: Path,
+    evidence_shots: Path | None = None,
+    *,
+    ffprobe: Path | None = None,
+    ffmpeg: Path | None = None,
+) -> None:
     """The evidence must be a real film, not a well-formed still picture.
 
     A composition that fails to animate encodes into an MP4 of the right length
     that every other check reads as success, so the frame count and the distinct
     content are both asserted rather than the file size alone.
     """
-    ffprobe = DEBUG_APP_RESOURCE_ROOT / "media-toolchain/bin/ffprobe"
+    ffprobe = ffprobe or DEBUG_APP_RESOURCE_ROOT / "media-toolchain/bin/ffprobe"
     probe = subprocess.run(
         [
             str(ffprobe), "-v", "error", "-count_frames", "-select_streams", "v:0",
@@ -419,7 +432,11 @@ def inspect_film(video: Path, evidence_shots: Path | None = None) -> None:
     if not audio_streams:
         raise RuntimeError("the film carries no narration audio track (PC-26)")
     print(f"T36 evidence narration: {json.dumps(audio_streams[0], ensure_ascii=False)}")
-    require_no_repeated_stretch(video, float(stream["duration"]))
+    require_no_repeated_stretch(
+        video,
+        float(stream["duration"]),
+        ffmpeg=ffmpeg,
+    )
 
 
 def inspect_shot_structure(path: Path, *, final_frame_count: int) -> None:
@@ -484,7 +501,12 @@ def inspect_shot_structure(path: Path, *, final_frame_count: int) -> None:
     )
 
 
-def require_no_repeated_stretch(video: Path, duration_seconds: float) -> None:
+def require_no_repeated_stretch(
+    video: Path,
+    duration_seconds: float,
+    *,
+    ffmpeg: Path | None = None,
+) -> None:
     """The film must not be one stretch of footage played more than once.
 
     PC-19: every check above this one passed over a film that was six seconds of
@@ -509,7 +531,7 @@ def require_no_repeated_stretch(video: Path, duration_seconds: float) -> None:
     """
     if duration_seconds < 4:
         return
-    ffmpeg = DEBUG_APP_RESOURCE_ROOT / "media-toolchain/bin/ffmpeg"
+    ffmpeg = ffmpeg or DEBUG_APP_RESOURCE_ROOT / "media-toolchain/bin/ffmpeg"
     step = 0.5
     with tempfile.TemporaryDirectory(prefix="automation-tool-t36-frames-") as raw:
         frames = Path(raw)

@@ -296,7 +296,6 @@ describe("Tauri material video studio gateway", () => {
     for (const catalogPartOverrides of [
       [null, null, null],
       ["not-a-locked-part", null, null],
-      ["caption-kinetic-slam", null, null],
     ]) {
       await expect(
         gateway.submitMotionBrief({

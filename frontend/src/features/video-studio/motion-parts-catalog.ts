@@ -1,5 +1,4 @@
 import contract from "../../../../contracts/video/motion-catalog-ui.v1.json";
-import slotContract from "../../../../contracts/video/motion-part-slots.v1.json";
 import type { MotionVideoDraftRequest } from "./material-video-studio-gateway";
 
 export interface MotionPartOption {
@@ -19,14 +18,6 @@ interface MotionPartsContract {
   readonly counts: { readonly total: number };
   readonly categories: readonly string[];
   readonly items: readonly MotionPartOption[];
-}
-
-interface MotionPartSlotsContract {
-  readonly schemaVersion: number;
-  readonly id: string;
-  readonly policy: string;
-  readonly counts: { readonly parts: number };
-  readonly parts: readonly { readonly name: string }[];
 }
 
 function loadCatalog(): {
@@ -61,19 +52,7 @@ function loadCatalog(): {
     }
     names.add(item.displayTitle);
   }
-  const slots = slotContract as MotionPartSlotsContract;
-  const selectablePartIds = new Set(slots.parts.map((part) => part.name));
-  if (
-    slots.schemaVersion !== 1 ||
-    slots.id !== "motion-part-slots.v1" ||
-    slots.policy !== "fail_closed" ||
-    slots.counts.parts !== 37 ||
-    slots.parts.length !== 37 ||
-    selectablePartIds.size !== 37 ||
-    [...selectablePartIds].some((id) => !identifiers.has(id))
-  ) {
-    throw new Error("motion parts selectable set must match the 37 frozen film slots");
-  }
+  const selectablePartIds = identifiers;
   return {
     categories: payload.categories,
     parts: payload.items,
@@ -93,8 +72,8 @@ export const MOTION_SELECTABLE_PART_IDS: ReadonlySet<string> =
  *
  * `browse_only` is a fact about the fixed-template path, not a feature flag:
  * its render request carries no part id. The one-sentence path consumes a
- * per-shot override, while individual cards are enabled only when the frozen
- * slot contract proves the real film assembler can build a shot from them.
+ * per-shot override. All 134 locked release items can become visual segments;
+ * the separate slot contract only says which of them can also receive beat copy.
  */
 export type MotionPartsUsage = "applies_to_output" | "browse_only";
 
