@@ -4149,6 +4149,34 @@ class TestMaterialPathRegistryRegistersOneAtomicBatch:
                 registry.resolve(identifier)
             assert _registry_rejection(excinfo) is MaterialPathRegistryRejection.NOT_REGISTERED
 
+    def test_a_batch_it_cannot_store_is_refused_before_anything_is_written(
+        self, tmp_path: Path
+    ) -> None:
+        """One replacement publishes the whole batch, so the whole batch is checked first."""
+        state = _state_directory(tmp_path)
+        registry = MaterialPathRegistry(state_directory=state)
+        source = _source(tmp_path, "generated-1.wav")
+        identifier = uuid.uuid4()
+
+        cases: list[tuple[str, object]] = [
+            ("mappings that are not a tuple", [(identifier, source)]),
+            ("an empty batch", ()),
+            ("a batch past the ceiling", tuple((uuid.uuid4(), source) for _ in range(129))),
+            ("an entry that is not a pair", ((identifier,),)),
+            ("an entry that is not a tuple", ([identifier, source],)),
+            ("an identifier the document could not key", ((uuid.UUID(int=0), source),)),
+            ("a source that is not a path", ((identifier, os.fspath(source)),)),
+            ("the same identifier twice", ((identifier, source), (identifier, source))),
+        ]
+        for label, mappings in cases:
+            with pytest.raises(MaterialPathRegistryRejected) as excinfo:
+                registry.register_many(mappings)  # type: ignore[arg-type]
+            assert (
+                _registry_rejection(excinfo) is MaterialPathRegistryRejection.UNUSABLE_IDENTIFIER
+            ), label
+
+        assert not _document(state).exists(), "nothing may be written for a refused batch"
+
     def test_a_failed_document_replace_keeps_the_previous_registry(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

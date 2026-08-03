@@ -9,7 +9,7 @@ reports success without the works list agreeing is a lie. Both are asserted.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, cast
 
@@ -22,6 +22,8 @@ from test_douyin_publish_page import (
     RISK_CHALLENGE,
     SUBMIT_CONTROL,
     WORK_LIST,
+    WORK_TITLE,
+    FakeLocator,
     FakePage,
     window,
 )
@@ -37,6 +39,8 @@ from automation_tool.executor.platform_commands import (
     DOUYIN_PUBLISH_DISPATCH_COMMAND,
     PUBLISH_DISPATCH_RESULT_FOR_STATE,
 )
+from automation_tool.executor.rpa.douyin import publish_release as publish_release_module
+from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
 from automation_tool.executor.rpa.douyin.publish_artifact import DouyinPublishArtifact
 from automation_tool.executor.rpa.douyin.publish_page import (
     DOUYIN_PUBLISH_MANAGE_ROUTE,
@@ -56,6 +60,7 @@ from automation_tool.executor.rpa.douyin.publish_release import (
     DouyinPublishConfirmation,
     DouyinPublishRelease,
     DouyinPublishReleaseEvidence,
+    DouyinPublishReleaseReceipt,
     DouyinPublishReleaseRejected,
     DouyinPublishReleaseState,
 )
@@ -669,3 +674,389 @@ def test_the_contract_pins_every_outcome_the_code_can_produce() -> None:
     assert set(contract["localCommand"]["resultStates"]) == set(
         PUBLISH_DISPATCH_RESULT_FOR_STATE.values()
     )
+
+
+def _receipt_values(**overrides: Any) -> dict[str, Any]:
+    values: dict[str, Any] = {
+        "publish_job_id": JOB_ID,
+        "state": DouyinPublishReleaseState.NOT_DISPATCHED,
+        "evidence": DouyinPublishReleaseEvidence.SURFACE_LOST,
+        "dispatch_state": None,
+        "dispatch_revision": None,
+        "replayed": False,
+    }
+    values.update(overrides)
+    return values
+
+
+def test_a_release_receipt_must_describe_an_outcome_that_could_have_happened() -> None:
+    """The four shapes are the whole vocabulary; a mixed one would claim two things."""
+    cases: list[tuple[str, dict[str, Any]]] = [
+        ("a job id that is not one", {"publish_job_id": "not-a-job"}),
+        ("a state from outside the set", {"state": "not_dispatched"}),
+        ("evidence from outside the set", {"evidence": "surface_lost"}),
+        ("another flow version", {"flow_version": "douyin-publish-release.v0"}),
+        ("another selector version", {"selector_version": "douyin-publish-page.v0"}),
+        ("a replay flag that is not a bool", {"replayed": 0}),
+        (
+            "not dispatched yet carrying a dispatch revision",
+            {"dispatch_state": SideEffectState.DISPATCHED, "dispatch_revision": 2},
+        ),
+        (
+            "verified without the settled revision",
+            {
+                "state": DouyinPublishReleaseState.VERIFIED,
+                "evidence": DouyinPublishReleaseEvidence.WORK_LISTED,
+                "dispatch_state": SideEffectState.VERIFIED,
+                "dispatch_revision": 2,
+            },
+        ),
+        (
+            "a replay flag that disagrees with its evidence",
+            {
+                "state": DouyinPublishReleaseState.VERIFIED,
+                "evidence": DouyinPublishReleaseEvidence.WORK_LISTED,
+                "dispatch_state": SideEffectState.VERIFIED,
+                "dispatch_revision": 3,
+                "replayed": True,
+            },
+        ),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(DouyinPublishReleaseRejected):
+            DouyinPublishReleaseReceipt(**_receipt_values(**overrides))
+        assert label
+
+
+def test_only_a_verified_release_counts_as_published() -> None:
+    """Anything else leaves the circuit open: the operator has to look before retrying."""
+    unsettled = DouyinPublishReleaseReceipt(**_receipt_values())
+    assert unsettled.published is False
+    assert unsettled.circuit_open is True
+
+    settled = DouyinPublishReleaseReceipt(
+        **_receipt_values(
+            state=DouyinPublishReleaseState.VERIFIED,
+            evidence=DouyinPublishReleaseEvidence.WORK_LISTED,
+            dispatch_state=SideEffectState.VERIFIED,
+            dispatch_revision=3,
+            replayed=False,
+        )
+    )
+    assert settled.published is True
+    assert settled.circuit_open is False
+
+
+def test_neither_the_release_nor_its_clock_prints_anything_private(tmp_path: Path) -> None:
+    from automation_tool.executor.rpa.douyin.publish_release import SystemPublishReleaseClock
+
+    page = publish_page()
+    opened = ledger_for(tmp_path)
+    assert repr(release(page, opened)) == "DouyinPublishRelease(<redacted>)"
+
+    assert repr(SystemPublishReleaseClock()) == "SystemPublishReleaseClock()"
+
+
+def test_a_release_built_on_a_policy_it_cannot_use_is_refused(tmp_path: Path) -> None:
+    """The interval and the action budget are what keep this from becoming a flood."""
+    page = publish_page()
+    opened = ledger_for(tmp_path)
+    with pytest.raises(DouyinPublishReleaseRejected):
+        DouyinPublishRelease(
+            window=window(page),
+            lease=BrowserSurfaceLeaseManager(),
+            ledger=opened,
+            clock=Clock(),
+            policy=cast(Any, object()),
+            confirmation_gate=SideEffectConfirmationGate(),
+        )
+
+
+def test_a_fingerprint_is_only_built_from_a_real_content_digest() -> None:
+    from automation_tool.executor.rpa.douyin.publish_release import (
+        publish_verification_fingerprint,
+    )
+
+    assert len(publish_verification_fingerprint("a" * 64)) == 32
+    for label, value in [("not a digest", "not-a-digest"), ("too short", "a" * 63)]:
+        with pytest.raises(DouyinPublishReleaseRejected):
+            publish_verification_fingerprint(value)
+        assert label
+
+
+def test_a_clock_that_answers_with_a_useless_moment_is_refused(tmp_path: Path) -> None:
+    """Every rate-limit decision is made against this, so a naive moment cannot be one."""
+    page = publish_page()
+    opened = ledger_for(tmp_path)
+
+    class _Naive:
+        def now(self) -> datetime:
+            return datetime(2026, 7, 25, 8, 0)
+
+    class _Offset:
+        def now(self) -> datetime:
+            return datetime(2026, 7, 25, 8, 0, tzinfo=timezone(timedelta(hours=8)))
+
+    class _Exploding:
+        def now(self) -> datetime:
+            raise RuntimeError("clock defect")
+
+    for label, clock in [
+        ("a moment with no zone", _Naive()),
+        ("a moment in another zone", _Offset()),
+        ("a clock that raises", _Exploding()),
+    ]:
+        releasing = release(page, opened, clock=cast(Any, clock))
+        with pytest.raises(DouyinPublishReleaseRejected):
+            releasing._now()
+        assert label
+
+    assert release(page, opened, clock=Clock())._now().tzinfo is UTC
+
+
+def test_the_production_clock_answers_in_utc() -> None:
+    from automation_tool.executor.rpa.douyin.publish_release import SystemPublishReleaseClock
+
+    moment = SystemPublishReleaseClock().now()
+
+    assert moment.tzinfo is UTC
+    assert repr(SystemPublishReleaseClock()) == "SystemPublishReleaseClock()"
+
+
+class _LedgerThatCannotBind(ExecutorLedger):
+    def bind_action_hard_policy(self, **arguments: Any) -> Any:
+        raise RuntimeError("private ledger failure")
+
+
+def test_a_release_whose_limits_cannot_be_committed_never_starts(tmp_path: Path) -> None:
+    """The interval binding is what stops a flood; unbound means no publishing at all."""
+    opened = _LedgerThatCannotBind(
+        state_directory=tmp_path / "ledger",
+        installation_id=INSTALLATION_ID,
+        executor_id=EXECUTOR_ID,
+    )
+
+    with pytest.raises(DouyinPublishReleaseRejected):
+        DouyinPublishRelease(
+            window=window(publish_page()),
+            lease=BrowserSurfaceLeaseManager(),
+            ledger=opened,
+            clock=Clock(),
+            policy=LocalActionHardPolicy(minimum_interval=MINIMUM_INTERVAL, task_action_limit=10),
+            confirmation_gate=SideEffectConfirmationGate(),
+        )
+
+
+class _SubmitControlUnreadableLocator(FakeLocator):
+    def locator(self, selector: str) -> FakeLocator:
+        assert selector == VISIBLE_MATCH_ENGINE
+        return type(self)(self.selector, self._page, visible_only=True)
+
+    def is_enabled(self) -> bool:
+        raise RuntimeError("private enabled failure")
+
+
+class _SubmitControlUnreadable(FakePage):
+    """The publish control is present and will not say whether it is armed."""
+
+    def locator(self, selector: str) -> FakeLocator:
+        self.requested_selectors.append(selector)
+        return (
+            _SubmitControlUnreadableLocator(selector, self)
+            if selector == SUBMIT_GROUP
+            else super().locator(selector)
+        )
+
+
+def test_a_publish_control_that_will_not_report_its_state_is_never_pressed(
+    tmp_path: Path,
+) -> None:
+    page = _SubmitControlUnreadable(url=FORM_URL, visible_selectors=set(FORM_SELECTORS))
+    page.visible_selectors.add(ACCOUNT_NAME)
+    page.texts[ACCOUNT_NAME] = ACCOUNT
+
+    receipt = run(page, ledger_for(tmp_path), intent(tmp_path))
+
+    assert receipt.state is DouyinPublishReleaseState.NOT_DISPATCHED
+    assert receipt.evidence is DouyinPublishReleaseEvidence.FORM_NOT_READY
+    assert page.clicked == []
+
+
+class _ControlGoneAfterTheArmedCheck(FakePage):
+    """Armed when asked, gone by the time the press is handed out."""
+
+    def __init__(self) -> None:
+        super().__init__(url=FORM_URL, visible_selectors=set(FORM_SELECTORS))
+        self.visible_selectors.add(ACCOUNT_NAME)
+        self.texts[ACCOUNT_NAME] = ACCOUNT
+        self._submit_reads = 0
+
+    def locator(self, selector: str) -> FakeLocator:
+        if selector == SUBMIT_GROUP:
+            self._submit_reads += 1
+            if self._submit_reads > 3:
+                self.failed_selectors.add(selector)
+        return super().locator(selector)
+
+
+def test_a_publish_control_that_leaves_before_the_press_is_reported_not_forced(
+    tmp_path: Path,
+) -> None:
+    page = _ControlGoneAfterTheArmedCheck()
+
+    receipt = run(page, ledger_for(tmp_path), intent(tmp_path))
+
+    assert receipt.state is DouyinPublishReleaseState.NOT_DISPATCHED
+    assert receipt.evidence is DouyinPublishReleaseEvidence.PREPARE_UNAVAILABLE
+    assert page.clicked == []
+
+
+class _LeaseLostAfter(BrowserSurfaceLeaseManager):
+    def __init__(self, after: int) -> None:
+        super().__init__()
+        self._after = after
+        self.calls = 0
+
+    def authorize_playwright_action(self) -> None:
+        self.calls += 1
+        if self.calls > self._after:
+            self.begin_takeover(
+                cdp_url="http://127.0.0.1:45123", timeout_seconds=60, pause_confirmed=True
+            )
+        super().authorize_playwright_action()
+
+
+def test_a_surface_handed_over_in_the_last_moment_before_the_press_stops_it(
+    tmp_path: Path,
+) -> None:
+    page = publish_page()
+
+    receipt = run(page, ledger_for(tmp_path), intent(tmp_path), lease=_LeaseLostAfter(1))
+
+    assert receipt.state is DouyinPublishReleaseState.NOT_DISPATCHED
+    assert receipt.evidence is DouyinPublishReleaseEvidence.SURFACE_LOST
+    assert page.clicked == []
+
+
+def test_a_dispatch_another_worker_recorded_first_is_replayed_not_pressed(
+    tmp_path: Path,
+) -> None:
+    """Between preparing and dispatching, someone else claimed this job; do not press."""
+    page = publish_page()
+    opened = ledger_for(tmp_path)
+    source = intent(tmp_path)
+
+    class _RacingClock(Clock):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def now(self) -> datetime:
+            moment = super().now()
+            self.calls += 1
+            if self.calls == 2:
+                opened.begin_publish_dispatch(
+                    publish_job_id=JOB_ID,
+                    content_hash=source.content_hash,
+                    dispatched_at=moment,
+                    minimum_interval_seconds=int(MINIMUM_INTERVAL.total_seconds()),
+                )
+            return moment
+
+    receipt = run(page, opened, source, clock=_RacingClock())
+
+    assert receipt.state is DouyinPublishReleaseState.OUTCOME_UNCERTAIN
+    assert receipt.evidence is DouyinPublishReleaseEvidence.REPLAY_UNCERTAIN
+    assert page.clicked == []
+
+
+def test_a_works_list_step_that_refuses_outright_leaves_the_outcome_uncertain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The click already happened; a refusal on the way to the evidence is not an exception."""
+    monkeypatch.setattr(publish_release_module, "_WORKS_LIST_TIMEOUT_MILLISECONDS", 0)
+    page = publish_page()
+
+    receipt = run(page, ledger_for(tmp_path), intent(tmp_path))
+
+    assert receipt.state is DouyinPublishReleaseState.OUTCOME_UNCERTAIN
+    assert receipt.evidence is DouyinPublishReleaseEvidence.WORKS_LIST_UNAVAILABLE
+    assert page.clicked == [SUBMIT_CONTROL]
+
+
+class _WorkRowsUnreadableLocator(FakeLocator):
+    def element_handles(self) -> list[Any]:
+        raise RuntimeError("private handle resolution failure")
+
+
+class _WorkRowsUnreadable(FakePage):
+    """The list loads and its rows refuse to be snapshotted."""
+
+    def locator(self, selector: str) -> FakeLocator:
+        self.requested_selectors.append(selector)
+        return (
+            _WorkRowsUnreadableLocator(selector, self)
+            if WORK_TITLE in selector
+            else super().locator(selector)
+        )
+
+
+def test_rows_that_cannot_be_read_leave_the_outcome_uncertain(tmp_path: Path) -> None:
+    page = _WorkRowsUnreadable(url=FORM_URL, visible_selectors=set(FORM_SELECTORS))
+    page.visible_selectors.add(ACCOUNT_NAME)
+    page.texts[ACCOUNT_NAME] = ACCOUNT
+
+    def show_works_list() -> None:
+        page.visible_selectors.clear()
+        page.visible_selectors.add(WORK_LIST)
+        page.work_titles = [(TITLE, True)]
+
+    page.navigation_callbacks[DOUYIN_PUBLISH_MANAGE_URL] = show_works_list
+
+    receipt = run(page, ledger_for(tmp_path), intent(tmp_path))
+
+    assert receipt.state is DouyinPublishReleaseState.OUTCOME_UNCERTAIN
+    assert receipt.evidence is DouyinPublishReleaseEvidence.WORKS_LIST_UNAVAILABLE
+    assert page.clicked == [SUBMIT_CONTROL]
+
+
+class _LedgerThatCannotVerify(ExecutorLedger):
+    def verify_publish_dispatch(self, **arguments: Any) -> Any:
+        raise RuntimeError("private ledger failure")
+
+
+def test_a_ledger_that_cannot_record_the_proof_leaves_the_outcome_uncertain(
+    tmp_path: Path,
+) -> None:
+    """The work is on the platform; what is missing is the durable record of it."""
+    page = publish_page()
+    opened = _LedgerThatCannotVerify(
+        state_directory=tmp_path / "ledger",
+        installation_id=INSTALLATION_ID,
+        executor_id=EXECUTOR_ID,
+    )
+
+    receipt = run(page, opened, intent(tmp_path))
+
+    assert receipt.state is DouyinPublishReleaseState.OUTCOME_UNCERTAIN
+    assert receipt.evidence is DouyinPublishReleaseEvidence.VERIFICATION_UNAVAILABLE
+    assert page.clicked == [SUBMIT_CONTROL]
+
+
+def test_a_job_identifier_that_is_not_even_text_is_refused(tmp_path: Path) -> None:
+    gate = SideEffectConfirmationGate()
+    source = intent(tmp_path)
+    approval = gate.present(
+        action=DOUYIN_PUBLISH_CONFIRMATION_ACTION,
+        target_account=ACCOUNT,
+        content_hash=source.content_hash,
+    )
+    token = gate.authorize_dispatch(approval.confirmation_id, confirmed=True)
+
+    with pytest.raises(DouyinPublishReleaseRejected):
+        DouyinPublishConfirmation(
+            publish_job_id=cast(Any, 42),
+            content_hash=source.content_hash,
+            target_account=ACCOUNT,
+            dispatch_token=token,
+        )

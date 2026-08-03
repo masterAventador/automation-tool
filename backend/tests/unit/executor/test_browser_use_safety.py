@@ -151,3 +151,56 @@ class TestSideEffectConfirmationGate:
         token = gate.authorize_dispatch(approval.confirmation_id, confirmed=True)
         assert token not in repr(gate)
         assert token not in approval.summary
+
+
+class TestGateInputBoundaries:
+    def test_only_text_can_be_checked_for_leaked_secrets(self) -> None:
+        gate = SensitiveDataGate()
+        gate.register("password", "the-real-password")
+
+        for value in (None, 42, b"bytes", ["text"]):
+            with pytest.raises(BrowserUseSafetyRejected):
+                gate.model_visible(value)  # type: ignore[arg-type]
+
+    def test_a_secret_that_was_never_registered_cannot_be_confirmed(self) -> None:
+        gate = SensitiveDataGate()
+
+        with pytest.raises(BrowserUseSafetyRejected):
+            gate.confirm_send("password")
+
+    def test_the_gate_repr_names_its_keys_and_never_their_values(self) -> None:
+        gate = SensitiveDataGate()
+        gate.register("password", "the-real-password")
+        gate.register("otp", "123456")
+
+        text = repr(gate)
+
+        assert text == "SensitiveDataGate(keys=['otp', 'password'])"
+        assert "the-real-password" not in text
+
+    def test_an_approval_repr_carries_its_identifier_and_not_its_summary(self) -> None:
+        gate = SideEffectConfirmationGate()
+        approval = gate.present(
+            action="douyin_publish",
+            target_account="自动化运营测试账号",
+            content_hash="a" * 64,
+        )
+
+        text = repr(approval)
+
+        assert approval.confirmation_id in text
+        assert "自动化运营测试账号" not in text
+
+    def test_a_dispatch_token_that_is_not_even_text_is_refused(self) -> None:
+        gate = SideEffectConfirmationGate()
+        approval = gate.present(
+            action="douyin_publish",
+            target_account="自动化运营测试账号",
+            content_hash="a" * 64,
+        )
+        token = gate.authorize_dispatch(approval.confirmation_id, confirmed=True)
+
+        for wrong_token, wrong_hash in ((42, "a" * 64), (token, 42)):
+            with pytest.raises(BrowserUseSafetyRejected):
+                gate.consume_dispatch(wrong_token, content_hash=wrong_hash)  # type: ignore[arg-type]
+        gate.consume_dispatch(token, content_hash="a" * 64)

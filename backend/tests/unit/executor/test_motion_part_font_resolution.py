@@ -23,12 +23,17 @@ machine and fine on another, which is the class of drift BM-16 exists to remove.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from automation_tool.executor.motion_authoring import part_typography
 from automation_tool.executor.motion_authoring.part_typography import (
     FamilyPolicy,
     FontRequestUnmet,
+    cjk_codepoints,
     document_font_css,
+    face_artifact,
     packaged_weights,
     requested_faces,
     resolve_faces,
@@ -243,3 +248,185 @@ def test_the_rules_point_at_where_the_document_can_reach_them() -> None:
 
     assert "url(../../offline-deps/" in css
     assert "url(offline-deps/" not in css
+
+
+def test_a_typography_contract_of_the_wrong_shape_is_refused() -> None:
+    """Nothing downstream can tell "no families" apart from "the file is broken"."""
+    cases: list[tuple[str, dict[str, object]]] = [
+        (
+            "families is not a list",
+            {"chineseFace": {"artifactPath": CHINESE_ARTIFACT}, "families": {}},
+        ),
+        (
+            "a family entry that is not an object",
+            {"chineseFace": {"artifactPath": CHINESE_ARTIFACT}, "families": ["Inter"]},
+        ),
+    ]
+    for label, document in cases:
+        with pytest.raises(FontRequestUnmet):
+            document_font_css(
+                "<style>.a{font-family:'Inter'}</style>",
+                typography_contract=document,
+                offline_lock=LOCK,
+            )
+        assert label
+
+
+def test_a_family_policy_missing_any_of_its_four_fields_is_refused() -> None:
+    complete: dict[str, object] = {
+        "family": "Inter",
+        "policy": "packaged",
+        "replacement": None,
+        "reason": "",
+        "visualDifference": "",
+    }
+
+    cases: list[tuple[str, dict[str, object]]] = [
+        ("a family that is not text", {"family": 1}),
+        ("a policy that is not text", {"policy": None}),
+        ("a replacement that is neither text nor absent", {"replacement": 1}),
+        ("a reason that is not text", {"reason": 1}),
+        ("a visual difference that is not text", {"visualDifference": None}),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(FontRequestUnmet):
+            document_font_css(
+                "<style>.a{font-family:'Inter'}</style>",
+                typography_contract={
+                    "chineseFace": {"artifactPath": CHINESE_ARTIFACT},
+                    "families": [{**complete, **overrides}],
+                },
+                offline_lock=LOCK,
+            )
+        assert label
+
+
+def test_a_lock_face_whose_weight_is_not_a_number_is_refused() -> None:
+    """The weight is what buckets the face; an unreadable one buckets nothing."""
+    lock = {
+        "stylesheets": [
+            {
+                "faces": [
+                    {
+                        "family": "Inter",
+                        "weight": "regular",
+                        "artifactPath": "fonts/inter.woff2",
+                        "unicodeRange": "U+0000-00FF",
+                    }
+                ]
+            }
+        ]
+    }
+
+    with pytest.raises(FontRequestUnmet):
+        packaged_weights(lock)
+
+
+def test_a_generic_or_templated_family_name_is_never_requested() -> None:
+    """A generic keyword and a CSS variable name nothing that can be packaged."""
+    pairs = requested_faces(
+        "<style>.a{font-family:sans-serif}"
+        ".b{font-family:var(--brand-font)}"
+        ".c{font-family:$brand}"
+        ".d{font-family:''}"
+        ".e{color:red}</style>"
+    )
+
+    assert pairs == frozenset()
+
+
+def test_a_font_stack_named_in_a_data_attribute_is_requested_at_the_default_weight() -> None:
+    pairs = requested_faces("<div data-font=\"'Inter', sans-serif\"></div>")
+
+    assert pairs == frozenset({("Inter", 400)})
+
+
+def test_the_same_packaged_face_declared_twice_yields_one_rule() -> None:
+    """Two stylesheets naming the same artifact must not double the @font-face."""
+    face = {
+        "family": "Inter",
+        "weight": "400",
+        "artifactPath": "fonts/inter-400.woff2",
+        "unicodeRange": "U+0000-00FF",
+    }
+    lock = {"stylesheets": [{"faces": [face]}, {"faces": [dict(face)]}]}
+
+    css = document_font_css(
+        "<style>.a{font-family:'Inter';font-weight:400}</style>",
+        typography_contract=contract(
+            [{"family": "Inter", "policy": "packaged", "replacement": None}]
+        ),
+        offline_lock=lock,
+    )
+
+    assert css.count("fonts/inter-400.woff2") == 1
+
+
+def test_a_lock_face_missing_any_of_its_four_fields_is_refused() -> None:
+    complete: dict[str, object] = {
+        "family": "Inter",
+        "weight": "400",
+        "artifactPath": "fonts/inter-400.woff2",
+        "unicodeRange": "U+0000-00FF",
+    }
+
+    cases: list[tuple[str, dict[str, object]]] = [
+        ("a family that is not text", {"family": 1}),
+        ("a weight that is neither text nor a number", {"weight": None}),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(FontRequestUnmet):
+            packaged_weights({"stylesheets": [{"faces": [{**complete, **overrides}]}]})
+        assert label
+
+
+def test_reading_one_faces_artifact_refuses_a_lock_it_cannot_parse() -> None:
+    """`face_artifact` re-reads the lock, so it repeats the checks rather than trusting."""
+    complete: dict[str, object] = {
+        "family": "Inter",
+        "weight": "400",
+        "artifactPath": "fonts/inter-400.woff2",
+        "unicodeRange": "U+0000-00FF",
+    }
+
+    cases: list[tuple[str, dict[str, object]]] = [
+        ("a weight that is neither text nor a number", {"weight": None}),
+        ("a weight that is not a number", {"weight": "regular"}),
+        ("an artifact path that is not text", {"artifactPath": 1}),
+        ("a unicode range that is not text", {"unicodeRange": None}),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(FontRequestUnmet):
+            face_artifact(
+                {"stylesheets": [{"faces": [{**complete, **overrides}]}]},
+                "Inter",
+                400,
+            )
+        assert label
+
+
+def test_a_contract_file_that_cannot_be_read_or_is_not_an_object_is_refused(
+    tmp_path: Path,
+) -> None:
+    """These ship inside the package; an unreadable one is a broken build, not a default."""
+    missing = tmp_path / "absent.json"
+    not_an_object = tmp_path / "list.json"
+    not_an_object.write_text("[1, 2]", encoding="utf-8")
+    malformed = tmp_path / "broken.json"
+    malformed.write_text("{not json", encoding="utf-8")
+
+    for label, path in [
+        ("no file at all", missing),
+        ("a document that is not an object", not_an_object),
+        ("a document that will not parse", malformed),
+    ]:
+        with pytest.raises(FontRequestUnmet):
+            part_typography._load(path)
+        assert label
+
+
+def test_the_chinese_range_is_expanded_into_every_code_point_it_claims() -> None:
+    codepoints = cjk_codepoints()
+
+    assert ord("中") in codepoints
+    assert ord("A") not in codepoints

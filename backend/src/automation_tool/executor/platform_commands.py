@@ -710,8 +710,6 @@ class DouyinPublishPreflightCommandOperation:
                 # the captcha, slider, risk check or login in it by hand.
                 self._close_active(best_effort=True)
             return _PUBLISH_RESULT_FOR_STATE[receipt.state]
-        except PlatformCommandRejected:
-            raise
         except Exception:
             self._close_active(best_effort=True)
             raise PlatformCommandRejected from None

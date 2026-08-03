@@ -798,3 +798,132 @@ def test_public_types_do_not_leak_provider_names() -> None:
     assert inspect.signature(MaterialUnderstandingAdapter.understand).return_annotation != Any
     assert isinstance(MaterialUnderstandingFrame.__dataclass_fields__, dict)
     assert isinstance(MaterialUnderstandingOptions.__dataclass_fields__, dict)
+
+
+def test_a_catalog_that_cannot_be_read_is_a_fixed_rejection(tmp_path: Path) -> None:
+    """The locked model comes from this file only; anything unreadable stops here."""
+    real = tmp_path / "catalog.json"
+    real.write_text(CATALOG_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    link = tmp_path / "linked-catalog.json"
+    link.symlink_to(real)
+    missing = tmp_path / "absent.json"
+    directory = tmp_path / "a-directory.json"
+    directory.mkdir()
+    malformed = tmp_path / "malformed.json"
+    malformed.write_text("{not json", encoding="utf-8")
+
+    for label, path in [
+        ("a symlink standing in for the catalog", link),
+        ("no catalog at all", missing),
+        ("a directory where the catalog should be", directory),
+        ("a catalog that will not parse", malformed),
+    ]:
+        with pytest.raises(MaterialUnderstandingRejected):
+            load_bailian_material_understanding_config(
+                catalog_path=path,
+                api_key=API_KEY,
+                timeout_seconds=12.5,
+            )
+        assert label
+
+
+def test_the_adapter_refuses_a_configuration_of_the_wrong_type() -> None:
+    with pytest.raises(MaterialUnderstandingRejected):
+        BailianMaterialUnderstandingAdapter(cast(BailianMaterialUnderstandingConfig, object()))
+
+
+def test_the_adapter_refuses_frames_or_options_it_cannot_send() -> None:
+    adapter = _adapter()
+    frame = MaterialUnderstandingFrame(
+        timestamp_ms=0,
+        is_scene_cut=True,
+        jpeg_bytes=b"\xff\xd8\xff\xe0frame\xff\xd9",
+    )
+    options = MaterialUnderstandingOptions()
+
+    cases: list[tuple[str, Any, Any]] = [
+        ("frames that are not a tuple", [frame], options),
+        ("no frames at all", (), options),
+        ("something that is not a frame", (object(),), options),
+        ("options of the wrong type", (frame,), object()),
+    ]
+    for label, frames, request_options in cases:
+        with pytest.raises(MaterialUnderstandingRejected):
+            adapter.understand(frames, options=request_options)
+        assert label
+
+
+def test_a_response_envelope_with_no_usable_choice_is_a_fixed_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The first choice is what gets parsed; anything else is not read around."""
+    adapter = _adapter()
+    frame = MaterialUnderstandingFrame(
+        timestamp_ms=0,
+        is_scene_cut=True,
+        jpeg_bytes=b"\xff\xd8\xff\xe0frame\xff\xd9",
+    )
+
+    for label, body in [
+        ("choices as an object", {"id": "req-1", "choices": {"0": {}}}),
+        ("no choices at all", {"id": "req-1", "choices": []}),
+        ("a choice that is not an object", {"id": "req-1", "choices": ["stop"]}),
+    ]:
+        monkeypatch.setattr(
+            material_understanding_module,
+            "_open_request",
+            lambda _request, *, timeout, _body=body: _Response(_body),
+        )
+
+        with pytest.raises(MaterialUnderstandingRejected):
+            adapter.understand((frame,), options=MaterialUnderstandingOptions())
+        assert label
+
+
+def test_a_response_whose_headers_cannot_be_asked_about_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The declared length is how truncation is caught, so headers must be readable."""
+    adapter = _adapter()
+    frame = MaterialUnderstandingFrame(
+        timestamp_ms=0,
+        is_scene_cut=True,
+        jpeg_bytes=b"\xff\xd8\xff\xe0frame\xff\xd9",
+    )
+
+    class _NoGetAll(_Response):
+        headers = object()
+
+    monkeypatch.setattr(
+        material_understanding_module,
+        "_open_request",
+        lambda _request, *, timeout: _NoGetAll({"id": "req-1", "choices": []}),
+    )
+
+    with pytest.raises(MaterialUnderstandingRejected):
+        adapter.understand((frame,), options=MaterialUnderstandingOptions())
+
+
+def test_a_response_that_declares_no_length_is_still_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HTTP/1.1 chunked responses carry no Content-Length; that is not an error."""
+
+    class _NoLength(_Response):
+        headers = http.client.HTTPMessage()
+
+    monkeypatch.setattr(
+        material_understanding_module,
+        "_open_request",
+        lambda _request, *, timeout: _NoLength(json.loads(_reply().read().decode("utf-8"))),
+    )
+    adapter = _adapter()
+    frame = MaterialUnderstandingFrame(
+        timestamp_ms=0,
+        is_scene_cut=True,
+        jpeg_bytes=b"\xff\xd8\xff\xe0frame\xff\xd9",
+    )
+
+    reply = adapter.understand((frame,), options=MaterialUnderstandingOptions())
+
+    assert reply.request_id == "req-material-001"

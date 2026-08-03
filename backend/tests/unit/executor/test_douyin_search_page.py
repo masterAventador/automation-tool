@@ -637,3 +637,31 @@ def test_elapsed_wait_and_failed_url_read_remain_closed(monkeypatch: pytest.Monk
     page.wait_failure_selectors.add(INPUT_GROUP)
     unavailable = DouyinSearchPage(window(page)).wait_for_home_ready(timeout_milliseconds=1_000)
     assert unavailable.evidence is DouyinSearchPageEvidence.PAGE_VERSION_UNKNOWN
+
+
+class _DialogGoneAfterObservation(FakePage):
+    """The handoff dialog is present when observed and absent when reached for."""
+
+    def __init__(self, *, fail_instead: bool) -> None:
+        super().__init__(url=DOUYIN_HOME_URL, visible_selectors={LOGIN_DIALOG})
+        self._fail_instead = fail_instead
+        self._dialog_requests = 0
+
+    def locator(self, selector: str) -> FakeLocator:
+        if selector.startswith(LOGIN_DIALOG):
+            self._dialog_requests += 1
+            if self._dialog_requests > 1:
+                if self._fail_instead:
+                    self.failed_selectors.add(LOGIN_DIALOG)
+                else:
+                    self.visible_selectors.discard(LOGIN_DIALOG)
+        return super().locator(selector)
+
+
+@pytest.mark.parametrize("fail_instead", (False, True))
+def test_a_handoff_anchor_that_leaves_between_two_reads_fails_closed(fail_instead: bool) -> None:
+    """No anchor is better than the wrong one: the operator is handed a real element or nothing."""
+    search_page = DouyinSearchPage(window(_DialogGoneAfterObservation(fail_instead=fail_instead)))
+
+    with pytest.raises(DouyinSearchPageRejected, match="search page is unavailable"):
+        search_page.login_dialog()

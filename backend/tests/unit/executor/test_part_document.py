@@ -111,3 +111,42 @@ def test_entity_references_are_resolved_in_the_recorded_text() -> None:
 def test_enumeration_is_stable_across_calls() -> None:
     document = part_html("lt-bold-block")
     assert enumerate_text_nodes(document) == enumerate_text_nodes(document)
+
+
+def test_an_unbalanced_close_tag_does_not_unwind_past_the_element_that_opened() -> None:
+    """Upstream documents contain a few; a naive pop would reparent everything after.
+
+    The `</em>` here closes nothing -- no `em` was ever opened -- so the stack
+    must be left alone. If it were popped anyway, `after` would be attributed to
+    whatever sat below `span` rather than to `span` itself.
+    """
+    nodes = visible_text_nodes("<div><span>before</em>after</span></div>")
+
+    assert [node.parent_tag for node in nodes] == ["span", "span"]
+    assert [node.text for node in nodes] == ["before", "after"]
+
+
+def test_a_close_tag_unwinds_every_element_left_open_beneath_it() -> None:
+    """`</div>` closes the `span` that was never closed, and the text after it knows."""
+    nodes = visible_text_nodes("<div><span>inside</div>outside")
+
+    assert [node.parent_tag for node in nodes] == ["span", ""]
+    assert [node.text for node in nodes] == ["inside", "outside"]
+
+
+def test_non_text_syntax_closes_a_pending_node_without_becoming_one() -> None:
+    """Comments, processing instructions and CDATA end a text run, they do not join it.
+
+    Each is a separate parser callback, and each must close whatever text was
+    still open -- otherwise the text on either side of one would merge into a
+    single node and every index after it would shift.
+    """
+    for label, markup in [
+        ("a comment", "<p>before<!-- note -->after</p>"),
+        ("a processing instruction", "<p>before<?php echo 1; ?>after</p>"),
+        ("a cdata section", "<p>before<![CDATA[raw]]>after</p>"),
+        ("a declaration", "<!DOCTYPE html><p>before</p>"),
+    ]:
+        texts = [node.text for node in visible_text_nodes(markup)]
+        assert "beforeafter" not in texts, label
+        assert "before" in texts, label

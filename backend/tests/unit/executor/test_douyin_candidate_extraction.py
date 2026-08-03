@@ -695,3 +695,80 @@ def test_observation_rejects_forged_state_evidence_candidates_or_metadata() -> N
         page_revision=7,
     )
     assert failed.circuit_open is True
+
+
+class _FeedLocator(FakeLocator):
+    """Carries which selector it came from so only the row query can misbehave."""
+
+    selector = ""
+
+    def _carry(self, derived: FakeLocator) -> FakeLocator:
+        cast(_FeedLocator, derived).selector = self.selector
+        return derived
+
+    def nth(self, index: int) -> FakeLocator:
+        return self._carry(super().nth(index))
+
+    def locator(self, selector: str) -> FakeLocator:
+        derived = super().locator(selector)
+        return self._carry(derived) if selector == VISIBLE_MATCH_ENGINE else derived
+
+    def count(self) -> int:
+        page = cast(_UnstableFeed, self._page)
+        if page.reported_row_count is not None and self.selector == page.item_selector:
+            return cast(int, page.reported_row_count)
+        return super().count()
+
+    def element_handle(self, *, timeout: float) -> FakeHandle:
+        handle = super().element_handle(timeout=timeout)
+        if cast(_UnstableFeed, self._page).hide_rows_once_pinned:
+            for node in self.page_items():
+                node.visible = False
+        return handle
+
+    def page_items(self) -> list[FakeNode]:
+        return cast(_UnstableFeed, self._page).items
+
+
+class _UnstableFeed(FakePage):
+    """A feed that can overstate its length or empty a row after it is pinned."""
+
+    def __init__(
+        self,
+        *,
+        items: list[FakeNode],
+        reported_row_count: object | None = None,
+        hide_rows_once_pinned: bool = False,
+    ) -> None:
+        super().__init__(items=items)
+        self.reported_row_count = reported_row_count
+        self.hide_rows_once_pinned = hide_rows_once_pinned
+
+    def locator(self, selector: str) -> FakeLocator:
+        locator = _FeedLocator(self, lambda: self._match(selector))
+        locator.selector = selector
+        return locator
+
+
+def test_a_row_count_that_is_not_a_count_is_rejected_before_any_row_is_read() -> None:
+    for reported in (-1, True, "3"):
+        observation = extract(_UnstableFeed(items=[item()], reported_row_count=reported))
+        assert observation.state is DouyinCandidateExtractionState.UNKNOWN
+        assert observation.evidence is DouyinCandidateExtractionEvidence.PAGE_UNAVAILABLE
+
+
+def test_a_feed_that_shrinks_below_its_own_count_is_page_unavailable() -> None:
+    """The count promised three rows; reaching for the second finds nothing there."""
+    observation = extract(_UnstableFeed(items=[item()], reported_row_count=3))
+
+    assert observation.state is DouyinCandidateExtractionState.UNKNOWN
+    assert observation.evidence is DouyinCandidateExtractionEvidence.PAGE_UNAVAILABLE
+    assert observation.candidates == ()
+
+
+def test_a_row_that_goes_hidden_the_moment_it_is_pinned_is_a_privacy_rejection() -> None:
+    observation = extract(_UnstableFeed(items=[item()], hide_rows_once_pinned=True))
+
+    assert observation.state is DouyinCandidateExtractionState.UNKNOWN
+    assert observation.evidence is DouyinCandidateExtractionEvidence.PRIVACY_REJECTED
+    assert observation.candidates == ()

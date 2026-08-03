@@ -9,6 +9,7 @@ from automation_tool.executor.motion_authoring.component_host import (
     build_component_film_html,
     build_visual_part_film_html,
     component_film_metadata,
+    reviewed_visual_part_copy_mode,
 )
 
 
@@ -344,3 +345,120 @@ def test_an_unknown_fragment_component_is_rejected_fail_closed() -> None:
             body="正文",
             items=(),
         )
+
+
+def test_a_fragment_no_host_contract_covers_is_refused() -> None:
+    """Fragments get a reviewed stage each; one nobody reviewed has no stage to get."""
+    with pytest.raises(ComponentHostRejected):
+        component_film_metadata(name="not-a-known-fragment", source="<div>fragment</div>")
+
+
+def test_a_complete_component_that_declares_no_stage_is_refused() -> None:
+    """The declaration is where the capture size and length come from; nothing guesses."""
+    complete = (
+        '<!doctype html><html><body><div data-composition-id="caption" '
+        "{duration}{width}{height}></div></body></html>"
+    )
+
+    duration = 'data-duration="3" '
+    width = 'data-width="1920" '
+    height = 'data-height="1080"'
+    for label, fields in [
+        ("no duration", {"duration": "", "width": width, "height": height}),
+        ("no width", {"duration": duration, "width": "", "height": height}),
+        ("no height", {"duration": duration, "width": width, "height": ""}),
+    ]:
+        with pytest.raises(ComponentHostRejected):
+            component_film_metadata(name="caption-clip-wipe", source=complete.format(**fields))
+        assert label
+
+
+def test_a_complete_component_declaring_a_stage_nothing_can_capture_is_refused() -> None:
+    def source(duration: str, width: str, height: str) -> str:
+        return (
+            '<!doctype html><html><body><div data-composition-id="caption" '
+            f'data-duration="{duration}" data-width="{width}" data-height="{height}">'
+            "</div></body></html>"
+        )
+
+    for label, arguments in [
+        ("a length of zero", ("0", "1920", "1080")),
+        ("a width below the floor", ("3", "8", "1080")),
+        ("a width past the ceiling", ("3", "7681", "1080")),
+        ("a height below the floor", ("3", "1920", "8")),
+        ("a height past the ceiling", ("3", "1920", "4321")),
+    ]:
+        with pytest.raises(ComponentHostRejected):
+            component_film_metadata(name="caption-clip-wipe", source=source(*arguments))
+        assert label
+
+
+def test_a_complete_component_with_no_closing_head_cannot_be_given_a_backdrop() -> None:
+    """The backdrop is what keeps a transparent component from capturing as noise."""
+    with pytest.raises(ComponentHostRejected):
+        build_component_film_html(
+            name="caption-clip-wipe",
+            source=(
+                "<!doctype html><html><body>"
+                '<div data-composition-id="caption">x</div></body></html>'
+            ),
+            headline="标题",
+            body="",
+            items=(),
+        )
+
+
+def test_a_static_overlay_without_a_complete_page_is_refused() -> None:
+    """`lower-third-bild` is hosted by rewriting both ends; half a page has one."""
+    for label, source in [
+        ("no closing head", "<!doctype html><html><body><div id='lb-root'></div></body></html>"),
+        ("no closing body", "<!doctype html><html><head></head><div id='lb-root'></div></html>"),
+    ]:
+        with pytest.raises(ComponentHostRejected):
+            build_visual_part_film_html(name="lower-third-bild", source=source)
+        assert label
+
+
+def test_a_static_overlay_is_hosted_with_its_own_backdrop_and_timeline() -> None:
+    """The one catalog part that is static as an overlay gets an honest standalone shot."""
+    document = build_visual_part_film_html(
+        name="lower-third-bild",
+        source=(
+            "<!doctype html><html><head></head><body>"
+            "<div id='lb-root'><div id='lb-main-outer'></div>"
+            "<div id='lb-sub-outer'></div></div></body></html>"
+        ),
+    )
+
+    assert "data-motion-static-overlay-host" in document
+    assert "lower-third-bild-film-host" in document
+    assert document.index("data-motion-static-overlay-host") < document.index(
+        "data-motion-static-overlay-timeline"
+    ), "the backdrop is placed in the head and the timeline at the end of the body"
+
+
+def test_a_visual_part_with_no_host_of_its_own_is_handed_back_unchanged() -> None:
+    source = "<!doctype html><html><head></head><body><div>part</div></body></html>"
+
+    assert build_visual_part_film_html(name="lt-bold-block", source=source) == source
+
+
+def test_a_transition_film_block_needs_a_body_and_a_timeline_to_host() -> None:
+    """Its own script is what gets driven; without one there is nothing to capture."""
+    for label, source in [
+        ("no body", "<!doctype html><html><head></head></html>"),
+        (
+            "no timeline script",
+            "<!doctype html><html><head></head><body><div>no script</div></body></html>",
+        ),
+    ]:
+        with pytest.raises(ComponentHostRejected):
+            build_visual_part_film_html(name="glitch", source=source)
+        assert label
+
+
+def test_the_copy_mode_says_which_parts_take_the_beats_words() -> None:
+    """A part with a host shows the beat's copy; one without keeps its own visuals."""
+    assert reviewed_visual_part_copy_mode("glitch") == "beat_host"
+    assert reviewed_visual_part_copy_mode("motion-blur") == "beat_host"
+    assert reviewed_visual_part_copy_mode("lt-bold-block") == "visual_only"

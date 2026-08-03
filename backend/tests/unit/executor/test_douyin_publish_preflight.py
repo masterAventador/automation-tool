@@ -16,6 +16,7 @@ from automation_tool.executor.rpa.douyin.publish_artifact import open_publish_ar
 from automation_tool.executor.rpa.douyin.publish_page import (
     DOUYIN_PUBLISH_ENTRY_URL,
     DOUYIN_PUBLISH_PAGE_SELECTOR_VERSION,
+    DouyinPublishPageEvidence,
 )
 from automation_tool.executor.rpa.douyin.publish_preflight import (
     DOUYIN_PUBLISH_PREFLIGHT_FLOW_VERSION,
@@ -24,6 +25,7 @@ from automation_tool.executor.rpa.douyin.publish_preflight import (
     DouyinPublishPreflight,
     DouyinPublishPreflightEvidence,
     DouyinPublishPreflightIntent,
+    DouyinPublishPreflightReceipt,
     DouyinPublishPreflightRejected,
     DouyinPublishPreflightState,
 )
@@ -527,3 +529,139 @@ def test_artifact_replaced_during_the_upload_is_refused_before_pre_submit(
     assert receipt.evidence is DouyinPublishPreflightEvidence.ARTIFACT_REJECTED
     assert page.filled == {}
     assert page.clicks == []
+
+
+def test_a_receipt_that_describes_no_real_outcome_is_refused() -> None:
+    """The three shapes are the whole vocabulary; anything else is a broken caller."""
+    for values in (
+        {"state": "pre_submit_ready", "evidence": DouyinPublishPreflightEvidence.LOGIN_REQUIRED},
+        {"state": DouyinPublishPreflightState.HANDOFF_REQUIRED, "evidence": "login_required"},
+        {
+            "state": DouyinPublishPreflightState.HANDOFF_REQUIRED,
+            "evidence": DouyinPublishPreflightEvidence.LOGIN_REQUIRED,
+            "flow_version": "pb-05-not-the-frozen-flow",
+        },
+        {
+            "state": DouyinPublishPreflightState.HANDOFF_REQUIRED,
+            "evidence": DouyinPublishPreflightEvidence.LOGIN_REQUIRED,
+            "selector_version": "not-the-frozen-selectors",
+        },
+        {
+            "state": DouyinPublishPreflightState.HANDOFF_REQUIRED,
+            "evidence": DouyinPublishPreflightEvidence.LOGIN_REQUIRED,
+            "page_evidence": "required_anchor_missing",
+        },
+        {
+            "state": DouyinPublishPreflightState.HANDOFF_REQUIRED,
+            "evidence": DouyinPublishPreflightEvidence.LOGIN_REQUIRED,
+            "target_account": "‮" + "spoofed",
+        },
+        {
+            "state": DouyinPublishPreflightState.PRE_SUBMIT_READY,
+            "evidence": DouyinPublishPreflightEvidence.PRE_SUBMIT_CONFIRMED,
+            "content_hash": "not-a-digest",
+        },
+        {
+            "state": DouyinPublishPreflightState.HANDOFF_REQUIRED,
+            "evidence": DouyinPublishPreflightEvidence.LOGIN_REQUIRED,
+            "content_hash": "a" * 64,
+        },
+    ):
+        with pytest.raises(DouyinPublishPreflightRejected):
+            DouyinPublishPreflightReceipt(**cast(Any, values))
+
+
+def test_the_preflight_repr_names_no_page_content() -> None:
+    text = repr(DouyinPublishPreflight(window=window(FakePage()), lease=owned_lease()))
+    assert text == "DouyinPublishPreflight(<redacted>)"
+
+
+class _LeaseLostAfter(BrowserSurfaceLeaseManager):
+    """Hands the surface to the operator once the flow has authorized `after` times."""
+
+    def __init__(self, after: int) -> None:
+        super().__init__()
+        self._after = after
+        self.calls = 0
+
+    def authorize_playwright_action(self) -> None:
+        self.calls += 1
+        if self.calls > self._after:
+            self.begin_takeover(
+                cdp_url="http://127.0.0.1:45123", timeout_seconds=60, pause_confirmed=True
+            )
+        super().authorize_playwright_action()
+
+
+def test_surface_taken_over_after_the_upload_stops_before_any_text_is_typed(
+    tmp_path: Path,
+) -> None:
+    page = FakePage()
+    receipt = run(page, tmp_path, _LeaseLostAfter(2))
+    assert receipt.state is DouyinPublishPreflightState.BLOCKED
+    assert receipt.evidence is DouyinPublishPreflightEvidence.SURFACE_LOST
+    assert page.uploaded != []
+    assert page.filled == {}
+
+
+class _VanishingFormLocator(FakeLocator):
+    def locator(self, selector: str) -> FakeLocator:
+        assert selector == VISIBLE_MATCH_ENGINE
+        return type(self)(self.selector, self._page, visible_only=True)
+
+    def fill(self, value: str, *, timeout: float) -> None:
+        super().fill(value, timeout=timeout)
+        if DESCRIPTION_INPUT in self.selector:
+            self._page.visible_selectors.discard(SUBMIT_CONTROL)
+
+
+class _FormVanishesAfterTyping(FakePage):
+    """Ready when it is waited for, gone by the time the typed text is read back."""
+
+    def locator(self, selector: str) -> FakeLocator:
+        self.locator_requests.append(selector)
+        return _VanishingFormLocator(selector, self)
+
+
+def test_a_form_that_disappears_after_the_text_is_typed_is_reported(tmp_path: Path) -> None:
+    page = _FormVanishesAfterTyping()
+    receipt = run(page, tmp_path)
+    assert receipt.state is DouyinPublishPreflightState.BLOCKED
+    assert receipt.evidence is DouyinPublishPreflightEvidence.FORM_UNAVAILABLE
+    assert page.filled != {}
+    assert page.clicks == []
+
+
+class _NonBooleanEnabledLocator(FakeLocator):
+    def locator(self, selector: str) -> FakeLocator:
+        assert selector == VISIBLE_MATCH_ENGINE
+        return type(self)(self.selector, self._page, visible_only=True)
+
+    def is_enabled(self) -> bool:
+        return cast(bool, 1)
+
+
+class _SubmitControlAnswersNonsense(FakePage):
+    """The publish control reports something that is not a yes or a no."""
+
+    def locator(self, selector: str) -> FakeLocator:
+        self.locator_requests.append(selector)
+        return _NonBooleanEnabledLocator(selector, self)
+
+
+def test_a_publish_control_that_answers_nonsense_is_never_pressed(tmp_path: Path) -> None:
+    page = _SubmitControlAnswersNonsense()
+    receipt = run(page, tmp_path)
+    assert receipt.state is DouyinPublishPreflightState.BLOCKED
+    assert receipt.evidence is DouyinPublishPreflightEvidence.FORM_UNAVAILABLE
+    assert page.clicks == []
+
+
+def test_two_anchors_claiming_the_same_field_is_page_drift(tmp_path: Path) -> None:
+    """Two title inputs means the page changed under us; guessing which one is wrong."""
+    page = FakePage()
+    page.form_selectors = set(FORM_SELECTORS) | {'input[placeholder*="作品标题"]'}
+    receipt = run(page, tmp_path)
+    assert receipt.state is DouyinPublishPreflightState.BLOCKED
+    assert receipt.evidence is DouyinPublishPreflightEvidence.PAGE_DRIFT
+    assert receipt.page_evidence is DouyinPublishPageEvidence.CONFLICTING_ANCHORS

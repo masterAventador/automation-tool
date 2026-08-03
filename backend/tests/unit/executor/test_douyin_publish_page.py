@@ -9,11 +9,13 @@ import pytest
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from automation_tool.executor.browser_runtime import BrowserWindow
+from automation_tool.executor.rpa.douyin import publish_page as publish_page_module
 from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
 from automation_tool.executor.rpa.douyin.publish_page import (
     DOUYIN_PUBLISH_ENTRY_URL,
     DOUYIN_PUBLISH_FORM_ANCHORS,
     DOUYIN_PUBLISH_FORM_ROUTE,
+    DOUYIN_PUBLISH_MANAGE_URL,
     DOUYIN_PUBLISH_PAGE_SELECTOR_VERSION,
     DOUYIN_PUBLISH_UPLOAD_ROUTE,
     MAX_DOUYIN_PUBLISH_WORKS_READ,
@@ -780,3 +782,232 @@ def test_the_submit_control_hands_back_nothing_but_the_click() -> None:
     exposed = [getattr(control, name) for name in dir(control) if not name.startswith("__")]
     assert all(not isinstance(value, FakeLocator) for value in exposed)
     assert "redacted" in repr(control)
+
+
+def _works_list_page(*, titles: tuple[tuple[str, bool], ...] = (("已发布作品", True),)) -> FakePage:
+    page = FakePage(url=DOUYIN_PUBLISH_MANAGE_URL, visible_selectors={WORK_LIST})
+    page.work_titles = list(titles)
+    return page
+
+
+def test_counting_works_refuses_a_title_that_is_not_text() -> None:
+    """The title is operator content and is compared in Python, never spliced in."""
+    page = DouyinPublishPage(window(_works_list_page()))
+
+    with pytest.raises(DouyinPublishPageRejected):
+        page.works_titled(cast(Any, 1))
+
+
+def test_counting_works_refuses_a_list_it_cannot_resolve() -> None:
+    class _Refusing(FakePage):
+        def locator(self, selector: str) -> Any:
+            raise RuntimeError("private locator failure")
+
+    page = _Refusing(url=DOUYIN_PUBLISH_MANAGE_URL, visible_selectors={WORK_LIST})
+
+    with pytest.raises(DouyinPublishPageRejected):
+        DouyinPublishPage(window(page)).works_titled("已发布作品")
+
+
+def test_a_works_list_longer_than_it_will_read_is_refused() -> None:
+    """A page that keeps growing is not scanned without bound."""
+    from automation_tool.executor.rpa.douyin.publish_page import MAX_DOUYIN_PUBLISH_WORKS_READ
+
+    page = _works_list_page(
+        titles=tuple(("作品", True) for _ in range(MAX_DOUYIN_PUBLISH_WORKS_READ + 1))
+    )
+
+    with pytest.raises(DouyinPublishPageRejected):
+        DouyinPublishPage(window(page)).works_titled("作品")
+
+    assert len(page.disposed) == MAX_DOUYIN_PUBLISH_WORKS_READ + 1, "every row is released"
+
+
+def test_a_row_that_cannot_be_read_is_refused_and_the_rest_released() -> None:
+    page = _works_list_page(titles=(("作品", True), ("另一个作品", True)))
+    page.failing_handle_index = 1
+
+    with pytest.raises(RuntimeError):
+        DouyinPublishPage(window(page)).works_titled("作品")
+
+    assert page.disposed == [0, 1]
+
+
+def test_an_account_name_the_page_will_not_give_up_reads_as_unknown() -> None:
+    """It is untrusted text used only to show the operator what they are about to
+    publish to; not having it is not a failure, it is not knowing."""
+
+    class _RefusingLocator(FakePage):
+        def locator(self, selector: str) -> Any:
+            raise RuntimeError("private locator failure")
+
+    assert DouyinPublishPage(window(_RefusingLocator(url=FORM_URL))).target_account() is None
+
+    unreadable = FakePage(url=FORM_URL, visible_selectors={ACCOUNT_NAME})
+
+    class _RefusingText(FakeLocator):
+        def inner_text(self) -> str:
+            raise RuntimeError("private text failure")
+
+    unreadable.locator = lambda selector: _RefusingText(selector, unreadable)  # type: ignore[method-assign]
+    assert DouyinPublishPage(window(unreadable)).target_account() is None
+
+
+def test_a_submit_control_that_answers_with_a_non_bool_is_refused() -> None:
+    """The last check before an irreversible press has to be a real yes or no."""
+    page = form_page()
+
+    class _OddLocator(FakeLocator):
+        def is_enabled(self) -> bool:
+            # Deliberately not a bool: the page has to notice rather than trust it.
+            return cast(bool, "yes")
+
+    page.locator = lambda selector: _OddLocator(selector, page)  # type: ignore[method-assign]
+
+    with pytest.raises(DouyinPublishPageRejected):
+        DouyinPublishPage(window(page)).submit_enabled()
+
+
+def test_a_submit_control_that_cannot_be_asked_is_refused() -> None:
+    """Playwright raising mid-question is not read as "the button is fine"."""
+    from automation_tool.executor.rpa.douyin.publish_page import DOUYIN_PUBLISH_SUBMIT_SELECTORS
+
+    page = form_page()
+    # The locator resolves the whole anchor group, so that is what fails.
+    page.failed_selectors.add(", ".join(DOUYIN_PUBLISH_SUBMIT_SELECTORS))
+
+    with pytest.raises(DouyinPublishPageRejected):
+        DouyinPublishPage(window(page)).submit_enabled()
+
+
+def test_a_field_asked_for_in_the_wrong_state_is_refused() -> None:
+    """Each field belongs to one page state; asking outside it would type into nothing."""
+    upload = DouyinPublishPage(window(upload_page()))
+
+    for label, ask in [
+        ("a title before the form", upload.title_input),
+        ("a description before the form", upload.description_input),
+    ]:
+        with pytest.raises(DouyinPublishPageRejected):
+            ask()
+        assert label
+
+    form = DouyinPublishPage(window(form_page()))
+    with pytest.raises(DouyinPublishPageRejected):
+        form.artifact_input()
+
+
+def test_navigating_to_the_works_list_that_fails_reads_as_an_unknown_route() -> None:
+    """A navigation that did not happen leaves the page wherever it was."""
+
+    class _RefusingNavigation(FakePage):
+        def goto(self, url: str, *, wait_until: str, timeout: float) -> None:
+            raise RuntimeError("private navigation failure")
+
+    page = _RefusingNavigation(url=FORM_URL, visible_selectors=set(FORM_SELECTORS))
+    observation = DouyinPublishPage(window(page)).open_works_list(timeout_milliseconds=100)
+
+    assert observation.route is DouyinPublishRoute.UNKNOWN
+
+
+class _RowsUnreadable(FakePage):
+    """The works list resolves into something that cannot be snapshotted."""
+
+    def locator(self, selector: str) -> FakeLocator:
+        self.requested_selectors.append(selector)
+        return _UnreadableRowsLocator(selector, self)
+
+
+class _UnreadableRowsLocator(FakeLocator):
+    def element_handles(self) -> list[FakeHandle]:
+        raise RuntimeError("private handle resolution failure")
+
+
+def test_a_works_list_that_cannot_be_snapshotted_is_a_page_failure() -> None:
+    page = _RowsUnreadable(url=MANAGE_URL, visible_selectors={WORK_LIST})
+
+    with pytest.raises(DouyinPublishPageRejected):
+        DouyinPublishPage(window(page)).works_titled("确认过的标题")
+
+
+class _AnchorGoneAfterObservation(FakePage):
+    """The publish control is counted once and then leaves before it is read."""
+
+    def __init__(self, *, fail_instead: bool) -> None:
+        super().__init__(url=FORM_URL, visible_selectors=set(FORM_SELECTORS))
+        self._fail_instead = fail_instead
+        self._submit_requests = 0
+
+    def locator(self, selector: str) -> FakeLocator:
+        if selector.startswith(SUBMIT_CONTROL):
+            self._submit_requests += 1
+            if self._submit_requests > 1:
+                if self._fail_instead:
+                    self.failed_selectors.add(selector)
+                else:
+                    self.visible_selectors.discard(SUBMIT_CONTROL)
+        return super().locator(selector)
+
+
+@pytest.mark.parametrize("fail_instead", (False, True))
+def test_a_control_that_leaves_between_the_check_and_the_read_is_refused(
+    fail_instead: bool,
+) -> None:
+    page = _AnchorGoneAfterObservation(fail_instead=fail_instead)
+
+    with pytest.raises(DouyinPublishPageRejected):
+        DouyinPublishPage(window(page)).submit_enabled()
+    assert page.clicked == []
+
+
+class _SubmitControlUnreadable(FakePage):
+    """The publish control is there and refuses to say whether it is armed."""
+
+    def locator(self, selector: str) -> FakeLocator:
+        self.requested_selectors.append(selector)
+        return _UnreadableEnabledLocator(selector, self)
+
+
+class _UnreadableEnabledLocator(FakeLocator):
+    def is_enabled(self) -> bool:
+        raise RuntimeError("private enabled failure")
+
+
+def test_a_publish_control_that_will_not_say_whether_it_is_armed_is_refused() -> None:
+    page = _SubmitControlUnreadable(url=FORM_URL, visible_selectors=set(FORM_SELECTORS))
+
+    with pytest.raises(DouyinPublishPageRejected):
+        DouyinPublishPage(window(page)).submit_enabled()
+    assert page.clicked == []
+
+
+def test_every_form_anchor_can_arrive_without_the_page_becoming_the_form() -> None:
+    """Form-shaped anchors on the upload route are not the form; the wait reports what it saw."""
+    page = FakePage(url=DOUYIN_PUBLISH_ENTRY_URL, visible_selectors=set(FORM_SELECTORS))
+
+    observation = DouyinPublishPage(window(page)).wait_for_form(timeout_milliseconds=1_000)
+
+    assert observation.state is DouyinPublishPageState.UNKNOWN
+    assert observation.evidence is DouyinPublishPageEvidence.REQUIRED_ANCHOR_MISSING
+    assert page.wait_timeouts == []
+
+
+def test_a_wait_whose_budget_is_gone_reports_the_page_instead_of_waiting_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ticks = iter((0.0, 0.0, 5.0))
+    monkeypatch.setattr(publish_page_module, "monotonic", lambda: next(ticks))
+    page = FakePage(url=DOUYIN_PUBLISH_ENTRY_URL, visible_selectors=set(FORM_SELECTORS))
+
+    observation = DouyinPublishPage(window(page)).wait_for_form(timeout_milliseconds=1_000)
+
+    assert observation.evidence is DouyinPublishPageEvidence.REQUIRED_ANCHOR_MISSING
+
+
+def test_a_url_that_cannot_be_parsed_at_all_is_no_route() -> None:
+    """`urlsplit` accepts the string and only refuses when the port is read."""
+    page = FakePage(url="https://creator.douyin.com:not-a-port/creator-micro/home")
+
+    observation = DouyinPublishPage(window(page)).observe()
+
+    assert observation.route is DouyinPublishRoute.UNKNOWN

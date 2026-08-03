@@ -637,7 +637,6 @@ MAX_MODEL_RESPONSE_BYTES: Final = 262_144
 def _exact_keys(payload: object, expected: set[str], label: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         _reject(f"{label} must be an object")
-        raise AssertionError  # pragma: no cover
     if set(payload) != expected:
         _reject(f"{label} has an unexpected key set")
     return payload
@@ -1512,7 +1511,6 @@ def load_locked_authoring_workflow(*, vendor_root: Path, contract_path: Path) ->
         document = json.loads(contract_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         _reject("workflow contract is unreadable")
-        raise AssertionError from None  # pragma: no cover
     _require(
         isinstance(document, dict)
         and document.get("schema_version") == 1
@@ -1580,7 +1578,6 @@ def load_video_creation_model_config(
         catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         _reject("model catalog or secret is unreadable")
-        raise AssertionError from None  # pragma: no cover
     _require(isinstance(secret, dict) and isinstance(catalog, dict), "config shape invalid")
     api_key = secret.get("apiKey")
     if not isinstance(api_key, str):
@@ -2021,11 +2018,9 @@ class MotionAuthoringAgent:
             data = json.loads(reply)
         except json.JSONDecodeError:
             _reject("model output was not JSON")
-            raise AssertionError from None  # pragma: no cover
         document = _string_keyed_object(data)
         if document is None:
             _reject("model output must be a JSON object")
-            raise AssertionError from None  # pragma: no cover
         return document
 
     def _segments_for(
@@ -2217,7 +2212,6 @@ class MotionAuthoringAgent:
             # something a model round can repair and never a pass. The closed
             # reason keeps it out of the "describe the film differently" card.
             _reject("slot overflow probe failed to measure")
-            raise AssertionError from None  # pragma: no cover
         if len(readings) != len(documents) or not all(
             isinstance(reading, ProbeReading) for reading in readings
         ):
@@ -2302,13 +2296,16 @@ class MotionAuthoringAgent:
                     # A TTS service that fails must never quietly ship a
                     # silent film — that is the degradation this project bans.
                     _reject("voiceover synthesis failed")
-                    raise AssertionError from None  # pragma: no cover
                 narration[beat.beat_id] = (audio, float(seconds))
 
         # One cheap repair round (PC-14): measured overflow is the one failure
         # a further model round can actually fix — the fix is shorter copy, a
         # few dozen bytes, not the 13KB document rewrite T92 removed.
-        for repair_rounds_left in (1, 0):
+        # `while` rather than a two-element `for`: the loop has no normal exit.
+        # It ends by rendering (break) or by refusing, and writing it as a
+        # sequence would leave an exhausted-iterator path that cannot happen.
+        repair_rounds_left = 1
+        while True:
             composition_html = _compose(design, storyboard, duration_seconds=brief.duration_seconds)
             composition_path = self._tools.write_composition(COMPOSITION_PATH, composition_html)
             lint = self._tools.lint(composition_path)
@@ -2350,6 +2347,7 @@ class MotionAuthoringAgent:
                 repaired = StoryboardArtifact.from_payload(data["storyboard"])
                 require_repair_changed_only_copy(storyboard, repaired)
                 storyboard = self._tools.write_storyboard(data["storyboard"])
+                repair_rounds_left -= 1
         submission = self._tools.submit_render_job(
             entry_html=composition_path,
             allowed_assets=allowed_assets,

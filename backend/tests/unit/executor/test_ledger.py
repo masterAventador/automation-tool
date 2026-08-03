@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import stat
@@ -1068,3 +1069,100 @@ def test_invalid_identity_permissions_file_shapes_and_open_races_fail_closed(
     monkeypatch.setattr(Path, "stat", replaced_stat)
     with pytest.raises(ValueError):
         directory_race._prepare_private_directory()
+
+
+def test_a_delivery_scan_asked_for_at_an_unusable_moment_is_rejected(tmp_path: Path) -> None:
+    opened = ledger(tmp_path / "unusable-scan")
+
+    with pytest.raises(ExecutorLedgerRejected):
+        opened.outbox_for_delivery(observed_at=NOW.replace(tzinfo=None), recover_delivered=False)
+    with pytest.raises(ExecutorLedgerRejected):
+        opened.outbox_for_delivery(
+            observed_at=NOW,
+            recover_delivered=cast(bool, 1),
+        )
+
+
+def test_a_spool_row_that_contradicts_its_own_schema_stops_the_scan(tmp_path: Path) -> None:
+    """A row written by a different build, or damaged in place, is not deliverable."""
+    opened = ledger(tmp_path / "corrupt-spool")
+    source = command(1)
+    opened.receive_command(source)
+    opened.enqueue_outbox(
+        source_message_id=str(source.message_id),
+        message=outbound(
+            message_id=_uuid(130),
+            idempotency_key="executor-ledger:corrupt:delivered",
+        ),
+    )
+    with sqlite3.connect(opened.database_path) as connection:
+        # The live schema forbids this value; the guard exists for files that
+        # did not come from it.
+        connection.execute("PRAGMA ignore_check_constraints = 1")
+        connection.execute("UPDATE executor_outbox SET delivered = 2")
+
+    with pytest.raises(ExecutorLedgerRejected):
+        opened.outbox_for_delivery(
+            observed_at=NOW + timedelta(seconds=1),
+            recover_delivered=True,
+        )
+
+
+def test_an_action_command_is_stored_by_reference_and_never_by_its_payload(
+    tmp_path: Path,
+) -> None:
+    """The signed authority, the target and the message copy stay out of the ledger.
+
+    Every other command is kept whole so a restart can replay it. An action
+    command carries a bearer authority and a real person's handle, so the row
+    keeps only what the executor needs to recognize it again.
+    """
+    import test_action_operation
+
+    from automation_tool.protocol import DouyinSearchExposureAction
+
+    opened = ExecutorLedger(
+        state_directory=tmp_path / "action-spool",
+        installation_id=str(test_action_operation.INSTALLATION_ID),
+        executor_id=str(test_action_operation.EXECUTOR_ID),
+    )
+    opened.receive_command(
+        TaskCommandEnvelope.model_validate(
+            {
+                "protocol_version": "1.0",
+                "message_id": _uuid(140),
+                "message_type": "task.offer",
+                "sent_at": test_action_operation.NOW,
+                "deadline_at": test_action_operation.NOW + timedelta(minutes=5),
+                "installation_id": str(test_action_operation.INSTALLATION_ID),
+                "executor_id": str(test_action_operation.EXECUTOR_ID),
+                "correlation_id": _uuid(141),
+                "idempotency_key": "executor-ledger:action:offer",
+                "sequence": 1,
+                "payload": {"task_event_sequence_baseline": 0},
+                "task_id": str(test_action_operation.TASK_ID),
+                "execution_attempt_id": str(test_action_operation.ATTEMPT_ID),
+            }
+        )
+    )
+    opened.compare_and_set_checkpoint(
+        attempt_id=str(test_action_operation.ATTEMPT_ID),
+        expected_revision=1,
+        state=AttemptCheckpointState.RUNNING,
+        last_event_sequence=0,
+    )
+    envelope = test_action_operation.command(DouyinSearchExposureAction.COMMENT)
+
+    opened.receive_command(envelope)
+
+    with sqlite3.connect(opened.database_path) as connection:
+        stored = connection.execute(
+            "SELECT envelope FROM executor_commands WHERE message_id = ?",
+            (str(envelope.message_id),),
+        ).fetchone()
+    assert json.loads(stored[0]) == {
+        "correlation_id": str(envelope.correlation_id),
+        "message_type": "action.execute",
+    }
+    assert "signed_authority" not in stored[0]
+    assert "target-one" not in stored[0]

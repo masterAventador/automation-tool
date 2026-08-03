@@ -368,3 +368,31 @@ def test_a_failed_pyinstaller_run_carries_its_own_reason(
 
     assert "vendor/x/y.md" in str(captured.value)
     assert "PyInstaller traceback" in str(captured.value)
+
+
+def test_a_builder_failure_that_only_wrote_to_one_stream_still_explains_itself(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Whichever stream carried the reason is the one that has to reach the operator."""
+
+    def failing_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout=b"the Executor package cannot be built without vendor/x/y.md\n",
+            stderr=b"   \n",
+        )
+
+    monkeypatch.setattr(subprocess, "run", failing_run)
+
+    with pytest.raises(WindowsExecutorCandidateRejected) as captured:
+        windows_candidate._run_pyinstaller(
+            backend_root=tmp_path,
+            config_directory=tmp_path / "cache",
+            distribution_root=tmp_path / "dist",
+            python_executable=Path("C:/Python/python.exe"),
+            work_root=tmp_path / "work",
+        )
+
+    assert "vendor/x/y.md" in str(captured.value)
+    assert "stderr" not in str(captured.value)

@@ -451,3 +451,82 @@ def test_empty_or_durationless_artifact_batches_are_rejected(
         )
 
     assert adapter.calls == []
+
+
+def test_a_frame_that_is_not_one_whole_jpeg_is_refused() -> None:
+    """The model is shown bytes; a truncated or foreign payload is not a frame."""
+    frame = MaterialUnderstandingFrame(timestamp_ms=0, is_scene_cut=True, jpeg_bytes=JPEG_ONE)
+
+    cases: list[tuple[str, dict[str, object]]] = [
+        ("a timestamp that is not an int", {"timestamp_ms": 0.0}),
+        ("a negative timestamp", {"timestamp_ms": -1}),
+        ("a scene flag that is not a bool", {"is_scene_cut": 1}),
+        ("a payload that is not bytes", {"jpeg_bytes": bytearray(JPEG_ONE)}),
+        ("a payload with no jpeg header", {"jpeg_bytes": b"not-a-jpeg\xff\xd9"}),
+        ("a payload cut off before its end", {"jpeg_bytes": JPEG_ONE[:-2]}),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(MaterialUnderstandingRejected):
+            replace(frame, **overrides)  # type: ignore[arg-type]
+        assert label
+
+
+def test_request_options_outside_the_supported_range_are_refused() -> None:
+    for label, overrides in [
+        ("a thinking flag that is not a bool", {"enable_thinking": 1}),
+        ("a token budget that is not an int", {"max_output_tokens": 2_048.0}),
+        ("a token budget of zero", {"max_output_tokens": 0}),
+        ("a token budget past the ceiling", {"max_output_tokens": 16_385}),
+    ]:
+        with pytest.raises(MaterialUnderstandingRejected):
+            MaterialUnderstandingOptions(**overrides)  # type: ignore[arg-type]
+        assert label
+
+
+def test_a_reply_missing_any_of_its_three_facts_is_refused() -> None:
+    """Parsing needs all three; a reply without one cannot be traced or checked."""
+    complete = {"request_id": "req-1", "content": "{}", "finish_reason": "stop"}
+
+    for field_name in complete:
+        for label, value in [("empty", ""), ("not text", 1)]:
+            with pytest.raises(MaterialUnderstandingRejected):
+                MaterialUnderstandingReply(**{**complete, field_name: value})  # type: ignore[arg-type]
+            assert label
+
+
+def test_a_result_with_repeated_tags_or_a_foreign_shot_is_refused() -> None:
+    complete: dict[str, object] = {
+        "request_id": "req-1",
+        "description": "一段短片",
+        "tags": ("产品", "户外"),
+        "shots": (MaterialUnderstandingShot(0, 1_000, "室内展示"),),
+    }
+
+    cases: list[tuple[str, dict[str, object]]] = [
+        ("the same tag twice", {"tags": ("产品", "产品")}),
+        ("a shot that is not a shot", {"shots": (object(),)}),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(MaterialUnderstandingRejected):
+            MaterialUnderstandingResult(**{**complete, **overrides})  # type: ignore[arg-type]
+        assert label
+
+
+def test_structured_tags_and_shots_must_both_be_lists(tmp_path: Path) -> None:
+    """A model that answers with an object where a list belongs is not partially read."""
+    artifacts = _persist_artifacts(tmp_path)
+
+    structured: list[tuple[str, dict[str, object]]] = [
+        ("tags as an object", {"tags": {"0": "产品"}}),
+        ("shots as an object", {"shots": {"0": {}}}),
+    ]
+    for label, overrides in structured:
+        with pytest.raises(MaterialUnderstandingRejected):
+            understand_material_artifacts(
+                RecordingAdapter(_content(**overrides)),
+                output_directory=tmp_path,
+                artifacts=artifacts,
+                duration_ms=9_000,
+                options=MaterialUnderstandingOptions(),
+            )
+        assert label

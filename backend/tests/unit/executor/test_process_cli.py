@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from automation_tool.executor import cli
+from automation_tool.executor import cli, motion_authoring
 from automation_tool.executor.authentication import LocalSessionAuthenticationRejected
 from automation_tool.executor.crash_recovery import ExecutorCrashRecoveryCoordinator
 from automation_tool.executor.ledger import ExecutorLedger
@@ -441,3 +441,34 @@ def test_executor_package_module_uses_the_formal_cli_entry() -> None:
     assert completed.returncode == 2
     assert completed.stdout == b""
     assert completed.stderr == b"Local Executor bootstrap is rejected\n"
+
+
+def test_main_serves_one_motion_authoring_request_when_asked_for_that_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The motion Worker shares the executable; the argument decides which entry runs."""
+    raw_input = BytesIO(b"{}\n")
+
+    class BufferedInput:
+        raw = raw_input
+
+    class TextInput:
+        buffer = BufferedInput()
+
+    stdout = StringIO()
+    captured: list[object] = []
+
+    def serve(input_stream: object, output_stream: object) -> int:
+        captured.append((input_stream, output_stream))
+        return 3
+
+    monkeypatch.setattr(sys, "stdin", TextInput())
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr(sys, "argv", ["automation-tool-executor", cli.AUTHOR_MOTION_ARGUMENT])
+    monkeypatch.setattr(motion_authoring, "serve_one_motion_authoring_request", serve)
+
+    with pytest.raises(SystemExit) as exit_status:
+        cli.main()
+
+    assert exit_status.value.code == 3
+    assert captured == [(raw_input, stdout)]

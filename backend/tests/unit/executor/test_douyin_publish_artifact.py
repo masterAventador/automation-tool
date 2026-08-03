@@ -180,3 +180,129 @@ def test_artifact_construction_requires_consistent_facts(tmp_path: Path) -> None
             size_bytes=len(PAYLOAD),
             sha256="not-a-digest",
         )
+
+
+def test_revalidation_refuses_a_file_that_changed_since_it_was_opened(tmp_path: Path) -> None:
+    """Proven once at preflight and again right before the upload: same file or none."""
+    path = write_artifact(tmp_path)
+    artifact = open_publish_artifact(path)
+
+    path.write_bytes(PAYLOAD[:-1] + b"X")
+    path.chmod(0o600)
+
+    with pytest.raises(DouyinPublishArtifactRejected):
+        artifact.revalidate()
+
+
+def test_revalidation_accepts_the_same_file_it_first_proved(tmp_path: Path) -> None:
+    artifact = open_publish_artifact(write_artifact(tmp_path))
+
+    artifact.revalidate()
+
+
+def test_a_reading_budget_outside_the_platform_ceiling_is_refused(tmp_path: Path) -> None:
+    from automation_tool.executor.rpa.douyin.publish_artifact import (
+        MAX_DOUYIN_PUBLISH_ARTIFACT_BYTES,
+    )
+
+    path = write_artifact(tmp_path)
+    for label, maximum in [
+        ("a budget that is not an int", cast(int, 1.0)),
+        ("a budget of zero", 0),
+        ("a budget past the platform ceiling", MAX_DOUYIN_PUBLISH_ARTIFACT_BYTES + 1),
+    ]:
+        with pytest.raises(DouyinPublishArtifactRejected):
+            open_publish_artifact(path, maximum_bytes=maximum)
+        assert label
+
+
+def test_a_file_that_changes_while_it_is_digested_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Opened, sized and hashed are three moments; the descriptor has to agree at the end."""
+    path = write_artifact(tmp_path)
+    real_read = os.read
+
+    def truncating(descriptor: int, size: int) -> bytes:
+        return b""
+
+    def growing(descriptor: int, size: int) -> bytes:
+        chunk = real_read(descriptor, size)
+        return chunk if chunk else b"extra"
+
+    for label, hook in [
+        ("the file ran out early", truncating),
+        ("the file grew past its declared size", growing),
+    ]:
+        monkeypatch.setattr(os, "read", hook)
+        with pytest.raises(DouyinPublishArtifactRejected):
+            open_publish_artifact(path)
+        monkeypatch.undo()
+        assert label
+
+
+def test_a_file_replaced_between_the_descriptor_and_the_path_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = write_artifact(tmp_path)
+    real_fstat = os.fstat
+    calls = 0
+
+    def drifting(descriptor: int) -> os.stat_result:
+        nonlocal calls
+        calls += 1
+        metadata = real_fstat(descriptor)
+        if calls == 1:
+            return metadata
+        fields = list(metadata)
+        fields[os.stat_result.n_fields - 1 if False else 1] = metadata.st_ino + 1
+        return os.stat_result(fields)
+
+    monkeypatch.setattr(os, "fstat", drifting)
+
+    with pytest.raises(DouyinPublishArtifactRejected):
+        open_publish_artifact(path)
+
+
+def test_an_artifact_with_more_than_one_name_is_refused(tmp_path: Path) -> None:
+    """A hard link means something else can change the bytes behind this name."""
+    path = write_artifact(tmp_path)
+    (tmp_path / "second-name.mp4").hardlink_to(path)
+
+    with pytest.raises(DouyinPublishArtifactRejected):
+        open_publish_artifact(path)
+
+
+def test_a_file_swapped_after_the_descriptor_closed_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The digest belongs to a descriptor; the caller later opens the path again."""
+    path = write_artifact(tmp_path)
+    replacement = tmp_path / "replacement.bin"
+    replacement.write_bytes(PAYLOAD)
+    replacement.chmod(0o600)
+    real_close = os.close
+    swapped = False
+
+    def swapping(descriptor: int) -> None:
+        nonlocal swapped
+        real_close(descriptor)
+        if not swapped:
+            swapped = True
+            os.replace(replacement, path)
+
+    monkeypatch.setattr(os, "close", swapping)
+
+    with pytest.raises(DouyinPublishArtifactRejected):
+        open_publish_artifact(path)
+
+
+def test_an_artifact_owned_by_another_account_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Something another account can rewrite is not ours to prove."""
+    path = write_artifact(tmp_path)
+    monkeypatch.setattr(os, "getuid", lambda: os.stat(path).st_uid + 1)
+
+    with pytest.raises(DouyinPublishArtifactRejected):
+        open_publish_artifact(path)

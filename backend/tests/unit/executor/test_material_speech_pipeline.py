@@ -6,11 +6,13 @@ import io
 import os
 import shutil
 import subprocess
+import tempfile
 import time
 import wave
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import ClassVar, cast
+from typing import Any, ClassVar, cast
 
 import pytest
 
@@ -603,3 +605,626 @@ def test_cleanup_failure_cannot_replace_a_successful_business_result(
     ).analyze(_facts())
 
     assert result.speech_transcript == "这段人声只从音轨转写。"
+
+
+def _analyzer_arguments(tmp_path: Path) -> dict[str, object]:
+    source = tmp_path / "private-source.mp4"
+    source.write_bytes(PRIVATE_VIDEO_BYTES)
+    resolved, approved = approve_source(source)
+    return {
+        "tools": _tools(tmp_path),
+        "source": resolved,
+        "approved": approved,
+        "vad_factory": lambda: SequencedVad([0.0]),
+        "asr_adapter": RecordingAsr(),
+    }
+
+
+def test_both_analyzers_refuse_collaborators_they_cannot_use(tmp_path: Path) -> None:
+    """Each of these is used to reach the operator's file or a paid model call."""
+    complete = _analyzer_arguments(tmp_path)
+
+    cases: list[tuple[str, dict[str, object]]] = [
+        ("tools that are not the packaged pair", {"tools": object()}),
+        ("a source that is not a path", {"source": str(complete["source"])}),
+        ("an approval that is not a stat", {"approved": (0, 0)}),
+        ("a vad factory that cannot be called", {"vad_factory": None}),
+        ("an asr adapter of the wrong type", {"asr_adapter": object()}),
+    ]
+    for label, overrides in cases:
+        arguments = {**complete, **overrides}
+        for builder in (LocalAudibleSpeechAnalyzer, LocalAudibleSpeechAnalyzerFactory):
+            with pytest.raises(MaterialSpeechRejected):
+                builder(**arguments)  # type: ignore[arg-type]
+        assert label
+
+
+def test_analysis_refuses_facts_that_describe_nothing_to_listen_to(
+    tmp_path: Path,
+) -> None:
+    """No audio track, or no length: there is nothing to extract and nothing to bill."""
+    analyzer = LocalAudibleSpeechAnalyzer(**_analyzer_arguments(tmp_path))  # type: ignore[arg-type]
+
+    cases: list[tuple[str, object]] = [
+        ("something that is not probe facts", object()),
+        ("facts that declare no audio", replace(_facts(), has_audio=False)),
+        ("a duration that is not an int", replace(_facts(), duration_ms=cast(int, 640.0))),
+        ("a duration of zero", replace(_facts(), duration_ms=0)),
+    ]
+    for label, facts in cases:
+        with pytest.raises(MaterialSpeechRejected):
+            analyzer.analyze(cast(MaterialFacts, facts))
+        assert label
+
+
+def test_a_scratch_directory_that_cannot_be_created_stops_the_analysis(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The extracted PCM is a copy of the operator's audio; with nowhere private
+    to put it the run does not start."""
+    analyzer = LocalAudibleSpeechAnalyzer(**_analyzer_arguments(tmp_path))  # type: ignore[arg-type]
+
+    def refuse(*_args: object, **_options: object) -> str:
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(tempfile, "mkdtemp", refuse)
+
+    with pytest.raises(MaterialSpeechRejected):
+        analyzer.analyze(_facts())
+
+
+def test_a_vad_factory_answering_with_the_wrong_thing_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The factory is lazy on purpose; what it builds is still checked."""
+    arguments = _analyzer_arguments(tmp_path)
+    arguments["vad_factory"] = lambda: object()
+    analyzer = LocalAudibleSpeechAnalyzer(**arguments)  # type: ignore[arg-type]
+    monkeypatch.setattr(subprocess, "Popen", FinishedExtraction)
+
+    with pytest.raises(MaterialSpeechRejected):
+        analyzer.analyze(_facts())
+
+
+class _ExtractionVariant(FinishedExtraction):
+    """A finished ffmpeg whose product is wrong in one specific way."""
+
+    payload: ClassVar[bytes] = (1_000).to_bytes(2, "little", signed=True) * 20 * 512
+    exit_code: ClassVar[int] = 0
+
+    def __init__(self, argv: list[str], **kwargs: object) -> None:
+        del kwargs
+        self.argv = argv
+        self.returncode = self.exit_code
+        Path(argv[-1]).write_bytes(self.payload)
+
+
+def test_an_extraction_whose_product_is_unusable_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exit code alone proves nothing; the file it left behind is measured."""
+
+    class _Failed(_ExtractionVariant):
+        exit_code = 1
+
+    class _Empty(_ExtractionVariant):
+        payload = b""
+
+    class _OddBytes(_ExtractionVariant):
+        payload = b"\x00" * 1_025
+
+    for label, variant in [
+        ("a non-zero exit", _Failed),
+        ("an empty file", _Empty),
+        ("a half sample at the end", _OddBytes),
+    ]:
+        analyzer = LocalAudibleSpeechAnalyzer(**_analyzer_arguments(tmp_path))  # type: ignore[arg-type]
+        monkeypatch.setattr(subprocess, "Popen", variant)
+        with pytest.raises(MaterialSpeechRejected):
+            analyzer.analyze(_facts())
+        monkeypatch.undo()
+        assert label
+
+
+def test_an_extraction_that_cannot_be_started_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    analyzer = LocalAudibleSpeechAnalyzer(**_analyzer_arguments(tmp_path))  # type: ignore[arg-type]
+
+    def refuse(*_args: object, **_options: object) -> object:
+        raise OSError("exec format error")
+
+    monkeypatch.setattr(subprocess, "Popen", refuse)
+
+    with pytest.raises(MaterialSpeechRejected):
+        analyzer.analyze(_facts())
+
+
+def test_an_output_name_something_already_holds_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Opened O_EXCL: the extractor writes a name nothing else may already own."""
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    analyzer = LocalAudibleSpeechAnalyzer(**_analyzer_arguments(tmp_path))  # type: ignore[arg-type]
+
+    def planting_mkdtemp(*_args: object, **_options: object) -> str:
+        for name in ("audio.pcm", "speech.pcm", "extracted.pcm"):
+            (scratch / name).write_bytes(b"squatting")
+        return os.fspath(scratch)
+
+    monkeypatch.setattr(tempfile, "mkdtemp", planting_mkdtemp)
+    monkeypatch.setattr(subprocess, "Popen", FinishedExtraction)
+
+    with pytest.raises(MaterialSpeechRejected):
+        analyzer.analyze(_facts())
+
+
+def test_an_extraction_that_outlives_its_budget_is_killed_and_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A model that will not finish is stopped rather than waited on forever."""
+    RunningExtraction.instances.clear()
+    analyzer = LocalAudibleSpeechAnalyzer(**_analyzer_arguments(tmp_path))  # type: ignore[arg-type]
+    monkeypatch.setattr(subprocess, "Popen", RunningExtraction)
+    monkeypatch.setattr(pipeline, "_extraction_timeout_seconds", lambda _duration: 0.0)
+
+    with pytest.raises(MaterialSpeechRejected):
+        analyzer.analyze(_facts())
+
+    assert RunningExtraction.instances
+    assert RunningExtraction.instances[0].kill_calls >= 1
+
+
+def test_a_reap_that_does_not_finish_kills_a_second_time(tmp_path: Path) -> None:
+    """The first kill can land on a process already wedged; the guard says so."""
+
+    class _Unreapable:
+        def __init__(self) -> None:
+            self.kill_calls = 0
+            self.wait_calls = 0
+
+        def poll(self) -> int | None:
+            return None
+
+        def kill(self) -> None:
+            self.kill_calls += 1
+
+        def wait(self, timeout: float | None = None) -> int:
+            self.wait_calls += 1
+            if self.wait_calls == 1:
+                raise subprocess.TimeoutExpired("ffmpeg", timeout or 0.0)
+            return -9
+
+    process = _Unreapable()
+    pipeline._kill_and_reap(cast(subprocess.Popen[bytes], process))
+
+    assert process.kill_calls == 2, "one kill before the reap, one after it timed out"
+
+
+def test_a_reap_that_never_finishes_still_returns(tmp_path: Path) -> None:
+    """Both waits timing out must not leave the caller hanging on cleanup."""
+
+    class _NeverReaped:
+        def poll(self) -> int | None:
+            return None
+
+        def kill(self) -> None:
+            return None
+
+        def wait(self, timeout: float | None = None) -> int:
+            raise subprocess.TimeoutExpired("ffmpeg", timeout or 0.0)
+
+    pipeline._kill_and_reap(cast(subprocess.Popen[bytes], _NeverReaped()))
+
+
+def test_only_a_real_regular_file_has_metadata_worth_comparing(tmp_path: Path) -> None:
+    """A link or a directory at the output name is not the file that was opened."""
+    real = tmp_path / "real.pcm"
+    real.write_bytes(b"\x00\x00")
+    directory = tmp_path / "a-directory"
+    directory.mkdir()
+    link = tmp_path / "link.pcm"
+    link.symlink_to(real)
+
+    assert pipeline._ordinary_file_metadata(real) is not None
+    assert pipeline._ordinary_file_metadata(tmp_path / "absent.pcm") is None
+    assert pipeline._ordinary_file_metadata(directory) is None
+    assert pipeline._ordinary_file_metadata(link) is None
+
+
+def _pcm(tmp_path: Path, payload: bytes, name: str = "audio.pcm") -> Path:
+    path = tmp_path / name
+    path.write_bytes(payload)
+    return path
+
+
+def test_detection_stops_at_the_end_of_the_pcm_it_was_given(tmp_path: Path) -> None:
+    """The declared duration is what ffmpeg promised; the file is what it delivered."""
+    one_chunk = (1_000).to_bytes(2, "little", signed=True) * 512
+    path = _pcm(tmp_path, one_chunk)
+    vad = SequencedVad([0.9] * 4)
+
+    segments, speech_ms, pcm_bytes = pipeline._detect_speech_segments(path, vad, duration_ms=10_000)
+
+    assert pcm_bytes == len(one_chunk)
+    assert vad.calls == 1
+    assert segments == () or speech_ms >= 0
+
+
+def test_a_final_partial_chunk_is_padded_rather_than_dropped(tmp_path: Path) -> None:
+    """The tail of the audio still gets a reading; silence is padded in, not skipped."""
+    payload = (1_000).to_bytes(2, "little", signed=True) * (512 + 100)
+    path = _pcm(tmp_path, payload)
+    vad = SequencedVad([0.9, 0.9])
+
+    _segments, _speech_ms, pcm_bytes = pipeline._detect_speech_segments(
+        path, vad, duration_ms=10_000
+    )
+
+    assert pcm_bytes == len(payload)
+    assert vad.calls == 2, "the short tail is measured too"
+
+
+def test_pcm_that_ends_mid_sample_is_refused(tmp_path: Path) -> None:
+    """Two bytes per sample; an odd byte count means the file is not what it claims."""
+    path = _pcm(tmp_path, b"\x00" * 1_025)
+
+    with pytest.raises(MaterialSpeechRejected):
+        pipeline._detect_speech_segments(path, SequencedVad([0.0]), duration_ms=10_000)
+
+
+def test_a_vad_answering_outside_zero_to_one_is_refused(tmp_path: Path) -> None:
+    """The number is compared against a decided threshold; anything else is not one."""
+    payload = (1_000).to_bytes(2, "little", signed=True) * 512
+
+    class _Answering:
+        def __init__(self, value: object) -> None:
+            self._value = value
+
+        def probability(self, _samples: object, *, sample_rate_hz: object) -> float:
+            del sample_rate_hz
+            return cast(float, self._value)
+
+    for label, value in [
+        ("an int rather than a float", 1),
+        ("not a number at all", "0.9"),
+        ("a value above one", 1.5),
+        ("a value below zero", -0.1),
+        ("a value that is not finite", float("nan")),
+    ]:
+        with pytest.raises(MaterialSpeechRejected):
+            pipeline._detect_speech_segments(
+                _pcm(tmp_path, payload, f"audio-{abs(hash(label))}.pcm"),
+                cast(Any, _Answering(value)),
+                duration_ms=10_000,
+            )
+        assert label
+
+
+def test_a_vad_that_raises_is_reported_as_one_closed_reason(tmp_path: Path) -> None:
+    payload = (1_000).to_bytes(2, "little", signed=True) * 512
+
+    class _Exploding:
+        def probability(self, _samples: object, *, sample_rate_hz: object) -> float:
+            del sample_rate_hz
+            raise TypeError("analyzer defect")
+
+    with pytest.raises(MaterialSpeechRejected):
+        pipeline._detect_speech_segments(
+            _pcm(tmp_path, payload), cast(Any, _Exploding()), duration_ms=10_000
+        )
+
+
+def test_a_pcm_file_the_opener_cannot_trust_is_refused(tmp_path: Path) -> None:
+    """The extracted audio is opened once and everything after reads that descriptor."""
+    real = tmp_path / "audio.pcm"
+    real.write_bytes(b"\x00\x00" * 512)
+    link = tmp_path / "link.pcm"
+    link.symlink_to(real)
+    directory = tmp_path / "a-directory"
+    directory.mkdir()
+
+    for label, path in [
+        ("nothing at that name", tmp_path / "absent.pcm"),
+        ("a symlink", link),
+        ("a directory", directory),
+    ]:
+        with pytest.raises(MaterialSpeechRejected):
+            pipeline._open_stable_pcm(path, approved=None)
+        assert label
+
+
+def test_a_pcm_file_that_is_not_the_approved_one_is_refused(tmp_path: Path) -> None:
+    """Same name, different file: the extraction's own product is the only one read."""
+    first = tmp_path / "audio.pcm"
+    first.write_bytes(b"\x00\x00" * 512)
+    approved = first.stat()
+    first.unlink()
+    first.write_bytes(b"\x01\x01" * 512)
+
+    with pytest.raises(MaterialSpeechRejected):
+        pipeline._open_stable_pcm(first, approved=approved)
+
+
+def test_a_pcm_file_replaced_while_it_is_read_is_refused(tmp_path: Path) -> None:
+    """Stability is re-checked after the read, not assumed from the open."""
+    path = tmp_path / "audio.pcm"
+    path.write_bytes(b"\x00\x00" * 512)
+    descriptor, before = pipeline._open_stable_pcm(path, approved=None)
+    try:
+        path.unlink()
+        path.write_bytes(b"\x01\x01" * 512)
+        with pytest.raises(MaterialSpeechRejected):
+            pipeline._require_stable_pcm(path, descriptor, before)
+    finally:
+        os.close(descriptor)
+
+
+def test_a_stability_check_on_a_closed_descriptor_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "audio.pcm"
+    path.write_bytes(b"\x00\x00" * 512)
+    descriptor, before = pipeline._open_stable_pcm(path, approved=None)
+    os.close(descriptor)
+
+    with pytest.raises(MaterialSpeechRejected):
+        pipeline._require_stable_pcm(path, descriptor, before)
+
+
+def test_neighbouring_speech_windows_are_merged_rather_than_listed_twice() -> None:
+    """Two runs that touch describe one stretch of speech, not two."""
+    segments: list[tuple[int, int]] = []
+    pipeline._append_segment(segments, start_ms=0, end_ms=400, duration_ms=10_000)
+    pipeline._append_segment(segments, start_ms=380, end_ms=900, duration_ms=10_000)
+
+    assert segments == [(0, 900)]
+
+
+def test_a_window_that_falls_outside_the_material_is_dropped() -> None:
+    """Padding can push a window past either end; what is left may be nothing."""
+    segments: list[tuple[int, int]] = []
+    pipeline._append_segment(segments, start_ms=-200, end_ms=-50, duration_ms=10_000)
+    pipeline._append_segment(segments, start_ms=10_500, end_ms=11_000, duration_ms=10_000)
+
+    assert segments == []
+
+
+def test_an_asr_batch_that_is_not_one_whole_wav_is_refused() -> None:
+    """This is what crosses the paid boundary; nothing else may."""
+    valid = io.BytesIO()
+    with wave.open(valid, "wb") as destination:
+        destination.setnchannels(1)
+        destination.setsampwidth(2)
+        destination.setframerate(16_000)
+        destination.writeframes(b"\x00\x00" * 16_000)
+    payload = valid.getvalue()
+
+    cases: list[tuple[str, dict[str, object]]] = [
+        ("bytes that are not bytes", {"wav_bytes": bytearray(payload)}),
+        ("a header shorter than a wav header", {"wav_bytes": payload[:43]}),
+        ("no RIFF marker", {"wav_bytes": b"FFIR" + payload[4:]}),
+        ("no WAVE marker", {"wav_bytes": payload[:8] + b"EVAW" + payload[12:]}),
+        ("a duration that is not an int", {"duration_ms": 1_000.0}),
+        ("a duration of zero", {"duration_ms": 0}),
+        ("a duration past the batch ceiling", {"duration_ms": 10**9}),
+    ]
+    for label, overrides in cases:
+        arguments: dict[str, object] = {"wav_bytes": payload, "duration_ms": 1_000}
+        arguments.update(overrides)
+        with pytest.raises(MaterialSpeechRejected):
+            SpeechAudioBatch(**arguments)  # type: ignore[arg-type]
+        assert label
+
+
+def test_more_speech_windows_than_the_model_may_carry_are_refused() -> None:
+    """The segment list is persisted onto the material, which bounds how many it holds."""
+    # A confirmed run needs `MIN_SPEECH_CHUNKS` consecutive readings, and the
+    # silence between two runs has to outlast the padding on both sides or the
+    # two get merged into one window. 8 speech chunks then 8 silent ones does
+    # both, repeated past the ceiling.
+    from automation_tool.control_plane.domain.material import MAX_SPEECH_SEGMENTS
+
+    alternating = ([0.9] * 8 + [0.0] * 8) * (MAX_SPEECH_SEGMENTS + 1)
+
+    with pytest.raises(MaterialSpeechRejected):
+        pipeline._aggregate_probability_evidence(alternating, duration_ms=10_000_000)
+
+
+def test_a_batch_reader_that_cannot_read_what_it_asked_for_is_refused(
+    tmp_path: Path,
+) -> None:
+    """The window was computed from the declared byte count; a short read means drift."""
+    path = tmp_path / "audio.pcm"
+    path.write_bytes(b"\x00\x00" * 512)
+
+    batches = pipeline._speech_audio_batches(
+        path,
+        segments=((0, 5_000),),
+        # A byte count larger than the file: the window it computes runs past
+        # the end, so the read comes back short.
+        pcm_bytes=10 * 1_024 * 1_024,
+        duration_ms=10_000,
+        approved=None,
+    )
+
+    with pytest.raises(MaterialSpeechRejected):
+        list(batches)
+
+
+def test_a_batch_reader_that_produced_nothing_is_refused(tmp_path: Path) -> None:
+    """Speech was confirmed, so something has to reach the model; nothing is a defect."""
+    path = tmp_path / "audio.pcm"
+    path.write_bytes(b"\x00\x00" * 512)
+
+    batches = pipeline._speech_audio_batches(
+        path,
+        # A window that overlaps no confirmed segment: every batch is skipped.
+        segments=((9_000, 9_500),),
+        pcm_bytes=1_024,
+        duration_ms=1_000,
+        approved=None,
+    )
+
+    with pytest.raises(MaterialSpeechRejected):
+        list(batches)
+
+
+def test_a_wav_larger_than_the_batch_ceiling_is_refused() -> None:
+    """The ceiling is what the paid boundary accepts; a bigger one is not sent."""
+    oversize = b"\x00\x00" * (pipeline.MAX_ASR_WAV_BYTES // 2 + 1)
+
+    with pytest.raises(MaterialSpeechRejected):
+        pipeline._pcm_wav(oversize)
+
+
+def test_reading_exactly_stops_when_the_file_does(tmp_path: Path) -> None:
+    """A short file is not padded and not retried; the caller compares the length."""
+    path = tmp_path / "audio.pcm"
+    path.write_bytes(b"\x00\x01\x02\x03")
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        assert pipeline._read_exact(descriptor, 4) == b"\x00\x01\x02\x03"
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        assert pipeline._read_exact(descriptor, 100) == b"\x00\x01\x02\x03"
+    finally:
+        os.close(descriptor)
+
+
+def test_the_pcm_identity_time_follows_the_platform_that_records_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows has a creation time and POSIX does not; each reads its own field.
+
+    Only one of these is reachable on a given host, so the platform value is
+    supplied and the field selection is what gets asserted.
+    """
+    path = tmp_path / "audio.pcm"
+    path.write_bytes(b"\x00\x00")
+    metadata = path.stat()
+
+    monkeypatch.setattr(os, "name", "posix")
+    assert pipeline._pcm_identity_time_ns(metadata) == metadata.st_ctime_ns
+
+    monkeypatch.setattr(os, "name", "nt")
+    expected = getattr(metadata, "st_birthtime_ns", metadata.st_ctime_ns)
+    assert pipeline._pcm_identity_time_ns(metadata) == expected
+
+
+def test_a_pcm_path_that_cannot_be_opened_at_all_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`os.open` succeeding and `os.fstat` failing leaves a descriptor to close."""
+    path = tmp_path / "audio.pcm"
+    path.write_bytes(b"\x00\x00" * 512)
+    real_fstat = os.fstat
+
+    def refusing_fstat(descriptor: int) -> os.stat_result:
+        del descriptor
+        raise OSError("bad file descriptor")
+
+    monkeypatch.setattr(os, "fstat", refusing_fstat)
+    with pytest.raises(MaterialSpeechRejected):
+        pipeline._open_stable_pcm(path, approved=None)
+    monkeypatch.setattr(os, "fstat", real_fstat)
+
+
+def test_a_batch_reader_that_cannot_seek_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anything the driver raises mid-read becomes one closed reason."""
+    path = tmp_path / "audio.pcm"
+    path.write_bytes(b"\x00\x00" * 512)
+
+    def refusing_lseek(*_args: object, **_options: object) -> int:
+        raise OSError("illegal seek")
+
+    monkeypatch.setattr(os, "lseek", refusing_lseek)
+
+    batches = pipeline._speech_audio_batches(
+        path,
+        segments=((0, 500),),
+        pcm_bytes=1_024,
+        duration_ms=1_000,
+        approved=None,
+    )
+
+    with pytest.raises(MaterialSpeechRejected):
+        list(batches)
+
+
+def test_an_output_the_extractor_cannot_create_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`os.open` failing outright leaves no descriptor to close on the way out."""
+    analyzer = LocalAudibleSpeechAnalyzer(**_analyzer_arguments(tmp_path))  # type: ignore[arg-type]
+    real_open = os.open
+
+    def refusing_open(path: str | os.PathLike[str], flags: int, mode: int = 0o777) -> int:
+        if os.fspath(path).endswith(pipeline._PCM_FILENAME):
+            raise OSError("permission denied")
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(os, "open", refusing_open)
+    monkeypatch.setattr(subprocess, "Popen", FinishedExtraction)
+
+    with pytest.raises(MaterialSpeechRejected):
+        analyzer.analyze(_facts())
+
+
+def test_detection_and_batching_close_nothing_when_nothing_opened(tmp_path: Path) -> None:
+    """The cleanup runs on every exit; with no descriptor there is nothing to close."""
+    absent = tmp_path / "absent.pcm"
+
+    with pytest.raises(MaterialSpeechRejected):
+        pipeline._detect_speech_segments(absent, SequencedVad([0.0]), duration_ms=1_000)
+
+    batches = pipeline._speech_audio_batches(
+        absent,
+        segments=((0, 500),),
+        pcm_bytes=1_024,
+        duration_ms=1_000,
+        approved=None,
+    )
+    with pytest.raises(MaterialSpeechRejected):
+        list(batches)
+
+
+def test_a_run_that_never_confirmed_leaves_no_segment_behind() -> None:
+    """Short bursts of noise reach the silence threshold without confirming anything."""
+    too_short_to_confirm = ([0.9] * 2 + [0.0] * 12) * 3
+
+    segments, speech_ms = pipeline._aggregate_probability_evidence(
+        too_short_to_confirm, duration_ms=10_000
+    )
+
+    assert segments == ()
+    assert speech_ms == 0
+
+
+def test_an_output_whose_identity_cannot_be_read_is_refused_before_ffmpeg_runs(
+    tmp_path: Path,
+) -> None:
+    """That stat is what pins the file ffmpeg is about to fill; without it there is
+    nothing to compare the finished output against."""
+    started: list[object] = []
+
+    def never_started(*args: object, **kwargs: object) -> object:
+        started.append(args)
+        raise AssertionError("ffmpeg must not start without a pinned output")
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(subprocess, "Popen", never_started)
+        monkeypatch.setattr(os, "fstat", _raise_io_error)
+        with pytest.raises(MaterialSpeechRejected):
+            pipeline._extract_pcm(
+                tmp_path / "ffmpeg",
+                tmp_path / "source.mp4",
+                tmp_path / "audio.pcm",
+                duration_ms=1,
+            )
+
+    assert started == []
+
+
+def _raise_io_error(descriptor: int) -> os.stat_result:
+    raise OSError("private stat failure")

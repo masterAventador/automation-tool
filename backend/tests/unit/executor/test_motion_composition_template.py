@@ -33,6 +33,7 @@ from automation_tool.executor.motion_authoring.agent import (
 )
 from automation_tool.executor.motion_authoring.composition_template import (
     AUTHORING_RUNTIME_ASSET,
+    MAX_SCENE_ITEMS,
     SCENE_LAYOUTS,
     TemplateScene,
     escape_untrusted_text,
@@ -223,3 +224,54 @@ def test_a_scene_that_declares_no_layout_the_template_knows_is_refused() -> None
                 ),
             )
         )
+
+
+def _scene(**overrides: object) -> TemplateScene:
+    values: dict[str, object] = {
+        "clip_id": "clip-1",
+        "layout": "points",
+        "headline": "标题",
+        "body": "正文",
+        "items": ("一", "二"),
+        "start_seconds": 0.0,
+        "duration_seconds": float(DURATION),
+    }
+    values.update(overrides)
+    return TemplateScene(**values)  # type: ignore[arg-type]
+
+
+def test_a_composition_with_no_scenes_is_refused() -> None:
+    """An empty film is a blank stretch every static gate would happily accept."""
+    with pytest.raises(ValueError):
+        _render(())
+
+
+def test_a_scene_carrying_more_items_than_the_frame_holds_is_refused() -> None:
+    with pytest.raises(ValueError):
+        _render((_scene(items=tuple(f"要点{index}" for index in range(MAX_SCENE_ITEMS + 1))),))
+
+
+def test_control_characters_in_untrusted_copy_are_dropped_rather_than_escaped() -> None:
+    """They render as nothing and can terminate markup; escaping would keep them."""
+    rendered = _render((_scene(headline="标题\x00\x07\x1f\x7f收尾", items=(), body=""),))
+
+    assert "\x00" not in rendered
+    assert "&#0;" not in rendered
+    assert "&#127;" not in rendered
+    assert "标题" in rendered
+
+
+@pytest.mark.parametrize("layout", ["title", "points", "flow", "stat"])
+def test_a_scene_may_omit_every_optional_part_of_its_layout(layout: str) -> None:
+    """Body and items are optional; a layout missing them still renders and animates."""
+    rendered = _render((_scene(layout=layout, body="", items=()),))
+
+    assert f"clip-{layout}" in rendered
+    # The optional parts animate only when they exist; the stylesheet mentions
+    # their class names regardless, so the timeline is what gets asserted.
+    assert 'tl.from("#clip-1 .lede"' not in rendered
+    assert 'tl.from("#clip-1 p"' not in rendered
+    assert 'tl.from("#clip-1 .figure-label"' not in rendered
+    assert "<ul" not in rendered
+    assert "<ol" not in rendered
+    assert "tl.to(" in rendered, "the beat still carries motion for its whole length"

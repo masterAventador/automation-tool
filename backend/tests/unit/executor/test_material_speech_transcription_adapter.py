@@ -9,7 +9,7 @@ import traceback
 import urllib.request
 import wave
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -17,6 +17,7 @@ from automation_tool.executor import material_speech_transcription as transcript
 from automation_tool.executor.material_speech_pipeline import SpeechAudioBatch
 from automation_tool.executor.material_speech_transcription import (
     BailianSpeechTranscriptionAdapter,
+    BailianSpeechTranscriptionConfig,
     SpeechTranscriptionRejected,
     load_bailian_speech_transcription_config,
 )
@@ -355,3 +356,242 @@ def test_adapter_source_never_reads_a_path_or_builds_a_public_file_url() -> None
     assert "oss://" not in source
     assert "http://" not in source
     assert "SpeechAudioBatch" in source
+
+
+def _batch() -> SpeechAudioBatch:
+    return SpeechAudioBatch(wav_bytes=_wav(), duration_ms=100)
+
+
+def test_a_catalog_that_cannot_be_read_or_drifted_is_refused(tmp_path: Path) -> None:
+    """One snapshot is declared; anything else is not the model this was reviewed for."""
+    document = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    real = tmp_path / "catalog.json"
+    real.write_text(json.dumps(document), encoding="utf-8")
+    link = tmp_path / "linked.json"
+    link.symlink_to(real)
+    malformed = tmp_path / "malformed.json"
+    malformed.write_text("{not json", encoding="utf-8")
+
+    def written(name: str, changes: dict[str, object]) -> Path:
+        path = tmp_path / name
+        path.write_text(json.dumps({**document, **changes}), encoding="utf-8")
+        return path
+
+    cases: list[tuple[str, Path]] = [
+        ("no catalog at all", tmp_path / "absent.json"),
+        ("a symlink standing in for it", link),
+        ("a catalog that will not parse", malformed),
+        ("a document that is not an object", written("list.json", {})),
+        ("another schema version", written("schema.json", {"schema_version": 2})),
+        ("another provider", written("provider.json", {"provider": "openai"})),
+        ("another api mode", written("mode.json", {"api_mode": "responses"})),
+        ("another gateway", written("gateway.json", {"base_url": "https://example.invalid"})),
+        ("purposes that are not a list", written("purposes.json", {"purposes": {}})),
+        ("models that are not a list", written("models.json", {"models": {}})),
+        ("no speech purpose at all", written("nopurpose.json", {"purposes": []})),
+    ]
+    (tmp_path / "list.json").write_text("[1, 2]", encoding="utf-8")
+    for label, path in cases:
+        with pytest.raises(SpeechTranscriptionRejected):
+            load_bailian_speech_transcription_config(
+                catalog_path=path, api_key=API_KEY, timeout_seconds=90
+            )
+        assert label
+
+
+def test_the_adapter_refuses_a_configuration_or_batch_of_the_wrong_type() -> None:
+    with pytest.raises(SpeechTranscriptionRejected):
+        BailianSpeechTranscriptionAdapter(cast(BailianSpeechTranscriptionConfig, object()))
+
+    with pytest.raises(SpeechTranscriptionRejected):
+        _adapter().transcribe(cast(SpeechAudioBatch, object()))
+
+
+def test_a_configuration_outside_the_locked_snapshot_is_refused() -> None:
+    """The gateway, the model and the key shape are all pinned by the same object."""
+    complete: dict[str, object] = {
+        "base_url": transcription.BAILIAN_BASE_URL,
+        "model_id": transcription.BAILIAN_ASR_MODEL_ID,
+        "api_key": API_KEY,
+        "timeout_seconds": 90.0,
+    }
+
+    cases: list[tuple[str, dict[str, object]]] = [
+        ("another gateway", {"base_url": "https://example.invalid/v1"}),
+        ("another model", {"model_id": "whisper-1"}),
+        ("a key that is not text", {"api_key": None}),
+        ("a key of the wrong shape", {"api_key": "not-a-key"}),
+        ("a timeout that is not a number", {"timeout_seconds": "90"}),
+        ("a timeout of zero", {"timeout_seconds": 0}),
+        ("a timeout past the ceiling", {"timeout_seconds": 91}),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(SpeechTranscriptionRejected):
+            BailianSpeechTranscriptionConfig(**{**complete, **overrides})  # type: ignore[arg-type]
+        assert label
+
+
+def test_a_response_declaring_no_length_is_still_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HTTP/1.1 chunked responses carry no Content-Length; that is not an error."""
+    monkeypatch.setattr(
+        transcription,
+        "_open_request",
+        lambda _request, *, timeout: Response(_success_body(), declared_length=None),
+    )
+
+    assert _adapter().transcribe(_batch()) == "欢迎使用本地音轨转写。"
+
+
+def test_a_response_whose_headers_cannot_be_asked_about_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The declared length is how truncation is caught, so headers must be readable."""
+
+    class _NoGetAll(Response):
+        def __init__(self) -> None:
+            super().__init__(_success_body())
+            self.headers = cast(Headers, object())
+
+    monkeypatch.setattr(transcription, "_open_request", lambda _request, *, timeout: _NoGetAll())
+
+    with pytest.raises(SpeechTranscriptionRejected):
+        _adapter().transcribe(_batch())
+
+
+def test_a_content_length_that_is_not_one_plain_number_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two values, a comma-joined pair or non-digits all mean the framing is unclear."""
+
+    class _Headers:
+        def __init__(self, values: object) -> None:
+            self._values = values
+
+        def get_all(self, _name: str) -> object:
+            return self._values
+
+    for label, values in [
+        ("two separate headers", ["10", "20"]),
+        ("a comma-joined pair", ["10,20"]),
+        ("something that is not a list", "10"),
+        ("a value that is not text", [10]),
+        ("an empty value", [""]),
+        ("a value that is not digits", ["ten"]),
+        ("a non-ascii digit", ["１０"]),
+    ]:
+        response = Response(_success_body())
+        response.headers = cast(Headers, _Headers(values))
+        monkeypatch.setattr(
+            transcription, "_open_request", lambda _request, *, timeout, _r=response: _r
+        )
+        with pytest.raises(SpeechTranscriptionRejected):
+            _adapter().transcribe(_batch())
+        assert label
+
+
+def test_a_redirect_is_refused_and_its_body_closed() -> None:
+    """A redirect could take the audio somewhere the catalog never declared."""
+
+    class _Body:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    body = _Body()
+    handler = transcription._RejectRedirectHandler()
+
+    with pytest.raises(SpeechTranscriptionRejected):
+        handler.redirect_request(
+            urllib.request.Request("https://example.invalid/v1"),
+            cast(Any, body),
+            302,
+            "Found",
+            cast(Any, Headers(0)),
+            "https://elsewhere.invalid/v1",
+        )
+
+    assert body.closed, "the redirect's body is released rather than left open"
+
+
+def test_the_transport_installs_the_redirect_refusing_opener(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Built per call so no global opener can quietly re-enable redirects."""
+    seen: list[object] = []
+
+    class _Opener:
+        def open(self, _request: object, timeout: float) -> Response:
+            seen.append(timeout)
+            return Response(_success_body())
+
+    def building(*handlers: object) -> _Opener:
+        seen.extend(handlers)
+        return _Opener()
+
+    monkeypatch.setattr(urllib.request, "build_opener", building)
+
+    transcription._open_request(urllib.request.Request("https://example.invalid/v1"), timeout=5.0)
+
+    assert any(isinstance(handler, transcription._RejectRedirectHandler) for handler in seen)
+    assert 5.0 in seen
+
+
+def test_a_response_that_does_not_match_its_declared_length_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Truncation reads as a valid short document; the declared length is what catches it."""
+    body = _success_body()
+    monkeypatch.setattr(
+        transcription,
+        "_open_request",
+        lambda _request, *, timeout: Response(body, declared_length=len(body) + 1),
+    )
+
+    with pytest.raises(SpeechTranscriptionRejected):
+        _adapter().transcribe(_batch())
+
+
+def test_an_assistant_message_of_the_wrong_shape_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The transcript is read out of this one object; an unexpected shape is not read around."""
+    for label, message in [
+        ("not an object", "欢迎使用本地音轨转写。"),
+        ("an extra key", {"content": "话", "role": "assistant", "refusal": None}),
+        ("a missing key", {"content": "话"}),
+        ("another role", {"content": "话", "role": "system"}),
+    ]:
+        choice = {
+            "finish_reason": "stop",
+            "index": 0,
+            "logprobs": None,
+            "message": message,
+        }
+        monkeypatch.setattr(
+            transcription,
+            "_open_request",
+            lambda _request, *, timeout, _c=choice: Response(_success_body(choices=[_c])),
+        )
+        with pytest.raises(SpeechTranscriptionRejected):
+            _adapter().transcribe(_batch())
+        assert label
+
+
+def test_a_response_with_no_content_length_header_is_read_without_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`get_all` answering None is the absent-header case, not a malformed one."""
+
+    class _NoHeader:
+        def get_all(self, _name: str) -> None:
+            return None
+
+    response = Response(_success_body())
+    response.headers = cast(Headers, _NoHeader())
+    monkeypatch.setattr(transcription, "_open_request", lambda _request, *, timeout: response)
+
+    assert _adapter().transcribe(_batch()) == "欢迎使用本地音轨转写。"

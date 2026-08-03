@@ -884,3 +884,20 @@ def test_packaged_ffprobe_measures_an_off_grid_synthesized_audio(
 
     assert result.clips[0].duration_ms == 1237
     assert result.clips[0].bytes_written == len(payload)
+
+
+def test_a_cancellation_probe_that_cannot_be_trusted_is_not_read_as_carry_on() -> None:
+    """An unusable answer stops the run rather than being taken as "keep going"."""
+    from automation_tool.executor.script_voiceover import ScriptVoiceoverRejected
+
+    def raising() -> bool:
+        raise RuntimeError("probe defect")
+
+    for label, probe in [
+        ("the probe raises", raising),
+        ("the probe answers with an int", lambda: 1),
+        ("the probe answers with nothing", lambda: None),
+    ]:
+        with pytest.raises(ScriptVoiceoverRejected):
+            script_voiceover_module._cancel_if_requested(probe)  # type: ignore[arg-type]
+        assert label

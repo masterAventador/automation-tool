@@ -8,6 +8,7 @@ from typing import cast
 
 import pytest
 
+from automation_tool.control_plane.bootstrap import local_provisioning as provisioning
 from automation_tool.control_plane.bootstrap.local_provisioning import (
     HANDOFF_DOCUMENT_FIELDS,
     HANDOFF_DOCUMENT_VERSION,
@@ -29,6 +30,13 @@ CONTRACT_PATH = (
     Path(__file__).resolve().parents[4] / "contracts/protocol/local-registration-handoff-v1.json"
 )
 CONTRACT = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+
+
+class _PlatformStub:
+    """Stands in for `sys` so the module sees another platform's `sys.platform`."""
+
+    def __init__(self, platform: str) -> None:
+        self.platform = platform
 
 
 def read_document(directory: Path) -> dict[str, object]:
@@ -150,3 +158,82 @@ def test_local_app_data_directory_matches_the_frozen_app_identifier(
     else:
         monkeypatch.setenv("XDG_DATA_HOME", "/tmp/automation-tool-xdg")
         assert local_app_data_directory() == Path("/tmp/automation-tool-xdg") / identifier
+
+
+def test_every_desktop_platform_resolves_its_own_app_private_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The grant lands where that platform's client will look for it, or nowhere at all."""
+    identifier = CONTRACT["appIdentifier"]
+
+    monkeypatch.setattr(provisioning, "sys", _PlatformStub("darwin"))
+    macos = Path.home() / "Library" / "Application Support" / identifier
+    assert local_app_data_directory() == macos
+
+    monkeypatch.setattr(provisioning, "sys", _PlatformStub("win32"))
+    monkeypatch.setenv("APPDATA", "/roaming")
+    assert local_app_data_directory() == Path("/roaming") / identifier
+    monkeypatch.setenv("APPDATA", "")
+    with pytest.raises(LocalProvisioningUnavailable):
+        local_app_data_directory()
+    monkeypatch.delenv("APPDATA", raising=False)
+    with pytest.raises(LocalProvisioningUnavailable):
+        local_app_data_directory()
+
+    monkeypatch.setattr(provisioning, "sys", _PlatformStub("linux"))
+    monkeypatch.setenv("XDG_DATA_HOME", "/xdg")
+    assert local_app_data_directory() == Path("/xdg") / identifier
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    assert local_app_data_directory() == Path.home() / ".local" / "share" / identifier
+
+
+def test_windows_leaves_the_directory_mode_to_its_own_access_control(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POSIX modes mean nothing on Windows; the file is still written and read back."""
+    monkeypatch.setattr(provisioning, "sys", _PlatformStub("win32"))
+    directory = tmp_path / "app-data"
+
+    issued = provision_local_registration_bootstrap(directory)
+
+    assert issued.environment_id == LOCAL_ENVIRONMENT_ID
+    assert read_document(directory)["environmentId"] == LOCAL_ENVIRONMENT_ID
+
+
+def test_a_half_written_grant_is_removed_instead_of_being_left_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A partial handoff file would be read by the App as if it were a whole grant."""
+    directory = tmp_path / "app-data"
+    real_fsync = os.fsync
+
+    def failing_fsync(descriptor: int) -> None:
+        real_fsync(descriptor)
+        raise OSError("disk is full")
+
+    monkeypatch.setattr(os, "fsync", failing_fsync)
+
+    with pytest.raises(LocalProvisioningUnavailable):
+        provision_local_registration_bootstrap(directory)
+
+    assert list(directory.iterdir()) == []
+
+
+def test_a_grant_issued_at_a_moment_with_no_zone_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(LocalProvisioningUnavailable):
+        provision_local_registration_bootstrap(
+            tmp_path / "app-data", now=datetime(2026, 7, 25, 8, 0)
+        )
+
+
+def test_a_grant_that_does_not_fit_the_frozen_handoff_budget_is_never_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The App refuses to read past the budget, so writing past it would strand the grant."""
+    monkeypatch.setattr(provisioning, "MAX_HANDOFF_BYTES", 16)
+    directory = tmp_path / "app-data"
+
+    with pytest.raises(LocalProvisioningUnavailable):
+        provision_local_registration_bootstrap(directory)
+
+    assert not directory.exists()

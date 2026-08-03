@@ -93,8 +93,6 @@ def open_publish_artifact(
         candidate = _require_artifact_path(path)
         media_type = _require_media_type(candidate)
         size_bytes, digest = _digest_stable_file(candidate, maximum_bytes)
-    except DouyinPublishArtifactRejected:
-        raise
     except Exception:
         raise DouyinPublishArtifactRejected from None
     return DouyinPublishArtifact(

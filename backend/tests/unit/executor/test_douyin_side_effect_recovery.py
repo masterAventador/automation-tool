@@ -890,3 +890,35 @@ def test_recovery_constructor_run_and_receipt_contracts_are_closed(
     ):
         with pytest.raises(DouyinSideEffectRecoveryRejected):
             replace(receipt, **changes)
+
+
+def test_a_crashed_process_settles_uncertain_because_it_has_no_page_to_read(
+    tmp_path: Path,
+) -> None:
+    """After a crash the window is gone; a dispatched effect can only stay uncertain."""
+    opened, action_id, _ = seed(
+        tmp_path / "recovery",
+        60,
+        action=DouyinSearchExposureAction.COMMENT,
+        state=SideEffectState.DISPATCHED,
+    )
+
+    recovery = DouyinSideEffectRecovery.without_page_context(ledger=opened, clock=Clock())
+    receipt = recovery.run(action_id=action_id)
+
+    assert receipt.state is DouyinSideEffectRecoveryState.OUTCOME_UNCERTAIN
+    assert receipt.evidence is DouyinSideEffectRecoveryEvidence.PAGE_UNAVAILABLE
+    assert repr(recovery) == "DouyinSideEffectRecovery(<redacted>)"
+    recorded = opened.get_side_effect(str(action_id))
+    assert recorded is not None
+    assert recorded.state is SideEffectState.UNCERTAIN
+
+
+def test_a_pageless_recovery_still_refuses_dependencies_it_cannot_trust(tmp_path: Path) -> None:
+    opened = ledger(tmp_path / "recovery")
+    for arguments in (
+        {"ledger": cast(Any, object()), "clock": Clock()},
+        {"ledger": opened, "clock": cast(Any, object())},
+    ):
+        with pytest.raises(DouyinSideEffectRecoveryRejected):
+            DouyinSideEffectRecovery.without_page_context(**arguments)

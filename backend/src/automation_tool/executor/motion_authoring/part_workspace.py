@@ -149,11 +149,18 @@ def _slot_marks(
     marks: list[tuple[int, int, str]] = []
     for (start, end), indices in by_element.items():
         opening = html[start:end]
-        if not opening.endswith(">"):
-            raise SlotAnchorRejected(
-                f"the element holding slot {indices[0]} has no closing angle "
-                "bracket; this is not the document the slots were frozen against"
-            )
+        # Always ends in one: the span is `get_starttag_text()`'s length, and the
+        # parser only emits a start tag once it has seen the closing bracket
+        # (its fallback spelling carries one too). The only way this slice could
+        # disagree is if `getpos()` and the real character offset drifted --
+        # measured against CRLF, bare CR, form feed, vertical tab, U+2028, U+0085
+        # and U+2029, they do not. Asserted rather than raised, because a raise
+        # here is a branch nothing can take, and a future parser change that did
+        # break the offsets must fail loudly rather than mark the wrong element.
+        assert opening.endswith(">"), (
+            f"the element holding slot {indices[0]} has no closing angle "
+            "bracket; this is not the document the slots were frozen against"
+        )
         # Self-closing (`<img/>`) cannot hold a run, so the only shape here is a
         # normal open tag; the mark goes just inside its closing bracket.
         listed = " ".join(str(index) for index in indices)

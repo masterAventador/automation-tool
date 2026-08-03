@@ -155,3 +155,30 @@ class TestReleaseAndExpiry:
         grant = lease.begin_takeover(cdp_url=CDP, timeout_seconds=60, pause_confirmed=True)
         assert grant.token not in repr(grant)
         assert grant.token not in repr(lease)
+
+
+class TestBorrowerFailureReports:
+    def test_a_second_failure_report_during_reclaim_is_accepted_idempotently(self) -> None:
+        """The borrower can fail twice; the surface still needs exactly one reclaim."""
+        lease = manager(FakeClock())
+        grant = lease.begin_takeover(cdp_url=CDP, timeout_seconds=60, pause_confirmed=True)
+        lease.report_borrower_failure(grant.token)
+
+        lease.report_borrower_failure(grant.token)
+
+        assert lease.state() is LeaseState.RECLAIM_REQUIRED
+
+    def test_a_failure_reported_for_a_surface_nobody_borrowed_is_refused(self) -> None:
+        lease = manager(FakeClock())
+
+        with pytest.raises(SurfaceLeaseRejected):
+            lease.report_borrower_failure("not-a-live-token")
+        assert lease.state() is LeaseState.OWNER_ACTIVE
+
+    def test_a_failure_reported_with_the_wrong_token_is_refused(self) -> None:
+        lease = manager(FakeClock())
+        lease.begin_takeover(cdp_url=CDP, timeout_seconds=60, pause_confirmed=True)
+
+        with pytest.raises(SurfaceLeaseRejected):
+            lease.report_borrower_failure("someone-elses-token")
+        assert lease.state() is LeaseState.LEASED

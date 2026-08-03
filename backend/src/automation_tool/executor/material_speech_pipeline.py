@@ -255,8 +255,9 @@ class LocalAudibleSpeechAnalyzer:
                     transcripts.append(transcript)
             finally:
                 batches.close()
-            if not transcripts:
-                _reject()
+            # The batch generator refuses rather than finishing empty, so a loop
+            # that ran to completion has produced at least one transcript.
+            assert transcripts
             transcript = "\n".join(transcripts)
             return MaterialSpeechAnalysis(True, segments, transcript)
         finally:
@@ -429,18 +430,19 @@ def _extract_pcm(
     duration_ms: int,
 ) -> os.stat_result:
     limit = _pcm_output_limit(duration_ms)
-    descriptor: int | None = None
     try:
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
         flags |= getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(output, flags, 0o600)
+    except OSError:
+        _reject()
+    try:
         approved_output = os.fstat(descriptor)
     except OSError:
         _reject()
     finally:
-        if descriptor is not None:
-            with suppress(OSError):
-                os.close(descriptor)
+        with suppress(OSError):
+            os.close(descriptor)
     try:
         process = subprocess.Popen(
             _ffmpeg_argv(ffmpeg, source, output),
@@ -527,9 +529,8 @@ def _detect_speech_segments(
     probabilities: list[float] = []
     pcm_bytes = 0
     remaining_pcm_bytes = duration_ms * PCM_BYTES_PER_MILLISECOND
-    descriptor: int | None = None
+    descriptor, before = _open_stable_pcm(pcm_path, approved=approved)
     try:
-        descriptor, before = _open_stable_pcm(pcm_path, approved=approved)
         while remaining_pcm_bytes:
             chunk = os.read(
                 descriptor,
@@ -563,9 +564,8 @@ def _detect_speech_segments(
     except (OSError, ValueError, TypeError):
         _reject()
     finally:
-        if descriptor is not None:
-            with suppress(OSError):
-                os.close(descriptor)
+        with suppress(OSError):
+            os.close(descriptor)
     actual_duration_ms = min(
         duration_ms,
         math.ceil(pcm_bytes / PCM_BYTES_PER_SAMPLE * 1_000 / SAMPLE_RATE_HZ),
@@ -628,14 +628,15 @@ def _aggregate_probability_evidence(
         if silence_chunks < MIN_SILENCE_CHUNKS:
             continue
         first_silence = index + 1 - silence_chunks
-        if confirmed:
-            _append_segment(
-                segments,
-                start_ms=candidate_start * VAD_CHUNK_MILLISECONDS - SPEECH_PADDING_MS,
-                end_ms=first_silence * VAD_CHUNK_MILLISECONDS + SPEECH_PADDING_MS,
-                duration_ms=duration_ms,
-            )
-            confirmed_positive_duration_ms += candidate_positive_duration_ms
+        # Necessarily confirmed: an unconfirmed candidate is dropped above,
+        # before a single silent chunk can be counted against it.
+        _append_segment(
+            segments,
+            start_ms=candidate_start * VAD_CHUNK_MILLISECONDS - SPEECH_PADDING_MS,
+            end_ms=first_silence * VAD_CHUNK_MILLISECONDS + SPEECH_PADDING_MS,
+            duration_ms=duration_ms,
+        )
+        confirmed_positive_duration_ms += candidate_positive_duration_ms
         candidate_start = None
         candidate_positive_duration_ms = 0
         consecutive_speech_chunks = 0
@@ -696,10 +697,8 @@ def _speech_audio_batches(
         math.ceil(pcm_bytes / PCM_BYTES_PER_SAMPLE * 1_000 / SAMPLE_RATE_HZ),
     )
     yielded = False
-    descriptor: int | None = None
-    before: os.stat_result | None = None
+    descriptor, before = _open_stable_pcm(pcm_path, approved=approved)
     try:
-        descriptor, before = _open_stable_pcm(pcm_path, approved=approved)
         for start_ms in range(0, total_duration_ms, MAX_ASR_BATCH_DURATION_MS):
             end_ms = min(total_duration_ms, start_ms + MAX_ASR_BATCH_DURATION_MS)
             if not any(
@@ -726,13 +725,11 @@ def _speech_audio_batches(
     except OSError:
         _reject()
     finally:
-        if descriptor is not None:
-            try:
-                if before is not None:
-                    _require_stable_pcm(pcm_path, descriptor, before)
-            finally:
-                with suppress(OSError):
-                    os.close(descriptor)
+        try:
+            _require_stable_pcm(pcm_path, descriptor, before)
+        finally:
+            with suppress(OSError):
+                os.close(descriptor)
 
 
 def _open_stable_pcm(
@@ -757,9 +754,10 @@ def _open_stable_pcm(
             _reject()
         return descriptor, before
     except MaterialSpeechRejected:
-        if descriptor is not None:
-            with suppress(OSError):
-                os.close(descriptor)
+        # Only the checks below the open refuse, so the descriptor is always open here.
+        assert descriptor is not None
+        with suppress(OSError):
+            os.close(descriptor)
         raise
     except OSError:
         if descriptor is not None:

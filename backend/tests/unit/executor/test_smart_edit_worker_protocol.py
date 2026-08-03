@@ -6,7 +6,9 @@ import base64
 import hashlib
 import hmac
 import json
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
@@ -263,3 +265,156 @@ def test_smart_commands_reject_unknown_fields_bad_proofs_and_identity(
 
     with pytest.raises(LocalEditingWorkerBootstrapRejected):
         LocalEditingWorkerProtocol(_bootstrap(tmp_path), "2.0.0").accept_command(_line(document))
+
+
+def _started(tmp_path: Path) -> LocalEditingWorkerProtocol:
+    protocol = LocalEditingWorkerProtocol(_bootstrap(tmp_path), "2.0.0")
+    protocol.accept_command(_line(_command("worker.smart_edit.start")))
+    return protocol
+
+
+def _prepared(tmp_path: Path) -> LocalEditingWorkerProtocol:
+    protocol = _started(tmp_path)
+    protocol.smart_edit_progress(JOB_ID, SmartEditGenerationStage.PREPARING, 0)
+    protocol.smart_edit_progress(JOB_ID, SmartEditGenerationStage.COMPLETED, 1_000)
+    protocol.smart_edit_prepared(JOB_ID, RESULT_DIGEST)
+    return protocol
+
+
+def test_the_two_phase_terminal_commands_never_print_which_job(tmp_path: Path) -> None:
+    protocol = _prepared(tmp_path)
+
+    commit = protocol.accept_command(_line(_command("worker.smart_edit.commit")))
+    assert repr(commit) == "LocalSmartEditCommitCommand(<redacted>)"
+
+    protocol = _prepared(tmp_path)
+    abort = protocol.accept_command(_line(_command("worker.smart_edit.abort")))
+    assert repr(abort) == "LocalSmartEditAbortCommand(<redacted>)"
+
+
+def test_an_operation_in_flight_is_visible_to_the_caller(tmp_path: Path) -> None:
+    """The reader asks this to tell "refused" apart from "nothing running"."""
+    protocol = LocalEditingWorkerProtocol(_bootstrap(tmp_path), "2.0.0")
+
+    assert protocol.has_active_operation() is False
+    protocol.accept_command(_line(_command("worker.smart_edit.start")))
+    assert protocol.has_active_operation() is True
+    protocol.smart_edit_failed(JOB_ID, LocalSmartEditFailureCode.LOCAL_FAILED)
+    assert protocol.has_active_operation() is False
+
+
+def test_a_terminal_command_of_the_wrong_shape_is_refused(tmp_path: Path) -> None:
+    mutations: list[tuple[str, Callable[[dict[str, object]], object]]] = [
+        ("an unknown field", lambda value: value.update(extra=True)),
+        ("a missing field", lambda value: value.pop("jobId")),
+        ("another protocol version", lambda value: value.update(protocolVersion="2.0")),
+        ("another worker kind", lambda value: value.update(workerKind="node")),
+    ]
+    for label, mutate in mutations:
+        protocol = _prepared(tmp_path)
+        document = _command("worker.smart_edit.commit")
+        mutate(document)
+
+        with pytest.raises(LocalEditingWorkerBootstrapRejected):
+            protocol.accept_command(_line(document))
+        assert label
+
+
+def test_progress_refuses_a_stage_or_reading_it_cannot_use(tmp_path: Path) -> None:
+    protocol = _started(tmp_path)
+
+    cases: list[tuple[str, object, object]] = [
+        ("a stage from outside the closed set", "preparing", 0),
+        ("a reading that is not an int", SmartEditGenerationStage.PREPARING, 0.0),
+        ("a negative reading", SmartEditGenerationStage.PREPARING, -1),
+        ("a reading past the end", SmartEditGenerationStage.PREPARING, 1_001),
+        ("a first stage that is not the first", SmartEditGenerationStage.ANALYZING, 0),
+        ("a first reading that is not zero", SmartEditGenerationStage.PREPARING, 1),
+    ]
+    for label, stage, progress in cases:
+        with pytest.raises(LocalEditingWorkerBootstrapRejected):
+            protocol.smart_edit_progress(JOB_ID, cast(Any, stage), cast(Any, progress))
+        assert label
+
+
+def test_progress_never_runs_backwards(tmp_path: Path) -> None:
+    """A later reading may repeat, but it may not undo what was already reported."""
+    protocol = _started(tmp_path)
+    protocol.smart_edit_progress(JOB_ID, SmartEditGenerationStage.PREPARING, 0)
+    protocol.smart_edit_progress(JOB_ID, SmartEditGenerationStage.ANALYZING, 500)
+
+    for label, stage, progress in [
+        ("an earlier stage", SmartEditGenerationStage.PREPARING, 500),
+        ("a smaller reading", SmartEditGenerationStage.ANALYZING, 499),
+    ]:
+        with pytest.raises(LocalEditingWorkerBootstrapRejected):
+            protocol.smart_edit_progress(JOB_ID, stage, progress)
+        assert label
+
+    protocol.smart_edit_progress(JOB_ID, SmartEditGenerationStage.ANALYZING, 500)
+
+
+def test_progress_is_refused_once_the_result_is_staged(tmp_path: Path) -> None:
+    protocol = _prepared(tmp_path)
+
+    with pytest.raises(LocalEditingWorkerBootstrapRejected):
+        protocol.smart_edit_progress(JOB_ID, SmartEditGenerationStage.COMPLETED, 1_000)
+
+
+def test_success_must_name_the_digest_that_was_staged(tmp_path: Path) -> None:
+    """Committing one result and announcing another would publish an unverified file."""
+    protocol = _prepared(tmp_path)
+    protocol.accept_command(_line(_command("worker.smart_edit.commit")))
+
+    for label, digest in [
+        ("a different digest", "ef" * 32),
+        ("a digest of the wrong shape", "not-a-digest"),
+        ("a digest that is not text", cast(str, None)),
+    ]:
+        with pytest.raises(LocalEditingWorkerBootstrapRejected):
+            protocol.smart_edit_succeeded(JOB_ID, digest)
+        assert label
+
+    protocol.smart_edit_succeeded(JOB_ID, RESULT_DIGEST)
+
+
+def test_success_is_refused_before_the_commit_arrives(tmp_path: Path) -> None:
+    protocol = _prepared(tmp_path)
+
+    with pytest.raises(LocalEditingWorkerBootstrapRejected):
+        protocol.smart_edit_succeeded(JOB_ID, RESULT_DIGEST)
+
+
+def test_failure_must_name_a_reason_from_the_closed_set(tmp_path: Path) -> None:
+    protocol = _started(tmp_path)
+
+    with pytest.raises(LocalEditingWorkerBootstrapRejected):
+        protocol.smart_edit_failed(JOB_ID, cast(Any, "local_failed"))
+
+    protocol.smart_edit_failed(JOB_ID, LocalSmartEditFailureCode.LOCAL_FAILED)
+
+
+def test_cancellation_is_only_announced_after_one_was_asked_for(tmp_path: Path) -> None:
+    protocol = _started(tmp_path)
+
+    with pytest.raises(LocalEditingWorkerBootstrapRejected):
+        protocol.smart_edit_cancelled(JOB_ID)
+
+
+def test_a_staged_result_may_not_be_cancelled_away(tmp_path: Path) -> None:
+    """Once staged the only exits are commit and abort, which say what happened."""
+    protocol = _prepared(tmp_path)
+
+    with pytest.raises(LocalEditingWorkerBootstrapRejected):
+        protocol.accept_command(_line(_command("worker.cancel")))
+
+
+def test_an_abort_is_only_announced_after_one_was_asked_for(tmp_path: Path) -> None:
+    protocol = _prepared(tmp_path)
+
+    with pytest.raises(LocalEditingWorkerBootstrapRejected):
+        protocol.smart_edit_aborted(JOB_ID)
+
+    protocol.accept_command(_line(_command("worker.smart_edit.commit")))
+    with pytest.raises(LocalEditingWorkerBootstrapRejected):
+        protocol.smart_edit_aborted(JOB_ID)

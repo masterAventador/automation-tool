@@ -24,6 +24,7 @@ import sys
 import threading
 from pathlib import Path
 from typing import Any, cast
+from unittest import mock
 
 import pytest
 
@@ -33,13 +34,18 @@ from automation_tool.executor.motion_authoring import (
     run_motion_authoring_entry,
 )
 from automation_tool.executor.motion_authoring.agent import (
+    SELECTABLE_CATALOG_PART_IDS,
     AuthoringWorkspace,
     MotionAuthoringAgent,
     MotionAuthoringRejected,
     MotionAuthoringTools,
+    MotionAuthoringUnavailable,
     VideoCreationModelConfig,
     call_video_creation_model,
     verify_closed_tool_surface,
+)
+from automation_tool.executor.motion_authoring.entry import (
+    serve_one_motion_authoring_request,
 )
 
 BRIEF = "用蓝色商务风做一段本周销售增长说明"
@@ -865,3 +871,292 @@ def test_our_own_wiring_defect_is_never_answered_as_a_refusal_of_the_brief(
     assert not unclassified, f"our own defects are still refusals of the brief: {unclassified}"
     blamed = sorted(token for token in defects if status(token) == "rejected")
     assert not blamed, f"these reach the App as a refusal of a sentence nothing read: {blamed}"
+
+
+def test_the_request_shape_is_checked_field_by_field(workspace: Path) -> None:
+    """Each of these reaches something that would otherwise be built from it."""
+    model = _NeverCalledModel()
+
+    cases: list[tuple[str, dict[str, object]]] = [
+        ("another schema version", {"schemaVersion": 2}),
+        ("a workspace that is not text", {"workspace": 1}),
+        ("an empty workspace", {"workspace": ""}),
+        ("a workspace that is not a usable one", {"workspace": str(workspace / "absent")}),
+        ("a model that is not an object", {"model": "qwen"}),
+        ("a model with the wrong field set", {"model": {"modelId": "x"}}),
+        ("brand assets that are not a list", {"brandAssets": "logo.png"}),
+        ("a brand asset that is not text", {"brandAssets": [1]}),
+        ("a duration that is not a whole number", {"durationSeconds": 6.0}),
+        ("a thinking choice that is not a bool", {"modelThinking": "yes"}),
+        ("a catalog root that is not text", {"catalogRoot": 1}),
+        ("an empty catalog root", {"catalogRoot": ""}),
+        ("a relative catalog root", {"catalogRoot": "relative/catalog"}),
+        ("catalog part overrides that are not a list", {"catalogParts": {}}),
+        ("a catalog part override that is not text", {"catalogParts": [1]}),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(MotionAuthoringEntryRejected):
+            run_motion_authoring_entry(_request(workspace, **overrides), model_call=model)
+        assert label
+
+    assert model.calls == 0, "nothing may reach the model before the request is trusted"
+
+
+def test_a_model_configuration_the_agent_refuses_is_restated_not_forwarded(
+    workspace: Path,
+) -> None:
+    """The agent's message never carries the key, but this boundary restates anyway."""
+    model = _NeverCalledModel()
+
+    with pytest.raises(MotionAuthoringEntryRejected) as caught:
+        run_motion_authoring_entry(
+            _request(
+                workspace,
+                model={"baseUrl": "http://insecure.example", "modelId": "m", "apiKey": "sk-x"},
+            ),
+            model_call=model,
+        )
+
+    assert "sk-x" not in str(caught.value)
+    assert model.calls == 0
+
+
+def test_a_model_that_is_unavailable_is_told_apart_from_one_that_refused(
+    workspace: Path,
+) -> None:
+    """Retryable and not-retryable lead to different next steps for the caller."""
+
+    def unavailable(*_args: object, **_kw: object) -> object:
+        raise MotionAuthoringUnavailable("motion authoring unavailable: gateway down")
+
+    with pytest.raises(MotionAuthoringEntryRejected) as caught:
+        run_motion_authoring_entry(_request(workspace), model_call=unavailable)
+
+    # The message stays fixed; the closed reason is what tells the two apart.
+    assert caught.value.rejection_reason == "video_creation_model_unavailable"
+
+
+def test_a_wire_reason_outside_the_closed_vocabulary_is_dropped() -> None:
+    """Anything not in the contract becomes no reason at all, never a passthrough."""
+    closed = motion_authoring_entry._closed_wire_reason
+
+    assert closed(None) is None
+    assert closed(1) is None
+    assert closed("something_nobody_declared") is None
+
+
+def test_a_static_gate_reason_is_only_read_when_it_is_the_declared_shape() -> None:
+    reader = motion_authoring_entry._closed_static_gate_reason
+
+    assert reader("not a gate message") is None
+    prefix = motion_authoring_entry._STATIC_GATE_MESSAGE_PREFIX
+    assert reader(prefix + "x" * 1025) is None, "an oversized payload is not parsed"
+    assert reader(prefix + "[unclosed") is None, "a payload that will not parse is dropped"
+
+
+def test_a_rejection_reason_that_is_not_text_or_not_the_agents_is_dropped() -> None:
+    reader = motion_authoring_entry._closed_rejection_reason
+
+    assert reader(None) is None
+    assert reader(1) is None
+    assert reader("something the agent never says") is None
+
+
+def test_an_outcome_table_that_could_answer_two_ways_is_refused() -> None:
+    """A token in two classes would answer with whichever iteration reached first."""
+    declared = motion_authoring_entry._outcomes_are_declared
+    fixed = frozenset({"a", "b"})
+
+    assert declared({"partial": ["a"], "refused_by_model": ["b"]}, fixed) is True
+    assert declared("not a table", fixed) is False
+    assert declared({}, fixed) is False
+    assert declared({"b_class": ["a"], "a_class": ["b"]}, fixed) is False, "unsorted names"
+    assert declared({"Partial": ["a"]}, fixed) is False, "a name outside the wire token shape"
+    assert declared({"partial": "a"}, fixed) is False, "reasons that are not a list"
+    assert declared({"partial": []}, fixed) is False, "a class with no reasons"
+    assert declared({"partial": ["b", "a"]}, fixed) is False, "unsorted reasons"
+    assert declared({"partial": ["c"]}, fixed) is False, "a reason outside the fixed set"
+    assert declared({"partial": ["a"], "second": ["a"]}, fixed) is False, (
+        "the same reason in two classes"
+    )
+    reserved = motion_authoring_entry._REFUSED_STATUS
+    assert declared({reserved: ["a"]}, fixed) is False, "the reserved status name"
+
+
+def test_a_request_larger_than_the_reader_accepts_is_refused_without_parsing() -> None:
+    oversized = b"{" + b" " * (motion_authoring_entry.MAX_REQUEST_BYTES + 1) + b"}"
+    out = io.StringIO()
+
+    code = serve_one_motion_authoring_request(io.BytesIO(oversized), out)
+
+    assert code != 0
+    assert json.loads(out.getvalue())["rejectionReason"] == "request_too_large"
+
+
+def test_a_request_that_is_not_readable_json_answers_without_a_reason() -> None:
+    """A body that will not decode names no closed reason, so none is invented."""
+    out = io.StringIO()
+
+    code = serve_one_motion_authoring_request(io.BytesIO(b"\xff\xfe not json"), out)
+
+    assert code != 0
+
+
+def test_per_shot_overrides_are_checked_against_the_selectable_catalog(
+    workspace: Path,
+) -> None:
+    """The field is `catalogPartOverrides`; anything it names must be a part that exists."""
+    model = _NeverCalledModel()
+    selectable = sorted(SELECTABLE_CATALOG_PART_IDS)[0]
+
+    cases: list[tuple[str, object]] = [
+        ("not a list", {"a": 1}),
+        ("more shots than a storyboard may have", [selectable] * 100),
+        ("every shot left to the model", [None, None]),
+        ("a part that is not text", [1]),
+        ("a part the catalog does not carry", ["a-part-nobody-froze"]),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(MotionAuthoringEntryRejected):
+            run_motion_authoring_entry(
+                _request(workspace, catalogPartOverrides=overrides), model_call=model
+            )
+        assert label
+
+    assert model.calls == 0
+
+
+def test_an_absolute_catalog_root_is_carried_through(workspace: Path, tmp_path: Path) -> None:
+    """A relative one would resolve against whatever directory the Executor sits in."""
+    catalog = tmp_path / "catalog"
+    catalog.mkdir()
+
+    def answering_nonsense(*_args: object, **_options: object) -> str:
+        return "not a json document"
+
+    # The root is accepted and the run goes on to the model, which is what the
+    # absolute-path branch leads to; the refusal then comes from the answer.
+    with pytest.raises(MotionAuthoringEntryRejected):
+        run_motion_authoring_entry(
+            _request(workspace, catalogRoot=str(catalog)),
+            model_call=answering_nonsense,
+        )
+
+
+def test_a_static_gate_reason_is_carried_only_when_every_code_is_declared() -> None:
+    closed = motion_authoring_entry._closed_wire_reason
+    prefix = motion_authoring_entry._STATIC_GATE_REASON_PREFIX
+    codes = sorted(motion_authoring_entry._STATIC_GATE_CODES)
+
+    assert closed(prefix + codes[0]) == prefix + codes[0]
+    assert closed(prefix + "+".join(codes[:2])) == prefix + "+".join(codes[:2])
+    assert closed(prefix + "+".join(reversed(codes[:2]))) is None, "unsorted codes"
+    assert closed(prefix + f"{codes[0]}+{codes[0]}") is None, "the same code twice"
+    assert closed(prefix + "a_code_nobody_declared") is None
+
+
+def test_the_refusal_contract_itself_must_be_readable_and_undrifted(tmp_path: Path) -> None:
+    """It decides what may cross the wire, so a broken one is not read around.
+
+    Loaded once at import and trusted afterwards, so the loader is driven
+    directly with the module's own path constant pointed at a written file.
+    """
+    complete = json.loads(motion_authoring_entry._REFUSAL_CONTRACT_PATH.read_text(encoding="utf-8"))
+
+    malformed = tmp_path / "broken.json"
+    malformed.write_text("{not json", encoding="utf-8")
+    drifted = tmp_path / "drifted.json"
+    drifted.write_text(json.dumps({**complete, "schemaVersion": 2}), encoding="utf-8")
+    extra = tmp_path / "extra.json"
+    extra.write_text(json.dumps({**complete, "somethingNobodyDeclared": True}), encoding="utf-8")
+
+    for label, path in [
+        ("no file at all", tmp_path / "absent.json"),
+        ("a document that will not parse", malformed),
+        ("another schema version", drifted),
+        ("a key the contract does not declare", extra),
+    ]:
+        with (
+            mock.patch.object(motion_authoring_entry, "_REFUSAL_CONTRACT_PATH", path),
+            pytest.raises(RuntimeError),
+        ):
+            motion_authoring_entry._load_refusal_contract()
+        assert label
+
+
+def test_the_narrator_writes_each_beat_into_the_workspace_and_measures_it(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Beat length comes from the file that was actually written, never from the model."""
+    seen: list[object] = []
+    synthesized: list[dict[str, object]] = []
+    measured: list[Path] = []
+
+    class _RecordingAgent:
+        def __init__(self, **keywords: object) -> None:
+            seen.append(keywords.get("narrator"))
+
+        def author(self, _brief: object) -> None:
+            raise AssertionError("the recording agent never authors")
+
+    class _Synthesized:
+        def __init__(self, relative_path: str) -> None:
+            self.relative_path = relative_path
+
+    def fake_synthesize(
+        config: object, text: str, *, workspace: object, relative_path: str
+    ) -> _Synthesized:
+        synthesized.append({"text": text, "relative_path": relative_path})
+        return _Synthesized(relative_path)
+
+    def fake_measure(path: Path, *, ffprobe: object) -> float:
+        measured.append(path)
+        assert ffprobe is not None
+        return 2.5
+
+    monkeypatch.setattr(motion_authoring_entry, "MotionAuthoringAgent", _RecordingAgent)
+    monkeypatch.setattr(motion_authoring_entry, "synthesize_voiceover", fake_synthesize)
+    monkeypatch.setattr(motion_authoring_entry, "measure_audio_seconds", fake_measure)
+
+    with pytest.raises(AssertionError, match="recording agent never authors"):
+        run_motion_authoring_entry(
+            _request(workspace, ffprobeExecutable=str(workspace / "ffprobe")),
+            model_call=_NeverCalledModel(),
+        )
+    narrator = seen[0]
+    assert callable(narrator)
+
+    relative_path, seconds = narrator("beat-01", "这一拍的旁白")
+
+    assert relative_path == "narration/beat-01.wav"
+    assert seconds == 2.5
+    assert synthesized == [{"text": "这一拍的旁白", "relative_path": "narration/beat-01.wav"}]
+    assert measured == [workspace / "narration/beat-01.wav"]
+
+
+def test_an_authored_film_is_written_to_stdout_and_reported_as_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The App reads one document off stdout; the exit code only says whether to trust it."""
+    authored = {
+        "schemaVersion": 1,
+        "status": "authored",
+        "entryHtml": "index.html",
+        "allowedAssets": ["runtime/gsap.min.js"],
+        "frameCount": 90,
+        "framesPerSecond": 30,
+        "durationSeconds": 3.0,
+        "aspectRatio": "16:9",
+        "segments": [],
+    }
+    monkeypatch.setattr(
+        motion_authoring_entry,
+        "run_motion_authoring_entry",
+        lambda *_args, **_keywords: authored,
+    )
+    output = io.StringIO()
+
+    code = motion_authoring_entry.serve_one_motion_authoring_request(io.BytesIO(b"{}"), output)
+
+    assert code == 0
+    assert json.loads(output.getvalue()) == authored

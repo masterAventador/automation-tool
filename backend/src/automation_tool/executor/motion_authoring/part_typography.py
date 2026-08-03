@@ -374,8 +374,13 @@ def document_font_css(
     blocks: list[str] = []
     for face in faces:
         artifacts = face_artifact(offline_lock, face.source_family, face.weight)
-        if not artifacts:
-            raise FontRequestUnmet(f"no packaged file serves {face.source_family} {face.weight}")
+        # Never empty here: this is the lock that produced the weight table
+        # `resolve_faces` just accepted the face against, and `face_artifact`
+        # reads it back by the same two keys. Asserted rather than raised,
+        # because a raise on this path is a branch nothing can take -- and the
+        # two readers ever drifting apart must fail loudly instead of emitting
+        # a rule with no packaged file behind it.
+        assert artifacts, f"no packaged file serves {face.source_family} {face.weight}"
         for artifact in artifacts:
             blocks.append(
                 _font_face_rule(

@@ -2490,9 +2490,13 @@ class ExecutorLedger:
                             "UPDATE executor_outbox SET expired = 1 WHERE message_id = ?",
                             expired_ids,
                         )
+                    # Every page is filtered by `ordinal > last_ordinal` starting
+                    # from zero, and the schema forbids ordinals below one, so a
+                    # returned row cannot fail to advance the scan. Asserted
+                    # rather than handled: a non-advancing page would loop here
+                    # forever, and there is no state in which that is recoverable.
                     last_ordinal = int(rows[-1][0])
-                    if last_ordinal <= 0:
-                        raise ValueError
+                    assert last_ordinal > 0
                     if len(rows) < _MAX_OUTBOX_BATCH:
                         break
                 connection.commit()
