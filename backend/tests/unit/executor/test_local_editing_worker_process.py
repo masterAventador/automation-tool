@@ -301,3 +301,136 @@ def test_job_bundle_preserves_a_path_free_missing_registry_diagnostic(tmp_path: 
     assert rejected.value.code is LocalEditingWorkerFailureCode.MATERIAL_UNAVAILABLE
     assert rejected.value.diagnostic is LocalEditingRenderDiagnosticCode.REGISTRY_FILE_MISSING
     assert repr(rejected.value) == "LocalEditingRenderRejected(<redacted>)"
+
+
+def _write_checkpoint(app_data: Path, document: dict[str, object]) -> None:
+    checkpoints = app_data / "video-workspaces-v1" / "jobs" / str(JOB_ID) / "checkpoints"
+    (checkpoints / "local-editing-render-request.checkpoint").write_text(
+        json.dumps(document, separators=(",", ":")), encoding="utf-8"
+    )
+
+
+def _start_command(**overrides: object) -> LocalEditingStartCommand:
+    arguments: dict[str, object] = {
+        "job_id": JOB_ID,
+        "project_id": PROJECT_ID,
+        "timeline_id": TIMELINE_ID,
+        "timeline_revision": 1,
+    }
+    arguments.update(overrides)
+    return LocalEditingStartCommand(**arguments)  # type: ignore[arg-type]
+
+
+def _execute(prepared: LocalEditingWorkerBootstrap, command: LocalEditingStartCommand) -> UUID:
+    return execute_local_editing_job(
+        prepared,
+        command,
+        cancel_requested=lambda: False,
+        artifact_id_factory=lambda: ARTIFACT_ID,
+    )
+
+
+def test_job_refuses_a_checkpoint_written_for_another_schema_or_job(tmp_path: Path) -> None:
+    app_data, _source = prepare_job(tmp_path)
+    prepared = bootstrap(app_data)
+
+    for label, changes in [
+        ("schema version", {"schemaVersion": "local-editing-render-request.v2"}),
+        ("job id", {"jobId": str(PROJECT_ID)}),
+    ]:
+        document = render_request()
+        document.update(changes)
+        _write_checkpoint(app_data, document)
+
+        with pytest.raises(LocalEditingRenderRejected) as caught:
+            _execute(prepared, _start_command())
+        assert caught.value.code is LocalEditingWorkerFailureCode.INVALID_TIMELINE, label
+
+
+def test_job_refuses_a_checkpoint_that_names_a_different_project_or_revision(
+    tmp_path: Path,
+) -> None:
+    """The command and the checkpoint must agree on exactly what is being rendered."""
+    app_data, _source = prepare_job(tmp_path)
+    prepared = bootstrap(app_data)
+    other = UUID("00000000-0000-4000-8000-00000000009f")
+
+    for label, command in [
+        ("project id", _start_command(project_id=other)),
+        ("timeline id", _start_command(timeline_id=other)),
+        ("timeline revision", _start_command(timeline_revision=2)),
+    ]:
+        with pytest.raises(LocalEditingRenderRejected) as caught:
+            _execute(prepared, command)
+        assert caught.value.code is LocalEditingWorkerFailureCode.INVALID_TIMELINE, label
+
+
+def test_job_refuses_a_timeline_that_belongs_to_another_project(tmp_path: Path) -> None:
+    app_data, _source = prepare_job(tmp_path)
+    document = render_request()
+    timeline = cast(dict[str, object], document["timeline"])
+    timeline["projectId"] = "00000000-0000-4000-8000-0000000000aa"
+    _write_checkpoint(app_data, document)
+
+    with pytest.raises(LocalEditingRenderRejected) as caught:
+        _execute(bootstrap(app_data), _start_command())
+
+    assert caught.value.code is LocalEditingWorkerFailureCode.INVALID_TIMELINE
+
+
+def test_job_refuses_a_clip_whose_material_the_checkpoint_never_bound(
+    tmp_path: Path,
+) -> None:
+    """A clip may only use material the same document declared."""
+    app_data, _source = prepare_job(tmp_path)
+    document = render_request()
+    document["materials"] = [
+        {"materialId": "00000000-0000-4000-8000-0000000000bb", "hasAudio": False}
+    ]
+    _write_checkpoint(app_data, document)
+
+    with pytest.raises(LocalEditingRenderRejected) as caught:
+        _execute(bootstrap(app_data), _start_command())
+
+    assert caught.value.code is LocalEditingWorkerFailureCode.MATERIAL_UNAVAILABLE
+    assert caught.value.diagnostic is LocalEditingRenderDiagnosticCode.BINDING_MISSING
+
+
+def test_job_reports_an_unregistered_material_without_naming_a_path(
+    tmp_path: Path,
+) -> None:
+    app_data = private_directory(tmp_path / "app-data")
+    state = private_directory(app_data / "local-executor" / "state")
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"controlled source")
+    registry = MaterialPathRegistry(state_directory=state)
+    registry.register(UUID("00000000-0000-4000-8000-0000000000cc"), source)
+    checkpoints = private_directory(
+        app_data / "video-workspaces-v1" / "jobs" / str(JOB_ID) / "checkpoints"
+    )
+    private_directory(checkpoints.parent / "outputs")
+    _write_checkpoint(app_data, render_request())
+
+    with pytest.raises(LocalEditingRenderRejected) as caught:
+        _execute(bootstrap(app_data), _start_command())
+
+    assert caught.value.code is LocalEditingWorkerFailureCode.MATERIAL_UNAVAILABLE
+    assert str(source) not in str(caught.value)
+    assert repr(caught.value) == "LocalEditingRenderRejected(<redacted>)"
+
+
+def test_job_refuses_a_timeline_no_render_plan_can_be_built_from(tmp_path: Path) -> None:
+    """Plan construction failing is a timeline problem, not a render failure."""
+    app_data, _source = prepare_job(tmp_path)
+    document = render_request()
+    timeline = cast(dict[str, object], document["timeline"])
+    tracks = cast(list[dict[str, object]], timeline["tracks"])
+    clips = cast(list[dict[str, object]], tracks[0]["clips"])
+    clips[0]["startMs"] = 999_999
+
+    _write_checkpoint(app_data, document)
+
+    with pytest.raises(LocalEditingRenderRejected) as caught:
+        _execute(bootstrap(app_data), _start_command())
+
+    assert caught.value.code is LocalEditingWorkerFailureCode.INVALID_TIMELINE
