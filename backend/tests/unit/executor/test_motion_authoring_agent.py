@@ -2963,3 +2963,85 @@ class CompositionGateEdgeTests(unittest.TestCase):
             "missing_animation_runtime",
             self._codes(check_composition("<html><body></body></html>", duration_seconds=6)),
         )
+
+
+class AgentBoundaryTypeTests(unittest.TestCase):
+    """Constructors and entry points that build something from what they are handed."""
+
+    def test_a_catalog_with_no_single_document_for_a_part_is_refused(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "items" / "two-documents").mkdir(parents=True)
+            (root / "items" / "two-documents" / "a.html").write_text("<html>", encoding="utf-8")
+            (root / "items" / "two-documents" / "b.html").write_text("<html>", encoding="utf-8")
+            (root / "items" / "no-document").mkdir(parents=True)
+            catalog = object.__new__(PartsCatalog)
+            object.__setattr__(catalog, "root", root)
+
+            for label, name in [("two of them", "two-documents"), ("none at all", "no-document")]:
+                with self.subTest(label=label), self.assertRaises(MotionAuthoringRejected):
+                    catalog.document_for(name)
+
+    def test_a_payload_that_is_not_an_object_is_refused_by_name(self) -> None:
+        """The label is what tells the model which part of its answer was wrong."""
+        with self.assertRaises(MotionAuthoringRejected) as caught:
+            motion_authoring_agent._exact_keys(["not", "an", "object"], {"a"}, "storyboard")
+
+        self.assertIn("storyboard", str(caught.exception))
+
+    def test_the_tools_and_their_surface_check_refuse_foreign_types(self) -> None:
+        with self.assertRaises(MotionAuthoringRejected):
+            MotionAuthoringTools(cast(AuthoringWorkspace, object()))
+
+        with self.assertRaises(MotionAuthoringRejected):
+            verify_closed_tool_surface(cast(MotionAuthoringTools, object()))
+
+    def test_the_model_call_refuses_a_configuration_of_the_wrong_type(self) -> None:
+        with self.assertRaises(MotionAuthoringRejected):
+            call_video_creation_model(
+                cast(VideoCreationModelConfig, object()),
+                messages=[{"role": "user", "content": "x"}],
+                timeout_seconds=5,
+            )
+
+    def test_the_agent_refuses_a_workspace_or_workflow_of_the_wrong_type(self) -> None:
+        with TemporaryDirectory() as raw:
+            workspace = _make_workspace(Path(raw))
+            tools = MotionAuthoringTools(workspace)
+            workflow = load_locked_authoring_workflow(
+                vendor_root=VENDOR_ROOT, contract_path=WORKFLOW_CONTRACT
+            )
+
+            with self.assertRaises(MotionAuthoringRejected):
+                MotionAuthoringAgent(
+                    workspace=cast(AuthoringWorkspace, object()),
+                    tools=tools,
+                    workflow=workflow,
+                    model_config=None,
+                    model_call=ScriptedModel([]),
+                )
+
+            with self.assertRaises(MotionAuthoringRejected):
+                MotionAuthoringAgent(
+                    workspace=workspace,
+                    tools=tools,
+                    workflow=cast(Any, object()),
+                    model_config=None,
+                    model_call=ScriptedModel([]),
+                )
+
+
+class CatalogOverrideInstructionTests(unittest.TestCase):
+    """What the model is told when the operator already chose the shots."""
+
+    def test_no_overrides_says_nothing_at_all(self) -> None:
+        self.assertEqual(motion_authoring_agent._catalog_part_override_instruction(()), "")
+
+    def test_each_shot_is_named_and_the_unset_ones_are_left_to_the_model(self) -> None:
+        instruction = motion_authoring_agent._catalog_part_override_instruction(
+            ("lt-bold-block", None, "glitch")
+        )
+
+        self.assertIn("第1镜头=lt-bold-block", instruction)
+        self.assertIn("第2镜头=由你自动选择", instruction)
+        self.assertIn("第3镜头=glitch", instruction)
