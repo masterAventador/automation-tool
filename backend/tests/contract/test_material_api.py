@@ -464,6 +464,15 @@ def test_material_library_rejects_invalid_paging_and_delete_is_constrained() -> 
         .rstrip(b"=")
         .decode("ascii"),
         base64.urlsafe_b64encode(b'{"materialId":"not-a-material"}').rstrip(b"=").decode("ascii"),
+        # Decodes to the same bytes as the canonical cursor -- the final base64
+        # character carries unused low bits, so two spellings mean one payload.
+        # A cursor is an opaque token the server issued; a second spelling of it
+        # is one the server did not issue.
+        "eyJtYXRlcmlhbElkIjoiMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAxIn1",
+        # Canonical base64 of a non-canonical document: one space after the key.
+        base64.urlsafe_b64encode(b'{"materialId": "00000000-0000-4000-8000-000000000001"}')
+        .rstrip(b"=")
+        .decode("ascii"),
     ],
 )
 async def test_material_library_cursor_is_canonical_and_fail_closed(cursor: str) -> None:
@@ -1061,3 +1070,38 @@ def test_application_factory_wires_the_real_repository() -> None:
     assert response.json()["error"]["code"] == "material_persistence_unavailable"
     assert response.json()["error"]["retryable"] is True
     assert "private" not in response.text
+
+
+def test_library_paging_reports_a_storage_failure_rather_than_an_empty_page() -> None:
+    """An unavailable library is not the same answer as a library with nothing in it."""
+    client, repository = material_client()
+    repository.failure = MaterialPersistenceUnavailable()
+
+    response = client.get("/api/v1/editing-materials/library", params={"limit": 2})
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "material_persistence_unavailable"
+
+
+def test_a_writeback_the_domain_refuses_is_a_validation_error() -> None:
+    """The facts pass the wire schema and still describe no material that could exist."""
+    client, _repository = material_client()
+    payload = smart_edit_writeback_payload()
+    analyses = payload["analyses"]
+    assert isinstance(analyses, list)
+    analyses[0]["speechSegmentsMs"] = [[900, 200]]
+
+    response = client.post("/api/v1/editing-materials/smart-edit-writebacks", json=payload)
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation"
+
+
+def test_deleting_a_material_reports_a_query_failure_as_a_validation_error() -> None:
+    client, repository = material_client()
+    repository.failure = InvalidMaterialQuery()
+
+    response = client.delete(f"/api/v1/editing-materials/{MATERIAL_ID}")
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation"

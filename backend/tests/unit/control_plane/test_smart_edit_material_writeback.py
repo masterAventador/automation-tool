@@ -142,3 +142,34 @@ async def test_service_rejects_foreign_writeback_types_before_the_repository() -
         )
 
     assert repository.calls == []
+
+
+def test_analysis_facts_that_no_material_could_carry_are_refused() -> None:
+    """The writeback is checked against the domain, not just against its own field types.
+
+    It reaches the repository as a set of facts that will be written onto a real
+    material, so it is validated by building one. Anything the domain would not
+    accept is refused here rather than at the write.
+    """
+    from dataclasses import replace
+
+    from automation_tool.control_plane.application.materials import InvalidMaterialQuery
+
+    complete = _analysis()
+
+    cases: list[tuple[str, dict[str, object]]] = [
+        ("a digest that is not a sha256", {"content_digest": "not a digest"}),
+        ("speech windows that run backwards", {"speech_segments_ms": ((900, 200),)}),
+        ("speech with no transcript", {"speech_transcript": None}),
+        ("a transcript with no speech", {"has_speech": False}),
+        ("shot boundaries out of order", {"shot_boundaries_ms": (1_000, 0)}),
+        ("tags with no description", {"ai_description": None}),
+        (
+            "a description with no timestamp",
+            {"described_at": None},
+        ),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(InvalidMaterialQuery):
+            replace(complete, **overrides)  # type: ignore[arg-type]
+        assert label

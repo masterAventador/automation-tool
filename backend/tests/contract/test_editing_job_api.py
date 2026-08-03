@@ -686,3 +686,56 @@ async def test_runtime_builder_uses_sql_repositories_and_an_utc_clock() -> None:
         assert service._clock().tzinfo is UTC
     finally:
         await database.close()
+
+
+def test_a_timestamp_sent_as_a_number_is_refused_before_it_is_parsed() -> None:
+    """Pydantic would read an epoch number as a moment; the wire contract says text.
+
+    Accepting a number would make two different requests -- an ISO string and a
+    number -- mean the same instant, and only one of them is the contract.
+    """
+    client, repository, _ = job_client()
+    queued = job(identifier="00000000-0000-4000-8000-000000000033")
+    repository.jobs[queued.job_id] = (INSTALLATION_ID, queued)
+
+    response = client.patch(
+        f"/api/v1/editing-jobs/{queued.job_id}",
+        json={
+            "expectedUpdatedAt": 1_785_000_000,
+            "status": "running",
+            "failureCode": None,
+            "outputArtifactId": None,
+        },
+    )
+
+    assert_error(response, status_code=422, code="validation")
+    assert repository.jobs[queued.job_id][1] == queued
+
+
+def test_an_artifact_id_the_wire_accepts_but_the_domain_refuses_is_a_validation_error() -> None:
+    """The schema only says "a string"; whether it is an artifact id is the domain's call."""
+    client, repository, _ = job_client()
+    queued = job(identifier="00000000-0000-4000-8000-000000000034")
+    repository.jobs[queued.job_id] = (INSTALLATION_ID, queued)
+    running = client.patch(
+        f"/api/v1/editing-jobs/{queued.job_id}",
+        json={
+            "expectedUpdatedAt": "2026-07-30T10:11:12.123456Z",
+            "status": "running",
+            "failureCode": None,
+            "outputArtifactId": None,
+        },
+    )
+
+    response = client.patch(
+        f"/api/v1/editing-jobs/{queued.job_id}",
+        json={
+            "expectedUpdatedAt": running.json()["updatedAt"],
+            "status": "succeeded",
+            "failureCode": None,
+            "outputArtifactId": "not-an-artifact-id",
+        },
+    )
+
+    assert_error(response, status_code=422, code="validation")
+    assert repository.jobs[queued.job_id][1].status is EditingJobStatus.RUNNING
