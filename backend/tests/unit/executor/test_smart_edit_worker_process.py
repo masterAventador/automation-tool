@@ -739,3 +739,190 @@ def test_prepare_refuses_a_result_document_beyond_the_size_ceiling(
         _prepare(bootstrap)
 
     assert caught.value.code is LocalSmartEditFailureCode.LOCAL_FAILED
+
+
+def _staged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[LocalEditingWorkerBootstrap, LocalSmartEditStagedJob]:
+    bootstrap = _bootstrap(tmp_path)
+    _request_path(bootstrap)
+    _install_success(monkeypatch)
+    staged = cast(LocalSmartEditStagedJob, _prepare(bootstrap))
+    return bootstrap, staged
+
+
+def test_commit_refuses_a_wrong_type_or_an_already_finalized_job(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bootstrap, staged = _staged(tmp_path, monkeypatch)
+
+    with pytest.raises(LocalSmartEditWorkerRejected):
+        commit_smart_edit_job(cast(LocalEditingWorkerBootstrap, object()), staged)
+    with pytest.raises(LocalSmartEditWorkerRejected):
+        commit_smart_edit_job(bootstrap, cast(LocalSmartEditStagedJob, object()))
+
+    commit_smart_edit_job(bootstrap, staged)
+    assert staged.finalized
+
+    with pytest.raises(LocalSmartEditWorkerRejected) as caught:
+        commit_smart_edit_job(bootstrap, staged)
+    assert caught.value.code is LocalSmartEditFailureCode.COMMIT_FAILED
+
+
+def test_commit_refuses_a_result_document_that_changed_after_staging(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The digest recorded at staging time is what makes the publish binding."""
+    bootstrap, staged = _staged(tmp_path, monkeypatch)
+    staged.response_path.write_bytes(b'{"tampered":true}')
+
+    with pytest.raises(LocalSmartEditWorkerRejected) as caught:
+        commit_smart_edit_job(bootstrap, staged)
+
+    assert caught.value.code is LocalSmartEditFailureCode.COMMIT_FAILED
+
+
+def test_commit_refuses_a_result_document_that_vanished(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bootstrap, staged = _staged(tmp_path, monkeypatch)
+    staged.response_path.unlink()
+
+    with pytest.raises(LocalSmartEditWorkerRejected) as caught:
+        commit_smart_edit_job(bootstrap, staged)
+
+    assert caught.value.code is LocalSmartEditFailureCode.COMMIT_FAILED
+
+
+def test_commit_refuses_narration_audio_that_changed_after_staging(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bootstrap, staged = _staged(tmp_path, monkeypatch)
+    registration = staged.narration_registrations[0]
+    audio = staged.workspace_root.joinpath(*registration.relative_path.split("/"))
+    audio.write_bytes(VOICEOVER + b"extra")
+
+    with pytest.raises(LocalSmartEditWorkerRejected) as caught:
+        commit_smart_edit_job(bootstrap, staged)
+
+    assert caught.value.code is LocalSmartEditFailureCode.COMMIT_FAILED
+
+
+def test_commit_refuses_narration_audio_that_vanished(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bootstrap, staged = _staged(tmp_path, monkeypatch)
+    registration = staged.narration_registrations[0]
+    staged.workspace_root.joinpath(*registration.relative_path.split("/")).unlink()
+
+    with pytest.raises(LocalSmartEditWorkerRejected) as caught:
+        commit_smart_edit_job(bootstrap, staged)
+
+    assert caught.value.code is LocalSmartEditFailureCode.COMMIT_FAILED
+
+
+def test_commit_refuses_a_durable_directory_that_already_exists(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Publishing over an existing job directory would destroy its contents."""
+    bootstrap, staged = _staged(tmp_path, monkeypatch)
+    generated = bootstrap.asset_root / "local-executor" / "generated-materials"
+    generated.mkdir(parents=True, mode=0o700)
+    (generated / str(staged.job_id)).mkdir(mode=0o700)
+
+    with pytest.raises(LocalSmartEditWorkerRejected) as caught:
+        commit_smart_edit_job(bootstrap, staged)
+
+    assert caught.value.code is LocalSmartEditFailureCode.COMMIT_FAILED
+    assert staged.workspace_root.is_dir(), "the staging tree must survive a refused commit"
+
+
+def test_commit_rolls_the_staging_tree_back_when_registration_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A move that is not followed by registration must be undone."""
+    bootstrap, staged = _staged(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "automation_tool.executor.smart_edit_worker_process._state_registry",
+        lambda _bootstrap: (_ for _ in ()).throw(OSError("registry unavailable")),
+    )
+
+    with pytest.raises(LocalSmartEditWorkerRejected) as caught:
+        commit_smart_edit_job(bootstrap, staged)
+
+    assert caught.value.code is LocalSmartEditFailureCode.COMMIT_FAILED
+    assert staged.workspace_root.is_dir(), "the staging tree must be moved back"
+    durable = bootstrap.asset_root / "local-executor" / "generated-materials" / str(staged.job_id)
+    assert not durable.exists()
+    assert not staged.finalized
+
+
+def test_commit_discards_the_moved_tree_when_it_cannot_be_rolled_back(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the tree cannot go back it must not be left published either."""
+    bootstrap, staged = _staged(tmp_path, monkeypatch)
+    real_rename = os.rename
+    calls = {"n": 0}
+
+    def rename(source: str | os.PathLike[str], target: str | os.PathLike[str]) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            real_rename(source, target)
+            return
+        raise OSError("cannot move back")
+
+    monkeypatch.setattr(
+        "automation_tool.executor.smart_edit_worker_process._state_registry",
+        lambda _bootstrap: (_ for _ in ()).throw(OSError("registry unavailable")),
+    )
+    monkeypatch.setattr("automation_tool.executor.smart_edit_worker_process.os.rename", rename)
+
+    with pytest.raises(LocalSmartEditWorkerRejected) as caught:
+        commit_smart_edit_job(bootstrap, staged)
+
+    assert caught.value.code is LocalSmartEditFailureCode.COMMIT_FAILED
+    durable = bootstrap.asset_root / "local-executor" / "generated-materials" / str(staged.job_id)
+    assert not durable.exists(), "a tree that cannot be rolled back must be discarded"
+
+
+def test_abort_refuses_a_wrong_type_or_an_already_finalized_job(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _bootstrap_unused, staged = _staged(tmp_path, monkeypatch)
+
+    with pytest.raises(LocalSmartEditWorkerRejected):
+        abort_smart_edit_job(cast(LocalSmartEditStagedJob, object()))
+
+    abort_smart_edit_job(staged)
+    assert staged.finalized
+
+    with pytest.raises(LocalSmartEditWorkerRejected) as caught:
+        abort_smart_edit_job(staged)
+    assert caught.value.code is LocalSmartEditFailureCode.LOCAL_FAILED
+
+
+def test_abort_reports_a_job_directory_it_cannot_remove(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _bootstrap_unused, staged = _staged(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "automation_tool.executor.smart_edit_worker_process._cleanup_job",
+        lambda job_root: False,
+    )
+
+    with pytest.raises(LocalSmartEditWorkerRejected) as caught:
+        abort_smart_edit_job(staged)
+
+    assert caught.value.code is LocalSmartEditFailureCode.WORKSPACE_UNUSABLE
+    assert not staged.finalized
