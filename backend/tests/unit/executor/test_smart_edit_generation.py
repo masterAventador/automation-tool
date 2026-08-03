@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import fields, replace
 from datetime import UTC, datetime
-from typing import cast
-from uuid import uuid4
+from types import SimpleNamespace
+from typing import Any, cast
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -44,11 +46,18 @@ from automation_tool.executor.smart_edit_generation import (
     SmartEditGenerationStage,
     SmartEditMaterialAnalysis,
     SmartEditNarrationRegistration,
+    _decodable_evidence,
+    _ForbiddenPlanner,
+    _material_kind,
+    _require_prepared_materials,
+    _SilentPlanner,
+    _speech_window_is_decodable,
     assemble_smart_edit_timeline_draft,
     generate_smart_edit_timeline_draft,
 )
 from automation_tool.executor.speech_paragraph_draft import NarrationMaterialBinding
 from automation_tool.protocol.local_editing import (
+    MAX_LOCAL_EDITING_SEMANTIC_MATERIALS,
     LocalEditingTimelineParagraphKind,
     SegmentSelectionMaterialKind,
 )
@@ -705,3 +714,463 @@ def test_more_than_32_visual_materials_are_rejected_before_preparation() -> None
         )
 
     assert pipeline.calls == []
+
+
+class _BrokenPipeline(_RecordingPipeline):
+    """A pipeline whose one named step answers with something of the wrong type."""
+
+    def __init__(self, material: Material, *, broken_step: str) -> None:
+        super().__init__(material)
+        self.broken_step = broken_step
+
+    def _answer(self, step: str, real: Any) -> Any:
+        return object() if step == self.broken_step else real
+
+    def prepare(self, materials: Any, **options: Any) -> Any:
+        return self._answer("prepare", super().prepare(materials, **options))
+
+    def segment(self, prompt: str, **options: Any) -> Any:
+        return self._answer("segment", super().segment(prompt, **options))
+
+    def synthesize(self, script: Any, **options: Any) -> Any:
+        return self._answer("synthesize", super().synthesize(script, **options))
+
+    def match(self, script: Any, materials: Any, **options: Any) -> Any:
+        return self._answer("match", super().match(script, materials, **options))
+
+    def bind_narration(self, voiceovers: Any, **options: Any) -> Any:
+        return self._answer("bind", super().bind_narration(voiceovers, **options))
+
+
+def _generate(pipeline: Any, material: Material, **overrides: Any) -> Any:
+    arguments: dict[str, Any] = {
+        "prompt": "把发布会剪成一条产品亮点短片。",
+        "materials": (material,),
+        "enable_thinking": False,
+        "progress": lambda _stage, _per_mille: None,
+        "cancellation_requested": lambda: False,
+    }
+    arguments.update(overrides)
+    return generate_smart_edit_timeline_draft(pipeline, **arguments)
+
+
+def test_a_pipeline_step_that_answers_with_the_wrong_type_is_refused() -> None:
+    """Every model step is a boundary: what comes back is checked, not assumed."""
+    for step in ("prepare", "segment", "synthesize", "match", "bind"):
+        material = _material()
+        with pytest.raises(SmartEditGenerationRejected):
+            _generate(_BrokenPipeline(material, broken_step=step), material)
+
+
+def test_a_pipeline_that_raises_anything_else_still_fails_closed() -> None:
+    """Nothing from a model adapter may surface as its own exception type."""
+    material = _material()
+
+    class _ExplodingPipeline(_RecordingPipeline):
+        def prepare(self, materials: Any, **options: Any) -> Any:
+            raise RuntimeError("adapter defect")
+
+    with pytest.raises(SmartEditGenerationRejected):
+        _generate(_ExplodingPipeline(material), material)
+
+
+def test_generation_refuses_a_request_it_cannot_trust() -> None:
+    material = _material()
+    pipeline = _RecordingPipeline(material)
+
+    cases: list[tuple[str, dict[str, Any]]] = [
+        ("a prompt that is empty", {"prompt": ""}),
+        ("a prompt with untrimmed space", {"prompt": " 剪一条片子。"}),
+        ("a prompt past the ceiling", {"prompt": "字" * 4_001}),
+        ("a prompt with a control character", {"prompt": "剪\x00一条"}),
+        ("a prompt that is not text", {"prompt": cast(Any, 1)}),
+        ("materials that are not a tuple", {"materials": cast(Any, [material])}),
+        ("no materials at all", {"materials": ()}),
+        ("something that is not a material", {"materials": (object(),)}),
+        ("a thinking flag that is not a bool", {"enable_thinking": cast(Any, 1)}),
+        ("a progress sink that cannot be called", {"progress": cast(Any, None)}),
+        ("a cancellation probe that cannot be called", {"cancellation_requested": cast(Any, None)}),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(SmartEditGenerationRejected):
+            _generate(pipeline, material, **overrides)
+        assert label
+
+    with pytest.raises(SmartEditGenerationRejected):
+        _generate(cast(Any, object()), material)
+
+
+def test_a_cancellation_probe_that_cannot_be_trusted_is_not_read_as_carry_on() -> None:
+    material = _material()
+
+    for label, probe in [
+        ("the probe raises", lambda: (_ for _ in ()).throw(RuntimeError("defect"))),
+        ("the probe answers with an int", lambda: cast(bool, 1)),
+        ("the probe answers with nothing", lambda: cast(bool, None)),
+    ]:
+        with pytest.raises(SmartEditGenerationRejected):
+            _generate(_RecordingPipeline(material), material, cancellation_requested=probe)
+        assert label
+
+
+def test_a_progress_sink_that_raises_stops_the_generation() -> None:
+    """Progress is what the caller bills and shows; a sink that fails is not ignored."""
+    material = _material()
+
+    def refuse(_stage: SmartEditGenerationStage, _per_mille: int) -> None:
+        raise RuntimeError("sink defect")
+
+    with pytest.raises(SmartEditGenerationRejected):
+        _generate(_RecordingPipeline(material), material, progress=refuse)
+
+
+def test_a_failure_must_name_a_reason_from_the_closed_set() -> None:
+    with pytest.raises(SmartEditGenerationRejected):
+        SmartEditGenerationFailure(cast(Any, "source_too_short"))
+
+    assert (
+        SmartEditGenerationFailure(SmartEditGenerationFailureCode.SOURCE_TOO_SHORT).code
+        is SmartEditGenerationFailureCode.SOURCE_TOO_SHORT
+    )
+
+
+def _analysis(material: Material, **overrides: Any) -> SmartEditMaterialAnalysis:
+    return replace(SmartEditMaterialAnalysis.from_material(material), **overrides)
+
+
+def test_an_analysis_snapshot_must_describe_a_material_that_could_exist() -> None:
+    """It is persisted as fact, so a shape no probe could produce is refused."""
+    material = _material(has_speech=True)
+
+    cases: list[tuple[str, dict[str, Any]]] = [
+        ("an identifier that is not canonical", {"material_id": UUID(int=0)}),
+        ("a digest that is not text", {"content_digest": cast(Any, b"a" * 64)}),
+        ("a digest of the wrong shape", {"content_digest": "not a digest"}),
+        ("speech windows that run backwards", {"speech_segments_ms": ((1_200, 200),)}),
+        ("shot boundaries that are not a tuple", {"shot_boundaries_ms": cast(Any, [0, 1])}),
+        ("a transcript that is not text", {"speech_transcript": cast(Any, 1)}),
+        ("tags that are not a tuple", {"ai_tags": cast(Any, ["发布会"])}),
+        ("a description source outside the set", {"description_source": cast(Any, "ai")}),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(SmartEditGenerationRejected):
+            _analysis(material, **overrides)
+        assert label
+
+
+def _narration_batch(material: Material, sentences: tuple[str, ...]) -> PreparedSmartEditNarration:
+    pipeline = _RecordingPipeline(material)
+    pipeline.script, pipeline.voiceovers, pipeline.matches, pipeline.narration = _narrated_inputs(
+        material, sentences=sentences
+    )
+    return pipeline.bind_narration(pipeline.voiceovers, cancellation_requested=lambda: False)
+
+
+def test_prepared_narration_must_be_one_batch_the_bindings_agree_with() -> None:
+    material = _material()
+    prepared = _narration_batch(material, ("展示产品的核心亮点。", "再讲一句收尾。"))
+    first_binding, second_binding = prepared.bindings
+    first_registration, second_registration = prepared.registrations
+
+    cases: list[tuple[str, tuple[Any, Any]]] = [
+        ("bindings that are not a tuple", (list(prepared.bindings), prepared.registrations)),
+        ("no bindings at all", ((), prepared.registrations)),
+        ("a binding of the wrong type", ((object(),), prepared.registrations)),
+        ("registrations that are not a tuple", (prepared.bindings, list(prepared.registrations))),
+        ("no registrations at all", (prepared.bindings, ())),
+        ("a registration of the wrong type", (prepared.bindings, (object(),))),
+        (
+            "the same sentence registered twice",
+            ((first_binding, first_binding), (first_registration, first_registration)),
+        ),
+        (
+            "two sentences pointing at one audio file",
+            (
+                (first_binding, replace(second_binding, material_id=first_binding.material_id)),
+                (
+                    first_registration,
+                    replace(second_registration, material_id=first_binding.material_id),
+                ),
+            ),
+        ),
+        (
+            "registrations that do not describe these bindings",
+            ((first_binding,), (second_registration,)),
+        ),
+    ]
+    for label, (bindings, registrations) in cases:
+        with pytest.raises(SmartEditGenerationRejected):
+            PreparedSmartEditNarration(bindings=bindings, registrations=registrations)
+        assert label
+
+    assert PreparedSmartEditNarration(prepared.bindings, prepared.registrations).bindings
+
+
+def test_prepared_materials_must_be_a_coherent_verified_batch() -> None:
+    material = _material()
+    evidence = _evidence(material)
+    analysis = SmartEditMaterialAnalysis.from_material(material)
+    other = _material()
+
+    cases: list[tuple[str, tuple[Any, Any, Any]]] = [
+        ("materials that are not a tuple", ([material], (evidence,), (analysis,))),
+        ("no materials at all", ((), (evidence,), (analysis,))),
+        ("something that is not a material", ((object(),), (evidence,), (analysis,))),
+        ("the same material twice", ((material, material), (evidence,), (analysis,))),
+        ("evidence that is not a tuple", ((material,), [evidence], (analysis,))),
+        ("evidence of the wrong type", ((material,), (object(),), (analysis,))),
+        ("analysis that is not a tuple", ((material,), (evidence,), [analysis])),
+        ("analysis of the wrong type", ((material,), (evidence,), (object(),))),
+        ("the same analysis twice", ((material,), (evidence,), (analysis, analysis))),
+        (
+            "analysis for a material that is not here",
+            (
+                (material,),
+                (evidence,),
+                (SmartEditMaterialAnalysis.from_material(other),),
+            ),
+        ),
+    ]
+    for label, arguments in cases:
+        with pytest.raises(SmartEditGenerationRejected):
+            PreparedSmartEditMaterials(*arguments)
+        assert label
+
+    with pytest.raises(SmartEditGenerationRejected):
+        PreparedSmartEditMaterials(
+            tuple(_material() for _index in range(MAX_LOCAL_EDITING_SEMANTIC_MATERIALS + 1)),
+            (),
+            (),
+        )
+
+
+def _corrupt(material: Material, **overrides: Any) -> Material:
+    """A material the domain factory would refuse, assembled past it on purpose.
+
+    Everything downstream re-validates rather than trusting what it is handed,
+    and the only way to test that is to hand it something the factory would not
+    have produced -- which means bypassing the constructor, since that is the
+    very check being proved insufficient on its own.
+    """
+    broken = Material.__new__(Material)
+    for field in fields(Material):
+        object.__setattr__(
+            broken,
+            field.name,
+            overrides.get(field.name, getattr(material, field.name)),
+        )
+    return broken
+
+
+def test_a_material_that_no_longer_revalidates_is_refused_where_it_is_used() -> None:
+    material = _material()
+    broken = _corrupt(material, duration_ms=0)
+
+    with pytest.raises(SmartEditGenerationRejected):
+        PreparedSmartEditMaterials((broken,), (), ())
+
+    with pytest.raises(SmartEditGenerationRejected):
+        _require_prepared_materials(
+            (material,),
+            cast(
+                PreparedSmartEditMaterials,
+                SimpleNamespace(
+                    materials=(broken,),
+                    decodable_materials=(),
+                    analysis_updates=(),
+                ),
+            ),
+        )
+
+
+def test_a_material_kind_the_selector_has_no_word_for_is_refused() -> None:
+    with pytest.raises(SmartEditGenerationRejected):
+        _material_kind(_corrupt(_material(), kind=cast(Any, SimpleNamespace(value="hologram"))))
+
+
+def test_decodable_evidence_must_cover_exactly_the_video_it_claims() -> None:
+    material = _material()
+    evidence = _evidence(material)
+    other = _material()
+
+    cases: list[tuple[str, tuple[Any, Any]]] = [
+        ("evidence that is not a tuple", ((material,), [evidence])),
+        ("evidence of the wrong type", ((material,), (object(),))),
+        ("the same material twice", ((material,), (evidence, evidence))),
+        ("no evidence for the video", ((material,), ())),
+        ("evidence for something not asked about", ((material,), (evidence, _evidence(other)))),
+        (
+            "evidence bound to a different digest",
+            ((material,), (replace(evidence, content_digest="a" * 64),)),
+        ),
+    ]
+    for label, (materials, values) in cases:
+        with pytest.raises(SmartEditGenerationRejected):
+            _decodable_evidence(materials, values)
+        assert label
+
+
+def test_a_material_claiming_speech_with_no_window_has_nothing_to_verify() -> None:
+    material = _material(has_speech=True)
+
+    without_window = _corrupt(material, speech_segments_ms=())
+
+    assert _speech_window_is_decodable(without_window, _evidence(material)) is False
+
+
+def test_original_speech_outside_the_verified_picture_is_refused_when_prepared() -> None:
+    material = _material(has_speech=True)
+    assert material.duration_ms is not None
+    short = replace(
+        _evidence(material),
+        intervals=(VerifiedDecodableInterval(start_ms=0, end_ms=100),),
+    )
+
+    with pytest.raises(SmartEditGenerationRejected):
+        _require_prepared_materials(
+            (material,),
+            PreparedSmartEditMaterials((material,), (short,), ()),
+        )
+
+
+def test_the_narrated_planner_only_plans_for_the_silent_material_it_was_built_for() -> None:
+    material = _material()
+    script, voiceovers, matches, _narration = _narrated_inputs(material)
+    planner = _SilentPlanner(
+        silent_ids=(material.material_id.uuid,),
+        script=script,
+        voiceovers=voiceovers,
+        matches=matches,
+        selection_materials=(),
+        decodable_materials=(_evidence(material),),
+    )
+
+    with pytest.raises(SmartEditGenerationRejected):
+        planner.plan((uuid4(),))
+
+
+def test_the_all_voiced_path_refuses_to_plan_a_narrated_paragraph_at_all() -> None:
+    """Narration exists only for silent material; being asked here is a defect."""
+    with pytest.raises(SmartEditGenerationRejected):
+        _ForbiddenPlanner().plan(())
+
+
+def _assemble(materials: tuple[Material, ...], **overrides: Any) -> Any:
+    arguments: dict[str, Any] = {
+        "materials": materials,
+        "script": None,
+        "voiceovers": None,
+        "matches": None,
+        "decodable_materials": tuple(_evidence(material) for material in materials),
+        "narration_materials": (),
+    }
+    arguments.update(overrides)
+    return assemble_smart_edit_timeline_draft(**arguments)
+
+
+def test_narration_offered_to_an_all_voiced_draft_is_refused() -> None:
+    """Narration only exists for silent material, so a draft with none cannot take it."""
+    voiced = _material(has_speech=True)
+    _script, _voiceovers, _matches, narration = _narrated_inputs(voiced)
+
+    with pytest.raises(SmartEditGenerationRejected):
+        _assemble((voiced,), narration_materials=narration)
+
+
+def test_an_all_voiced_draft_refuses_model_output_it_never_asked_for() -> None:
+    """Nothing was scripted or synthesised here; being handed some means a defect."""
+    voiced = _material(has_speech=True)
+    script, voiceovers, matches, _narration = _narrated_inputs(voiced)
+
+    cases: list[tuple[str, dict[str, Any]]] = [
+        ("a script", {"script": script}),
+        ("voiceovers", {"voiceovers": voiceovers}),
+        ("matches", {"matches": matches}),
+    ]
+    for label, overrides in cases:
+        with pytest.raises(SmartEditGenerationRejected):
+            _assemble((voiced,), **overrides)
+        assert label
+
+
+def test_a_silent_draft_refuses_missing_or_mistyped_model_output() -> None:
+    silent = _material()
+    script, voiceovers, matches, _narration = _narrated_inputs(silent)
+    complete: dict[str, Any] = {"script": script, "voiceovers": voiceovers, "matches": matches}
+
+    for label, missing in [
+        ("no script", "script"),
+        ("no voiceovers", "voiceovers"),
+        ("no matches", "matches"),
+    ]:
+        with pytest.raises(SmartEditGenerationRejected):
+            _assemble((silent,), **{**complete, missing: None})
+        assert label
+
+    for label, wrong in [
+        ("a script of the wrong type", "script"),
+        ("voiceovers of the wrong type", "voiceovers"),
+        ("matches of the wrong type", "matches"),
+    ]:
+        with pytest.raises(SmartEditGenerationRejected):
+            _assemble((silent,), **{**complete, wrong: object()})
+        assert label
+
+
+def test_a_silent_draft_refuses_model_output_that_does_not_agree_with_itself() -> None:
+    """Three separate model calls; nothing but this checks they describe one job."""
+    silent = _material()
+    other = _material()
+    script, voiceovers, matches, _narration = _narrated_inputs(silent)
+    two_sentence_script, _v, _m, _n = _narrated_inputs(silent, sentences=("一。", "二。"))
+    _s, _v2, other_matches, _n2 = _narrated_inputs(other)
+
+    cases: list[tuple[str, dict[str, Any]]] = [
+        (
+            "voiceovers made from a different script",
+            {"voiceovers": replace(voiceovers, script_request_id="another-request")},
+        ),
+        (
+            "voiceovers covering different sentences",
+            {"script": two_sentence_script},
+        ),
+        (
+            "matches for a material that is not in this job",
+            {"matches": other_matches},
+        ),
+    ]
+    for label, override in cases:
+        arguments: dict[str, Any] = {
+            "script": script,
+            "voiceovers": voiceovers,
+            "matches": matches,
+        }
+        arguments.update(override)
+        with pytest.raises(SmartEditGenerationRejected):
+            _assemble((silent,), **arguments)
+        assert label
+
+
+def test_a_resolved_draft_of_the_wrong_type_is_refused_on_both_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The resolver is another module; what it returns is checked, not assumed."""
+    monkeypatch.setattr(
+        "automation_tool.executor.smart_edit_generation.resolve_speech_aware_paragraph_draft",
+        lambda _draft: object(),
+    )
+    voiced = _material(has_speech=True)
+    silent = _material()
+    script, voiceovers, matches, narration = _narrated_inputs(silent)
+
+    with pytest.raises(SmartEditGenerationRejected):
+        _assemble((voiced,))
+
+    with pytest.raises(SmartEditGenerationRejected):
+        _assemble(
+            (silent,),
+            script=script,
+            voiceovers=voiceovers,
+            matches=matches,
+            narration_materials=narration,
+        )
