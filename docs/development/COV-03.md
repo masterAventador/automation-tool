@@ -3,8 +3,8 @@
 用户可操作：否
 证据类型：分层实现
 
-> 状态：🚧 实现中。388 → **26**。十一个模块已收口到 0，`entry.py` 剩 14、
-> `agent.py` 剩 10、`part_workspace.py` 剩 2。
+> 状态：🚧 实现中。388 → **16**。十一个模块已收口到 0，`agent.py` 剩 8、
+> `entry.py` 剩 6、`part_workspace.py` 剩 2。
 > 上游计划：`docs/development/2026-08-03-backend-coverage-debt-plan.md`
 > 前置：[COV-02](COV-02.md)
 > 分支：`coverage/backend-100`
@@ -16,8 +16,8 @@ COV-02 收口后重新测量 `automation_tool.executor.motion_authoring`，精�
 
 | 模块 | 起点 | 现在 |
 |---|---:|---:|
-| `agent.py` | 123 | 10 |
-| `entry.py` | 55 | 14 |
+| `agent.py` | 123 | 8 |
+| `entry.py` | 55 | 6 |
 | `voiceover.py` | 52 | **0** |
 | `part_typography.py` | 34 | **0** |
 | `film_assembly.py` | 24 | **0** |
@@ -84,7 +84,7 @@ verbatim 去掉四个字符、UNC 去掉八个再补回两个斜杠、没有前�
 语义仍是防御，两个读取方真要漂移必须是响亮失败，而不是发出一条背后没有文件的字体
 规则。**仍然没有新增 `pragma: no cover`。**
 
-## 4. `agent.py`：123 → 10
+## 4. `agent.py`：123 → 8
 
 这是本批最大的一块。按 COV-02 §2.1 的做法先分组，最大的一类出乎意料：**打包契约的
 加载器**——故事板时长、渲染画布、锁定目录、模型调用、单句简报、可用性与槽位表。它们
@@ -127,11 +127,12 @@ verbatim 去掉四个字符、UNC 去掉八个再补回两个斜杠、没有前�
 
 ## 5. 待办
 
-- `agent.py` 剩 10 点：全在 `author()` 主流程里——修复轮改动过大、模型输出不是
-  JSON 对象、没有槽位预算时跳过、槽位溢出探针测量失败、静态门禁失败。这些都要把
-  一次完整的作者流程驱动起来才够得着，成本比前面几批高；
-- `entry.py` 剩 14 点：契约加载与漂移（需要 patch 契约路径）、旁白闭包（需要真实
-  配音配置）、`serve_one_motion_authoring_request` 的成功路径（它不接受 `model_call`
-  参数，会真的调模型，需要另想办法）；
+- `agent.py` 剩 8 点：全在 `author()` 主流程的深处——修复轮改动超出「只改文案」、
+  某一镜没有槽位预算时跳过、槽位溢出探针测量失败、静态门禁失败。这些要把一次完整
+  的作者流程连同一个会返回特定错误答案的脚本化模型一起驱动起来才够得着，
+  `ScriptedModel` 是现成的入口；
+- `entry.py` 剩 6 点：旁白闭包（需要真实配音配置才走得到）与
+  `serve_one_motion_authoring_request` 的成功路径（它不接受 `model_call` 参数，
+  会真的调模型；现有的子进程测试是另一条路，可以从那里接）；
 - `part_workspace.py` 剩 2 点：元素开标签不以 `>` 结尾，尚未找到能让 `HTMLParser`
   产出这种 span 的文档。
