@@ -3,8 +3,8 @@
 用户可操作：否
 证据类型：分层实现
 
-> 状态：动效部分（计划 §COV-01 第 1～3 步）已完成并验证；素材 worker 拆分（第 4～5 步）
-> 未开始，见 §6。
+> 状态：✅ 已完成。动效部分（计划 §COV-01 第 1～3 步）完成并验证；素材 worker
+> （第 4～5 步）经测量新增覆盖为 0，登记原因后不执行迁移，见 §6。
 > 上游计划：`docs/development/2026-08-03-backend-coverage-debt-plan.md`
 > 前置：[COV-00](COV-00.md)
 > 分支：`coverage/backend-100`（worktree `wt/coverage-100`）
@@ -120,10 +120,57 @@
 **过程中被 §8.4 救了一次**：用 `replace_all` 批量删 `# noqa: E402` 时，闭合括号被并进了
 上一行。语法仍然合法、118 条测试照常全绿，只有逐行看 diff 才发现。已回滚重做。
 
-## 6. 本批未做
+## 6. 素材 worker（计划第 4～5 步）：经测量不执行迁移
 
-计划 §COV-01 第 4～5 步（拆 `scripts/test_material_video_worker.py` 的 74 条、在允许
-socket 的宿主复跑）尚未开始，留待 COV-01b。它与动效部分互不依赖。
+计划把 `scripts/test_material_video_worker.py` 的 74 条列入本批，动机与动效那 118 条相同
+——「已有但未计入 backend coverage 的测试资产」。**对这 74 条，该动机经实测不成立。**
+
+### 6.1 本机基线
+
+先在非沙箱环境跑通：`74 tests OK (skipped=1)`。计划 §4.2 提到的「沙箱里 5 条因禁止绑定
+临时 socket 假失败」在这里不出现，与计划判断一致。
+
+另有一个环境前提：worktree 没有 `.local/`（gitignore 的运行数据目录），而 6 条测试用
+`tempfile.TemporaryDirectory(dir=ROOT/".local")`，缺目录会报 `FileNotFoundError`。
+`mkdir -p .local` 即可，与 COV-00 §2.1 的 media-toolchain 同属环境对齐。
+
+### 6.2 关键测量：新增覆盖为 0
+
+用 `coverage run --branch --source=automation_tool` 单独跑这 74 条，再与 COV-01 之后的
+全库报告做集合运算（`missing_lines ∩ executed_lines`，分支同理）：
+
+```
+匹配上的文件: 271 / 272
+合计新增覆盖点: 0 行 + 0 分支 = 0
+当前缺口 1664 -> 预计 1664
+```
+
+这 74 条确实执行到 46 个 `automation_tool` 模块（`local_editing_worker` 367 行、
+`material_probe` 203 行……），但**这些行已经全部被 backend 现有测试覆盖**，迁移它们
+一个缺口也消不掉。
+
+> 这个 `0` 先验证过不是路径没对上造成的假结果：两份报告的 key 前缀不同
+> （`src/automation_tool/…` vs `backend/src/automation_tool/…`），规整后 271/272 匹配。
+
+### 6.3 为什么本来就该是 0
+
+`backend/tests/unit/executor/` 里已经有 `test_local_editing_worker_process.py`(4)、
+`test_smart_edit_worker_process.py`(11)、`test_local_editing_worker.py`(8)、
+`test_smart_edit_pipeline.py`(6) 等——计划第 4 步要「提取到 backend tests」的第 1 类
+生产 Executor 行为，**在 backend tests 里早已有对应测试**。
+
+这 74 条的独特价值在第 2、3 类职责：worker 进程边界、冻结包模块排除、vendor 上游资源、
+字体权利与回退、背景音乐。按类名分布，12 个 TestCase 里只有 `MaterialVideoWorkerBoundaryTest`
+(19 条) 沾生产行为，其余 55 条全是包与资源约束——而**计划自己就说这些应留在脚本/平台
+工作流**。
+
+### 6.4 结论
+
+不执行迁移。理由不是「做不动」，而是：迁移收益经测量为 0，而拆分 74 条测试本身有引入
+回归的风险；计划 §2 也限定本轮「只允许两类修改」，无收益的重组不在其中。
+
+`scripts/test_material_video_worker.py` 保持原样，继续由 `run_script_tests.py` 与
+Material video Worker 工作流执行。COV-01 至此收口，不留 COV-01b。
 
 ## 7. 验证命令与结果
 
