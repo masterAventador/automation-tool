@@ -2602,13 +2602,22 @@ class PackagedContractLoaderTests(unittest.TestCase):
             "model call",
             "_MODEL_CALL_CONTRACT_PATH",
             "_load_model_stream_idle_timeout_seconds",
-            {"schemaVersion": 1, "policy": "fail_closed"},
+            # The key is present so the read succeeds: what is being reached is
+            # the range check, not the "contract is unreadable" arm above it.
+            {"schemaVersion": 1, "policy": "fail_closed", "streamIdleTimeoutSeconds": 0},
         ),
         (
             "one-sentence brief",
             "_BRIEF_CONTRACT_PATH",
             "_load_brief_bounds",
-            {"schemaVersion": 1, "policy": "fail_closed"},
+            {
+                "schemaVersion": 1,
+                "policy": "fail_closed",
+                "maxBriefCharacters": 0,
+                "maxBrandAssets": 4,
+                "aspectRatios": ["16:9"],
+                "languages": ["zh"],
+            },
         ),
     )
 
@@ -2664,7 +2673,13 @@ class PackagedContractLoaderTests(unittest.TestCase):
         with TemporaryDirectory() as raw:
             path = Path(raw) / "contract.json"
             path.write_text(
-                json.dumps({"schemaVersion": 1, "policy": "fail_closed"}),
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "policy": "fail_closed",
+                        "briefBeatCountMaximum": 0,
+                    }
+                ),
                 encoding="utf-8",
             )
             absent = Path(raw) / "absent.json"
@@ -2705,11 +2720,17 @@ class PackagedContractLoaderTests(unittest.TestCase):
             with mock.patch.object(motion_authoring_agent, "_MODEL_CALL_CONTRACT_PATH", declared):
                 self.assertIs(motion_authoring_agent.load_thinking_default(), True)
 
-    def test_a_duration_ceiling_the_contract_does_not_declare_is_refused(self) -> None:
+    def test_a_duration_ceiling_outside_the_allowed_range_is_refused(self) -> None:
         with TemporaryDirectory() as raw:
             path = Path(raw) / "contract.json"
             path.write_text(
-                json.dumps({"schemaVersion": 1, "policy": "fail_closed"}),
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "policy": "fail_closed",
+                        "briefSecondsMaximum": 3601,
+                    }
+                ),
                 encoding="utf-8",
             )
 
@@ -3045,3 +3066,37 @@ class CatalogOverrideInstructionTests(unittest.TestCase):
         self.assertIn("第1镜头=lt-bold-block", instruction)
         self.assertIn("第2镜头=由你自动选择", instruction)
         self.assertIn("第3镜头=glitch", instruction)
+
+
+class SelectableCatalogDriftTests(unittest.TestCase):
+    """The selectable list is built from two contracts; either drifting stops it."""
+
+    def test_a_usability_contract_that_grades_a_different_set_is_refused(self) -> None:
+        with TemporaryDirectory() as raw:
+            path = Path(raw) / "usability.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "policy": "fail_closed",
+                        # Well-formed, and about parts the locked catalog does
+                        # not carry -- so nothing here grades what is selectable.
+                        "parts": [{"name": "a-part-nobody-froze", "grade": "usable"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with (
+                mock.patch.object(motion_authoring_agent, "_MOTION_PART_USABILITY_PATH", path),
+                self.assertRaises(MotionAuthoringRejected),
+            ):
+                motion_authoring_agent._load_selectable_catalog_parts()
+
+    def test_a_locked_catalog_of_the_wrong_size_stops_the_selectable_list(self) -> None:
+        """The count is the contract: 134 parts, no more and no fewer."""
+        with (
+            mock.patch.object(motion_authoring_agent, "_LOCKED_CATALOG_ITEMS", ()),
+            self.assertRaises(MotionAuthoringRejected),
+        ):
+            motion_authoring_agent._load_selectable_catalog_parts()
