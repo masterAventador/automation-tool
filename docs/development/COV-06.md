@@ -3,7 +3,7 @@
 用户可操作：否
 证据类型：分层实现
 
-> 状态：🚧 实现中（等最终一次全量测量落定）。129 → **0（待全量确认）**。
+> 状态：✅ 已完成。129 → **0**，全库 2,023 → **0**。
 > 上游计划：`docs/development/2026-08-03-backend-coverage-debt-plan.md`
 > 前置：[COV-05](COV-05.md)
 > 分支：`coverage/backend-100`
@@ -114,10 +114,90 @@
 
 ## 5. 最终完整性审计
 
-（待最终一次 `pytest tests --cov=automation_tool` 落定后填入：全库缺口、
-`fail_under = 100` 是否真通过、49 处既有 `# pragma: no cover` 的复核结论。）
+### 5.1 权威门禁
+
+`backend/pyproject.toml` 的 `fail_under = 100` 与 `branch = true` 一字未动，
+`omit` 仍只有 Linux 覆盖进程无法导入的 `executor/windows_acl.py`。
+
+```bash
+cd backend
+uv run --frozen pytest tests -q -p no:randomly \
+  --cov=automation_tool --cov-report=term-missing
+```
+
+```text
+Name    Stmts   Miss Branch BrPart  Cover   Missing
+---------------------------------------------------
+TOTAL   32199      0   8154      0   100%
+
+271 files skipped due to complete coverage.
+Required test coverage of 100.0% reached. Total coverage: 100.00%
+7327 passed, 21 skipped, 208 subtests passed in 585.12s (0:09:45)
+```
+
+- 语句 `32,199 / 32,199`，缺 0；
+- 分支 `8,154 / 8,154`，缺 0，部分分支 0；
+- 起点 `main@dbd56118` 为 `6,471 passed`、`94.992698%`、`2,023` 个覆盖点。
+  测试数只增不减：`6,471 → 7,327`。
+
+### 5.2 既有 `# pragma: no cover` 逐项审计
+
+起点 49 处，本轮**未新增任何一处**，删掉 9 处，现存 **40** 处。
+
+删掉的 9 处是同一形状：跟在返回 `Never` 的 `_reject()` 后面的
+`raise AssertionError`，本来就是死语句（`agent.py` 七处、`voiceover.py`
+一处）。`authoring_workspace.py` 那一处的 `_reject` 返回类型原本写成 `None`
+——那正是断言存在的唯一理由——改成 `Never` 后一并删掉。这与本轮在
+`silero_vad.py` 做过的处理同源。
+
+现存 40 处的复核结论：
+
+| 类别 | 处数 | 结论 |
+|---|---:|---|
+| 台账里 `BEGIN IMMEDIATE` 锁住同一行后的 `rowcount != 1` | 9 | **保留**。行在同一事务里选中并锁住，漂移不可能；它抛的是领域错误而不是 `AssertionError`，转成断言会在 `-O` 下削弱行为 |
+| 打包器与 CLI 入口（`macos_candidate` 8、`windows_candidate` 6、`package_manifest` 4、`__main__` 3、`browser_runtime._start_playwright` 1） | 22 | **保留**。由真实子进程与真实出包验收，本来就不走进程内覆盖；把它们拉进覆盖等于在单元测试里跑 PyInstaller |
+| B 站发布与对账的防御性 `isinstance` / `else` | 7 | **保留**。解析器已把状态锁成文档化闭集，这些分支守的是解析器被改坏 |
+| 诊断码的私有固定调用、动效模板布局的 `else` | 2 | **保留** |
+
+### 5.3 计划 §8 判据逐条核对
+
+| 判据 | 结果 |
+|---|---|
+| 1. `pytest --cov` 退出 0 | ✅（见 §5.1，无失败、覆盖率要求满足） |
+| 2. 测试数只增不减 | ✅ `6,471 → 7,327` |
+| 3. missing lines / branches / partial 全为 0 | ✅ |
+| 4. Ruff format、Ruff check、Mypy 全绿 | ✅ 630 个文件 |
+| 5. 独立脚本聚合门禁 | ✅ `check_acceptance_evidence_depth.py` 74 项通过 |
+| 6. 49 处旧 pragma 已逐项审计，无新增 pragma / omit | ✅ 见 §5.2，49 → 40 |
+| 7. 未调用真实付费模型、真实平台账号或默认浏览器 Profile | ✅ 新增用例全部是内存 Fake、`tmp_path` 与一条本机 loopback HTTP |
+| 8. 无残留 `.coverage`、临时媒体、容器、浏览器或后台进程 | ✅ 每轮结束核对 |
+| 9. 合回并推送 `main` | 见 §7 |
+
+### 5.4 本轮对生产代码的改动清单
+
+补覆盖率不允许改产品行为，以下每一处都是「让走不到的路消失」或「让不变量
+变成结构」，没有一处改变调用方看到的结果：
+
+| 位置 | 改动 | 依据 |
+|---|---|---|
+| `platform_commands.handle` | 删掉 `except PlatformCommandRejected: raise` | try 体内没有来源；与下一支产出同类型异常 |
+| `publish_artifact.open_publish_artifact` | 同上 | 三个下游助手只抛 `ValueError` |
+| `ledger.outbox_for_delivery` | `if last_ordinal <= 0: raise` → 断言 | 分页过滤 + schema `CHECK` 双重保证；真不推进会死循环 |
+| `agent.author` 修复轮 | `for ... in (1, 0)` → `while True` + 计数器 | 循环没有正常出口，序列写法留下走不到的耗尽弧 |
+| `material_speech_pipeline` ×3 | 把打开挪出受保护体 / 拆成两个 `try` | 「描述符可能为 None」的正常收尾路径不存在 |
+| `material_speech_pipeline._open_stable_pcm` | 加断言替代 None 判断 | 能抛到那里的只有打开之后的检查 |
+| `_aggregate_probability_evidence` | 删掉恒真的 `if confirmed` | 未确认的候选在上面就被丢掉 |
+| `MaterialSpeechAnalyzer` | `if not transcripts: _reject()` → 断言 | 批次生成器空转会自己拒绝 |
+| `authoring_workspace._reject` | 返回类型 `None` → `Never` | 与同目录另外两个 `_reject` 对齐，消掉一处死断言 |
+| `silero_vad`、`adaptive_frame_extraction` 等九处（前几批） | 不可达 → 断言 | 逐处在对应台账里写明依据 |
 
 ## 6. 证据
 
-- 提交：`0e5a0ddb`、`b0e8a367`、`3fecb03a`、`939dad78`
+- 提交：`0e5a0ddb`、`b0e8a367`、`3fecb03a`、`939dad78`、`9dfe55b8` 之后的收尾提交
 - 收口测量：上表全部模块的 `missing_lines` 与 `missing_branches` 均为 `[]`
+- 权威门禁：见 §5.1
+
+## 7. 合回
+
+见分支 `coverage/backend-100` 合入 `main` 的 merge commit（`--no-ff`），
+以及合入后在 `main` 上复跑一次的同一条门禁命令。
