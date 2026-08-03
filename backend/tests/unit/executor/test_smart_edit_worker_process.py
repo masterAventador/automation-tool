@@ -38,7 +38,10 @@ from automation_tool.executor.motion_authoring.authoring_workspace import (
 )
 from automation_tool.executor.smart_edit_generation import (
     SmartEditGenerationCancelled,
+    SmartEditGenerationFailure,
+    SmartEditGenerationFailureCode,
     SmartEditGenerationPipeline,
+    SmartEditGenerationRejected,
     SmartEditGenerationResult,
     SmartEditGenerationStage,
     SmartEditMaterialAnalysis,
@@ -573,3 +576,166 @@ def test_prepare_refuses_a_symlinked_private_job_root(
     assert rejected.value.code is LocalSmartEditFailureCode.WORKSPACE_UNUSABLE
     assert request.exists()
     assert not (outside_job / "staging").exists()
+
+
+def _install_generate(monkeypatch: pytest.MonkeyPatch, outcome: object) -> None:
+    """Drive `prepare` down one specific arm of its outcome handling."""
+
+    def generate(pipeline: _Pipeline, **_kwargs: object) -> object:
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(
+        "automation_tool.executor.smart_edit_worker_process.generate_smart_edit_timeline_draft",
+        generate,
+    )
+
+
+def _prepare(bootstrap: LocalEditingWorkerBootstrap, **overrides: object) -> object:
+    arguments: dict[str, object] = {
+        "pipeline_factory": lambda workspace: cast(
+            SmartEditGenerationPipeline, _Pipeline(workspace)
+        ),
+        "cancel_requested": lambda: False,
+        "progress": lambda stage, value: None,
+    }
+    arguments.update(overrides)
+    return prepare_smart_edit_job(
+        bootstrap,
+        LocalSmartEditStartCommand(JOB_ID),
+        **arguments,  # type: ignore[arg-type]
+    )
+
+
+def test_prepare_refuses_arguments_of_the_wrong_type(tmp_path: Path) -> None:
+    bootstrap = _bootstrap(tmp_path)
+    _request_path(bootstrap)
+
+    for label, overrides in [
+        ("pipeline factory is not callable", {"pipeline_factory": object()}),
+        ("cancel probe is not callable", {"cancel_requested": object()}),
+        ("progress is not callable", {"progress": object()}),
+    ]:
+        with pytest.raises(LocalSmartEditWorkerRejected) as caught:
+            _prepare(bootstrap, **overrides)
+        assert caught.value.code is LocalSmartEditFailureCode.LOCAL_FAILED, label
+
+    with pytest.raises(LocalSmartEditWorkerRejected):
+        prepare_smart_edit_job(
+            cast(LocalEditingWorkerBootstrap, object()),
+            LocalSmartEditStartCommand(JOB_ID),
+            pipeline_factory=lambda workspace: cast(
+                SmartEditGenerationPipeline, _Pipeline(workspace)
+            ),
+            cancel_requested=lambda: False,
+            progress=lambda stage, value: None,
+        )
+
+
+def test_prepare_refuses_a_factory_that_returns_something_else(tmp_path: Path) -> None:
+    """A factory that hands back a non-pipeline is a configuration problem."""
+    bootstrap = _bootstrap(tmp_path)
+    _request_path(bootstrap)
+
+    with pytest.raises(LocalSmartEditWorkerRejected) as caught:
+        _prepare(bootstrap, pipeline_factory=lambda workspace: object())
+
+    assert caught.value.code is LocalSmartEditFailureCode.CONFIGURATION_MISSING
+
+
+def test_prepare_reports_a_generation_failure_under_its_own_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bootstrap = _bootstrap(tmp_path)
+    request = _request_path(bootstrap)
+    _install_generate(
+        monkeypatch,
+        SmartEditGenerationFailure(SmartEditGenerationFailureCode.NO_RELEVANT_MATERIAL),
+    )
+
+    with pytest.raises(LocalSmartEditWorkerRejected) as caught:
+        _prepare(bootstrap)
+
+    assert caught.value.code is LocalSmartEditFailureCode.NO_RELEVANT_MATERIAL
+    assert not request.exists(), "a failed job must not leave its request behind"
+
+
+def test_prepare_treats_an_unexpected_outcome_as_a_local_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Neither a result nor a failure: refuse rather than publish nothing."""
+    bootstrap = _bootstrap(tmp_path)
+    _request_path(bootstrap)
+    _install_generate(monkeypatch, object())
+
+    with pytest.raises(LocalSmartEditWorkerRejected) as caught:
+        _prepare(bootstrap)
+
+    assert caught.value.code is LocalSmartEditFailureCode.LOCAL_FAILED
+
+
+def test_prepare_propagates_cancellation_as_cancellation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bootstrap = _bootstrap(tmp_path)
+    _request_path(bootstrap)
+    _install_generate(monkeypatch, SmartEditGenerationCancelled())
+
+    with pytest.raises(LocalSmartEditWorkerCancelled):
+        _prepare(bootstrap)
+
+
+def test_prepare_maps_an_upstream_rejection_and_any_other_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for raised, expected in [
+        (SmartEditGenerationRejected(), LocalSmartEditFailureCode.UPSTREAM_REJECTED),
+        (RuntimeError("something else"), LocalSmartEditFailureCode.LOCAL_FAILED),
+    ]:
+        bootstrap = _bootstrap(tmp_path / f"case-{expected.value}")
+        _request_path(bootstrap)
+        _install_generate(monkeypatch, raised)
+
+        with pytest.raises(LocalSmartEditWorkerRejected) as caught:
+            _prepare(bootstrap)
+
+        assert caught.value.code is expected
+
+
+def test_prepare_reports_a_job_directory_it_cannot_clean_up(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The failure code must say the workspace is stuck, not repeat the cause."""
+    bootstrap = _bootstrap(tmp_path)
+    _request_path(bootstrap)
+    _install_generate(monkeypatch, RuntimeError("upstream blew up"))
+    monkeypatch.setattr(
+        "automation_tool.executor.smart_edit_worker_process._cleanup_job",
+        lambda job_root: False,
+    )
+
+    with pytest.raises(LocalSmartEditWorkerRejected) as caught:
+        _prepare(bootstrap)
+
+    assert caught.value.code is LocalSmartEditFailureCode.WORKSPACE_UNUSABLE
+
+
+def test_prepare_refuses_a_result_document_beyond_the_size_ceiling(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bootstrap = _bootstrap(tmp_path)
+    _request_path(bootstrap)
+    _install_success(monkeypatch)
+    monkeypatch.setattr("automation_tool.executor.smart_edit_worker_process._MAX_DOCUMENT_BYTES", 1)
+
+    with pytest.raises(LocalSmartEditWorkerRejected) as caught:
+        _prepare(bootstrap)
+
+    assert caught.value.code is LocalSmartEditFailureCode.LOCAL_FAILED
