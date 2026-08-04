@@ -24,9 +24,15 @@ import json
 import posixpath
 import re
 import shutil
+import sys
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
+
+from gate_prerequisites import require  # noqa: E402
+
 RELEASE_LOCK_PATH = REPOSITORY_ROOT / "contracts/video/motion-catalog-release.v1.json"
 DEP_LOCK_PATH = REPOSITORY_ROOT / "contracts/video/offline-motion-dependencies.v1.json"
 CATALOG_CONTRACT_PATH = REPOSITORY_ROOT / "contracts/quality/motion-catalog.v1.json"
@@ -565,10 +571,27 @@ def stage_for_release(*, staging: Path, release_root: Path | None = None) -> Pat
     unverified tree would put the one thing the lock exists to guarantee — that
     the parts a customer renders are the parts the gates checked — behind
     whatever happened to be on the build machine's disk.
+
+    A tree that is absent, or that verification rejects, is rebuilt once from
+    the staged catalog and verified again — the same "cache miss rebuilds
+    itself" contract every other pinned runtime resource already has through
+    `video_runtime_cache.ensure_cached`. The tree is a reproducible build
+    output, not evidence, so regenerating it destroys nothing; if the rebuilt
+    tree still fails, that failure is real and propagates.
     """
     source = release_root or default_release_root()
+    try:
+        _verify_release_tree(source)
+    except (BuildError, OSError, SystemExit):
+        # `CheckError` subclasses `SystemExit`, so it is not an `Exception`.
+        _rebuild_release_tree(source)
+        _verify_release_tree(source)
+    return _stage_tree(name="motion-catalog", source=source, staging=staging)
+
+
+def _verify_release_tree(source: Path) -> None:
     if not source.is_dir():
-        raise BuildError(f"the release tree is not built at {source}; run this script first")
+        raise BuildError(f"the release tree is not built at {source}")
     verify = load_gate(REPOSITORY_ROOT / "scripts/check_motion_catalog_release.py")
     verify.verify_release(
         source,
@@ -577,7 +600,38 @@ def stage_for_release(*, staging: Path, release_root: Path | None = None) -> Pat
         load_json(CATALOG_CONTRACT_PATH),
         load_json(OVERLAY_PATH),
     )
-    return _stage_tree(name="motion-catalog", source=source, staging=staging)
+
+
+def _rebuild_release_tree(source: Path) -> None:
+    """Rebuild the release tree in place from the staged catalog.
+
+    The staged catalog is a build input this cannot synthesise, so a missing
+    one is reported with the command that produces it rather than guessed at —
+    `gate_prerequisites` owns that mapping so the remedy cannot drift from the
+    path being checked.
+    """
+    require("offline-motion-catalog")
+    dep_lock = load_json(DEP_LOCK_PATH)
+    staged_root = REPOSITORY_ROOT / dep_lock["layout"]["catalogRoot"]
+    if source.exists():
+        _make_tree_writable(source)
+        shutil.rmtree(source)
+    build_release(
+        load_json(RELEASE_LOCK_PATH),
+        dep_lock,
+        load_json(CATALOG_CONTRACT_PATH),
+        load_json(RIGHTS_PATH),
+        load_json(OVERLAY_PATH),
+        staged_root,
+        source,
+    )
+
+
+def _make_tree_writable(root: Path) -> None:
+    """The release tree is deliberately read-only, so removing it needs this."""
+    for path in sorted(root.rglob("*"), reverse=True):
+        if path.is_file():
+            path.chmod(WRITABLE_MODE)
 
 
 def _stage_tree(*, name: str, source: Path, staging: Path) -> Path:

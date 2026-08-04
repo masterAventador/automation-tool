@@ -722,6 +722,84 @@ def test_real_release_build_is_reproducible() -> None:
                     path.chmod(0o644)
 
 
+def _make_writable(root: Path) -> None:
+    """The release tree is built read-only; a temporary directory has to go."""
+    for path in sorted(root.rglob("*"), reverse=True):
+        if path.is_file():
+            path.chmod(0o644)
+
+
+def test_stage_for_release_builds_a_missing_release_tree() -> None:
+    """A release tree that was never built is produced, not reported.
+
+    Every other pinned runtime resource rebuilds itself when its cache is
+    absent (`video_runtime_cache.ensure_cached`). The catalog used to be the
+    one exception: it raised "run this script first", so a clean machine's
+    first release attempt failed on a step no other resource needed.
+    """
+    build = load_module(BUILD)
+    check = load_module(CHECK)
+    require("offline-motion-catalog")
+
+    with tempfile.TemporaryDirectory(prefix="automation-tool-bm14-absent-") as temporary:
+        release_root = Path(temporary) / "release" / "1.0.0"
+        staging = Path(temporary) / "staging"
+
+        staged = build.stage_for_release(staging=staging, release_root=release_root)
+
+        assert (staged / "manifest.json").is_file(), "staged catalog has no manifest"
+        check.verify_release(
+            release_root,
+            load_json(RELEASE_LOCK),
+            load_json(DEP_LOCK),
+            load_json(CATALOG),
+            load_json(OVERLAY),
+        )
+        _make_writable(release_root)
+
+
+def test_stage_for_release_rebuilds_a_stale_release_tree() -> None:
+    """A tree built against superseded inputs is rebuilt, not refused.
+
+    Measured 2026-08-04: the tree on this machine had been built on 08-01 with
+    an older `motion-asset-overlay.v1.json`, so a release build died at
+    "release manifest input pins drifted from the lock" — while the repository
+    itself was self-consistent. Absence was never the interesting case; being
+    present and out of date is.
+    """
+    build = load_module(BUILD)
+    require("offline-motion-catalog")
+    lock = load_json(RELEASE_LOCK)
+
+    with tempfile.TemporaryDirectory(prefix="automation-tool-bm14-stale-") as temporary:
+        release_root = Path(temporary) / "release" / "1.0.0"
+        staging = Path(temporary) / "staging"
+        build.build_release(
+            lock,
+            load_json(DEP_LOCK),
+            load_json(CATALOG),
+            load_json(RIGHTS),
+            load_json(OVERLAY),
+            STAGED_ROOT,
+            release_root,
+        )
+        manifest_path = release_root / "manifest.json"
+        manifest_path.chmod(0o644)
+        stale = json.loads(manifest_path.read_text(encoding="utf-8"))
+        stale["inputs"]["motionAssetOverlay"]["sha256"] = "0" * 64
+        manifest_path.write_text(
+            json.dumps(stale, ensure_ascii=False), encoding="utf-8"
+        )
+
+        staged = build.stage_for_release(staging=staging, release_root=release_root)
+
+        rebuilt = json.loads((staged / "manifest.json").read_text(encoding="utf-8"))
+        assert rebuilt["inputs"] == lock["inputs"], (
+            "a stale tree must be rebuilt against the current locked inputs"
+        )
+        _make_writable(release_root)
+
+
 def main() -> None:
     test_release_lock_contract()
     test_runtime_data_is_inlined_only_in_the_release_tree()
@@ -731,8 +809,10 @@ def main() -> None:
     test_release_gate_tamper_matrix()
     test_windows_unicode_and_read_only_path_semantics()
     test_real_release_build_is_reproducible()
+    test_stage_for_release_builds_a_missing_release_tree()
+    test_stage_for_release_rebuilds_a_stale_release_tree()
     print("motion catalog release tests passed")
-    print("executed checks: 8")
+    print("executed checks: 10")
 
 
 if __name__ == "__main__":
