@@ -59,6 +59,11 @@ WORKER_CONTRACT_PATH = (
 # to the user and unusable as a default.
 BUNDLE_TARGET = "material-video-worker"
 PACKAGED_FONT_DIRECTORY = "upstream/resource/fonts"
+# The locked bytes themselves, committed. They are immutable, small enough to
+# carry, and not compiled per machine, so re-downloading them on every clean
+# checkout bought nothing and made the build depend on hosts some machines
+# cannot reach.
+COMMITTED_FONT_DIRECTORY = REPOSITORY_ROOT / "assets/subtitle-fonts"
 LISTABLE_FONT_SUFFIXES = (".ttf", ".ttc")
 
 # Name of the cached artifact under `video_runtime_cache.cache_root()`, beside
@@ -616,14 +621,31 @@ def ensure_subtitle_fonts(
         except Exception as error:
             raise SubtitleFontUnavailable(f"cannot fetch {url}: {error}") from error
 
+    def acquire(packaged_name: str, url: str) -> bytes:
+        """Prefer the committed copy; the network is the fallback, not the source.
+
+        Verification is unchanged either way — the caller digests whatever this
+        returns against the pinning contract, so a committed file that drifted
+        is rejected exactly like a corrupted download. Reading the repository
+        first is what lets a machine that cannot reach the upstream host build
+        at all: the Windows box fails the TLS handshake to `fonts.gstatic.com`,
+        and used to depend on somebody copying a built tree across by hand.
+        """
+        committed = COMMITTED_FONT_DIRECTORY / packaged_name
+        if committed.is_file():
+            return committed.read_bytes()
+        return obtain(url)
+
     def build(destination: Path) -> None:
         destination.mkdir(parents=True, exist_ok=False)
         for font in resolved_fonts:
-            payload = obtain(font.source_url)
+            payload = acquire(font.packaged_name, font.source_url)
             verify_font_payload(font, payload)
             (destination / font.packaged_name).write_bytes(payload)
         for resolved_notice in resolved_notices:
-            payload = obtain(resolved_notice.source_url)
+            payload = acquire(
+                resolved_notice.packaged_name, resolved_notice.source_url
+            )
             verify_license_payload(resolved_notice, payload)
             (destination / resolved_notice.packaged_name).write_bytes(payload)
 

@@ -19,7 +19,7 @@
     "gsap.com"
   ],
   "layout": {
-    "downloadRoot": ".local/offline-motion-deps/downloads",
+    "downloadRoot": "assets/offline-motion-deps",
     "catalogRoot": ".local/offline-motion-deps/catalog",
     "dependencyRoot": "offline-deps",
     "itemRoot": "items"

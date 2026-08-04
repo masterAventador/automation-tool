@@ -10,7 +10,7 @@
   "inputs": {
     "offlineDependenciesLock": {
       "path": "contracts/video/offline-motion-dependencies.v1.json",
-      "sha256": "73ef3e9426d823d52877e380b81817a44fa87fd56d348a65ba745f69a965b502"
+      "sha256": "801ab7e8b08671b959642b044d2461a9839b693b42b976f959d0643b67d3b961"
     },
     "motionCatalog": {
       "path": "contracts/quality/motion-catalog.v1.json",
