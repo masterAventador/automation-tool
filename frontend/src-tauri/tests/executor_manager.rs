@@ -1058,3 +1058,104 @@ fn real_packaged_executor_uses_the_public_manager_lifecycle() {
         ExecutorManagerState::Stopped,
     );
 }
+
+/// PB-07 的三个发布方法各自把命令送到真实执行器进程，并按结果结算浏览器租约。
+///
+/// 这个 fixture 与 `PLATFORM_COMMAND_FIXTURE` 的区别在于它认得三种发布命令，
+/// 并对每种回不同的状态——PB-07 的租约语义正是按状态分流的：
+/// 预检成功要**留住**浏览器（操作者还要在那个页面上确认），
+/// 派发与释放无论结果如何都要**交还**。
+const PUBLISH_COMMAND_FIXTURE: &str = r#"#!/usr/bin/env python3
+import base64, hashlib, hmac, json, signal, sys
+bootstrap = json.loads(sys.stdin.readline())
+key = bytes.fromhex(bootstrap["local_session_token"])
+def encoded(domain, parts):
+    message = domain + b"\0".join(part.encode() for part in parts)
+    return "atlcp1." + base64.urlsafe_b64encode(hmac.digest(key, message, hashlib.sha256)).rstrip(b"=").decode()
+def lifecycle(event):
+    message = b"automation-tool.local-executor-event.v1\0" + event.encode() + b"\0" + b"1.0"
+    proof = "atlep1." + base64.urlsafe_b64encode(hmac.digest(key, message, hashlib.sha256)).rstrip(b"=").decode()
+    print(json.dumps({"authenticationProof": proof, "event": event, "protocolVersion": "1.0"}, separators=(",", ":")), flush=True)
+signal.signal(signal.SIGTERM, lambda _signum, _frame: None)
+lifecycle("executor.healthy")
+for line in sys.stdin:
+    command = json.loads(line)
+    kind = command["commandType"]
+    if kind == "douyin.publish.preflight":
+        parts = [command["commandId"], kind, command["executablePath"], command["profileDirectory"],
+                 "1" if command["headless"] else "0", command["publishJobId"], command["artifactPath"],
+                 command["title"], command["description"], command["protocolVersion"]]
+        domain = b"automation-tool.local-executor-publish-command.v1\0"
+        state = "publish_pre_submit_ready"
+        flow = "douyin.publish-preflight.v1"
+    elif kind == "douyin.publish.dispatch":
+        parts = [command["commandId"], kind, command["publishJobId"], command["confirmationId"], command["protocolVersion"]]
+        domain = b"automation-tool.local-executor-publish-dispatch.v1\0"
+        state = "publish_verified"
+        flow = "douyin.publish-release.v1"
+    else:
+        parts = [command["commandId"], kind, command["executablePath"], command["profileDirectory"],
+                 "1" if command["headless"] else "0", command["protocolVersion"]]
+        domain = b"automation-tool.local-executor-command.v1\0"
+        state = "publish_released"
+        flow = "douyin.publish-preflight.v1"
+    assert hmac.compare_digest(command["authenticationProof"], encoded(domain, parts)), kind
+    result = {"authenticationProof": encoded(b"automation-tool.local-executor-result.v1\0", [command["commandId"], state, "1.0"]),
+              "commandId": command["commandId"], "event": "platform.command.completed",
+              "flowVersion": flow, "platform": "douyin",
+              "protocolVersion": "1.0", "state": state}
+    print(json.dumps(result, separators=(",", ":"), sort_keys=True), flush=True)
+lifecycle("executor.stopped")
+"#;
+
+#[test]
+fn the_three_publish_commands_reach_a_real_executor_and_come_back_authenticated() {
+    // PB-07 的「真实边界」第 1 条写着这三个方法的管道「至今没有验证过」，
+    // 因为桌面验收在未登录状态下走不到那里。管道本身不需要真实账号：
+    // 需要的是一个真跑起来的执行器进程，而这个文件已经有起进程的设施。
+    //
+    // fixture 逐条重算三种命令各自的签名域与参数顺序，对不上就 assert 失败——
+    // 也就是说这条测试同时钉住了帧的构造，而不只是「有个回包」。
+    let package = TemporaryPackage::new(PUBLISH_COMMAND_FIXTURE);
+    let manager = manager(&package);
+    manager
+        .start(launch(package.root.join("executor-state")))
+        .expect("start publish command fixture");
+
+    let publish_job_id = "3f155810-eb7c-42d5-8f15-9ab345036f1e";
+    let confirmation_id = "9c1e4f4f-1077-4f4a-a51c-da7c14edb07b";
+    let artifact = package.root.join("finished.mp4");
+    fs::write(&artifact, b"finished video bytes").expect("write artifact");
+
+    let preflight = manager
+        .execute_publish_command(
+            publish_job_id.to_string(),
+            package.root.join("automation-tool-executor"),
+            package.root.clone(),
+            true,
+            artifact,
+            "标题".to_string(),
+            "简介".to_string(),
+        )
+        .expect("preflight publish command");
+    let dispatched = manager
+        .execute_publish_dispatch_command(
+            publish_job_id.to_string(),
+            confirmation_id.to_string(),
+        )
+        .expect("dispatch publish command");
+    let released = manager
+        .execute_platform_command(
+            LocalPlatformCommand::ReleaseDouyinPublishSurface,
+            package.root.join("automation-tool-executor"),
+            package.root.clone(),
+            true,
+        )
+        .expect("release publish surface");
+
+    assert_eq!(preflight.state(), "publish_pre_submit_ready");
+    assert_eq!(dispatched.state(), "publish_verified");
+    assert_eq!(released.state(), "publish_released");
+
+    manager.stop().expect("stop publish command fixture");
+}
