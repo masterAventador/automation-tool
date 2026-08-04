@@ -45,7 +45,7 @@ DEFAULT_EVIDENCE_ROOT = REPOSITORY_ROOT / "docs/development"
 DEFAULT_LEGACY_ROADMAP = REPOSITORY_ROOT / "docs/development-roadmap.md"
 GROUP_COUNTS = {
     "AV": 4,
-    "EB": 17,
+    "EB": 18,
     "BU": 7,
     "VF": 7,
     "IM": 8,

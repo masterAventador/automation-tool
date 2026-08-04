@@ -544,5 +544,99 @@ class TheOutputDirectoryIsCreatedBeforeItIsUsed(unittest.TestCase):
             "anything creates it",
         )
 
+class WindowsReleaseTests(unittest.TestCase):
+    """EB-18. `--platform windows` must build, not refuse.
+
+    Until now the Windows release existed only inside
+    `scripts/run_eb_16_windows_acceptance.py`, and two further Windows
+    acceptance runners each carried their own `build_installer()`. Three copies
+    of the shipped path, none of them reachable as a command, and the one
+    command that *is* the shipped path refused the platform outright.
+
+    That is the exact shape the macOS half was created to end: when the
+    verified path and the shipped path are different code, they drift, and on
+    2026-07-26 the shipped one went out with three resources missing.
+    """
+
+    def test_the_windows_platform_has_a_release_builder(self) -> None:
+        self.assertTrue(
+            hasattr(build_release_package, "build_windows_release"),
+            "--platform windows has no builder, so main() can only refuse it",
+        )
+
+    def test_a_private_dependency_copy_does_not_depend_on_bin_cp(self) -> None:
+        """The snapshot's private copy must exist on the host doing the build.
+
+        `_clone_snapshot_dependency` shells out to `/bin/cp -c` for APFS
+        `clonefile`. There is no `/bin/cp` on Windows and no `cp` on PATH
+        (measured), so on the host that builds the Windows package this raises
+        `release source snapshot dependency could not be copied` before a
+        single byte is copied.
+
+        The property under test is not the technique but the outcome the
+        docstring already claims: the build gets its own copy, and writing to
+        it does not reach the operator's. A filesystem without clone support
+        is allowed to be slower; it is not allowed to be absent.
+        """
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "node_modules"
+            (source / "nested").mkdir(parents=True)
+            (source / "nested" / "marker.txt").write_text("原始", encoding="utf-8")
+            target = root / "snapshot-node_modules"
+
+            build_release_package._clone_snapshot_dependency(source, target)
+
+            copied = target / "nested" / "marker.txt"
+            self.assertEqual(copied.read_text(encoding="utf-8"), "原始")
+            copied.write_text("快照改过", encoding="utf-8")
+            self.assertEqual(
+                (source / "nested" / "marker.txt").read_text(encoding="utf-8"),
+                "原始",
+                "the snapshot copy is not independent of the operator's tree",
+            )
+
+    def test_the_snapshot_capability_reaches_a_child_on_this_host(self) -> None:
+        """The capability handoff must work on the host that builds the package.
+
+        Round 14 of the EB-11 review replaced two public environment variables
+        with a one-shot anonymous pipe precisely because the public pair let a
+        caller dress an ordinary writable checkout up as a materialized
+        snapshot. The pipe is handed over with `subprocess.run(pass_fds=...)`,
+        and `pass_fds` raises `AssertionError: pass_fds not supported on
+        Windows` (measured on this host).
+
+        So on Windows the release identity has no delivery mechanism at all —
+        not a weaker one, none. This asserts the round trip rather than the
+        mechanism: the parent hands a payload to exactly one child, and the
+        child reads back the same bytes.
+        """
+        self.assertTrue(
+            hasattr(build_release_package, "spawn_with_source_snapshot_capability"),
+            "the capability handoff is inlined and POSIX-only, so no Windows "
+            "release can carry a trustworthy source identity",
+        )
+        payload = b"automation-tool.release-source-snapshot.v1\x00probe\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            echoed = Path(temporary) / "echoed.bin"
+            reader = Path(temporary) / "reader.py"
+            reader.write_text(
+                "import os, pathlib, sys\n"
+                "sys.path.insert(0, %r)\n" % os.fspath(ROOT / "scripts")
+                + "import build_release_package as release\n"
+                "pathlib.Path(sys.argv[1]).write_bytes("
+                "release.read_source_snapshot_capability_bytes())\n",
+                encoding="utf-8",
+            )
+            returncode = build_release_package.spawn_with_source_snapshot_capability(
+                [sys.executable, os.fspath(reader), os.fspath(echoed)],
+                capability=payload,
+                environment=os.environ.copy(),
+                cwd=Path.cwd(),
+            )
+        self.assertEqual(returncode, 0)
+        self.assertEqual(echoed.read_bytes(), payload)
+
+
 if __name__ == "__main__":
     unittest.main()
