@@ -1104,15 +1104,22 @@ mod tests {
 
     impl TemporaryAppData {
         fn new() -> Self {
-            Self(std::env::temp_dir().join(format!(
-                "automation-tool-h8-03-reconciliation-{}-{}-{}",
-                std::process::id(),
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .expect("system time")
-                    .as_nanos(),
-                NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed),
-            )))
+            // 必须是解析过的真实路径：Profile 目录逐级用 `O_NOFOLLOW` 打开，而
+            // macOS 的 `$TMPDIR` 挂在 `/var` 这个符号链接下，未解析时 ELOOP。
+            Self(
+                std::env::temp_dir()
+                    .canonicalize()
+                    .unwrap_or_else(|_| std::env::temp_dir())
+                    .join(format!(
+                        "automation-tool-h8-03-reconciliation-{}-{}-{}",
+                        std::process::id(),
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .expect("system time")
+                            .as_nanos(),
+                        NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed),
+                    )),
+            )
         }
     }
 
@@ -1335,5 +1342,240 @@ mod tests {
             service.status().expect("manager status").state(),
             crate::executor_manager::ExecutorManagerState::Stopped
         );
+    }
+
+    /// PB-07 遗留项：租约的**拒绝**分支。
+    ///
+    /// `under_profile_lease` 的注释写着「第二个控制者要别的 Profile 时应被拒绝而
+    /// 不是被服务」，但此前没有任何测试走过那一条 `return`——已有覆盖全部落在
+    /// 「拿得到租约」的顺路径上。这条分支有两件事必须同时成立，缺一件就等于
+    /// 把一次发布打进别人的页面：
+    ///
+    /// 1. 换一个 Profile 的请求被拒；
+    /// 2. **这次拒绝不能碰已持有的那份租约**——`return` 走在释放逻辑之前正是为此，
+    ///    而这一点用「返回了错误」是断言不出来的，必须去看租约还在不在、还能不能用。
+    ///
+    /// 测试用真实执行器进程：租约只有在命令**成功**且状态要求留住浏览器时才会
+    /// 存活，任何替身在这里都等于自己编造前提。
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_second_controller_asking_for_another_profile_is_refused_without_touching_the_held_lease() {
+        use super::{ExecutorPlatformErrorCode, LocalPlatformCommand};
+        use crate::browser_profiles::BrowserProfileStore;
+        use crate::executor_manager::ExecutorLaunchConfiguration;
+
+        let app_data = TemporaryAppData::new();
+        write_publish_fixture_package(&app_data.0.join("local-executor/package"));
+        let service = ExecutorPlatformService::initialize(&app_data.0).expect("initialize service");
+        service
+            .manager
+            .start(
+                ExecutorLaunchConfiguration::new(
+                    "ws://127.0.0.1:8765/api/v1/executors/connect".to_owned(),
+                    "atds1.private-control-plane-session".to_owned(),
+                    "123e4567-e89b-42d3-a456-426614174003".to_owned(),
+                    "123e4567-e89b-42d3-a456-426614174004".to_owned(),
+                    app_data.0.join("local-executor/state"),
+                    1,
+                )
+                .expect("launch configuration"),
+            )
+            .expect("start publish fixture executor");
+
+        let profiles = BrowserProfileStore::initialize(&app_data.0).expect("profile store");
+        let held = profiles.create_douyin_profile().expect("first profile");
+        let other = profiles.create_douyin_profile().expect("second profile");
+        let held_id = held.profile_id().to_owned();
+        let held_directory = held.directory().to_path_buf();
+        assert_ne!(held_id, other.profile_id(), "两个 Profile 必须真的不同");
+
+        let entrypoint = app_data
+            .0
+            .join("local-executor/package/automation-tool-executor");
+        let artifact = app_data.0.join("finished.mp4");
+        std::fs::write(&artifact, b"finished video bytes").expect("write artifact");
+        let publish_job_id = "3f155810-eb7c-42d5-8f15-9ab345036f1e";
+
+        // 第一个控制者把浏览器停在填好的发布页上，租约按 PB-07 的语义留住。
+        let ready = service
+            .execute_publish_command(
+                publish_job_id.to_owned(),
+                entrypoint.clone(),
+                held,
+                true,
+                artifact.clone(),
+                "标题".to_owned(),
+                "简介".to_owned(),
+            )
+            .expect("preflight keeps the operations browser");
+        assert_eq!(ready.state(), "publish_pre_submit_ready");
+
+        // 第二个控制者要另一个 Profile：拒绝。
+        let refused = service
+            .execute_platform_command(
+                LocalPlatformCommand::OpenDouyinLogin,
+                entrypoint.clone(),
+                other,
+                true,
+            )
+            .expect_err("a different profile must be refused while one is leased");
+        assert_eq!(
+            refused.code(),
+            ExecutorPlatformErrorCode::ConfigurationInvalid
+        );
+
+        // 拒绝之后租约必须原封不动地还在第一个控制者手上。
+        {
+            let lease = service
+                .platform_profile_lease
+                .lock()
+                .expect("read the lease after the refusal");
+            let still_held = lease
+                .as_ref()
+                .expect("被拒的请求把别人的租约释放掉了：那正是这个分支要防的事");
+            assert_eq!(still_held.profile_id(), held_id);
+            assert_eq!(still_held.directory(), held_directory);
+        }
+
+        // 同一个 Profile 回来要继续用，应当被服务而不是被拒——这是判据的另一半，
+        // 否则「一律拒绝」也能让上面三条断言通过。
+        let same_profile = profiles
+            .open_douyin_profile(&held_id)
+            .expect("reopen the leased profile");
+        let served = service
+            .execute_publish_command(
+                publish_job_id.to_owned(),
+                entrypoint,
+                same_profile,
+                true,
+                artifact,
+                "标题".to_owned(),
+                "简介".to_owned(),
+            )
+            .expect("the controller that holds the lease must still be served");
+        assert_eq!(served.state(), "publish_pre_submit_ready");
+
+        // 并且它仍然花得掉：拒绝没有让这条链路变成一把只能看的锁。
+        let dispatched = service
+            .execute_publish_dispatch_command(
+                publish_job_id.to_owned(),
+                "9c1e4f4f-1077-4f4a-a51c-da7c14edb07b".to_owned(),
+            )
+            .expect("dispatch the approval the lease was held for");
+        assert_eq!(dispatched.state(), "publish_verified");
+        assert!(
+            service
+                .platform_profile_lease
+                .lock()
+                .expect("read the settled lease")
+                .is_none(),
+            "派发花掉了这次批准，浏览器必须交还"
+        );
+
+        service.manager.stop().expect("stop publish fixture");
+    }
+
+    /// 认得发布预检与派发的执行器桩，由**开发签名者**签名——调试构建的
+    /// `executor_verifying_key` 只认这一把，所以包必须真的通过验证才能起进程。
+    #[cfg(target_os = "macos")]
+    const PUBLISH_LEASE_FIXTURE: &str = r#"#!/usr/bin/env python3
+import base64, hashlib, hmac, json, signal, sys
+bootstrap = json.loads(sys.stdin.readline())
+key = bytes.fromhex(bootstrap["local_session_token"])
+def encoded(domain, parts):
+    message = domain + b"\0".join(part.encode() for part in parts)
+    return "atlcp1." + base64.urlsafe_b64encode(hmac.digest(key, message, hashlib.sha256)).rstrip(b"=").decode()
+def lifecycle(event):
+    message = b"automation-tool.local-executor-event.v1\0" + event.encode() + b"\0" + b"1.0"
+    proof = "atlep1." + base64.urlsafe_b64encode(hmac.digest(key, message, hashlib.sha256)).rstrip(b"=").decode()
+    print(json.dumps({"authenticationProof": proof, "event": event, "protocolVersion": "1.0"}, separators=(",", ":")), flush=True)
+signal.signal(signal.SIGTERM, lambda _signum, _frame: None)
+lifecycle("executor.healthy")
+for line in sys.stdin:
+    command = json.loads(line)
+    kind = command["commandType"]
+    if kind == "douyin.publish.preflight":
+        parts = [command["commandId"], kind, command["executablePath"], command["profileDirectory"],
+                 "1" if command["headless"] else "0", command["publishJobId"], command["artifactPath"],
+                 command["title"], command["description"], command["protocolVersion"]]
+        domain = b"automation-tool.local-executor-publish-command.v1\0"
+        state = "publish_pre_submit_ready"
+        flow = "douyin.publish-preflight.v1"
+    elif kind == "douyin.publish.dispatch":
+        parts = [command["commandId"], kind, command["publishJobId"], command["confirmationId"], command["protocolVersion"]]
+        domain = b"automation-tool.local-executor-publish-dispatch.v1\0"
+        state = "publish_verified"
+        flow = "douyin.publish-release.v1"
+    else:
+        # 被拒的那条请求永远不该走到这里；真到了就让测试当场看见。
+        raise AssertionError(kind)
+    assert hmac.compare_digest(command["authenticationProof"], encoded(domain, parts)), kind
+    result = {"authenticationProof": encoded(b"automation-tool.local-executor-result.v1\0", [command["commandId"], state, "1.0"]),
+              "commandId": command["commandId"], "event": "platform.command.completed",
+              "flowVersion": flow, "platform": "douyin",
+              "protocolVersion": "1.0", "state": state}
+    print(json.dumps(result, separators=(",", ":"), sort_keys=True), flush=True)
+lifecycle("executor.stopped")
+"#;
+
+    #[cfg(target_os = "macos")]
+    fn write_publish_fixture_package(package_root: &std::path::Path) {
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        use base64::Engine as _;
+        use ed25519_dalek::{Signer, SigningKey};
+        use sha2::{Digest, Sha256};
+        use std::os::unix::fs::PermissionsExt;
+
+        // 开发夹具签名者：其公钥即 `DEVELOPMENT_EXECUTOR_VERIFYING_KEY`。
+        const DEVELOPMENT_SIGNER_SEED: [u8; 32] = [
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31,
+        ];
+        const ENTRYPOINT: &str = "automation-tool-executor";
+
+        std::fs::create_dir_all(package_root).expect("fixture package root");
+        let entrypoint = package_root.join(ENTRYPOINT);
+        std::fs::write(&entrypoint, PUBLISH_LEASE_FIXTURE).expect("fixture entrypoint");
+        std::fs::set_permissions(&entrypoint, std::fs::Permissions::from_mode(0o755))
+            .expect("executable fixture");
+
+        let contents = std::fs::read(&entrypoint).expect("fixture contents");
+        let file_hash = Sha256::digest(&contents);
+        let mut package_digest = Sha256::new();
+        package_digest.update(b"automation-tool.executor-package.v1\0");
+        package_digest.update((ENTRYPOINT.len() as u32).to_be_bytes());
+        package_digest.update(ENTRYPOINT.as_bytes());
+        package_digest.update((contents.len() as u64).to_be_bytes());
+        package_digest.update(file_hash);
+        let hex =
+            |bytes: &[u8]| -> String { bytes.iter().map(|byte| format!("{byte:02x}")).collect() };
+        let manifest = serde_json::json!({
+            "architecture": if cfg!(target_arch = "x86_64") { "x86_64" } else { "aarch64" },
+            "build_id": "pb-07-lease-refusal",
+            "entrypoint": ENTRYPOINT,
+            "executor_version": "0.1.0",
+            "files": [{
+                "path": ENTRYPOINT,
+                "sha256": hex(&file_hash),
+                "size": contents.len(),
+            }],
+            "manifest_version": "1",
+            "package_sha256": hex(&package_digest.finalize()),
+            "package_size": contents.len(),
+            "platform": "macos",
+        });
+        let mut manifest_bytes = serde_json::to_vec(&manifest).expect("manifest JSON");
+        manifest_bytes.push(b'\n');
+        let signature = SigningKey::from_bytes(&DEVELOPMENT_SIGNER_SEED).sign(&manifest_bytes);
+        std::fs::write(
+            package_root.join("executor-manifest.v1.json"),
+            &manifest_bytes,
+        )
+        .expect("manifest");
+        std::fs::write(
+            package_root.join("executor-manifest.v1.sig"),
+            format!("atems1.{}\n", URL_SAFE_NO_PAD.encode(signature.to_bytes())),
+        )
+        .expect("signature");
     }
 }

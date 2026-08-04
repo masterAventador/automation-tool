@@ -1139,10 +1139,7 @@ fn the_three_publish_commands_reach_a_real_executor_and_come_back_authenticated(
         )
         .expect("preflight publish command");
     let dispatched = manager
-        .execute_publish_dispatch_command(
-            publish_job_id.to_string(),
-            confirmation_id.to_string(),
-        )
+        .execute_publish_dispatch_command(publish_job_id.to_string(), confirmation_id.to_string())
         .expect("dispatch publish command");
     let released = manager
         .execute_platform_command(
