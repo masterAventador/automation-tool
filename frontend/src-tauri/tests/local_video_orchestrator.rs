@@ -2891,3 +2891,133 @@ fn a_commit_the_worker_refused_is_finished_by_the_app_so_the_next_smart_edit_can
         .stop(VideoWorkerKind::Python)
         .expect("stop smart-edit Worker");
 }
+
+/// 智能剪辑提交成功之后又失败时的**补偿**：把生成的旁白素材忘掉，并收掉
+/// `generated-materials/<job>` 这个耐久目录。
+///
+/// 它此前一次都没被走到过（投毒确认）。补偿这种代码的特点是：**只在别的地方已经
+/// 出错时才跑**，所以它自己坏掉不会有人看见——表现出来只是磁盘上慢慢多出一堆
+/// 没人认领的素材和目录。
+#[test]
+fn rolling_back_a_committed_smart_edit_forgets_materials_and_removes_the_durable_directory() {
+    let fixture = TemporaryWorker::new(&material_worker("success"));
+    let orchestrator = orchestrator();
+    orchestrator
+        .start(editing_launch(&fixture))
+        .expect("start material Worker");
+
+    let job_id = Uuid::parse_str("123e4567-e89b-42d3-a456-426614174140").unwrap();
+    let durable = fixture
+        .root
+        .join("local-executor/generated-materials")
+        .join(job_id.hyphenated().to_string());
+    fs::create_dir_all(&durable).expect("durable generated-materials directory");
+    fs::write(durable.join("narration-1.wav"), b"generated narration").expect("generated file");
+    let materials = [
+        Uuid::parse_str("623e4567-e89b-42d3-a456-426614174141").unwrap(),
+        Uuid::parse_str("623e4567-e89b-42d3-a456-426614174142").unwrap(),
+    ];
+
+    // 校验先于任何删除：不合法的入参一个字节都不许动。
+    for (job, ids) in [
+        (Uuid::from_bytes([0; 16]), materials.as_slice()),
+        (job_id, [Uuid::from_bytes([0; 16])].as_slice()),
+    ] {
+        assert_eq!(
+            orchestrator
+                .rollback_committed_smart_edit(job, ids)
+                .expect_err("non-v4 identifiers must be refused")
+                .code(),
+            VideoWorkerErrorCode::ConfigurationInvalid,
+        );
+    }
+    let too_many: Vec<Uuid> = (0..33).map(|_| materials[0]).collect();
+    assert_eq!(
+        orchestrator
+            .rollback_committed_smart_edit(job_id, &too_many)
+            .expect_err("a rollback may not be handed an unbounded list")
+            .code(),
+        VideoWorkerErrorCode::ConfigurationInvalid,
+    );
+    assert!(
+        durable.join("narration-1.wav").exists(),
+        "被拒的入参不该动到任何东西"
+    );
+
+    orchestrator
+        .rollback_committed_smart_edit(job_id, &materials)
+        .expect("compensate a committed smart edit");
+
+    assert!(!durable.exists(), "耐久目录必须被收掉");
+    orchestrator
+        .stop(VideoWorkerKind::Python)
+        .expect("stop material Worker");
+}
+
+/// 一个素材忘不掉，**其余的照样要忘、目录照样要收**，最后才报错。
+///
+/// 这条形状和 `shutdown_for_app_exit` 是同一类：把 `is_err()` 记下来接着做，
+/// 而不是 `?` 当场返回。差别只在真出错的那一次显现——而补偿代码本来就只在
+/// 出错时才跑，所以这里是常态而不是边角。
+#[test]
+fn a_material_that_cannot_be_forgotten_does_not_stop_the_rest_of_the_rollback() {
+    let stubborn = "623e4567-e89b-42d3-a456-426614174151";
+    let worker_source = material_worker("success").replace(
+        r#"    elif name == "worker.material.forget":
+        material_event("worker.material.forgotten", material_id, material_id)"#,
+        &format!(
+            r#"    elif name == "worker.material.forget":
+        if material_id == {stubborn:?}:
+            material_event(
+                "worker.material.forget_failed", material_id,
+                material_id + "\0unreadable", failureCode="unreadable",
+            )
+        else:
+            open(bootstrap["assetRoot"] + "/forgot-" + material_id, "w").close()
+            material_event("worker.material.forgotten", material_id, material_id)"#
+        ),
+    );
+    assert!(
+        worker_source.contains("forget_failed"),
+        "夹具没被改到：忘记素材仍然一律成功，这条测试就等于在测顺路径"
+    );
+    let fixture = TemporaryWorker::new(&worker_source);
+    let orchestrator = orchestrator();
+    orchestrator
+        .start(editing_launch(&fixture))
+        .expect("start material Worker");
+
+    let job_id = Uuid::parse_str("123e4567-e89b-42d3-a456-426614174150").unwrap();
+    let durable = fixture
+        .root
+        .join("local-executor/generated-materials")
+        .join(job_id.hyphenated().to_string());
+    fs::create_dir_all(&durable).expect("durable generated-materials directory");
+    fs::write(durable.join("narration-1.wav"), b"generated narration").expect("generated file");
+    // 忘不掉的那个排在**最前面**：用 `?` 的写法会在这里就返回。
+    let follower = "623e4567-e89b-42d3-a456-426614174152";
+    let materials = [
+        Uuid::parse_str(stubborn).unwrap(),
+        Uuid::parse_str(follower).unwrap(),
+    ];
+
+    assert_eq!(
+        orchestrator
+            .rollback_committed_smart_edit(job_id, &materials)
+            .expect_err("a material that could not be forgotten must be reported")
+            .code(),
+        VideoWorkerErrorCode::ProcessUnavailable,
+    );
+
+    assert!(
+        fixture.root.join(format!("forgot-{follower}")).exists(),
+        "第一个失败之后就不再处理其余素材了：剩下的会永远留在 Worker 那边"
+    );
+    assert!(
+        !durable.exists(),
+        "第一个失败之后就不收目录了：那份生成物会永远留在磁盘上"
+    );
+    orchestrator
+        .stop(VideoWorkerKind::Python)
+        .expect("stop material Worker");
+}

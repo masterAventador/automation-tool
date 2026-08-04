@@ -311,16 +311,29 @@ async fn fail_current_job(
         .get_editing_job(vault, job_id)
         .await
         .map_err(|_| runtime_unavailable())?;
-    match current.status() {
-        EditingJobStatus::Queued | EditingJobStatus::Running => {
-            mark_failed(client, vault, &current, code).await?;
-        }
-        EditingJobStatus::Failed => {}
-        EditingJobStatus::Cancelling
-        | EditingJobStatus::Succeeded
-        | EditingJobStatus::Cancelled => return Err(runtime_unavailable()),
+    if failure_reconciliation_required(current.status())? {
+        mark_failed(client, vault, &current, code).await?;
     }
     Ok(())
+}
+
+/// Whether a job in this status still has to be marked failed.
+///
+/// The same shape as `cancel_reconciliation_required` below, and for the same
+/// reason: the decision is a table, and a table is worth reading and testing on
+/// its own rather than inline in an async call chain. `Failed` answers `false`
+/// rather than erroring because settling an already-failed job is a retry, not
+/// a fault.
+fn failure_reconciliation_required(
+    status: EditingJobStatus,
+) -> Result<bool, LocalEditingRuntimeError> {
+    match status {
+        EditingJobStatus::Queued | EditingJobStatus::Running => Ok(true),
+        EditingJobStatus::Failed => Ok(false),
+        EditingJobStatus::Cancelling
+        | EditingJobStatus::Succeeded
+        | EditingJobStatus::Cancelled => Err(runtime_unavailable()),
+    }
 }
 
 fn cancel_reconciliation_required(
@@ -622,6 +635,164 @@ pub async fn fail_submitted_job<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn snapshot(
+        job_id: &str,
+        project_id: &str,
+        timeline_id: &str,
+        timeline_revision: u64,
+    ) -> EditingJobSnapshot {
+        serde_json::from_value(serde_json::json!({
+            "jobId": job_id,
+            "projectId": project_id,
+            "timelineId": timeline_id,
+            "timelineRevision": timeline_revision,
+            "status": "queued",
+            "failureCode": null,
+            "outputArtifactId": null,
+            "createdAt": "2026-08-04T00:00:00Z",
+            "updatedAt": "2026-08-04T00:00:00Z",
+        }))
+        .expect("editing job snapshot")
+    }
+
+    const JOB: &str = "123e4567-e89b-42d3-a456-426614174160";
+    const PROJECT: &str = "223e4567-e89b-42d3-a456-426614174161";
+    const TIMELINE: &str = "323e4567-e89b-42d3-a456-426614174162";
+
+    /// 失败收尾的决策表，和上面那条取消的决策表是对称的一对。
+    ///
+    /// 三种答案各有各的后果：`Ok(true)` 去标失败；`Ok(false)` 是**幂等**——已经
+    /// 失败过的任务再收一次不该报错，否则一次重试就会把正常路径变成错误路径；
+    /// `Err` 是拒绝——已成功或已取消的任务被要求标失败，说明调用方拿的是过期快照，
+    /// 这时候改状态会把用户已经看到的结果改掉。
+    #[test]
+    fn only_an_unfinished_job_is_marked_failed_and_a_failed_one_is_idempotent() {
+        for status in [EditingJobStatus::Queued, EditingJobStatus::Running] {
+            assert_eq!(failure_reconciliation_required(status), Ok(true));
+        }
+        assert_eq!(
+            failure_reconciliation_required(EditingJobStatus::Failed),
+            Ok(false),
+            "已经失败的任务再收一次必须是幂等的，不是错误"
+        );
+        for status in [
+            EditingJobStatus::Cancelling,
+            EditingJobStatus::Succeeded,
+            EditingJobStatus::Cancelled,
+        ] {
+            assert_eq!(
+                failure_reconciliation_required(status),
+                Err(runtime_unavailable()),
+                "{status:?} 已经有终态了，把它改成失败等于改掉用户看到的结果"
+            );
+        }
+    }
+
+    /// 本机失败码到 Control Plane 失败码的映射。
+    ///
+    /// 编译器保证这张表是**全的**（match 没有 `_` 分支），但保证不了它是**对的**：
+    /// 把「字体缺失」映到「渲染失败」照样编译通过，用户看到的就是一条查不下去的
+    /// 错误原因。所以这里逐条钉死，并额外断言映射是单射——两个本机码塌成同一个
+    /// 上报码，等于永久丢掉区分度。
+    #[test]
+    fn every_local_failure_code_keeps_its_own_meaning_upstream() {
+        let pairs = [
+            (
+                LocalEditingJobFailureCode::InvalidTimeline,
+                EditingJobFailureCode::InvalidTimeline,
+            ),
+            (
+                LocalEditingJobFailureCode::MaterialUnavailable,
+                EditingJobFailureCode::MaterialUnavailable,
+            ),
+            (
+                LocalEditingJobFailureCode::MaterialUnsupported,
+                EditingJobFailureCode::MaterialUnsupported,
+            ),
+            (
+                LocalEditingJobFailureCode::FontUnavailable,
+                EditingJobFailureCode::FontUnavailable,
+            ),
+            (
+                LocalEditingJobFailureCode::RenderFailed,
+                EditingJobFailureCode::RenderFailed,
+            ),
+            (
+                LocalEditingJobFailureCode::ResourceExhausted,
+                EditingJobFailureCode::ResourceExhausted,
+            ),
+            (
+                LocalEditingJobFailureCode::PermissionDenied,
+                EditingJobFailureCode::PermissionDenied,
+            ),
+            (
+                LocalEditingJobFailureCode::WorkerLost,
+                EditingJobFailureCode::WorkerLost,
+            ),
+        ];
+        for (local, upstream) in pairs {
+            assert_eq!(local_failure_code(local), upstream, "{local:?} 映错了");
+        }
+        for (index, (_, first)) in pairs.iter().enumerate() {
+            for (_, second) in pairs.iter().skip(index + 1) {
+                assert_ne!(first, second, "两个本机失败码塌成了同一个上报码");
+            }
+        }
+    }
+
+    /// 快照到 Worker 请求的转换，判据全在边界上。
+    ///
+    /// `timeline_revision` 在快照里是 `u64`，在 Worker 请求里是 `u32`，而请求本身
+    /// 只接受 `1..=i32::MAX`。三段不同的上界叠在一起，端点最容易漏。
+    #[test]
+    fn a_job_request_is_parsed_only_from_canonical_identifiers_and_a_usable_revision() {
+        let (job_id, request) =
+            parse_job_request(&snapshot(JOB, PROJECT, TIMELINE, 3)).expect("canonical job");
+        assert_eq!(job_id, Uuid::parse_str(JOB).unwrap());
+        assert_eq!(request.project_id(), Uuid::parse_str(PROJECT).unwrap());
+        assert_eq!(request.timeline_id(), Uuid::parse_str(TIMELINE).unwrap());
+        assert_eq!(request.timeline_revision(), 3);
+
+        // 两个端点都要在：只测被拒的一侧，把下界改成 2 也照样绿。
+        assert!(parse_job_request(&snapshot(JOB, PROJECT, TIMELINE, 1)).is_ok());
+        assert!(
+            parse_job_request(&snapshot(JOB, PROJECT, TIMELINE, i32::MAX as u64)).is_ok(),
+            "上界本身必须是可用的"
+        );
+        for revision in [
+            0,
+            i32::MAX as u64 + 1,
+            u32::MAX as u64 + 1,
+            u64::MAX,
+            // 这一个是**必须**的，别的都替代不了它：`u32::try_from` 换成 `as u32`
+            // 时上面那几个仍然会被拒（截断后落在 0 或 > i32::MAX，下游照样拦），
+            // 于是「上界还检查着吗」这个问题根本没人问。只有截断后落回**合法
+            // 区间**的值才问得出来——2^32 + 5 会变成 5，一个 revision 高得离谱的
+            // 任务会被当成第 5 版渲染，而且全程不报错。
+            u32::MAX as u64 + 6,
+        ] {
+            assert!(
+                parse_job_request(&snapshot(JOB, PROJECT, TIMELINE, revision)).is_err(),
+                "revision {revision} 应当被拒"
+            );
+        }
+
+        for (job, project, timeline) in [
+            ("not-a-uuid", PROJECT, TIMELINE),
+            (JOB, "not-a-uuid", TIMELINE),
+            (JOB, PROJECT, "not-a-uuid"),
+            // 非 v4：版本位不是 4，Worker 请求明确拒绝。
+            (JOB, "223e4567-e89b-12d3-a456-426614174161", TIMELINE),
+            // 项目与时间轴不能是同一个标识。
+            (JOB, PROJECT, PROJECT),
+        ] {
+            assert!(
+                parse_job_request(&snapshot(job, project, timeline, 3)).is_err(),
+                "({job}, {project}, {timeline}) 应当被拒",
+            );
+        }
+    }
 
     #[test]
     fn a_worker_cancel_only_confirms_a_control_plane_cancellation() {

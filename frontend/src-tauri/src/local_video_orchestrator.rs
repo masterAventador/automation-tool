@@ -2364,7 +2364,12 @@ impl LocalVideoOrchestrator {
             .is_some_and(|actual| actual.same_secret_configuration(expected)))
     }
 
-    pub(crate) fn rollback_committed_smart_edit(
+    /// Undo a smart edit that committed and then failed further downstream.
+    ///
+    /// `pub` like the five other smart-edit lifecycle methods, all of which have
+    /// the same single caller module. It was the odd one out for no reason other
+    /// than never having been reached from a test.
+    pub fn rollback_committed_smart_edit(
         &self,
         job_id: Uuid,
         material_ids: &[Uuid],

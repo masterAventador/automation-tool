@@ -190,29 +190,113 @@ jobs 目录、绝对路径落在本次临时目录（`Path::join` 遇到绝对�
 ✅ 被抓住  不核对是哪个 job   → 「别的 job 不能收这一个」
 ```
 
-## 扫描出的其余高风险项（登记，未做）
+## 本轮第四条：`rollback_committed_smart_edit`（已补）
 
-| 函数 | 坏掉的后果 | 为什么这轮没做 |
-| --- | --- | --- |
-| `rollback_committed_smart_edit` | 智能剪辑补偿失效：生成的旁白素材与 `generated-materials/<job>` 目录双双泄漏 | 见下「为什么不是顺手就能补」 |
-| `dispatch_submitted_job` / `fail_submitted_job` | 剪辑任务派发与失败终态；后者坏掉意味着失败的任务**永远停在进行中** | 两者都吃 `tauri::AppHandle`。本 crate 没有开 `tauri` 的 `test` feature，全仓也没有任何 `mock_builder` / `mock_app` 用法——要补就得先加这项 dev 依赖并定下 App 夹具的做法 |
+### 先更正上一版这份文档里的一个错判
 
-### 为什么 `rollback_committed_smart_edit` 不是顺手就能补
+上一版写着「不能放宽成 `pub`，因为那四个同族方法是 Tauri Command 从 `lib.rs` 调的，
+而它只被 `smart_edit_runtime` 调」。**这条规则实测不成立。** 逐个查调用方：
 
-它是 `pub(crate)`，集成测试看不见；而 in-src 测试模块里没有 Worker 夹具——那套
-（签名的 Python Worker、`TemporaryWorker`、`editing_launch`）整个住在
-`tests/local_video_orchestrator.rs` 里。三条路都不是白拿的：
+```text
+commit_smart_edit_job          smart_edit_runtime.rs
+abort_smart_edit_job           smart_edit_runtime.rs
+emergency_stop_smart_edit_job  smart_edit_runtime.rs
+finish_smart_edit_job          smart_edit_runtime.rs
+start_smart_edit_job           smart_edit_runtime.rs
+rollback_committed_smart_edit  smart_edit_runtime.rs
+```
 
-1. **放宽成 `pub`**：它的四个同族方法（`commit` / `abort` / `emergency_stop` /
-   `finish`）确实都是 `pub`。但看清楚区别——那四个是 Tauri Command 从 `lib.rs` 调的，
-   而它只被 `smart_edit_runtime` 调，跟同样是 `pub(crate)` 的 `smart_edit_job_owner`、
-   `worker_uses_script_model`、`local_editing_job_owner` 同一类。**按调用方划分是对的，
-   为了测试把它挪到另一类不对。**
-2. **把夹具抄进 in-src**：约 250 行，从此两份要跟着协议一起改。
-3. **下沉成共享夹具**：`#[cfg(test)]` 的模块集成测试看不见，要让两边都用就得开
-   feature——那正好撞上「单一构建路径」不许用 feature 改变产品行为的那条。
+**六个方法调用方完全一样，`lib.rs` 一个都没调**，五个是 `pub`、一个是 `pub(crate)`。
+所以那个 `pub(crate)` 不是按调用方划分的设计，就是漏了——它是这一族里唯一一个从没被
+测试走到的，可见性也是这一族里唯一一个不同的，两件事同源。
 
-所以这不是「还没排上」，是**一个需要先定的设计选择**。挑哪条路都要单开一个任务。
+这个错判是怎么来的：我按「`pub` 的多半给 Command 用」这个印象推了一条规则，没有去
+数调用方。**规则要么有据可查，要么就别当成理由写进文档。**
+
+改成 `pub` 之后 RED 是编译错误（集成测试看不见私有方法），改完 GREEN。
+
+### 补了什么
+
+`frontend/src-tauri/tests/local_video_orchestrator.rs` 两条，用现成的
+`material_worker` / `editing_launch` 夹具：
+
+| 测试 | 断言 |
+| --- | --- |
+| `rolling_back_a_committed_smart_edit_forgets_materials_and_removes_the_durable_directory` | 非 v4 标识、超过 32 个素材一律拒，且**被拒时一个字节都不动**；顺路径清掉耐久目录 |
+| `a_material_that_cannot_be_forgotten_does_not_stop_the_rest_of_the_rollback` | 第一个素材忘不掉时，**其余素材照样忘、目录照样收**，最后才报 `ProcessUnavailable` |
+
+补偿代码有个共同特点：**它只在别的地方已经出错时才跑**，所以它自己坏掉没人看得见——
+表现出来只是磁盘上慢慢多出一堆没人认领的素材和目录。
+
+三条变异各自被抓住：
+
+```text
+✅ 被抓住  循环里改用 ?，第一个失败就返回  → 只有第二条红（顺路径照常绿，又是那个盲区）
+✅ 被抓住  不收耐久目录                    → 两条都红
+✅ 被抓住  去掉素材标识与长度校验          → 第一条红
+```
+
+## 本轮第五条：`local_editing_runtime` 的纯决策（已补）
+
+### 先纠正一个观察错误
+
+扫描时我按 `tests/` 目录грep，得出「这个模块 20 个函数零测试引用」。**不对**：文件末尾
+有 in-src 测试模块，`cancel_reconciliation_required` 已被完整覆盖。差点因此写了重复用例。
+
+而这个事实恰好指出正确做法：**取消那条决策已经被抽成纯谓词并测过，失败那条还内联在
+`fail_current_job` 里**。补齐对称是这个文件自己立的规矩，不是为测试改结构。
+
+### `dispatch_submitted_job` / `fail_submitted_job` 不补单测，理由
+
+它们是活 Control Plane 之上的**组合根**：从 App 取六份状态，再跑一整条异步流程。
+而它们**已经在真实 App 上被走过**——`frontend/e2e-tauri/video-editing.spec.ts` 与
+`smart-edit-package.spec.ts` 点「提交剪辑任务」正是走 `lib.rs:3188 → dispatch_submitted_job`，
+LE-17 还落了真实 PostgreSQL 行并用 `ffprobe` 核了终态。
+
+给它们造 `mock_builder` + 假 Control Plane 的 harness，断言的大部分会是 harness 自己。
+**组合根的正确覆盖层次就是端到端**；单测该覆盖的是它里面那些一次 E2E 只会走到一条分支
+的决策表。
+
+### 补了什么
+
+| 测试 | 它防的事 |
+| --- | --- |
+| `only_an_unfinished_job_is_marked_failed_and_a_failed_one_is_idempotent` | `Failed → Ok(false)` 是**幂等**而不是错误——弄反了，一次重试就把正常路径变成错误路径；已成功/已取消要拒，否则会改掉用户已经看到的结果 |
+| `every_local_failure_code_keeps_its_own_meaning_upstream` | 八条映射逐条钉死 + **单射**。编译器保证这张表是全的（无 `_` 分支），保证不了它是对的：把「字体缺失」映成「渲染失败」照样编译过，用户看到的是一条查不下去的原因 |
+| `a_job_request_is_parsed_only_from_canonical_identifiers_and_a_usable_revision` | 三段不同上界叠在一起的边界（快照 `u64` → 请求 `u32` → 只收 `1..=i32::MAX`） |
+
+同时把 `fail_current_job` 里内联的状态判断抽成 `failure_reconciliation_required`，
+与同文件已有的 `cancel_reconciliation_required` 对称。行为不变，TDD 顺序是先写测试
+（RED 是编译错误：函数不存在）再抽。
+
+### 变异确认：第四条第一次跑活下来了，那才是重点
+
+```text
+✅ 被抓住  字体缺失映成渲染失败
+✅ 被抓住  已失败的任务再收一次改成报错
+✅ 被抓住  已成功的任务也允许标失败
+❌ 活下来  u32::try_from 换成 as u32     ← 第一次
+```
+
+**`as u32` 是截断，不是拒绝**，而我原来选的三个「过大」值截断之后恰好都还是非法的：
+`u32::MAX + 1` → 0，`u64::MAX` → `u32::MAX`（> `i32::MAX`），下游的
+`VideoWorkerLocalEditingJobRequest::new` 照样拦。于是「上界还检查着吗」这个问题**根本
+没被问出来**，三个用例全在问别的。
+
+补上 `u32::MAX as u64 + 6`：截断后是 5，一个**合法**的 revision。有了它，变异下
+`parse_job_request` 会**成功**返回 revision 5 —— 一个 revision 高得离谱的任务被当成
+第 5 版渲染，全程不报错。加上这一个之后 M4 立刻红。
+
+这正是 `memory/mutation-sets-miss-boundary-endpoints` 记的那条：**「全杀」属实，但集合
+不完整。** 选端点时要问的不是「这个值大不大」，而是「**这个值能让变异体给出与原实现
+不同的答案吗**」。
+
+## 扫描出的其余项（登记，未做）
+
+| 函数 | 现状 |
+| --- | --- |
+| `dispatch_submitted_job` / `fail_submitted_job` | 见上：覆盖层次在端到端，不补单测。若将来要补，前置是本 crate 开 `tauri` 的 `test` feature 并定下 App 夹具做法——全仓目前没有任何 `mock_builder` / `mock_app` 用法 |
+| `monitor` / `settle_worker_lost` / `find_project` / `load_materials` 等 | 同上，都是活 Control Plane 之上的异步组合 |
 
 ## 清理
 
@@ -231,9 +315,9 @@ jobs 目录、绝对路径落在本次临时目录（`Path::join` 遇到绝对�
 ## 验证
 
 ```text
-cargo test --lib                            164 passed
+cargo test --lib                            167 passed（原 161）
 cargo test --test video_job_workspace        17 passed（原 15）
-cargo test --test local_video_orchestrator   44 passed, 3 ignored（原 43）
+cargo test --test local_video_orchestrator   46 passed, 3 ignored（原 43）
 cargo clippy --lib --tests                  零告警
 cargo fmt -- --check                        干净
 ```
@@ -242,5 +326,10 @@ cargo fmt -- --check                        干净
 
 - `frontend/src-tauri/src/executor_platform.rs`（App 退出两条测试 + 共用夹具）
 - `frontend/src-tauri/tests/video_job_workspace.rs`（`remove_output` 两条测试）
-- `frontend/src-tauri/tests/local_video_orchestrator.rs`（`finish_smart_edit_job` 一条测试）
+- `frontend/src-tauri/tests/local_video_orchestrator.rs`（`finish_smart_edit_job` 一条、
+  `rollback_committed_smart_edit` 两条）
+- `frontend/src-tauri/src/local_video_orchestrator.rs`（`rollback_committed_smart_edit`
+  改 `pub`，与同族五个方法一致）
+- `frontend/src-tauri/src/local_editing_runtime.rs`（抽出
+  `failure_reconciliation_required` + 三条决策测试）
 - 本文件
