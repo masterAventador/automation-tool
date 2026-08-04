@@ -134,7 +134,7 @@ VIDEO_STUDIO_DRIVER_ENVIRONMENT_NAMES: Final = frozenset(
 )
 
 LOCKED_BROWSER_ARCHIVES: Final = {
-    "macos-arm64": archive_path(REPOSITORY_ROOT, MACOS_ARM64_ARCHIVE),
+    "macos-arm64": archive_path(MACOS_ARM64_ARCHIVE),
 }
 
 _reserved_control_plane_port: int | None = None

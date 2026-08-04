@@ -55,7 +55,7 @@ from release_assembly import (  # noqa: E402
 )
 
 STAGING_CONTRACT = ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
-DEFAULT_ARCHIVES = default_archives(ROOT)
+DEFAULT_ARCHIVES = default_archives()
 
 PROBE = r'''
 import asyncio

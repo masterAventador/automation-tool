@@ -21,16 +21,11 @@ from pathlib import Path
 
 from build_embedded_chromium_staging import build_staging, load_staging_contract
 from build_motion_video_worker_candidate import build_candidate
+from embedded_browser_archives import default_archives
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
-DEFAULT_ARCHIVES = {
-    "macos-arm64": (
-        ROOT.parent.parent
-        / ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm64.zip"
-    ),
-    "windows-x86_64": ROOT / ".local/eb-04-windows/chrome-win64.zip",
-}
+DEFAULT_ARCHIVES = default_archives()
 RENDER_JOB_PREFIX = "automation-tool-renderjob-"
 
 

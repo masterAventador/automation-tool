@@ -33,7 +33,7 @@ from build_embedded_chromium_staging import (  # noqa: E402
 from embedded_browser_archives import default_archives  # noqa: E402
 
 STAGING_CONTRACT = ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
-DEFAULT_ARCHIVES = default_archives(ROOT)
+DEFAULT_ARCHIVES = default_archives()
 MANIFEST_ARGS = ["--manifest-path", "frontend/src-tauri/Cargo.toml"]
 
 

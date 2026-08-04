@@ -29,12 +29,13 @@ from build_embedded_chromium_staging import (  # noqa: E402
     load_staging_contract,
     sha256_file,
 )
+from embedded_browser_archives import (  # noqa: E402
+    MACOS_ARM64_ARCHIVE,
+    archive_path,
+)
 
 CONTRACT_PATH = ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
-DEFAULT_ARCHIVE = (
-    ROOT.parent.parent
-    / ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm64.zip"
-)
+DEFAULT_ARCHIVE = archive_path(MACOS_ARM64_ARCHIVE)
 
 
 def fail(message: str) -> None:

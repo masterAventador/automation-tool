@@ -456,7 +456,7 @@ def main() -> int:
         raise AcceptanceFailed("LE-23 Windows package acceptance requires x86_64")
     arguments = parse_arguments()
     api_key = read_model_key(arguments.secret.resolve())
-    archive = arguments.archive or archive_path(REPOSITORY_ROOT, WINDOWS_X86_64_ARCHIVE)
+    archive = arguments.archive or archive_path(WINDOWS_X86_64_ARCHIVE)
     work_directory: Path = arguments.work_dir
     build_directory = work_directory / "build"
     cargo_target = work_directory / "cargo-target"

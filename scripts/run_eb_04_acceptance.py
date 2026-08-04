@@ -25,9 +25,13 @@ from build_embedded_chromium_staging import (  # noqa: E402
     load_staging_contract,
     sha256_file,
 )
+from embedded_browser_archives import (  # noqa: E402
+    WINDOWS_X86_64_ARCHIVE,
+    archive_path,
+)
 
 CONTRACT_PATH = ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
-DEFAULT_ARCHIVE = ROOT / ".local/eb-04-windows/chrome-win64.zip"
+DEFAULT_ARCHIVE = archive_path(WINDOWS_X86_64_ARCHIVE)
 TARGET_ID = "windows-x86_64"
 _PE_X86_64_MACHINE = 0x8664
 

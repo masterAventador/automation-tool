@@ -538,7 +538,10 @@ def check_executor_spec_resource_discovery_ignores_destination_directories() -> 
 def check_locked_browser_archives_use_shared_archive_resolver() -> None:
     module_source = Path(prerequisites.__file__).read_text(encoding="utf-8")
     assert "archive_path(" in module_source, (
-        "locked browser archives must use the shared archive_path() worktree resolver"
+        "locked browser archives must use the shared archive_path() cache resolver"
+    )
+    assert ".local/embedded-browser-video-studio" not in module_source, (
+        "the archive location is the machine artifact cache, not a checkout path"
     )
 
 

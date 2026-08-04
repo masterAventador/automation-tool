@@ -15,7 +15,11 @@ test("EB-05 drives the distribution acceptance for the native target", async () 
     assert.match(acceptance, new RegExp(`"${target}"`, "u"));
   }
   assert.doesNotMatch(acceptance, /"macos-x86_64"/u);
-  assert.match(acceptance, /ROOT \/ "\.local\/eb-04-windows\/chrome-win64\.zip"/u);
+  // 归档改由机器级构建缓存持有，脚本不得再自带一份 checkout 内路径——
+  // 那正是 FIX-embedded-browser-archive-lookup.md 记的那类缺陷的来源。
+  assert.doesNotMatch(acceptance, /\.local\/eb-04-windows/u);
+  assert.match(acceptance, /from embedded_browser_archives import/u);
+  assert.match(acceptance, /default_archives\(\)/u);
   assert.match(acceptance, /target = contract\.targets\[target_id\]/u);
   assert.match(acceptance, /target_id=target_id/u);
   assert.match(

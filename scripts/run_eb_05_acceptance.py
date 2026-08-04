@@ -30,16 +30,10 @@ from build_embedded_chromium_staging import (  # noqa: E402
     load_staging_contract,
     sha256_file,
 )
+from embedded_browser_archives import default_archives  # noqa: E402
 
 STAGING_CONTRACT = ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
-DEFAULT_MACOS_ARM64_ARCHIVE = (
-    ROOT.parent.parent
-    / ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm64.zip"
-)
-DEFAULT_ARCHIVES = {
-    "macos-arm64": DEFAULT_MACOS_ARM64_ARCHIVE,
-    "windows-x86_64": ROOT / ".local/eb-04-windows/chrome-win64.zip",
-}
+DEFAULT_ARCHIVES = default_archives()
 
 
 def fail(message: str) -> None:

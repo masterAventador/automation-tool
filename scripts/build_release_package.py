@@ -59,6 +59,13 @@ from build_embedded_chromium_staging import (  # noqa: E402
     load_staging_contract,
     sha256_file,
 )
+from build_motion_catalog_release import (  # noqa: E402
+    stage_for_release as stage_motion_catalog,
+)
+from check_embedded_browser_package import (  # noqa: E402
+    audit_embedded_browser_package,
+    browser_resource_root,
+)
 from check_packaged_javascript_runtimes import (  # noqa: E402
     BROWSER_PROBE_EXPECTED,
     BROWSER_PROBE_EXPRESSION,
@@ -67,18 +74,15 @@ from check_packaged_javascript_runtimes import (  # noqa: E402
     probe_embedded_browsers,
     summarise_jit_grants,
 )
-from check_embedded_browser_package import (  # noqa: E402
-    audit_embedded_browser_package,
-    browser_resource_root,
-)
 from customer_demo_release import (  # noqa: E402
     CustomerDemoMaterial,
     customer_demo_material,
     describe_deployment,
     require_compiled_deployment,
 )
-from build_motion_catalog_release import (  # noqa: E402
-    stage_for_release as stage_motion_catalog,
+from embedded_browser_archives import (  # noqa: E402
+    MACOS_ARM64_ARCHIVE,
+    archive_path,
 )
 from prepare_video_runtime import prepare as prepare_video_runtime  # noqa: E402
 from production_assets import (  # noqa: E402
@@ -122,7 +126,6 @@ from run_p9_03_acceptance import (  # noqa: E402
 )
 
 STAGING_CONTRACT = REPOSITORY_ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
-_EB_03_CACHE = ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm64.zip"
 DEFAULT_WORK_DIRECTORY = REPOSITORY_ROOT / ".local/release"
 RELEASE_CONFIGURATION_NAME = "tauri.release.generated.json"
 EFFECTIVE_CONFIGURATION_NAME = "tauri.release.effective.json"
@@ -169,20 +172,10 @@ def require_source_stable_work_directory(path: Path) -> Path:
     raise ReleaseFailed("release work directory ignore policy is unavailable")
 
 
-def _first_existing(*candidates: Path) -> Path:
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    return candidates[0]
-
-
 DEFAULT_ARCHIVES = {
-    # The EB-03 archive cache lives in the primary checkout's .local; resolve
-    # it both from the primary checkout itself and from a wt/<task> worktree.
-    "macos-arm64": _first_existing(
-        REPOSITORY_ROOT / _EB_03_CACHE,
-        REPOSITORY_ROOT.parent.parent / _EB_03_CACHE,
-    ),
+    # One download per machine, shared by every checkout — so there is no
+    # primary-checkout / worktree distinction left to resolve.
+    "macos-arm64": archive_path(MACOS_ARM64_ARCHIVE),
 }
 
 

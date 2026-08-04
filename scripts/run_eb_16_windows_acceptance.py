@@ -539,9 +539,7 @@ def main() -> int:
     architecture = require_windows()
     require_non_elevated_process()
     arguments = parse_arguments()
-    archive = arguments.archive or archive_path(
-        REPOSITORY_ROOT, WINDOWS_X86_64_ARCHIVE
-    )
+    archive = arguments.archive or archive_path(WINDOWS_X86_64_ARCHIVE)
     work_directory: Path = arguments.work_dir
     build_directory = work_directory / "build"
     cargo_target = work_directory / "cargo-target"
