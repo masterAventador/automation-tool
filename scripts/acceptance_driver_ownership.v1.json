@@ -22,6 +22,7 @@
         "run_eb_01_acceptance.py",
         "run_eb_02_acceptance.py",
         "run_im_01_acceptance.py",
+        "run_le20_font_package_acceptance.py",
         "run_vf_01_acceptance.py",
         "run_vf_02_acceptance.py",
         "run_vf_03_acceptance.py",
@@ -59,6 +60,8 @@
         "run_bm_05_acceptance.py",
         "run_bu_06_acceptance.py",
         "run_cq_04_acceptance.py",
+        "run_le_13_acceptance.py",
+        "run_le_14_acceptance.py",
         "run_le_15_acceptance.py",
         "run_pc_14_acceptance.py",
         "run_pc_16_macos_package_acceptance.py",
@@ -85,7 +88,8 @@
         "run_eb_05_acceptance.py",
         "run_eb_06_acceptance.py",
         "run_eb_07_acceptance.py",
-        "run_pb_08_acceptance.py"
+        "run_pb_08_acceptance.py",
+        "run_pc_24_acceptance.py"
       ]
     },
     "manual_embedded_browser_macos": {
@@ -143,6 +147,7 @@
         "run_bm_15_acceptance.py",
         "run_cq_01_acceptance.py",
         "run_cq_02_acceptance.py",
+        "run_pb_07_navigation_acceptance.py",
         "run_vf_05_acceptance.py",
         "run_vf_07_acceptance.py"
       ]
