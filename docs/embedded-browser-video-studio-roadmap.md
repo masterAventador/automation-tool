@@ -80,9 +80,12 @@
 ### 2.5 独立视频剪辑模块
 
 - “视频剪辑”是独立产品模块和独立后端边界，不隶属于“智能素材成片”或“品牌动效成片”；两个制作方式只产出素材、镜头和初始 Timeline。
-- 领域层只认识 `EditingProject`、供应商无关 `Timeline`、`EditingJob`、`Artifact` 和 `VideoEditingProvider`，不出现阿里、腾讯等供应商 DTO。
-- 首期只实现阿里云 IMS/ICE 云剪辑；本地 FFmpeg 仍是受控媒体基础设施，不作为首期第二个用户可选云剪辑服务。
-- Provider registry、能力矩阵、Timeline 编译器、状态映射、回调/轮询对账和一致性契约必须先建好。以后接腾讯云或其他服务，只增加 Adapter 与映射，不修改上层业务、页面和项目数据。
+- 领域层只认识 `EditingProject`、供应商无关 `Timeline`、`EditingJob` 和 `Artifact`，不出现任何云服务商 DTO。
+- **首期改为随包 FFmpeg 本地剪辑（2026-07-28 起）。** 原「首期只实现阿里云 IMS/ICE 云剪辑」已由
+  `LE-01` 废弃删除——那条路线的凭据设置页与 Tauri 桥从未接到产品路径上（提交按钮固定抛错），
+  删除后由 `frontend/src/app/no-cloud-editing.test.ts` 守着不许回来。本模块的任务、依赖与状态
+  全部改由 `docs/local-video-editing-roadmap.md` 承接，设计见
+  `docs/superpowers/specs/2026-07-28-local-smart-edit-design.md`；本文件不再登记该模块的任务状态。
 - 左侧“视频剪辑”入口、剪辑项目、任务和成片记录与“视频制作”入口分开；生成完成后可把素材一键送入剪辑模块，但两个模块没有共享的供应商状态机。
 
 ### 2.6 名称与品牌边界
@@ -167,7 +170,7 @@ B 站采用“实现完成”和“真实凭据验收”分离的交付状态。
 
 ### 3.2 当前视频与剪辑链路
 
-App 左侧菜单目前既没有“视频制作”，也没有独立“视频剪辑”入口。既有规划已经预留 Material、Timeline、RenderJob、PublishJob 和 Artifact，以及云剪辑、本地 FFmpeg、成片管理和平台发布任务。新方案必须细化和复用这些对象；制作任务与剪辑任务分别建模，但共用 Material、Timeline 和 Artifact，不建立重复文件或发布状态。
+App 左侧菜单目前既没有“视频制作”，也没有独立“视频剪辑”入口。既有规划已经预留 Material、Timeline、RenderJob、PublishJob 和 Artifact，以及本地 FFmpeg 剪辑、成片管理和平台发布任务（云剪辑一路已由 LE-01 废弃，见 §2.5）。新方案必须细化和复用这些对象；制作任务与剪辑任务分别建模，但共用 Material、Timeline 和 Artifact，不建立重复文件或发布状态。
 
 ### 3.3 当前没有 Browser Use 生产链路
 
@@ -842,7 +845,7 @@ PB 系列会复用既有 CT-14～CT-22 的领域对象与安全语义，但实�
 - “品牌动效成片”提供官网当前公开的全部 12 套整体风格，并能推荐、预览、微调和冻结；
 - 网址转视频保持暂不实现：首期没有 URL 输入、网站抓取 Worker 或可达任务类型，BM-09～BM-10 只保留后续规划；
 - 锁定 registry 的全部 134 个动效零件都进入离线固定清单、原创/合规资产替换和双平台兼容性测试，用户能按中文分类使用，但不会被误导为 134 套整体风格；
-- 视频剪辑作为独立模块存在，首期阿里云剪辑通过正式 Provider 入口完成；假的第二 Provider 证明未来接腾讯云不需要改领域层和页面；
+- 视频剪辑作为独立模块存在，首期由随包 FFmpeg 本地剪辑通过正式入口完成；其完成定义与验收证据归 `docs/local-video-editing-roadmap.md`，不在本文件判定；
 - 首期发布只开放 B站 API 和抖音 Browser Use：抖音必须从正式 App 完成单次提交与结果对账；B站必须完成实现与确定性验证，有凭据时完成真实投稿，无凭据时保留清晰的 `待凭据验收` 且不阻塞其他工作；快手、小红书、微信视频号无可达入口并明确暂不实现；
 - SA-01～SA-07 的自愈式自动化仍为后续规划，没有用事件字段或普通审计冒充 skill 编译、回放、修复和版本路由已实现；
 - UI、任务、错误和导出中没有两个上游项目名，法务声明除外；
@@ -883,5 +886,3 @@ PB 系列会复用既有 CT-14～CT-22 的领域对象与安全语义，但实�
 - 百炼 GLM 模型：https://help.aliyun.com/zh/model-studio/glm
 - 百炼千问文本模型：https://help.aliyun.com/zh/model-studio/text-generation-model
 - 百炼视觉理解模型：https://help.aliyun.com/zh/model-studio/vision/
-- 阿里 IMS 云剪辑：https://help.aliyun.com/zh/ims/user-guide/cloud-clip
-- 阿里 IMS Timeline 配置：https://help.aliyun.com/zh/ims/developer-reference/timeline-configuration-description
