@@ -242,7 +242,7 @@ class SqlAlchemyTaskTargetResultRepository:
             )
         except (InvalidTaskTargetResult, TaskTargetResultUnavailable):
             raise
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise TaskTargetResultUnavailable from None
 
 

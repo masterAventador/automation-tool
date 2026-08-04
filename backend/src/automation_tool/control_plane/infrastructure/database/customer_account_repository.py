@@ -161,7 +161,7 @@ class SqlAlchemyCustomerAccountRepository:
                 )
         except IntegrityError:
             raise AccountAlreadyExists from None
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise AccountPersistenceUnavailable from None
         return _account_record(cast(RowMapping, values))
 
@@ -190,7 +190,7 @@ class SqlAlchemyCustomerAccountRepository:
                     .mappings()
                     .one_or_none()
                 )
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise AccountPersistenceUnavailable from None
         if row is None:
             return None
@@ -297,7 +297,7 @@ class SqlAlchemyCustomerAccountRepository:
                         )
                     )
                 return _account_record(updated_row)
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise AccountPersistenceUnavailable from None
 
     async def emergency_revoke(
@@ -445,7 +445,7 @@ class SqlAlchemyCustomerAccountRepository:
                     account=_account_record(updated_row),
                     revoked_device_count=len(device_ids),
                 )
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise AccountPersistenceUnavailable from None
 
 

@@ -60,7 +60,7 @@ class SqlAlchemyAccountDeviceRepository:
                     .mappings()
                     .all()
                 )
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise AccountDevicesUnavailable from None
         return tuple(_record(row) for row in rows)
 
@@ -147,7 +147,7 @@ class SqlAlchemyAccountDeviceRepository:
                     )
                 )
                 return _record(updated)
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise AccountDevicesUnavailable from None
 
 

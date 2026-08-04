@@ -157,7 +157,7 @@ class SqlAlchemyBilibiliArchivePublishStore:
             raise
         except IntegrityError:
             raise BilibiliArchivePublishRejected from None
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise BilibiliArchivePublishUnavailable from None
         except Exception:
             raise BilibiliArchivePublishUnavailable from None
@@ -496,7 +496,7 @@ class SqlAlchemyBilibiliReconciliationStore:
             raise
         except IntegrityError:
             raise BilibiliArchivePublishRejected from None
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise BilibiliArchivePublishUnavailable from None
         except Exception:
             raise BilibiliArchivePublishUnavailable from None

@@ -72,7 +72,7 @@ class SqlAlchemyPlatformSessionHealthRepository:
                     .one_or_none()
                 )
                 return None if row is None else _projection(row)
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise PlatformSessionHealthUnavailable from None
         except PlatformSessionHealthRejected:
             raise
@@ -213,7 +213,7 @@ class SqlAlchemyPlatformSessionHealthRepository:
             raise
         except IntegrityError:
             raise PlatformSessionHealthRejected from None
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise PlatformSessionHealthUnavailable from None
         except Exception:
             raise PlatformSessionHealthUnavailable from None
@@ -291,7 +291,7 @@ class SqlAlchemyPlatformSessionHealthRepository:
             raise
         except IntegrityError:
             raise PlatformSessionHealthRejected from None
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise PlatformSessionHealthUnavailable from None
         except Exception:
             raise PlatformSessionHealthUnavailable from None

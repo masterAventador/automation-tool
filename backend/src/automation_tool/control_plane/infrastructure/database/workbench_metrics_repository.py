@@ -80,7 +80,7 @@ class SqlAlchemyWorkbenchMetricsRepository:
         try:
             async with self._database.session() as session:
                 row = (await session.execute(statement)).mappings().one()
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise WorkbenchMetricsRepositoryRejected from None
         return WorkbenchMetricsSnapshot(
             task_total=cast(int, row["task_total"]),

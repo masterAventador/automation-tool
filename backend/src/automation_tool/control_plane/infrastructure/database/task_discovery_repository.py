@@ -323,7 +323,7 @@ class SqlAlchemyTaskDiscoveryRepository:
                 )
         except TaskDiscoveryRejected:
             raise
-        except (IntegrityError, SQLAlchemyError, ValueError):
+        except (IntegrityError, OSError, SQLAlchemyError, ValueError):
             raise TaskDiscoveryRejected from None
 
     async def authorize_batch(self, message: TaskDiscoveryBatchEnvelope) -> None:
@@ -520,7 +520,13 @@ class SqlAlchemyTaskDiscoveryRepository:
                 )
         except TaskDiscoveryRejected:
             raise
-        except (IntegrityError, SQLAlchemyError, TaskTargetPersistenceRejected, ValueError):
+        except (
+            IntegrityError,
+            OSError,
+            SQLAlchemyError,
+            TaskTargetPersistenceRejected,
+            ValueError,
+        ):
             raise TaskDiscoveryRejected from None
 
     @staticmethod

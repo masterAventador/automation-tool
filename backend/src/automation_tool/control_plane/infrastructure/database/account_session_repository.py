@@ -561,7 +561,7 @@ class SqlAlchemyAccountSessionRepository:
                         request_id=request_id,
                         source_fingerprint=source_fingerprint,
                     )
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise AccountSessionUnavailable from None
         if rejected or issued is None:
             raise AccountAuthenticationRejected
@@ -693,7 +693,7 @@ class SqlAlchemyAccountSessionRepository:
                         request_id=request_id,
                         source_fingerprint=source_fingerprint,
                     )
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise AccountSessionUnavailable from None
         if reuse or issued is None:
             raise AccountSessionRejected
@@ -729,7 +729,7 @@ class SqlAlchemyAccountSessionRepository:
                     reason_code="user_logout",
                     request_id=request_id,
                 )
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise AccountSessionUnavailable from None
 
     async def authenticate_access(
@@ -753,7 +753,7 @@ class SqlAlchemyAccountSessionRepository:
                     credential_version=cast(int, token["credential_version"]),
                     expires_at=cast(datetime, token["expires_at"]),
                 )
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise AccountSessionUnavailable from None
 
     async def change_password(
@@ -844,7 +844,7 @@ class SqlAlchemyAccountSessionRepository:
                             reason_code=reason_code,
                             request_id=request_id,
                         )
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise AccountSessionUnavailable from None
         if rejected:
             raise AccountAuthenticationRejected
@@ -903,7 +903,7 @@ class SqlAlchemyAccountSessionRepository:
                     expires_at=expires_at,
                     account=_projection(user),
                 )
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise AccountSessionUnavailable from None
 
     async def recover_password(
@@ -1002,7 +1002,7 @@ class SqlAlchemyAccountSessionRepository:
                         reason_code=reason_code,
                         request_id=request_id,
                     )
-        except SQLAlchemyError:
+        except (OSError, SQLAlchemyError):
             raise AccountSessionUnavailable from None
 
 
