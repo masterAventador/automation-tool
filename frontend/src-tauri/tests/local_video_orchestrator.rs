@@ -2781,3 +2781,113 @@ fn tauri_composition_root_owns_the_orchestrator_without_a_webview_command() {
     assert!(!source.contains("start_video_worker"));
     assert!(!source.contains("stop_video_worker"));
 }
+
+/// `finish_smart_edit_job` 此前在整个 Rust 套件里一次都没被走到过（投毒确认）。
+///
+/// 它管的是 Worker **认账地说提交失败**之后的收尾。那条路上没有人会替它做事：
+/// Worker 因为提交没成功而没有清理自己的私有 job 目录，而 App 这边
+/// `running.smart_edit_job` 还占着——`start_smart_edit_job` 见到
+/// `smart_edit_job.is_some()` 就直接拒。
+///
+/// 所以这个函数一坏，用户看到的是「这次剪辑失败了，而且**再也剪不了第二次**」，
+/// 同时私有暂存目录留在磁盘上。
+#[test]
+fn a_commit_the_worker_refused_is_finished_by_the_app_so_the_next_smart_edit_can_start() {
+    // 与顺路径夹具只差一处：提交时认账地回「提交失败」，并且**不**清理私有目录。
+    let worker_source = smart_edit_worker().replace(
+        r#"        shutil.rmtree(root)
+        smart_event("worker.smart_edit.succeeded", job_id, job_id + "\0" + prepared_digest, resultDigest=prepared_digest)"#,
+        r#"        smart_event("worker.smart_edit.failed", job_id, job_id + "\0commit_failed", failureCode="commit_failed")"#,
+    );
+    assert!(
+        !worker_source.contains("worker.smart_edit.succeeded"),
+        "夹具没被改到：顺路径的提交回包还在，这条测试就等于在测另一件事"
+    );
+    let fixture = TemporaryWorker::new(&worker_source);
+    let launch = editing_launch(&fixture).with_script_model(
+        VideoWorkerScriptModelConfiguration::bailian(
+            "qwen3.7-max-2026-06-08",
+            "sk-private-private-private-private",
+        )
+        .expect("redacted script model"),
+    );
+    let orchestrator = orchestrator();
+    orchestrator.start(launch).expect("start smart-edit Worker");
+    let job_id = Uuid::parse_str("123e4567-e89b-42d3-a456-426614174130").unwrap();
+    let request = VideoWorkerSmartEditRequest::new(
+        "把发布会开场剪成一条节奏明快的短片",
+        vec![smart_edit_material()],
+        false,
+    )
+    .expect("path-free smart-edit request");
+    orchestrator
+        .start_smart_edit_job(job_id, &request)
+        .expect("stage private request and dispatch");
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut prepared = false;
+    while !prepared {
+        match orchestrator
+            .try_smart_edit_event(job_id)
+            .expect("authenticated smart-edit event")
+        {
+            Some(VideoWorkerSmartEditEvent::Progress { .. }) => {}
+            Some(VideoWorkerSmartEditEvent::Prepared { .. }) => prepared = true,
+            Some(other) => panic!("unexpected smart-edit event: {other:?}"),
+            None => std::thread::sleep(Duration::from_millis(5)),
+        }
+        assert!(Instant::now() < deadline, "smart-edit prepare timed out");
+    }
+
+    let job_root = fixture
+        .root
+        .join("local-executor/smart-edit/jobs")
+        .join(job_id.hyphenated().to_string());
+    assert_eq!(
+        orchestrator
+            .commit_smart_edit_job(job_id)
+            .expect_err("the Worker refused this commit")
+            .code(),
+        VideoWorkerErrorCode::RenderRejected,
+    );
+    assert!(
+        job_root.exists(),
+        "前提没建立：Worker 本该把私有目录留在原地，收尾才有东西要做"
+    );
+
+    // 别的 job 标识收不了这一个——收尾也是有主的。
+    assert_eq!(
+        orchestrator
+            .finish_smart_edit_job(Uuid::parse_str("123e4567-e89b-42d3-a456-426614174131").unwrap())
+            .expect_err("a different job may not finish this one")
+            .code(),
+        VideoWorkerErrorCode::ConfigurationInvalid,
+    );
+    // 到这里第二次剪辑仍然是被拒的：位置还占着。
+    assert_eq!(
+        orchestrator
+            .start_smart_edit_job(
+                Uuid::parse_str("123e4567-e89b-42d3-a456-426614174132").unwrap(),
+                &request,
+            )
+            .expect_err("the refused job still owns the slot")
+            .code(),
+        VideoWorkerErrorCode::ConfigurationInvalid,
+    );
+
+    orchestrator
+        .finish_smart_edit_job(job_id)
+        .expect("the App finishes what the Worker refused");
+
+    assert!(!job_root.exists(), "私有暂存目录必须被收掉");
+    // 这才是用户拿得到的东西：能再剪一次。
+    orchestrator
+        .start_smart_edit_job(
+            Uuid::parse_str("123e4567-e89b-42d3-a456-426614174132").unwrap(),
+            &request,
+        )
+        .expect("the next smart edit must be able to start");
+    orchestrator
+        .stop(VideoWorkerKind::Python)
+        .expect("stop smart-edit Worker");
+}

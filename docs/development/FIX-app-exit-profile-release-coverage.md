@@ -163,12 +163,38 @@ jobs 目录、绝对路径落在本次临时目录（`Path::join` 遇到绝对�
 ✅ 被抓住  报告成功但什么都不删    → 「原件应当已被删除」
 ```
 
+## 本轮第三条：`finish_smart_edit_job`（已补）
+
+它管的是 Worker **认账地说提交失败**之后的收尾。那条路上没有别人会做事：
+
+- Worker 因为提交没成功，没有清理自己的私有 job 目录；
+- App 这边 `running.smart_edit_job` 还占着，而 `start_smart_edit_job` 见到
+  `smart_edit_job.is_some()` 直接拒。
+
+所以一坏，用户看到的是「这次剪辑失败了，而且**再也剪不了第二次**」，同时私有暂存
+目录留在磁盘上。这两件事都不会报错，只会表现成「智能剪辑坏了」。
+
+夹具由顺路径的 `smart_edit_worker()` 改一处得到：提交时回认证过的
+`worker.smart_edit.failed` + `commit_failed`，并且**不**清理私有目录（提交都没成功，
+它本来就不会清）。改完加一条 `assert!(!worker_source.contains("worker.smart_edit.succeeded"))`
+守着——替换字符串一旦对不上，测的就是另一件事了，而它照样会绿。
+
+断言按用户拿得到的东西排：提交被拒 → 私有目录还在（前提成立）→ 换个 job 标识收不了
+这一个 → 此时第二次剪辑仍被拒 → 收尾 → 目录没了 → **能再剪一次**。
+
+变异确认非空，三条各自红在不同断言：
+
+```text
+✅ 被抓住  清目录但不放位置   → 「能再剪一次」那条
+✅ 被抓住  放位置但不清目录   → 「私有暂存目录必须被收掉」
+✅ 被抓住  不核对是哪个 job   → 「别的 job 不能收这一个」
+```
+
 ## 扫描出的其余高风险项（登记，未做）
 
 | 函数 | 坏掉的后果 | 为什么这轮没做 |
 | --- | --- | --- |
 | `rollback_committed_smart_edit` | 智能剪辑补偿失效：生成的旁白素材与 `generated-materials/<job>` 目录双双泄漏 | `pub(crate)`，集成测试看不见；in-src 测试又要把 `tests/local_video_orchestrator.rs` 那套 Worker 夹具抄一份。需要先决定是放宽可见性（它的四个同族方法都是 `pub`）还是下沉夹具 |
-| `finish_smart_edit_job` | 提交被 Worker 拒绝后的私有 job 目录清理 | `pub`，可从集成测试走到，但要先把 `terminal` 状态造出来 |
 | `dispatch_submitted_job` / `fail_submitted_job` | 剪辑任务派发与失败终态；后者坏掉意味着失败的任务**永远停在进行中** | 两者都吃 `tauri::AppHandle`，要先有 App 夹具 |
 
 ## 清理
@@ -188,14 +214,16 @@ jobs 目录、绝对路径落在本次临时目录（`Path::join` 遇到绝对�
 ## 验证
 
 ```text
-cargo test --lib                      164 passed
-cargo test --test video_job_workspace  17 passed（原 15）
-cargo clippy --lib --tests            零告警
-cargo fmt -- --check                  干净
+cargo test --lib                            164 passed
+cargo test --test video_job_workspace        17 passed（原 15）
+cargo test --test local_video_orchestrator   44 passed, 3 ignored（原 43）
+cargo clippy --lib --tests                  零告警
+cargo fmt -- --check                        干净
 ```
 
 ## 文档
 
 - `frontend/src-tauri/src/executor_platform.rs`（App 退出两条测试 + 共用夹具）
 - `frontend/src-tauri/tests/video_job_workspace.rs`（`remove_output` 两条测试）
+- `frontend/src-tauri/tests/local_video_orchestrator.rs`（`finish_smart_edit_job` 一条测试）
 - 本文件
