@@ -90,6 +90,9 @@ def base_contract() -> dict:
     # tree does not have, so it has to be narrowed here too — otherwise every
     # case fails on a missing directory before it can exercise anything.
     contract["nativeScan"]["roots"] = []
+    # 合成树里没有 docs/，这一项由各自需要它的场景显式声明（见 documentationScan
+    # 三条场景）。留着真实契约的四份文档路径，每个场景都会挂在「文件不存在」上。
+    contract.pop("documentationScan", None)
     contract["staticScan"]["excludedGlobs"] = ["**/*.test.*", "**/*.spec.*"]
     contract["conceptDistinctions"] = [
         {
@@ -121,6 +124,7 @@ def materialize(
     embedded: str = EMBEDDED_WEBUI_OK,
     third_party_sources: dict | None = None,
     native_sources: dict[str, str] | None = None,
+    documentation: dict[str, str] | None = None,
 ) -> Path:
     third_party_sources = (
         THIRD_PARTY_SOURCES_OK if third_party_sources is None else third_party_sources
@@ -151,6 +155,10 @@ def materialize(
         path = directory / "backend/src" / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
+    for name, text in (documentation or {}).items():
+        path = directory / "docs" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
     contract_path = directory / "terminology.json"
     contract_path.write_text(json.dumps(contract, ensure_ascii=False), encoding="utf-8")
     return contract_path
@@ -179,12 +187,19 @@ def expect(
     embedded: str = EMBEDDED_WEBUI_OK,
     third_party_sources: dict | None = None,
     native_sources: dict[str, str] | None = None,
+    documentation: dict[str, str] | None = None,
 ) -> None:
     EXECUTED.append(name)
     with tempfile.TemporaryDirectory(prefix="automation-tool-cq01-test-") as temporary:
         directory = Path(temporary)
         contract_path = materialize(
-            directory, contract, sources, embedded, third_party_sources, native_sources
+            directory,
+            contract,
+            sources,
+            embedded,
+            third_party_sources,
+            native_sources,
+            documentation,
         )
         result = run_check(root=directory, contract=contract_path)
         if passes:
@@ -252,6 +267,41 @@ def main() -> int:
         {"Studio.tsx": STUDIO_OK},
         passes=False,
         third_party_sources={"schemaVersion": 1, "sources": []},
+    )
+
+    # 用户文档里写「点某某按钮」，那个按钮必须真的存在。2026-08-04 实测：四份文档里
+    # 52 条引号文案有 6 条在产品里根本没有——卸载说明第 1 步的菜单名和按钮名都不存在，
+    # 用户照着做第一步就卡住。这类错误不是数字抄错，抽查常量永远碰不到；而 docs/ 当时
+    # 不在任何扫描范围内，所以没有任何东西守着它。
+    documented = base_contract()
+    documented["documentationScan"] = {
+        "roots": ["docs/user-help.md"],
+        "searchRoots": ["frontend/src"],
+        "excludedGlobs": ["**/*.test.*"],
+        "systemUiLabels": ["应用程序"],
+    }
+    expect(
+        "documented control that exists in the product",
+        documented,
+        {"Studio.tsx": STUDIO_OK},
+        passes=True,
+        documentation={"user-help.md": "选好之后点「智能素材成片」就行。\n"},
+    )
+    expect(
+        "documented control the product does not have",
+        documented,
+        {"Studio.tsx": STUDIO_OK},
+        passes=False,
+        documentation={"user-help.md": "选好之后点「打开完整制作界面」就行。\n"},
+    )
+    # 系统界面词（访达的「应用程序」、活动监视器等）不是本产品的控件，按白名单放行；
+    # 白名单是逐条声明的，不是「找不到就放过」。
+    expect(
+        "system UI label on the declared allowlist",
+        documented,
+        {"Studio.tsx": STUDIO_OK},
+        passes=True,
+        documentation={"user-help.md": "把它拖进「应用程序」文件夹。\n"},
     )
 
     # 中文 docstring 是写给维护者的内部技术说明，不是用户文案。把它当文案扫，会逼人

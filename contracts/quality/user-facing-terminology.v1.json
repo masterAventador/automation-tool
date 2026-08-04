@@ -412,5 +412,33 @@
     "technical_terms_use_plain_language_mapping_or_immediate_explanation",
     "upstream_names_only_appear_on_separate_required_legal_page",
     "safe_task_export_and_artifact_names_use_product_terms_only"
-  ]
+  ],
+  "documentationScan": {
+    "roots": [
+      "docs/user-help.md",
+      "docs/privacy-notice.md",
+      "docs/troubleshooting.md",
+      "docs/uninstall-guide.md"
+    ],
+    "searchRoots": [
+      "frontend/index.html",
+      "frontend/src",
+      "frontend/src-tauri/tauri.conf.json",
+      "contracts"
+    ],
+    "excludedGlobs": [
+      "**/*.test.*",
+      "**/*.spec.*",
+      "**/fixtures/**",
+      "**/test-harness/**",
+      "contracts/quality/user-facing-terminology.v1.json"
+    ],
+    "systemUiLabels": [
+      "应用程序",
+      "活动监视器",
+      "已安装的应用"
+    ],
+    "systemUiLabelsReason": "这三个是 macOS 访达 / 活动监视器与 Windows 设置里的名字，不是本产品的控件，所以在本仓源码里必然找不到。逐条声明而不是「找不到就放过」——放过一切找不到的，等于这条规则不存在。",
+    "excludedGlobsReason": "测试与夹具里的字符串是任意造的数据，不是产品会显示的文案。2026-08-04 实测：文档写的「商务蓝」在 12 套风格里根本没有，但它出现在一个网关测试的假数据里——把测试算进搜索范围就会把这个编造的名字判成真的。本契约自身也排除，否则白名单里的词会自证。"
+  }
 }

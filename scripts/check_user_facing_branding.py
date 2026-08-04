@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Scan user-facing source surfaces for forbidden brands and unexplained terms.
 
-Five rules are enforced against ``contracts/quality/user-facing-terminology.v1.json``:
+Six rules are enforced against ``contracts/quality/user-facing-terminology.v1.json``:
 
 0. the brand surface of the embedded upstream WebUI stays exactly as pinned;
 1. upstream project names never reach a user-visible surface, and every
@@ -13,7 +13,11 @@ Five rules are enforced against ``contracts/quality/user-facing-terminology.v1.j
 3. the concept distinctions a normal user needs (two creation methods, the 12
    overall styles, the 134 motion parts, and the separate video editing module)
    stay in the shipped source, and every English motion part name ships with a
-   Chinese explanation beside it.
+   Chinese explanation beside it;
+4. every control the user documentation tells the reader to click exists in what
+   ships — the docs were the one deliverable no scan looked at, and on
+   2026-08-04 that cost six wrong control names, one of them in the uninstall
+   guide's first instruction.
 
 This is a regression gate only. The delivery evidence for user comprehension is
 ``scripts/run_cq_01_acceptance.py``, which drives the real production App.
@@ -28,6 +32,7 @@ import hashlib
 import json
 import re
 import unicodedata
+from collections.abc import Mapping
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -713,6 +718,97 @@ def scan_embedded_web_ui(root: Path, policy: dict[str, object]) -> list[str]:
 
 
 THIRD_PARTY_SOURCES_RELATIVE = "contracts/quality/third-party-sources.v1.json"
+DOCUMENTED_LABEL = re.compile(r"[「『]([^」』\n]{2,40})[」』]")
+
+
+def label_ships(label: str, haystack: str) -> bool:
+    """True when the label appears in shipped text as its own run of characters.
+
+    Plain substring containment is not enough. `平台状态` is contained in the
+    product's `打开平台状态` button, so a document that calls it a *menu* — which
+    the uninstall guide did — would pass while sending the reader looking for
+    something that is not there. Requiring the neighbours not to be Chinese
+    characters separates "the product has this label" from "some longer label
+    happens to contain these characters", and it still accepts a label quoted
+    inside a sentence, where the neighbours are 「」 or punctuation.
+    """
+    for match in re.finditer(re.escape(label), haystack):
+        before = haystack[match.start() - 1] if match.start() else ""
+        after = haystack[match.end()] if match.end() < len(haystack) else ""
+        if CHINESE.fullmatch(before) or CHINESE.fullmatch(after):
+            continue
+        return True
+    return False
+
+
+def scan_documented_controls(root: Path, policy: Mapping[str, object]) -> list[str]:
+    """Every control a user doc tells the reader to click must exist.
+
+    The user documentation is a deliverable, and it is the one deliverable no
+    gate looked at: `staticScan` and `nativeScan` cover `frontend/` and
+    `backend/src`, so `docs/` had nothing watching it at all. On 2026-08-04 that
+    cost six wrong control names in four documents — the uninstall guide's very
+    first instruction named a menu (`平台状态`) and a button
+    (`退出该平台登录并清理运营档案`) that do not exist, so a reader following it
+    stops on step one. Two style names (`雏菊晴日`, `商务蓝`) were not in the
+    twelve either.
+
+    None of those are the kind of mistake the earlier checks could find: they are
+    neither forbidden brands nor unexplained jargon nor wrong numbers. What makes
+    them mechanically checkable is that a control named in a document must be
+    named somewhere in what ships.
+
+    Test files and fixtures are excluded from the search on purpose: `商务蓝`
+    existed only as arbitrary data in a gateway test, and searching those would
+    have called it real.
+    """
+    roots = policy.get("roots")
+    search_roots = policy.get("searchRoots")
+    allowed = policy.get("systemUiLabels")
+    if not isinstance(roots, list) or not roots:
+        fail("documentationScan.roots must not be empty")
+    if not isinstance(search_roots, list) or not search_roots:
+        fail("documentationScan.searchRoots must not be empty")
+    if not isinstance(allowed, list) or not all(isinstance(item, str) for item in allowed):
+        fail("documentationScan.systemUiLabels must be a string list")
+    excluded = policy.get("excludedGlobs")
+    if not isinstance(excluded, list) or not all(isinstance(item, str) for item in excluded):
+        fail("documentationScan.excludedGlobs must be a string list")
+
+    shipped: list[str] = []
+    for relative in search_roots:
+        base = root / str(relative)
+        if not base.exists():
+            return [f"documentationScan.searchRoots names a missing path: {relative}"]
+        candidates = sorted(base.rglob("*")) if base.is_dir() else [base]
+        for path in candidates:
+            if not path.is_file() or path.is_symlink():
+                continue
+            display = str(path.relative_to(root))
+            if matches_glob(display, list(excluded)):
+                continue
+            try:
+                shipped.append(path.read_text(encoding="utf-8", errors="ignore"))
+            except OSError:
+                continue
+    haystack = "\n".join(shipped)
+
+    permitted = set(allowed)
+    violations: list[str] = []
+    for relative in roots:
+        document = root / str(relative)
+        if not document.is_file():
+            return [f"documentationScan.roots names a missing document: {relative}"]
+        text = document.read_text(encoding="utf-8")
+        for match in DOCUMENTED_LABEL.finditer(text):
+            label = match.group(1)
+            if label in permitted or label_ships(label, haystack):
+                continue
+            violations.append(
+                f"{relative}: the document names 「{label}」 but nothing that ships "
+                "contains it; a reader following this cannot find it"
+            )
+    return violations
 
 
 def scan_upstream_name_coverage(root: Path, terms: list[str]) -> list[str]:
@@ -820,6 +916,11 @@ def main() -> None:
         )
 
     violations.extend(scan_upstream_name_coverage(root, terms))
+    documentation = contract.get("documentationScan")
+    if documentation is not None:
+        if not isinstance(documentation, dict):
+            fail("documentationScan policy is invalid")
+        violations.extend(scan_documented_controls(root, documentation))
     violations.extend(scan_embedded_web_ui(root, embedded))
     violations.extend(scan_concept_distinctions(root, distinctions, contract))
     violations.extend(scan_parts_projection(root, str(contract["partsCatalogProjection"])))
