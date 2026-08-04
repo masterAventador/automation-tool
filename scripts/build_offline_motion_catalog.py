@@ -19,11 +19,14 @@ import json
 import posixpath
 import re
 import shutil
+import sys
 import time
 import urllib.request
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
 LOCK_PATH = REPOSITORY_ROOT / "contracts/video/offline-motion-dependencies.v1.json"
 CATALOG_CONTRACT_PATH = REPOSITORY_ROOT / "contracts/quality/motion-catalog.v1.json"
 RIGHTS_PATH = REPOSITORY_ROOT / "contracts/quality/motion-catalog-rights.v1.json"
@@ -48,6 +51,25 @@ class BuildError(SystemExit):
 
     def __init__(self, message: str) -> None:
         super().__init__(f"offline motion catalog build failed: {message}")
+
+
+def catalog_root(lock: dict | None = None) -> Path:
+    """The one place on this machine where the built catalog lives.
+
+    A build input, digest-pinned and fetched from three CDNs, so it belongs
+    beside the other pinned third-party inputs in the machine-wide artifact
+    cache rather than inside one checkout. Inside a checkout it had to be
+    rebuilt or copied for every worktree — `.local` is not carried into a new
+    one — and six places each derived the path for themselves.
+
+    The release tree built *from* this stays in `.local` on purpose: that one
+    is an output, and `commit_gate`'s slow tier rebuilds it from the commit's
+    own code, so sharing it would let one run's output become another's input.
+    """
+    from video_runtime_cache import cache_root
+
+    resolved = lock or load_json(LOCK_PATH)
+    return cache_root() / resolved["layout"]["catalogRoot"]
 
 
 def load_json(path: Path) -> dict:
@@ -88,9 +110,8 @@ def is_retryable_download_error(error: OSError) -> bool:
     and the next attempt is the cheapest way to find out.
     """
     status = getattr(error, "code", None)
-    if isinstance(status, int) and 400 <= status < 500 and status not in (408, 429):
-        return False
-    return True
+    permanent = isinstance(status, int) and 400 <= status < 500 and status not in (408, 429)
+    return not permanent
 
 
 def fetch(url: str) -> bytes:
@@ -383,11 +404,11 @@ def main() -> None:
     catalog_contract = load_json(CATALOG_CONTRACT_PATH)
     rights = load_json(RIGHTS_PATH)
     download_root = REPOSITORY_ROOT / lock["layout"]["downloadRoot"]
-    catalog_root = REPOSITORY_ROOT / lock["layout"]["catalogRoot"]
+    catalog_directory = catalog_root(lock)
 
     verify_downloads(lock, download_root, offline=arguments.offline)
     manifest = generate_catalog(
-        lock, catalog_contract, rights, SUBMODULE_ROOT, download_root, catalog_root
+        lock, catalog_contract, rights, SUBMODULE_ROOT, download_root, catalog_directory
     )
     aggregate = aggregate_digest(manifest["files"])
     generated = {"fileCount": len(manifest["files"]), "aggregateSha256": aggregate}

@@ -27,6 +27,21 @@ from build_release_package import embed_release_identity  # noqa: E402
 from release_identity import SourceFacts  # noqa: E402
 
 
+def rendered_capability_reference(read_descriptor: int) -> str:
+    """What this platform's spawner would actually put in the environment.
+
+    POSIX hands over the file descriptor; Windows hands over an inheritable OS
+    handle, because `pass_fds` does not exist there. Spelling the descriptor
+    into the environment on both would test the reader against a shape nothing
+    in the product ever produces.
+    """
+    if os.name == "nt":
+        import msvcrt
+
+        return str(msvcrt.get_osfhandle(read_descriptor))
+    return str(read_descriptor)
+
+
 class SnapshotBuildDependencyTests(unittest.TestCase):
     def test_node_modules_reaches_the_snapshot_without_exposing_the_operators_copy(
         self,
@@ -121,7 +136,7 @@ class SignedReleaseIdentityTests(unittest.TestCase):
             with (
                 mock.patch.dict(
                     os.environ,
-                    {capability_name: str(read_descriptor)},
+                    {capability_name: rendered_capability_reference(read_descriptor)},
                     clear=False,
                 ),
                 mock.patch.object(
@@ -168,7 +183,7 @@ class SignedReleaseIdentityTests(unittest.TestCase):
         try:
             with mock.patch.dict(
                 os.environ,
-                {capability_name: str(read_descriptor)},
+                {capability_name: rendered_capability_reference(read_descriptor)},
                 clear=False,
             ):
                 with self.assertRaisesRegex(
@@ -634,8 +649,11 @@ class WindowsReleaseTests(unittest.TestCase):
                 environment=os.environ.copy(),
                 cwd=Path.cwd(),
             )
-        self.assertEqual(returncode, 0)
-        self.assertEqual(echoed.read_bytes(), payload)
+            # Asserted inside the context manager: `echoed` lives in the
+            # temporary directory, so reading it after the block only ever
+            # reports that the directory was cleaned up.
+            self.assertEqual(returncode, 0)
+            self.assertEqual(echoed.read_bytes(), payload)
 
 
 if __name__ == "__main__":

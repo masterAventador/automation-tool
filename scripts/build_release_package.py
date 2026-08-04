@@ -1033,7 +1033,12 @@ def _link_snapshot_build_dependency(snapshot: Path, relative: Path) -> None:
     if relative in _SNAPSHOT_PRIVATE_DEPENDENCIES:
         _clone_snapshot_dependency(source, target)
         return
-    target.symlink_to(source, target_is_directory=True)
+    # Shared with the operator's checkout on purpose. `.local` is where the
+    # build works (`--work-dir` defaults under it) and where local build inputs
+    # such as the staged motion catalog live; `backend/.venv` is read, not
+    # rewritten. Only `frontend/node_modules` above is rewritten in place, which
+    # is why it is the one that gets a private copy.
+    _create_directory_link(target, source)
 
 
 def _clone_snapshot_dependency(source: Path, target: Path) -> None:
@@ -1055,52 +1060,117 @@ def _clone_snapshot_dependency(source: Path, target: Path) -> None:
     `node_modules` in 9.7 s sharing blocks with the original, the same technique
     `scripts/new_worktree.py` uses for `vendor/`. A filesystem without clone
     support falls back to a plain copy: slower, never wrong.
+
+    `/bin/cp` is a macOS path, and the host that builds the Windows package has
+    neither it nor `cp` anywhere on PATH (measured), so this used to die with
+    `WinError 2` before copying a byte. The portable branch below is what runs
+    there.
     """
-    command = ["/bin/cp", "-c", "-p", "-R", os.fspath(source), os.fspath(target)]
-    result = subprocess.run(command, check=False, capture_output=True, text=True)
-    if result.returncode != 0:
-        fallback = ["/bin/cp", "-p", "-R", os.fspath(source), os.fspath(target)]
-        result = subprocess.run(fallback, check=False, capture_output=True, text=True)
-    if result.returncode != 0 or not target.is_dir():
+    if sys.platform == "darwin":
+        command = ["/bin/cp", "-c", "-p", "-R", os.fspath(source), os.fspath(target)]
+        result = subprocess.run(command, check=False, capture_output=True, text=True)
+        if result.returncode != 0:
+            fallback = ["/bin/cp", "-p", "-R", os.fspath(source), os.fspath(target)]
+            result = subprocess.run(fallback, check=False, capture_output=True, text=True)
+        if result.returncode != 0 or not target.is_dir():
+            raise ReleaseFailed("release source snapshot dependency could not be copied")
+        return
+    _copy_tree_preserving_links(source, target)
+    if not target.is_dir():
         raise ReleaseFailed("release source snapshot dependency could not be copied")
 
 
-def _read_source_snapshot_capability() -> tuple[Path, str]:
-    rendered_descriptor = os.environ.pop(
-        SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT,
-        None,
-    )
-    if (
-        rendered_descriptor is None
-        or not rendered_descriptor.isascii()
-        or not rendered_descriptor.isdigit()
-        or str(int(rendered_descriptor)) != rendered_descriptor
-    ):
-        raise ReleaseFailed("release source snapshot capability is unavailable")
-    descriptor = int(rendered_descriptor)
+def _copy_tree_preserving_links(source: Path, target: Path) -> None:
+    """Copy a dependency tree where neither `cp` nor `os.symlink` is available.
+
+    `shutil.copytree(symlinks=True)` is the obvious answer and it does not work
+    here: it recreates links with `os.symlink`, which a non-elevated Windows
+    user without Developer Mode is refused outright —
+
+        OSError: [WinError 1314] 客户端没有所需的特权。
+
+    and `frontend/node_modules` is 2,057 links over 87,734 real files (measured
+    on the Windows host). Dereferencing them instead is not an option either:
+    every one of them points into `.pnpm/`, so following them would duplicate
+    the whole store many times over.
+
+    Directory junctions need no privilege at all, so the links are recreated as
+    junctions when symlinks are refused. A junction cannot hold a relative
+    target, so it is resolved — against **this copy**, never against the
+    operator's tree, which is the entire property this function exists for.
+    """
+    links: list[tuple[Path, str]] = []
+    for directory, subdirectories, files in os.walk(source, followlinks=False):
+        here = Path(directory)
+        relative = here.relative_to(source)
+        (target / relative).mkdir(parents=True, exist_ok=True)
+        remaining = []
+        for name in subdirectories:
+            entry = here / name
+            if entry.is_symlink() or entry.is_junction():
+                links.append((relative / name, os.readlink(entry)))
+            else:
+                remaining.append(name)
+        # Assigning into the list `os.walk` handed us is how the traversal is
+        # told not to descend: following a link here would copy the same store
+        # entry once per package that points at it.
+        subdirectories[:] = remaining
+        for name in files:
+            entry = here / name
+            if entry.is_symlink():
+                links.append((relative / name, os.readlink(entry)))
+            else:
+                shutil.copy2(entry, target / relative / name, follow_symlinks=False)
+    for relative, raw_target in links:
+        _recreate_dependency_link(target / relative, raw_target, root=target)
+
+
+def _recreate_dependency_link(link: Path, raw_target: str, *, root: Path) -> None:
+    """Point `link` at the copied tree, by symlink if allowed, else a junction."""
+    resolved = Path(os.path.normpath(link.parent / raw_target))
+    # Fail closed rather than quietly wire the build's private copy back to the
+    # tree it was made to stay away from.
+    if not resolved.is_relative_to(root):
+        raise ReleaseFailed("release source snapshot dependency link escapes the copy")
+    _create_directory_link(link, resolved, relative_target=raw_target)
+
+
+def _create_directory_link(
+    link: Path, target: Path, *, relative_target: str | None = None
+) -> None:
+    """Link one directory to another, whatever this host is willing to grant.
+
+    A symlink is preferred because it can be relative and survives the tree
+    being moved. Windows refuses it to a non-elevated user without Developer
+    Mode —
+
+        OSError: [WinError 1314] 客户端没有所需的特权。
+
+    — which took out both callers here: every Windows release died linking
+    `.local` into its snapshot. A directory junction needs no privilege at all
+    (measured: `mklink /J` returns 0, writes pass through), and its one
+    limitation, that the target must be absolute, does not matter for a
+    snapshot that is deleted when the build ends.
+    """
+    link.parent.mkdir(parents=True, exist_ok=True)
     try:
-        metadata = os.fstat(descriptor)
-        if not stat.S_ISFIFO(metadata.st_mode):
-            raise ReleaseFailed("release source snapshot capability is invalid")
-        os.set_blocking(descriptor, False)
-        try:
-            payload = os.read(descriptor, SOURCE_SNAPSHOT_CAPABILITY_MAX_BYTES + 1)
-            trailing = os.read(descriptor, 1)
-        except BlockingIOError as error:
-            raise ReleaseFailed("release source snapshot capability is incomplete") from error
-    except OSError as error:
-        raise ReleaseFailed("release source snapshot capability is unavailable") from error
-    finally:
-        try:
-            os.close(descriptor)
-        except OSError:
-            pass
-    if (
-        not payload
-        or len(payload) > SOURCE_SNAPSHOT_CAPABILITY_MAX_BYTES
-        or trailing
-    ):
-        raise ReleaseFailed("release source snapshot capability is invalid")
+        os.symlink(relative_target or target, link, target_is_directory=True)
+        return
+    except OSError:
+        # Refused or unsupported on this host. Fall through to the junction.
+        pass
+    completed = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", os.fspath(link), os.fspath(target)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 or not link.exists():
+        raise ReleaseFailed("release source snapshot dependency link could not be created")
+
+
+def _read_source_snapshot_capability() -> tuple[Path, str]:
+    payload = read_source_snapshot_capability_bytes()
     fields = payload.split(b"\0")
     if len(fields) != 4 or fields[0] != SOURCE_SNAPSHOT_CAPABILITY_MAGIC:
         raise ReleaseFailed("release source snapshot capability is invalid")
@@ -1112,12 +1182,220 @@ def _read_source_snapshot_capability() -> tuple[Path, str]:
         raise ReleaseFailed("release source snapshot capability is invalid") from error
     if (
         fields[3] != expected_identity.encode("ascii") + b"\n"
-        or parent_process_id != os.getppid()
+        or not _capability_writer_is_an_ancestor(parent_process_id)
         or len(expected_identity) != 64
         or any(character not in "0123456789abcdef" for character in expected_identity)
     ):
         raise ReleaseFailed("release source snapshot capability is invalid")
     return declared, expected_identity
+
+
+def read_source_snapshot_capability_bytes() -> bytes:
+    """Consume, exactly once, the one-shot capability this process was handed.
+
+    The transport differs by platform and the value in the environment differs
+    with it: a file descriptor on POSIX, an inheritable OS handle on Windows.
+    Both arrive as a pipe — `os.fstat` reports `S_ISFIFO` either way (measured)
+    — so everything downstream of this function is identical.
+    """
+    rendered = os.environ.pop(SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT, None)
+    if (
+        rendered is None
+        or not rendered.isascii()
+        or not rendered.isdigit()
+        or str(int(rendered)) != rendered
+    ):
+        raise ReleaseFailed("release source snapshot capability is unavailable")
+    if os.name == "nt":
+        import msvcrt
+
+        try:
+            descriptor = msvcrt.open_osfhandle(int(rendered), os.O_RDONLY)
+        except OSError as error:
+            raise ReleaseFailed("release source snapshot capability is unavailable") from error
+    else:
+        descriptor = int(rendered)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISFIFO(metadata.st_mode):
+            raise ReleaseFailed("release source snapshot capability is invalid")
+        payload = _read_capability_payload(descriptor)
+    except OSError as error:
+        raise ReleaseFailed("release source snapshot capability is unavailable") from error
+    finally:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+    if not payload or len(payload) > SOURCE_SNAPSHOT_CAPABILITY_MAX_BYTES:
+        raise ReleaseFailed("release source snapshot capability is invalid")
+    return payload
+
+
+def _read_capability_payload(descriptor: int) -> bytes:
+    """Read the whole capability and refuse anything longer than one."""
+    if os.name == "nt":
+        # `os.set_blocking` does not accept this handle on Windows, and it is
+        # not needed: the writing end is closed before the child is created, so
+        # reading to EOF cannot block. The cap is enforced as it accumulates
+        # rather than by a trailing-byte probe.
+        chunks: list[bytes] = []
+        size = 0
+        while True:
+            chunk = os.read(descriptor, SOURCE_SNAPSHOT_CAPABILITY_MAX_BYTES + 1)
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+            size += len(chunk)
+            if size > SOURCE_SNAPSHOT_CAPABILITY_MAX_BYTES:
+                raise ReleaseFailed("release source snapshot capability is invalid")
+    os.set_blocking(descriptor, False)
+    try:
+        payload = os.read(descriptor, SOURCE_SNAPSHOT_CAPABILITY_MAX_BYTES + 1)
+        trailing = os.read(descriptor, 1)
+    except BlockingIOError as error:
+        raise ReleaseFailed("release source snapshot capability is incomplete") from error
+    if trailing:
+        raise ReleaseFailed("release source snapshot capability is invalid")
+    return payload
+
+
+def spawn_with_source_snapshot_capability(
+    command: list[str],
+    *,
+    capability: bytes,
+    environment: dict[str, str],
+    cwd: Path,
+) -> int:
+    """Run `command` as the single process able to read `capability`.
+
+    Round 14 of the EB-11 review replaced two public environment variables with
+    this, because the public pair let a caller dress an ordinary writable
+    checkout up as a materialized snapshot. The handoff was written with
+    `subprocess.run(pass_fds=...)`, which does not exist on Windows:
+
+        AssertionError: pass_fds not supported on Windows.
+
+    So the Windows release had no delivery mechanism for its source identity at
+    all — not a weaker one, none. `STARTUPINFO.lpAttributeList["handle_list"]`
+    is the platform's own answer to the same question and inherits exactly the
+    handles named, nothing else.
+    """
+    if len(capability) > SOURCE_SNAPSHOT_CAPABILITY_MAX_BYTES:
+        raise ReleaseFailed("release source snapshot capability could not be created")
+    read_descriptor, write_descriptor = os.pipe()
+    try:
+        written = os.write(write_descriptor, capability)
+        if written != len(capability):
+            raise ReleaseFailed("release source snapshot capability could not be created")
+    finally:
+        # Closed before the child exists, so the child reads a complete payload
+        # followed by EOF and never waits on a writer that will not write again.
+        os.close(write_descriptor)
+    child_environment = dict(environment)
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle = msvcrt.get_osfhandle(read_descriptor)
+            os.set_handle_inheritable(handle, True)
+            startup = subprocess.STARTUPINFO()
+            startup.lpAttributeList = {"handle_list": [handle]}
+            child_environment[SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT] = str(handle)
+            completed = subprocess.run(
+                command,
+                cwd=cwd,
+                env=child_environment,
+                startupinfo=startup,
+                close_fds=True,
+                check=False,
+            )
+        else:
+            child_environment[SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT] = str(read_descriptor)
+            completed = subprocess.run(
+                command,
+                cwd=cwd,
+                env=child_environment,
+                pass_fds=(read_descriptor,),
+                check=False,
+            )
+    finally:
+        os.close(read_descriptor)
+    return completed.returncode
+
+
+def _capability_writer_is_an_ancestor(process_id: int) -> bool:
+    """Whether `process_id` is this process's parent, or an ancestor of it.
+
+    On POSIX this is the direct parent and nothing else. On Windows "direct
+    parent" is not a usable notion here: `backend/.venv/Scripts/python.exe` is a
+    uv trampoline that launches the real interpreter as its own child, so the
+    process running this code is a *grandchild* of the release command and
+    `os.getppid()` names the trampoline — which has already exited. Measured:
+
+        spawning process pid: 14572
+        child ppid via venv python:  17468   (the trampoline)
+        child ppid via base python:  14572
+
+    A direct-parent test therefore rejects every Windows release unconditionally.
+    Widening it to the ancestor chain keeps what the check is for — a payload
+    lifted from somewhere else does not validate here — and gives up nothing
+    that was true before, since the trampoline is a process this build created.
+
+    Windows recycles process ids, so an ancestor id is not proof of identity.
+    That is consistent with what this gate already claims: a reproducibility and
+    misoperation check inside a trusted release flow, not a defence against an
+    active same-UID attacker (`EB-11.md`, review round 19).
+    """
+    if os.name != "nt":
+        return process_id == os.getppid()
+    return process_id in _windows_ancestor_process_ids()
+
+
+def _windows_ancestor_process_ids(*, limit: int = 16) -> set[int]:
+    """Walk this process's ancestry through a Toolhelp process snapshot."""
+    import ctypes
+    from ctypes import wintypes
+
+    class ProcessEntry(ctypes.Structure):
+        _fields_ = (
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", ctypes.c_long),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", ctypes.c_char * 260),
+        )
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
+    if snapshot == -1:
+        raise ReleaseFailed("release source snapshot capability is unavailable")
+    parents: dict[int, int] = {}
+    try:
+        entry = ProcessEntry()
+        entry.dwSize = ctypes.sizeof(ProcessEntry)
+        if not kernel32.Process32First(snapshot, ctypes.byref(entry)):
+            raise ReleaseFailed("release source snapshot capability is unavailable")
+        while True:
+            parents[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
+            if not kernel32.Process32Next(snapshot, ctypes.byref(entry)):
+                break
+    finally:
+        kernel32.CloseHandle(snapshot)
+    ancestors: set[int] = set()
+    current = os.getpid()
+    for _ in range(limit):
+        parent = parents.get(current)
+        if not parent or parent in ancestors:
+            break
+        ancestors.add(parent)
+        current = parent
+    return ancestors
 
 
 def require_snapshot_repository_layout(snapshot: Path, work_directory: Path) -> None:
@@ -1244,40 +1522,27 @@ def run_from_materialized_source_snapshot(arguments: argparse.Namespace) -> int:
             SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT,
         ):
             environment.pop(name, None)
-        read_descriptor, write_descriptor = os.pipe()
-        try:
-            capability = b"\0".join(
-                (
-                    SOURCE_SNAPSHOT_CAPABILITY_MAGIC,
-                    str(os.getpid()).encode("ascii"),
-                    os.fsencode(snapshot),
-                    source.tree_sha256.encode("ascii") + b"\n",
-                )
+        capability = b"\0".join(
+            (
+                SOURCE_SNAPSHOT_CAPABILITY_MAGIC,
+                str(os.getpid()).encode("ascii"),
+                os.fsencode(snapshot),
+                source.tree_sha256.encode("ascii") + b"\n",
             )
-            written = os.write(write_descriptor, capability)
-            if written != len(capability):
-                raise ReleaseFailed("release source snapshot capability could not be created")
-        finally:
-            os.close(write_descriptor)
-        try:
-            environment[SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT] = str(read_descriptor)
-            completed = subprocess.run(
-                [
-                    sys.executable,
-                    os.fspath(snapshot / "scripts/build_release_package.py"),
-                    *sys.argv[1:],
-                ],
-                # Preserve the operator's relative-path base. The child parses the
-                # original argv again from the detached script, and changing cwd
-                # here would silently retarget --work-dir, --archive and key paths.
-                cwd=invocation_directory,
-                env=environment,
-                pass_fds=(read_descriptor,),
-                check=False,
-            )
-        finally:
-            os.close(read_descriptor)
-        return completed.returncode
+        )
+        return spawn_with_source_snapshot_capability(
+            [
+                sys.executable,
+                os.fspath(snapshot / "scripts/build_release_package.py"),
+                *sys.argv[1:],
+            ],
+            capability=capability,
+            environment=environment,
+            # Preserve the operator's relative-path base. The child parses the
+            # original argv again from the detached script, and changing cwd
+            # here would silently retarget --work-dir, --archive and key paths.
+            cwd=invocation_directory,
+        )
     except ReleaseIdentityRejected as error:
         raise ReleaseFailed("release source snapshot could not be materialized") from error
     finally:

@@ -289,10 +289,21 @@ def _link_slow_runtime_inputs(checkout: Path, source_root: Path) -> None:
         _link_directory(destination, source)
 
 
-def _copy_offline_motion_catalog(checkout: Path, source_root: Path) -> None:
-    """Copy the digest-locked download cache without linking writes to it."""
-    relative = Path(".local/offline-motion-deps/catalog")
-    source = source_root / relative
+def _require_offline_motion_catalog() -> None:
+    """Check the shared build input the slow checkout will read, without copying it.
+
+    This used to copy 46 MiB into the checkout, because the catalog lived in
+    `.local` and a link would have exposed the host's copy to writes. It now
+    lives in the machine-wide artifact cache, which every checkout resolves to
+    identically, and the slow tier only *reads* it: `_build_slow_motion_release`
+    runs the release build, whose output goes to `.local` inside the checkout.
+    So the copy is gone and the two checks it carried stay — a missing input and
+    a link inside the tree are still worth naming here rather than as a failure
+    deeper inside the release build.
+    """
+    from build_offline_motion_catalog import catalog_root
+
+    source = catalog_root()
     if not source.is_dir():
         raise RuntimeError(
             f"slow-tier build input is missing: {source}; "
@@ -304,9 +315,6 @@ def _copy_offline_motion_catalog(checkout: Path, source_root: Path) -> None:
             "slow-tier offline catalog contains a link: "
             f"{links[0].relative_to(source).as_posix()}"
         )
-    destination = checkout / relative
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source, destination)
 
 
 def _build_slow_motion_release(checkout: Path, source_root: Path) -> None:
@@ -339,7 +347,7 @@ def prepare_slow_checkout(
     """Prepare only ignored/reconstructible inputs for aggregate script tests."""
     _initialize_slow_checkout_repository(checkout)
     _link_slow_runtime_inputs(checkout, source_root)
-    _copy_offline_motion_catalog(checkout, source_root)
+    _require_offline_motion_catalog()
     if build_release is None:
         _build_slow_motion_release(checkout, source_root)
     else:

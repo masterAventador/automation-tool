@@ -31,6 +31,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
 
+from build_offline_motion_catalog import catalog_root as locked_catalog_root  # noqa: E402
 from gate_prerequisites import require  # noqa: E402
 
 RELEASE_LOCK_PATH = REPOSITORY_ROOT / "contracts/video/motion-catalog-release.v1.json"
@@ -612,7 +613,7 @@ def _rebuild_release_tree(source: Path) -> None:
     """
     require("offline-motion-catalog")
     dep_lock = load_json(DEP_LOCK_PATH)
-    staged_root = REPOSITORY_ROOT / dep_lock["layout"]["catalogRoot"]
+    staged_root = locked_catalog_root(dep_lock)
     if source.exists():
         _make_tree_writable(source)
         shutil.rmtree(source)
@@ -665,7 +666,7 @@ def main() -> None:
     catalog_contract = load_json(CATALOG_CONTRACT_PATH)
     rights = load_json(RIGHTS_PATH)
     overlay = load_json(OVERLAY_PATH)
-    staged_root = arguments.staged_root or REPOSITORY_ROOT / dep_lock["layout"]["catalogRoot"]
+    staged_root = arguments.staged_root or locked_catalog_root(dep_lock)
     release_root = arguments.release_root or (
         REPOSITORY_ROOT / release_lock["layout"]["releaseRoot"] / release_lock["catalogVersion"]
     )

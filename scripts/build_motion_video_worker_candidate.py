@@ -10,6 +10,7 @@ import platform
 import shutil
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -19,6 +20,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+
+from build_offline_motion_catalog import catalog_root as locked_catalog_root  # noqa: E402
+
 CONTRACT = ROOT / "contracts/quality/motion-video-worker-package.v1.json"
 WORKER = ROOT / "workers/motion_composition/worker.mjs"
 DOWNLOAD_ROOT = "https://nodejs.org/dist/v22.23.1"
@@ -70,7 +76,7 @@ def _download(archive: Path, filename: str, expected_sha256: str) -> None:
 
 
 OFFLINE_MOTION_LOCK = ROOT / "contracts/video/offline-motion-dependencies.v1.json"
-OFFLINE_MOTION_CATALOG = ROOT / ".local/offline-motion-deps/catalog"
+OFFLINE_MOTION_CATALOG = locked_catalog_root()
 AUTHORING_RUNTIME_PACKAGE = "gsap"
 
 

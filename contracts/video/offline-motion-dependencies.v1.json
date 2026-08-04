@@ -20,7 +20,7 @@
   ],
   "layout": {
     "downloadRoot": "assets/offline-motion-deps",
-    "catalogRoot": ".local/offline-motion-deps/catalog",
+    "catalogRoot": "offline-motion-catalog",
     "dependencyRoot": "offline-deps",
     "itemRoot": "items"
   },
