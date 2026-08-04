@@ -1387,7 +1387,7 @@ mod tests {
         let other = profiles.create_douyin_profile().expect("second profile");
         let held_id = held.profile_id().to_owned();
         let held_directory = held.directory().to_path_buf();
-        assert_ne!(held_id, other.profile_id(), "两个 Profile 必须真的不同");
+        assert_ne!(held_id, other.profile_id(), "两个浏览器档案必须真的不同");
 
         let entrypoint = app_data
             .0
@@ -1477,46 +1477,20 @@ mod tests {
 
     /// 认得发布预检与派发的执行器桩，由**开发签名者**签名——调试构建的
     /// `executor_verifying_key` 只认这一把，所以包必须真的通过验证才能起进程。
+    ///
+    /// 桩的源码放在 `tests/fixtures/` 下的真实 `.py` 文件里，与
+    /// `local_editing_lifecycle_worker.py` 同一做法，而不是内嵌成 Rust 字符串。
+    /// 内嵌过一次，代价是 `check_user_facing_branding.py` 判红：它扫 `src/` 下的
+    /// **字符串字面量**，而执行器协议自带 `local_session_token`、
+    /// `local-executor-event` 这些词——那些词改不了，所以该挪的是夹具。
     #[cfg(target_os = "macos")]
-    const PUBLISH_LEASE_FIXTURE: &str = r#"#!/usr/bin/env python3
-import base64, hashlib, hmac, json, signal, sys
-bootstrap = json.loads(sys.stdin.readline())
-key = bytes.fromhex(bootstrap["local_session_token"])
-def encoded(domain, parts):
-    message = domain + b"\0".join(part.encode() for part in parts)
-    return "atlcp1." + base64.urlsafe_b64encode(hmac.digest(key, message, hashlib.sha256)).rstrip(b"=").decode()
-def lifecycle(event):
-    message = b"automation-tool.local-executor-event.v1\0" + event.encode() + b"\0" + b"1.0"
-    proof = "atlep1." + base64.urlsafe_b64encode(hmac.digest(key, message, hashlib.sha256)).rstrip(b"=").decode()
-    print(json.dumps({"authenticationProof": proof, "event": event, "protocolVersion": "1.0"}, separators=(",", ":")), flush=True)
-signal.signal(signal.SIGTERM, lambda _signum, _frame: None)
-lifecycle("executor.healthy")
-for line in sys.stdin:
-    command = json.loads(line)
-    kind = command["commandType"]
-    if kind == "douyin.publish.preflight":
-        parts = [command["commandId"], kind, command["executablePath"], command["profileDirectory"],
-                 "1" if command["headless"] else "0", command["publishJobId"], command["artifactPath"],
-                 command["title"], command["description"], command["protocolVersion"]]
-        domain = b"automation-tool.local-executor-publish-command.v1\0"
-        state = "publish_pre_submit_ready"
-        flow = "douyin.publish-preflight.v1"
-    elif kind == "douyin.publish.dispatch":
-        parts = [command["commandId"], kind, command["publishJobId"], command["confirmationId"], command["protocolVersion"]]
-        domain = b"automation-tool.local-executor-publish-dispatch.v1\0"
-        state = "publish_verified"
-        flow = "douyin.publish-release.v1"
-    else:
-        # 被拒的那条请求永远不该走到这里；真到了就让测试当场看见。
-        raise AssertionError(kind)
-    assert hmac.compare_digest(command["authenticationProof"], encoded(domain, parts)), kind
-    result = {"authenticationProof": encoded(b"automation-tool.local-executor-result.v1\0", [command["commandId"], state, "1.0"]),
-              "commandId": command["commandId"], "event": "platform.command.completed",
-              "flowVersion": flow, "platform": "douyin",
-              "protocolVersion": "1.0", "state": state}
-    print(json.dumps(result, separators=(",", ":"), sort_keys=True), flush=True)
-lifecycle("executor.stopped")
-"#;
+    fn publish_lease_fixture() -> String {
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/publish_lease_executor.py"),
+        )
+        .expect("publish lease executor fixture")
+    }
 
     /// 起一个真实执行器，并让它把运营档案租约留在 App 手里。
     ///
@@ -1606,7 +1580,7 @@ lifecycle("executor.stopped")
     fn app_exit_stops_the_executor_and_gives_the_operations_profile_back() {
         let app_data = TemporaryAppData::new();
         let (service, profiles, profile_id) =
-            service_holding_a_leased_profile(&app_data.0, PUBLISH_LEASE_FIXTURE);
+            service_holding_a_leased_profile(&app_data.0, &publish_lease_fixture());
 
         service.shutdown_for_app_exit().expect("clean App exit");
 
@@ -1653,16 +1627,14 @@ lifecycle("executor.stopped")
     #[cfg(target_os = "macos")]
     fn silent_exit_fixture() -> String {
         const FAREWELL: &str = "lifecycle(\"executor.stopped\")\n";
-        assert!(
-            PUBLISH_LEASE_FIXTURE.ends_with(FAREWELL),
-            "桩的结尾变了，这里就裁错了地方"
-        );
-        PUBLISH_LEASE_FIXTURE.trim_end_matches(FAREWELL).to_owned()
+        let source = publish_lease_fixture();
+        assert!(source.ends_with(FAREWELL), "桩的结尾变了，这里就裁错了地方");
+        source.trim_end_matches(FAREWELL).to_owned()
     }
 
     #[cfg(target_os = "macos")]
     fn write_publish_fixture_package(package_root: &std::path::Path) {
-        write_fixture_package(package_root, PUBLISH_LEASE_FIXTURE);
+        write_fixture_package(package_root, &publish_lease_fixture());
     }
 
     #[cfg(target_os = "macos")]
