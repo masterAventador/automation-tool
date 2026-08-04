@@ -43,20 +43,79 @@ const CANCEL_MARKER = JSON.parse(
   ),
 ).markerFileName;
 
-// Where a real embedded Chromium may already be staged on this machine. The
-// acceptance scripts stage one under `.local/`; an explicit path always wins.
+// Where a real embedded Chromium may already be staged on this machine. An
+// explicit `AUTOMATION_TOOL_RENDER_BROWSER` always wins; failing that the
+// machine-wide staging cache answers, and only then these.
+//
+// These two are leftovers, kept only because a checkout may still hold one:
+// both are `.local/`-relative and macOS-only, so they answer "where did *this*
+// checkout stage a browser" — a question that stopped having an answer when
+// staging moved to one machine-wide cache. `stagedBrowser` below is that cache,
+// and it is the path with a future.
+//
+// `.local/desktop-e2e/embedded-browser/...` used to be listed here too and is
+// gone: the desktop-E2E prerequisite now resolves to the machine cache, so
+// nothing creates that directory any more and naming it only kept a dead
+// lookup alive.
 const BROWSER_CANDIDATES = [
   ".local/release/build/embedded-browser/chrome-mac-arm64",
-  ".local/desktop-e2e/embedded-browser/macos-arm64/chrome-mac-arm64",
   ".local/t44-release-verify/build/embedded-browser/chrome-mac-arm64",
 ];
 const MAC_APP_SUFFIX = "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
+
+const PYTHON = process.env.AUTOMATION_TOOL_TEST_PYTHON
+  ?? ["backend/.venv/bin/python", "backend/.venv/Scripts/python.exe"]
+    .map((candidate) => fileURLToPath(new URL(candidate, repositoryRoot)))
+    .find((candidate) => existsSync(candidate))
+  ?? "python3";
+
+// The staged browser lives in one per-machine cache now, and where that cache
+// is depends on the platform. `scripts/video_runtime_cache.py` already answers
+// that; asking it beats keeping a second copy of the answer in JavaScript,
+// which would be one more place to be wrong when the location moves again.
+//
+// The executable's name inside the tree is read from the distribution manifest
+// rather than assumed: it differs per target (`chrome.exe` against a `.app`
+// bundle), and the manifest is what the release itself resolves through.
+const RESOLVE_STAGED_BROWSER = `
+import json, sys
+sys.path.insert(0, "scripts")
+from desktop_e2e_prerequisites import embedded_browser_cache, release_target_id
+
+root = embedded_browser_cache(release_target_id())
+manifest = root / "distribution-manifest.v1.json"
+if manifest.is_file():
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    sys.stdout.write(str(root.joinpath(*str(document["executable"]).split("/"))))
+`;
+
+async function stagedBrowserFromMachineCache() {
+  try {
+    const { stdout } = await execFileAsync(PYTHON, ["-c", RESOLVE_STAGED_BROWSER], {
+      cwd: fileURLToPath(repositoryRoot),
+    });
+    const executable = stdout.trim();
+    return executable.length > 0 && existsSync(executable) ? executable : null;
+  } catch {
+    // An unsupported platform, no interpreter, or an empty cache. All three
+    // mean "this machine has not staged one", which the callers already handle.
+    return null;
+  }
+}
+
+// Awaited here, above every `test(...)` call, and that position is load-bearing.
+// It was first written below them, and `node:test` starts running a registered
+// top-level test before module evaluation finishes: the two tests declared
+// before the await saw `null` and skipped, while the five after it ran. Half
+// the suite silently not exercising a browser is the exact defect being fixed.
+const stagedBrowser = await stagedBrowserFromMachineCache();
 
 function locateRenderBrowser() {
   const explicit = process.env.AUTOMATION_TOOL_RENDER_BROWSER;
   if (typeof explicit === "string" && explicit.length > 0 && existsSync(explicit)) {
     return explicit;
   }
+  if (stagedBrowser !== null) return stagedBrowser;
   for (const candidate of BROWSER_CANDIDATES) {
     const executable = fileURLToPath(new URL(`${candidate}/${MAC_APP_SUFFIX}`, repositoryRoot));
     if (existsSync(executable)) return executable;
@@ -311,11 +370,6 @@ test("a composition that actually animates still renders", async (t) => {
 // real Chromium: the deterministic Python tests can only prove the document
 // passes the *static* gates, and a document that passes all of them while never
 // repainting is exactly the defect T86 shipped.
-const PYTHON = process.env.AUTOMATION_TOOL_TEST_PYTHON
-  ?? ["backend/.venv/bin/python", "backend/.venv/Scripts/python.exe"]
-    .map((candidate) => fileURLToPath(new URL(candidate, repositoryRoot)))
-    .find((candidate) => existsSync(candidate))
-  ?? "python3";
 const TEMPLATE_DURATION = 3;
 const RENDER_TEMPLATE = `
 import sys
@@ -539,5 +593,29 @@ test("two shots of one document render different stretches of it", async (t) => 
     first.frameDigests,
     second.frameDigests,
     "两段各自渲染同一份文档的不同时间段，画面不可能逐帧相同——相同就说明窗口没生效",
+  );
+});
+
+// Every test above degrades to `t.skip` when no browser is found, which is the
+// right behaviour and also the reason this one has to exist. Every location
+// `BROWSER_CANDIDATES` names is `.local/`-relative and macOS-only, and the
+// shared staging cache moved the browser out of the checkout entirely — so
+// after that move these tests stopped rendering anything, on every platform,
+// while still reporting success.
+//
+// A suite that silently stops exercising a real Chromium is worse than one that
+// fails: the skips read as "not applicable here" no matter why they happened.
+test("the staged browser this machine actually has is the one these tests find", async (t) => {
+  const staged = await stagedBrowserFromMachineCache();
+  if (staged === null) {
+    t.skip("no staged embedded Chromium in the machine cache");
+    return;
+  }
+
+  assert.equal(
+    locateRenderBrowser(),
+    staged,
+    "the machine cache holds a staged Chromium that this suite cannot see, so "
+      + "every render test above is skipping while looking green",
   );
 });

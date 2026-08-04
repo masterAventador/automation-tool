@@ -108,4 +108,4 @@ backend/.venv/bin/python scripts/run_eb_03_acceptance.py
 
 | 项 | 状态 |
 | --- | --- |
-| Windows 机迁移 `chrome-win64.zip` | 待办：该机当时正在跑 EB-16 出包，未远程操作 |
+| Windows 机迁移 `chrome-win64.zip` | ✅ 2026-08-05 已完成。迁移前核对文件 sha256 与契约 `archive_sha256` 逐位一致（`ebc0c2b7…07ab`），按本文档做法用移动、不留第二份，192,511,857 字节落到 `%LOCALAPPDATA%\automation-tool-build\embedded-browser-archives\`，空掉的 `.local\eb-04-windows\` 已删。随后在该机实跑 `ensure_staged_browser("windows-x86_64")`：首次 5.0s → 310 文件 / 435,703,601 字节，二次 0.00s 命中，`verify_distribution` 通过。证据见 `FIX-staged-browser-lookup-and-host-target.md` |
