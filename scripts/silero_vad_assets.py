@@ -15,6 +15,9 @@ from typing import NoReturn, cast
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = REPOSITORY_ROOT / "contracts/quality/silero-vad-runtime.v1.json"
 CACHE_NAME = "silero-vad"
+# 1.3 MB of immutable, platform-independent ONNX weights, committed alongside
+# the fonts. Nothing about them needs a per-machine download.
+COMMITTED_ASSET_DIRECTORY = REPOSITORY_ROOT / "assets/silero-vad"
 MODEL_SOURCE_PREFIX = (
     "https://raw.githubusercontent.com/snakers4/silero-vad/v6.2.1/src/silero_vad/data/"
 )
@@ -228,6 +231,24 @@ def _fetch(url: str, *, limit: int) -> bytes:
     return payload
 
 
+def _committed_payload(asset: LockedAsset) -> bytes | None:
+    """Return the committed bytes only when they are the locked ones.
+
+    Matching on the file name alone is not enough: a caller may pass a contract
+    whose `cachedName` collides with a committed file while pinning entirely
+    different bytes, and returning the local file then answers a question that
+    was never asked. Digesting first makes this a cache — the locked digest
+    stays the only thing that decides what counts as the asset.
+    """
+    committed = COMMITTED_ASSET_DIRECTORY / asset.cached_name
+    if not committed.is_file():
+        return None
+    payload = committed.read_bytes()
+    if hashlib.sha256(payload).hexdigest() != asset.sha256:
+        return None
+    return payload
+
+
 def ensure_silero_vad_assets(
     *,
     root: Path | None = None,
@@ -241,6 +262,9 @@ def ensure_silero_vad_assets(
     contract = load_silero_vad_contract(contract_path)
 
     def obtain(asset: LockedAsset, *, limit: int) -> bytes:
+        committed = _committed_payload(asset)
+        if committed is not None:
+            return committed
         if fetch is None:
             return _fetch(asset.source_url, limit=limit)
         try:

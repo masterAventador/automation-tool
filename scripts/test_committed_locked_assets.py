@@ -24,6 +24,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from silero_vad_assets import (  # noqa: E402
+    CONTRACT_PATH as SILERO_VAD_CONTRACT_PATH,
+)
+from silero_vad_assets import (  # noqa: E402
+    ensure_silero_vad_assets,
+    load_silero_vad_contract,
+)
 from subtitle_font_assets import (  # noqa: E402
     ASSET_RIGHTS_PATH,
     bundled_subtitle_fonts,
@@ -96,6 +103,32 @@ class SubtitleFontTests(unittest.TestCase):
             for name in expected:
                 self.assertTrue(
                     (cached / name).is_file(), f"{name} missing from the built bundle"
+                )
+
+
+class SileroVadTests(unittest.TestCase):
+    def test_model_builds_without_touching_the_network(self) -> None:
+        """1.3 MB of immutable ONNX weights: nothing here needs a download.
+
+        It is a voice-activity detector, not a language model — small, CPU-only
+        and platform-independent, so it belongs next to the fonts rather than
+        behind a network call every clean machine has to make.
+        """
+
+        def boom(url: str) -> bytes:
+            raise NetworkUsed(f"the build tried to download {url}")
+
+        with tempfile.TemporaryDirectory(prefix="committed-vad-") as temporary:
+            cached = ensure_silero_vad_assets(root=Path(temporary), fetch=boom)
+
+            contract = load_silero_vad_contract(SILERO_VAD_CONTRACT_PATH)
+            for asset in (contract.model, contract.license):
+                path = cached / asset.cached_name
+                self.assertTrue(path.is_file(), f"{asset.cached_name} was not built")
+                self.assertEqual(
+                    digest(path.read_bytes()),
+                    asset.sha256,
+                    f"{asset.cached_name} drifted from its locked digest",
                 )
 
 
