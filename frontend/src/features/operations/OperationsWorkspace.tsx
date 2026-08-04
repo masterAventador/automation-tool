@@ -622,6 +622,9 @@ interface ScheduledWork {
   readonly status: "awaiting" | "scheduled" | "draft";
 }
 
+// 只能出现产品真的能发布的平台。这里原本有一条小红书草稿和一条视频号「已确认」，
+// 而两个平台都接不了——用户打开发布页第一眼看到的就是两条发不出去的排期，
+// 比不显示更糟。
 const INITIAL_PUBLISH_ITEMS: readonly ScheduledWork[] = [
   {
     id: "publish-1",
@@ -633,14 +636,14 @@ const INITIAL_PUBLISH_ITEMS: readonly ScheduledWork[] = [
   {
     id: "publish-2",
     title: "产品更新 · 夏季功能发布",
-    platform: "小红书",
+    platform: "B站",
     scheduledAt: "明天 10:00",
     status: "draft",
   },
   {
     id: "publish-3",
     title: "门店服务流程 · 30 秒版",
-    platform: "视频号",
+    platform: "抖音",
     scheduledAt: "周五 12:00",
     status: "scheduled",
   },
@@ -720,8 +723,8 @@ export function PublishingHub({
                 <Text type="secondary">{day}</Text>
                 <strong>{27 + index}</strong>
                 {index === 0 ? <span>18:30 · 抖音</span> : null}
-                {index === 1 ? <span>10:00 · 小红书</span> : null}
-                {index === 4 ? <span>12:00 · 视频号</span> : null}
+                {index === 1 ? <span>10:00 · B站</span> : null}
+                {index === 4 ? <span>12:00 · 抖音</span> : null}
               </div>
             ))}
           </div>

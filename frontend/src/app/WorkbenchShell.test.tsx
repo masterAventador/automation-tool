@@ -564,6 +564,32 @@ describe("publishing", () => {
     expect(await screen.findByRole("heading", { name: "发布", level: 2 })).toBeVisible();
   });
 
+  it("never names a platform the product cannot publish to", async () => {
+    // PB-07 要求发布页只展示 B站/抖音。之前只有「点进工作台之后」被断言过，而
+    // 发布板块的**落地视图**（发布清单与内容日历）带着占位数据：一条小红书草稿、
+    // 一条视频号「已确认」。用户打开发布页第一眼看到的就是这两条——产品发不了的
+    // 平台，却显示成已经排好的发布，比不显示更糟。
+    const user = openPublishing();
+
+    await user.click(screen.getByRole("menuitem", { name: "发布" }));
+    await screen.findByRole("heading", { name: "发布", level: 2 });
+
+    const listView = document.body.textContent ?? "";
+    for (const unsupported of ["小红书", "视频号", "快手", "微博"]) {
+      expect(listView).not.toContain(unsupported);
+    }
+
+    // 日历视图同样是落地视图的一部分，占位数据也在那里。
+    // Segmented 的 radio input 是 `pointer-events: none` 的隐藏元素，点它会被
+    // user-event 拒绝；可点的是带文案的 label。
+    await user.click(screen.getByText("内容日历"));
+    const calendarView = document.body.textContent ?? "";
+    expect(calendarView).toContain("周一");
+    for (const unsupported of ["小红书", "视频号", "快手", "微博"]) {
+      expect(calendarView).not.toContain(unsupported);
+    }
+  });
+
   it("says it cannot read the state rather than inventing a publishable one", async () => {
     // The shell has no bridge of its own; a fabricated "ready" would offer a
     // publish that nothing could carry out.
