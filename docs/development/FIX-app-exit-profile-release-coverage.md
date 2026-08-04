@@ -103,19 +103,73 @@ match (stop, release) {
   但走的是不是这条分支没核实。登记。
 - 扫描出的另外 45 个未命名函数：本次只处理了风险最高的一个，清单在下节。
 
+## 用投毒把「名字没出现」变成「真的没被走到」
+
+名字扫描只能排优先级。判定必须靠**投毒**：在函数体第一行插
+`panic!("MUTANT::<名字>")`，跑一次全量 `cargo test`，看哪个 MUTANT 真的炸出来。
+
+六个候选一次跑完，结果：
+
+| 函数 | 判定 |
+| --- | --- |
+| `read_rendered_video_artifact` | **假阳性**，3 条测试实际走到 |
+| `rollback_committed_smart_edit` | 真无覆盖 |
+| `finish_smart_edit_job` | 真无覆盖 |
+| `dispatch_submitted_job` | 真无覆盖 |
+| `fail_submitted_job` | 真无覆盖 |
+| `remove_output` | 真无覆盖 → **本轮补齐** |
+
+读日志时有个坑值得记：`panic!` 让后面的代码不可达，rustc 会为每个被投毒的函数
+各打一条 `unreachable expression` 警告，**警告里会原样印出 `MUTANT::<名字>`**。
+所以 `grep -c MUTANT` 得到 9，其中 6 条是编译警告、只有 3 条是真的 panic。
+按出现次数数会把六个全判成「有覆盖」。
+
+`cached_executable_still_sound` 同样是假阳性，由
+`executable_removed_after_caching_is_detected_on_next_resolve` 间接覆盖——它不在这次
+投毒批次里，是单独读测试确认的。
+
+`*_for_acceptance` 系列不在候选里：它们由验收驱动在运行期真实走过，只是名字不出现在
+测试源码。
+
+## 本轮第二条：`remove_output`（已补）
+
+它的用户可见后果藏在唯一调用点 `motion_video_studio::import_rendered_output` 里：
+先导入成片，再删掉工作区里那份原件；**删不掉就把刚导入的 Artifact 也删掉并返回失败**。
+一坏，用户什么成片都拿不到，报的还是存储错误，指不到真正的原因。
+
+`frontend/src-tauri/tests/video_job_workspace.rs` 新增两条：
+
+| 测试 | 断言 |
+| --- | --- |
+| `removing_a_worker_output_leaves_the_imported_artifact_and_reports_a_second_removal` | 原件删掉、`outputs/` 目录还在、**已导入的成片仍可读回原字节**、再删一次报 `NotFound` |
+| `remove_output_refuses_escaping_names_links_and_directories_without_touching_the_target` | 逃逸名、软链、目录一律 `PathRejected`，且 outputs 之外的文件一个没少 |
+
+### 诱饵放在逃逸名真正会落到的位置
+
+第一版只断言「返回了 `PathRejected`」，这**不够**：拿掉名字校验后 `../x` 也可能因为
+那里恰好没有文件而回 `NotFound`，看着照样像被拦住了。第一次跑变异时看到的正是
+`left: NotFound / right: PathRejected`——判据分辨的是错误码，不是「文件还在不在」。
+
+改成把诱饵写到每个逃逸名真正会落到的路径上：`../` 落在工作区目录、`../../` 落在
+jobs 目录、绝对路径落在本次临时目录（`Path::join` 遇到绝对路径**整段替换**，名字校验
+是那里唯一的防线；不拿系统文件做实验）。改完再跑同一条变异，报的就是
+**「`../escape-one.mp4` 必须被拒」——它被接受了，那个文件真的会没**。
+
+### 变异确认非空
+
+```text
+✅ 被抓住  去掉文件名校验        → 逃逸名被接受，工作区外的诱饵会被删
+✅ 被抓住  去掉软链/目录/不存在判定 → 软链与目录被当成产物
+✅ 被抓住  报告成功但什么都不删    → 「原件应当已被删除」
+```
+
 ## 扫描出的其余高风险项（登记，未做）
 
-按「坏掉之后用户会怎样」排的，不是按数量：
-
-| 函数 | 坏掉的后果 |
-| --- | --- |
-| `rollback_committed_smart_edit` | 剪辑回滚失效，用户素材可能停在半提交状态 |
-| `cached_executable_still_sound` | 内置浏览器缓存的完整性判据失守（供应链边界） |
-| `dispatch_submitted_job` / `fail_submitted_job` | 剪辑任务派发与失败终态 |
-| `read_rendered_video_artifact` / `remove_output` | 成片读取与删除 |
-
-`*_for_acceptance` 系列不在此列：它们由验收驱动在运行期真实走过，只是名字不出现在
-测试源码里。
+| 函数 | 坏掉的后果 | 为什么这轮没做 |
+| --- | --- | --- |
+| `rollback_committed_smart_edit` | 智能剪辑补偿失效：生成的旁白素材与 `generated-materials/<job>` 目录双双泄漏 | `pub(crate)`，集成测试看不见；in-src 测试又要把 `tests/local_video_orchestrator.rs` 那套 Worker 夹具抄一份。需要先决定是放宽可见性（它的四个同族方法都是 `pub`）还是下沉夹具 |
+| `finish_smart_edit_job` | 提交被 Worker 拒绝后的私有 job 目录清理 | `pub`，可从集成测试走到，但要先把 `terminal` 状态造出来 |
+| `dispatch_submitted_job` / `fail_submitted_job` | 剪辑任务派发与失败终态；后者坏掉意味着失败的任务**永远停在进行中** | 两者都吃 `tauri::AppHandle`，要先有 App 夹具 |
 
 ## 清理
 
@@ -135,11 +189,13 @@ match (stop, release) {
 
 ```text
 cargo test --lib                      164 passed
+cargo test --test video_job_workspace  17 passed（原 15）
 cargo clippy --lib --tests            零告警
 cargo fmt -- --check                  干净
 ```
 
 ## 文档
 
-- `frontend/src-tauri/src/executor_platform.rs`（两条测试 + 共用夹具）
+- `frontend/src-tauri/src/executor_platform.rs`（App 退出两条测试 + 共用夹具）
+- `frontend/src-tauri/tests/video_job_workspace.rs`（`remove_output` 两条测试）
 - 本文件

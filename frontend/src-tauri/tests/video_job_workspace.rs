@@ -753,3 +753,148 @@ fn a_staged_copy_left_by_a_crash_does_not_survive_the_next_start() {
     assert!(!staged.path().exists());
     assert_eq!(restarted.list_artifacts().expect("inventory").len(), 1);
 }
+
+/// `remove_output` 此前在整个 Rust 测试套件里一次都没被走到过（投毒确认）。
+///
+/// 它的**用户可见后果**藏在唯一的调用点里：`import_rendered_output` 先导入成片，
+/// 再删掉工作区里那份原件；删不掉就把刚导入的 Artifact 也删掉并返回失败。
+/// 也就是说这个函数一坏，**用户什么成片都拿不到**，而且报的是存储错误，
+/// 指不到真正的原因。
+#[test]
+fn removing_a_worker_output_leaves_the_imported_artifact_and_reports_a_second_removal() {
+    let root = TemporaryRoot::new();
+    let store = VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("workspace store");
+    let workspace = store
+        .create(job("123e4567-e89b-42d3-a456-426614174230"))
+        .expect("workspace");
+    let outputs = store
+        .worker_output_directory(&workspace)
+        .expect("worker output");
+    fs::write(outputs.join("result.mp4"), b"rendered-video-bytes").expect("rendered output");
+    let artifact = store
+        .import_output(&workspace, "result.mp4", "video/mp4", "rendered_video")
+        .expect("artifact");
+
+    store
+        .remove_output(&workspace, "result.mp4")
+        .expect("remove the worker's copy after import");
+
+    assert!(!outputs.join("result.mp4").exists(), "原件应当已被删除");
+    assert!(outputs.is_dir(), "删的是文件，不是整个 outputs 目录");
+    // 这才是这个函数存在的理由：删原件不能连成片一起带走。
+    let mut payload = Vec::new();
+    store
+        .open_artifact(&artifact)
+        .expect("the imported artifact must survive the cleanup")
+        .read_to_end(&mut payload)
+        .expect("artifact bytes");
+    assert_eq!(payload, b"rendered-video-bytes");
+
+    assert_eq!(
+        store
+            .remove_output(&workspace, "result.mp4")
+            .expect_err("removing it twice is not silently fine")
+            .code(),
+        VideoWorkspaceErrorCode::NotFound,
+    );
+}
+
+/// 文件名是**外部输入**（Worker 报上来的产物名），所以它必须过名字校验，
+/// 而不是直接拼进路径。CLAUDE.md §7：模型输出、网页内容、文件名一律视为不可信。
+#[test]
+fn remove_output_refuses_escaping_names_links_and_directories_without_touching_the_target() {
+    let root = TemporaryRoot::new();
+    let store = VideoJobWorkspaceStore::initialize(root.path(), policy()).expect("workspace store");
+    let workspace = store
+        .create(job("123e4567-e89b-42d3-a456-426614174231"))
+        .expect("workspace");
+    let outputs = store
+        .worker_output_directory(&workspace)
+        .expect("worker output");
+
+    // 诱饵**放在每个逃逸名真正会落到的位置上**。
+    //
+    // 只断言「返回了 PathRejected」是不够的：拿掉名字校验后 `../x` 也可能因为
+    // 那里恰好没有文件而回 NotFound，看着照样像被拦住了。诱饵让否定答案有形状——
+    // 校验一旦失效，这些文件就真的没了。
+    let workspace_directory = outputs.parent().expect("workspace directory");
+    let jobs_directory = workspace_directory.parent().expect("jobs directory");
+    // 绝对路径：`Path::join` 遇到绝对路径会**整段替换**，所以名字校验是这里唯一的
+    // 防线。诱饵放在本次临时目录里，不拿系统文件做实验。
+    let absolute_decoy = root.path().join("escape-absolute.mp4");
+    let absolute_name = absolute_decoy
+        .to_str()
+        .expect("UTF-8 decoy path")
+        .to_owned();
+    let decoys = [
+        (
+            "../escape-one.mp4".to_owned(),
+            workspace_directory.join("escape-one.mp4"),
+        ),
+        (
+            "../../escape-two.mp4".to_owned(),
+            jobs_directory.join("escape-two.mp4"),
+        ),
+        (absolute_name, absolute_decoy.clone()),
+    ];
+    for (_, path) in &decoys {
+        fs::write(path, b"a file the workspace has no business deleting").expect("decoy");
+    }
+    for (name, path) in &decoys {
+        let Err(refused) = store.remove_output(&workspace, name) else {
+            panic!("`{name}` 必须被拒");
+        };
+        assert_eq!(
+            refused.code(),
+            VideoWorkspaceErrorCode::PathRejected,
+            "`{name}` 应当在拼路径之前就被名字校验拦下",
+        );
+        assert!(path.exists(), "`{name}` 把 outputs 之外的文件删掉了");
+    }
+
+    // 落不到任何文件上的名字，同样必须是「拒绝」而不是「没找到」。
+    for name in [
+        "",
+        ".",
+        "..",
+        "nested/result.mp4",
+        "resu lt.mp4",
+        "结果.mp4",
+    ] {
+        let Err(refused) = store.remove_output(&workspace, name) else {
+            panic!("`{name}` 必须被拒");
+        };
+        assert_eq!(
+            refused.code(),
+            VideoWorkspaceErrorCode::PathRejected,
+            "`{name}` 应当被名字校验拦下",
+        );
+    }
+
+    // 名字合法、但那个位置是一条软链。删软链不会删到目标，真正的风险是它让
+    // outputs 里出现了一个不是本 Worker 产物的东西——所以判据是「不认」。
+    let link_target = root.path().join("link-target.mp4");
+    fs::write(&link_target, b"link target").expect("link target");
+    std::os::unix::fs::symlink(&link_target, outputs.join("linked.mp4")).expect("symlink fixture");
+    assert_eq!(
+        store
+            .remove_output(&workspace, "linked.mp4")
+            .expect_err("a symlink is not a worker output")
+            .code(),
+        VideoWorkspaceErrorCode::PathRejected,
+    );
+
+    // 名字合法、但那个位置是目录。
+    fs::create_dir(outputs.join("directory.mp4")).expect("directory fixture");
+    assert_eq!(
+        store
+            .remove_output(&workspace, "directory.mp4")
+            .expect_err("a directory is not a worker output")
+            .code(),
+        VideoWorkspaceErrorCode::PathRejected,
+    );
+
+    assert!(link_target.exists());
+    assert!(outputs.join("linked.mp4").symlink_metadata().is_ok());
+    assert!(outputs.join("directory.mp4").is_dir());
+}
