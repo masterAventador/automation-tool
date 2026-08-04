@@ -191,8 +191,10 @@ class PathsAreDerivedNotRetyped(unittest.TestCase):
             embedded_browser_cache,
         )
 
+        # Absolute now: the staged browser is one per machine, shared by the
+        # release and every desktop driver, so it is not inside any checkout.
         manifest = embedded_browser_cache() / DISTRIBUTION_MANIFEST_NAME
-        expected = (manifest.relative_to(ROOT).as_posix(),)
+        expected = (manifest.as_posix(),)
         prerequisite = by_name("video-e2e-embedded-browser")
 
         self.assertEqual(expected, prerequisite.produces)
@@ -204,17 +206,25 @@ class PathsAreDerivedNotRetyped(unittest.TestCase):
     def test_an_unsupported_host_can_still_inspect_the_registry(self) -> None:
         import desktop_e2e_prerequisites
         import gate_prerequisites
+        from video_runtime_cache import cache_root
 
+        # `patch.object(…sys, "platform")` rebinds the attribute on the `sys`
+        # module itself, so it reaches `cache_root()` too — the expectation has
+        # to be computed under the same patch or it would describe this host.
         with mock.patch.object(desktop_e2e_prerequisites.sys, "platform", "linux"):
             paths = gate_prerequisites._video_e2e_browser_paths()
+            expected = (
+                (
+                    cache_root()
+                    / "embedded-browser-unsupported-linux"
+                    / "distribution-manifest.v1.json"
+                ).as_posix(),
+            )
 
-        self.assertEqual(
-            (
-                ".local/desktop-e2e/embedded-browser/"
-                "unsupported-linux/distribution-manifest.v1.json",
-            ),
-            paths,
-        )
+        # The registry still answers rather than raising, and still names the
+        # unsupported target — the point of this test. The root itself is
+        # per-platform, so it is derived instead of retyped.
+        self.assertEqual(expected, paths)
 
 
 class ConsumersReadTheDeclarationRatherThanRetypingIt(unittest.TestCase):

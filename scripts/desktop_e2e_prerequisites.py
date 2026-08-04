@@ -252,7 +252,17 @@ def release_target_id() -> str:
 
 
 def embedded_browser_cache(target_id: str | None = None) -> Path:
-    return EMBEDDED_BROWSER_CACHE_ROOT / (target_id or release_target_id())
+    """Where the staged browser lives — the one cache, shared with the release.
+
+    This used to name a directory only the desktop drivers wrote to, while a
+    release unpacked its own copy elsewhere. Both now read
+    `embedded_browser_staging_cache`, so this has to answer for that location
+    or it would report on a directory nothing writes any more.
+    """
+    from embedded_browser_staging_cache import cache_name
+    from video_runtime_cache import cache_root
+
+    return cache_root() / cache_name(target_id or release_target_id())
 
 
 def build_embedded_browser_cache(target_id: str | None = None) -> Path:
@@ -263,41 +273,16 @@ def build_embedded_browser_cache(target_id: str | None = None) -> Path:
     sees. The cache is content-verified on every use, so a damaged one is
     rejected rather than staged.
     """
-    from build_embedded_browser_distribution import (
-        build_distribution_manifest,
-    )
-    from build_embedded_chromium_staging import (
-        build_staging,
-        load_staging_contract,
-        sha256_file,
+    from embedded_browser_staging_cache import (
+        EmbeddedBrowserStagingUnavailable,
+        ensure_staged_browser,
     )
 
     resolved = target_id or release_target_id()
-    archive = LOCKED_BROWSER_ARCHIVES.get(resolved)
-    if archive is None or not archive.is_file():
-        raise DesktopPrerequisiteRejected(
-            f"the locked Chromium archive for {resolved} is not downloaded "
-            f"({archive}); build_embedded_browser_distribution needs it"
-        )
-    destination = embedded_browser_cache(resolved)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(
-        prefix="automation-tool-embedded-browser-", dir=destination.parent
-    ) as workspace:
-        staging = Path(workspace) / "distribution"
-        contract = load_staging_contract(
-            REPOSITORY_ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
-        )
-        build_staging(
-            contract=contract,
-            target_id=resolved,
-            archive_path=archive,
-            archive_sha256=sha256_file(archive),
-            output=staging,
-        )
-        build_distribution_manifest(staging=staging, target_id=resolved)
-        shutil.rmtree(destination, ignore_errors=True)
-        shutil.move(os.fspath(staging), os.fspath(destination))
+    try:
+        destination = ensure_staged_browser(target_id=resolved)
+    except EmbeddedBrowserStagingUnavailable as error:
+        raise DesktopPrerequisiteRejected(str(error)) from error
     return destination
 
 

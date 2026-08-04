@@ -59,7 +59,12 @@ class Prerequisite:
     gate: str
     """The command that goes red without this artifact. Documentation only."""
     produces: tuple[str, ...]
-    """Repository-relative paths that must all exist. Never absolute."""
+    """Paths that must all exist, repository-relative where that is meaningful.
+
+    An artifact shared by every checkout on the machine — the staged browser —
+    lives in the platform cache instead, and is named absolutely. `missing()`
+    handles both because `REPOSITORY_ROOT / "/abs"` is `/abs`.
+    """
     producer: tuple[str, ...]
     """The argv `--ensure` runs. `{python}` is replaced by this interpreter."""
     automatic: bool
@@ -130,8 +135,11 @@ def _video_e2e_browser_paths() -> tuple[str, ...]:
         target_id = release_target_id()
     except DesktopPrerequisiteRejected:
         target_id = f"unsupported-{sys.platform}"
+    # Absolute: the staged browser is one per machine, shared by the release
+    # and every desktop driver, so it lives in the platform artifact cache
+    # rather than in any one checkout.
     manifest = embedded_browser_cache(target_id) / DISTRIBUTION_MANIFEST_NAME
-    return (manifest.relative_to(REPOSITORY_ROOT).as_posix(),)
+    return (manifest.as_posix(),)
 
 
 PREREQUISITES: Final[tuple[Prerequisite, ...]] = (
@@ -238,8 +246,16 @@ def by_name(name: str) -> Prerequisite:
     raise KeyError(f"no prerequisite named {name!r}; declared: {known}")
 
 
+def _readable(path: Path) -> str:
+    """Repository-relative when it is inside one, absolute when it is not."""
+    try:
+        return path.relative_to(REPOSITORY_ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 def explain(prerequisite: Prerequisite, missing: list[Path]) -> str:
-    absent = ", ".join(path.relative_to(REPOSITORY_ROOT).as_posix() for path in missing)
+    absent = ", ".join(_readable(path) for path in missing)
     lines = [
         f"{prerequisite.gate} cannot run: {absent} is missing.",
         f"  why: {prerequisite.why}",

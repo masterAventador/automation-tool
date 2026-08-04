@@ -54,10 +54,8 @@ from build_embedded_chromium_staging import (  # noqa: E402
     MANIFEST_NAME as STAGING_MANIFEST_NAME,
 )
 from build_embedded_chromium_staging import (  # noqa: E402
-    build_staging,
     generate_manifest,
     load_staging_contract,
-    sha256_file,
 )
 from build_motion_catalog_release import (  # noqa: E402
     stage_for_release as stage_motion_catalog,
@@ -84,6 +82,7 @@ from embedded_browser_archives import (  # noqa: E402
     MACOS_ARM64_ARCHIVE,
     archive_path,
 )
+from embedded_browser_staging_cache import copy_staged_browser  # noqa: E402
 from prepare_video_runtime import prepare as prepare_video_runtime  # noqa: E402
 from production_assets import (  # noqa: E402
     AUDITED_DISTRIBUTION_NAME,
@@ -231,14 +230,11 @@ def stage_browser_distribution(
     announce(f"Staging the digest-locked {target_id} Chromium from {archive.name}")
     if not archive.is_file():
         raise ReleaseFailed(f"locked archive is not downloaded yet: {archive}")
-    contract = load_staging_contract(STAGING_CONTRACT)
-    build_staging(
-        contract=contract,
-        target_id=target_id,
-        archive_path=archive,
-        archive_sha256=sha256_file(archive),
-        output=output,
-    )
+    # The unpacked tree comes from the machine-wide cache the desktop builds
+    # use, so both sides stage the same bytes by construction rather than by
+    # two code paths that happen to agree. The copy is this run's own: signing
+    # rewrites every Mach-O below, and the cache must stay unsigned.
+    copy_staged_browser(target_id=target_id, output=output)
     # Chrome for Testing arrives ad-hoc/linker-signed — `codesign -dvv` reports
     # `TeamIdentifier=not set`, so there is no upstream Developer ID signature
     # to preserve and nothing here can be notarised as it stands. Every Mach-O
