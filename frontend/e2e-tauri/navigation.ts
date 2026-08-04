@@ -169,9 +169,30 @@ export async function openVideoEditing(): Promise<void> {
 }
 
 /** The publishing workspace, on its 新建发布 step. */
+/**
+ * The publish workspace, with the workspace confirmed on screen.
+ *
+ * The click alone is not enough, and this suite had no way to notice: this
+ * helper had no caller until PB-07's navigation spec, and that spec's first
+ * real-App run went red reading 发布清单 — the landing list — because
+ * `setView("workspace")` had not re-rendered yet. WebdriverIO does not retry a
+ * bare `getText()` the way Playwright retries an assertion, so the race is the
+ * caller's to close.
+ *
+ * Landing assertion here rather than in each spec, same as `openSettings`
+ * below: a helper that returns while the page is still the previous one hands
+ * every caller the same bug.
+ */
 export async function openPublishingWorkspace(): Promise<void> {
   await openWorkbenchSection("发布");
   await browser.$("//button[contains(normalize-space(),'新建发布')]").click();
+  // `.embedded-workbench` would be the obvious wait target and is the wrong
+  // one: three other sections render that same class, so it can already exist
+  // from wherever the shell was before. This string is rendered in exactly one
+  // place in the product.
+  await browser
+    .$("//strong[normalize-space()='真实发布工作台']")
+    .waitForExist({ timeout: 10_000 });
 }
 
 /** The automation run history. */

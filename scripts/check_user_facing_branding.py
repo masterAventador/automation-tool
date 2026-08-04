@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Scan user-facing source surfaces for forbidden brands and unexplained terms.
 
-Four rules are enforced against ``contracts/quality/user-facing-terminology.v1.json``:
+Five rules are enforced against ``contracts/quality/user-facing-terminology.v1.json``:
 
 0. the brand surface of the embedded upstream WebUI stays exactly as pinned;
-1. upstream project names never reach a user-visible surface;
+1. upstream project names never reach a user-visible surface, and every
+   dependency declared in ``contracts/quality/third-party-sources.v1.json`` has
+   its name on that forbidden list — otherwise the scan passes by never looking;
 2. no declared industry term reaches rendered copy without its plain Chinese
    wording (in the same sentence, or anywhere on the same page for the two
    vendor console field names and the product category name);
@@ -650,6 +652,60 @@ def scan_embedded_web_ui(root: Path, policy: dict[str, object]) -> list[str]:
     ]
 
 
+THIRD_PARTY_SOURCES_RELATIVE = "contracts/quality/third-party-sources.v1.json"
+
+
+def scan_upstream_name_coverage(root: Path, terms: list[str]) -> list[str]:
+    """Every vendored upstream must have its name on the forbidden list.
+
+    Rules 1 and 2 scan for the names in ``forbiddenUserFacingTerms``, which
+    means this gate can only ever catch a name somebody remembered to declare.
+    Nothing tied that list to the actual dependency set, so adding a third
+    submodule would leave the scanner **silently blind to it** — passing not
+    because the new name is absent from the UI, but because it was never looked
+    for. That failure mode is indistinguishable from success in the output,
+    which is exactly the kind of check this repository treats as no check.
+
+    ``third-party-sources.v1.json`` is the authority on what is vendored
+    (`scripts/check_third_party_sources.py` holds it to pinned tags), so the
+    coverage question is answerable: for every source there, its id and its
+    repository name must both be covered by a declared term.
+    """
+    path = root / THIRD_PARTY_SOURCES_RELATIVE
+    if not path.is_file():
+        return [f"{THIRD_PARTY_SOURCES_RELATIVE} is missing; upstream names cannot be checked"]
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return [f"{THIRD_PARTY_SOURCES_RELATIVE} is unreadable: {error}"]
+    sources = document.get("sources")
+    if not isinstance(sources, list) or not sources:
+        return [f"{THIRD_PARTY_SOURCES_RELATIVE} declares no sources"]
+
+    declared = {compact(term) for term in terms}
+    violations: list[str] = []
+    for entry in sources:
+        if not isinstance(entry, dict):
+            violations.append(f"{THIRD_PARTY_SOURCES_RELATIVE} has a malformed source entry")
+            continue
+        identifier = entry.get("id")
+        if not isinstance(identifier, str) or not identifier:
+            violations.append(f"{THIRD_PARTY_SOURCES_RELATIVE} has a source without an id")
+            continue
+        names = {identifier}
+        url = entry.get("url")
+        if isinstance(url, str) and url:
+            names.add(url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git"))
+        for name in sorted(names):
+            if compact(name) not in declared:
+                violations.append(
+                    f"upstream dependency {identifier!r} is not covered by "
+                    f"forbiddenUserFacingTerms (missing {name!r}); the brand scan "
+                    "would pass without ever looking for it"
+                )
+    return violations
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
@@ -703,6 +759,7 @@ def main() -> None:
             scan_forbidden_segments(relative, names, terms, "artifact or export name")
         )
 
+    violations.extend(scan_upstream_name_coverage(root, terms))
     violations.extend(scan_embedded_web_ui(root, embedded))
     violations.extend(scan_concept_distinctions(root, distinctions, contract))
     violations.extend(scan_parts_projection(root, str(contract["partsCatalogProjection"])))

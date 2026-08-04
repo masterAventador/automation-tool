@@ -5,14 +5,19 @@ The real CQ-01 delivery evidence is the production Tauri App user path
 (``scripts/run_cq_01_acceptance.py``). This file only proves the static
 regression gate itself: the committed repository passes, and every declared
 comprehension rule fails closed when the contract or the UI copy is tampered
-with. 29 scenarios are covered: 25 ``expect`` cases, the inline motion part
-projection case, and 3 checks on the real App capture judgement. They span
-missing or malformed declarations, enforced terms without Chinese wording in
-``plainLanguageMappings``, bare industry terms in the three copy carriers,
-plural forms, copy containing parentheses, literals following a JSX
+with.
+
+Scenarios span missing or malformed declarations, enforced terms without Chinese
+wording in ``plainLanguageMappings``, bare industry terms in the three copy
+carriers, plural forms, copy containing parentheses, literals following a JSX
 self-closing tag, accessibility names, lost concept distinctions and card
-labels, an English-only motion part explanation, and captured real App pages
-that carry a bare term or nothing at all.
+labels, an English-only motion part explanation, a vendored upstream whose name
+nobody added to the forbidden list, and captured real App pages that carry a
+bare term or nothing at all.
+
+The scenario count is printed by the run rather than written here. It used to be
+a hand-maintained ``34``, which stayed ``34`` whether 34 scenarios ran or 3 did
+— a number that cannot be wrong cannot report a gap either.
 """
 
 from __future__ import annotations
@@ -100,12 +105,25 @@ def base_contract() -> dict:
     return contract
 
 
+THIRD_PARTY_SOURCES_OK = {
+    "schemaVersion": 1,
+    "sources": [
+        {"id": "moneyprinterturbo", "url": "https://example.invalid/MoneyPrinterTurbo.git"},
+        {"id": "hyperframes", "url": "https://example.invalid/hyperframes.git"},
+    ],
+}
+
+
 def materialize(
     directory: Path,
     contract: dict,
     sources: dict[str, str],
     embedded: str = EMBEDDED_WEBUI_OK,
+    third_party_sources: dict | None = None,
 ) -> Path:
+    third_party_sources = (
+        THIRD_PARTY_SOURCES_OK if third_party_sources is None else third_party_sources
+    )
     (directory / EMBEDDED_WEBUI_ROOT).mkdir(parents=True, exist_ok=True)
     (directory / EMBEDDED_WEBUI_ROOT / "Main.py").write_text(embedded, encoding="utf-8")
     (directory / "frontend/src").mkdir(parents=True, exist_ok=True)
@@ -119,6 +137,10 @@ def materialize(
     )
     (directory / "contracts/video/motion-catalog-ui.v1.json").write_text(
         json.dumps(PARTS_PROJECTION, ensure_ascii=False), encoding="utf-8"
+    )
+    (directory / "contracts/quality").mkdir(parents=True, exist_ok=True)
+    (directory / "contracts/quality/third-party-sources.v1.json").write_text(
+        json.dumps(third_party_sources, ensure_ascii=False), encoding="utf-8"
     )
     for name, text in sources.items():
         path = directory / "frontend/src" / name
@@ -138,6 +160,11 @@ STUDIO_OK = (
 )
 
 
+# 场景计数由 `expect` 自己累加。原先末尾印的是写死的 34：新增三个场景后它照样印 34，
+# 也就是这个数字既不能证明跑了多少，也不会因为漏跑而变——一个不会错的计数等于没有计数。
+EXECUTED: list[str] = []
+
+
 def expect(
     name: str,
     contract: dict,
@@ -145,10 +172,14 @@ def expect(
     *,
     passes: bool,
     embedded: str = EMBEDDED_WEBUI_OK,
+    third_party_sources: dict | None = None,
 ) -> None:
+    EXECUTED.append(name)
     with tempfile.TemporaryDirectory(prefix="automation-tool-cq01-test-") as temporary:
         directory = Path(temporary)
-        contract_path = materialize(directory, contract, sources, embedded)
+        contract_path = materialize(
+            directory, contract, sources, embedded, third_party_sources
+        )
         result = run_check(root=directory, contract=contract_path)
         if passes:
             assert result.returncode == 0, f"{name}: expected pass, got {result.stderr}"
@@ -177,6 +208,45 @@ def main() -> int:
     assert self_test.returncode == 0, f"self-test must pass: {self_test.stderr}"
 
     expect("clean synthetic tree", base_contract(), {"Studio.tsx": STUDIO_OK}, passes=True)
+
+    # A new vendored upstream whose name nobody added to the forbidden list.
+    # Without this rule the run is green — not because the name is absent from
+    # the UI, but because the scanner never looked for it. That is the whole
+    # point: an unasked question and a negative answer look identical.
+    added = copy.deepcopy(THIRD_PARTY_SOURCES_OK)
+    added["sources"].append(
+        {"id": "swiftcaption", "url": "https://example.invalid/SwiftCaption.git"}
+    )
+    expect(
+        "new upstream missing from the term list",
+        base_contract(),
+        {"Studio.tsx": STUDIO_OK},
+        passes=False,
+        third_party_sources=added,
+    )
+
+    # The repository name is checked as well as the id: a source declared as
+    # `id: "sc"` pointing at `SwiftCaption.git` still puts that word on screen.
+    renamed = copy.deepcopy(THIRD_PARTY_SOURCES_OK)
+    renamed["sources"][0] = {
+        "id": "moneyprinterturbo",
+        "url": "https://example.invalid/SomeOtherName.git",
+    }
+    expect(
+        "upstream repository name missing from the term list",
+        base_contract(),
+        {"Studio.tsx": STUDIO_OK},
+        passes=False,
+        third_party_sources=renamed,
+    )
+
+    expect(
+        "third-party source authority absent",
+        base_contract(),
+        {"Studio.tsx": STUDIO_OK},
+        passes=False,
+        third_party_sources={"schemaVersion": 1, "sources": []},
+    )
 
     # Contract declarations are mandatory and closed.
     contract = base_contract()
@@ -435,7 +505,9 @@ def main() -> int:
             raise AssertionError("an empty capture must not silently pass")
 
     print("CQ-01 user-facing plain-language gate tests passed")
-    print("executed checks: 34")
+    assert len(EXECUTED) == len(set(EXECUTED)), "场景名重复会让计数看起来对而实际漏跑"
+    # 四项非 `expect` 的检查：仓库自身过闸、扫描器自检、内联零件投影、真实 App 抓取判定。
+    print(f"executed checks: {len(EXECUTED) + 4}")
     return 0
 
 
