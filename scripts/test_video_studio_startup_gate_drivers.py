@@ -229,11 +229,11 @@ def check_driver(path: Path) -> None:
                 )
 
 
-def check_the_driver_set_is_derived_and_currently_contains_seven_builds() -> None:
+def check_the_driver_set_is_derived_and_currently_contains_eight_builds() -> None:
     drivers = video_studio_build_drivers()
-    assert len(drivers) == 7, (
+    assert len(drivers) == 8, (
         "the executable video-studio build surface changed; expected the current "
-        f"seven independent drivers, derived {len(drivers)}: "
+        f"eight independent drivers, derived {len(drivers)}: "
         f"{', '.join(path.name for path in drivers)}"
     )
 
@@ -711,7 +711,7 @@ def check_partial_compose_startup_still_runs_destructive_cleanup() -> None:
 
 
 CHECKS = (
-    check_the_driver_set_is_derived_and_currently_contains_seven_builds,
+    check_the_driver_set_is_derived_and_currently_contains_eight_builds,
     check_every_real_build_is_inside_the_complete_shared_harness,
     check_the_environment_allowlist_exactly_matches_dynamic_driver_inputs,
     check_local_and_incomplete_harness_decoys_are_rejected,

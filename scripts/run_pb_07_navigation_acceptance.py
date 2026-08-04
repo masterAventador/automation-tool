@@ -38,7 +38,15 @@ def _run(arguments: list[str], *, cwd: Path, env: dict[str, str]) -> None:
     subprocess.run(arguments, cwd=cwd, env=env, check=True, timeout=1800)
 
 
-def main() -> int:
+def run_desktop_acceptance() -> None:
+    """Build the hidden video-studio App and drive the one navigation spec.
+
+    Kept as its own named function rather than inlined into `main`, because
+    `scripts/test_video_studio_startup_gate_drivers.py` requires every driver
+    that builds this App to do it inside one top-level function that `main`
+    calls. Writing the build straight into `main` made this driver the eighth
+    one and the first to break that shape — the gate caught it the same day.
+    """
     configuration = json.loads(TAURI_CONFIG.read_text(encoding="utf-8"))
     windows = configuration.get("app", {}).get("windows", [])
     if (
@@ -99,6 +107,10 @@ def main() -> int:
         raise RuntimeError(
             "PB-07 navigation acceptance could not restore the normal build"
         )
+
+
+def main() -> int:
+    run_desktop_acceptance()
     print("PB-07 publish page normal-navigation acceptance passed")
     return 0
 
