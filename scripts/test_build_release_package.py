@@ -27,6 +27,55 @@ from build_release_package import embed_release_identity  # noqa: E402
 from release_identity import SourceFacts  # noqa: E402
 
 
+class SnapshotBuildDependencyTests(unittest.TestCase):
+    def test_node_modules_reaches_the_snapshot_without_exposing_the_operators_copy(
+        self,
+    ) -> None:
+        """出包不得让 pnpm 写到操作者那份 node_modules 上。
+
+        2026-08-04 实测：`frontend/node_modules` 是软链进快照的，pnpm 在快照上下文里
+        打出 `Recreating /…/frontend/node_modules` 并重建了**真实那份**；快照跑完即删，
+        于是 `node_modules/vitest` 这类指向 `.pnpm/…` 的相对软链失效，出包后
+        `npx vitest` 报 `Cannot find module …/vitest/vitest.mjs`。
+
+        **代价不在于要重装，而在于报错完全不指向出包**：一个刚跑完发布流程的人，
+        看到的是测试框架找不到自己，没有任何线索指回半小时前那条命令。
+
+        判据是隔离而不是形态：快照里那份必须是独立目录，往它里面写不得影响操作者那份。
+        """
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            operator = root / "checkout"
+            (operator / "frontend/node_modules/.pnpm").mkdir(parents=True)
+            (operator / "frontend/node_modules/marker").write_text("原始", encoding="utf-8")
+            snapshot = root / "snapshot"
+            (snapshot / ".git/info").mkdir(parents=True)
+            (snapshot / ".git/info/exclude").write_text("", encoding="utf-8")
+
+            with mock.patch.object(build_release_package, "REPOSITORY_ROOT", operator):
+                build_release_package._link_snapshot_build_dependency(
+                    snapshot, Path("frontend/node_modules")
+                )
+
+            copied = snapshot / "frontend/node_modules"
+            self.assertTrue(copied.is_dir())
+            self.assertFalse(
+                copied.is_symlink(),
+                "快照里的 node_modules 不能是指向操作者那份的软链——"
+                "pnpm 会穿过它重建真实目录",
+            )
+            self.assertEqual((copied / "marker").read_text(encoding="utf-8"), "原始")
+
+            # 构建过程写快照那份，操作者那份必须原样不动。
+            (copied / "marker").write_text("被构建改过", encoding="utf-8")
+            (copied / "新增").write_text("", encoding="utf-8")
+            self.assertEqual(
+                (operator / "frontend/node_modules/marker").read_text(encoding="utf-8"),
+                "原始",
+            )
+            self.assertFalse((operator / "frontend/node_modules/新增").exists())
+
+
 class SignedReleaseIdentityTests(unittest.TestCase):
     def test_pre_set_snapshot_environment_cannot_bypass_materialization(self) -> None:
         source_facts = SourceFacts(git_commit="a" * 40, tree_sha256="b" * 64)

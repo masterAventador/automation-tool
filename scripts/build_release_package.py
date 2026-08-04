@@ -39,7 +39,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
@@ -1004,6 +1004,11 @@ def resolve_deployment(arguments: argparse.Namespace) -> CustomerDemoMaterial | 
     )
 
 
+# Dependencies the build's own tooling rewrites in place. They must not be
+# shared with the operator's checkout by symlink; see `_clone_snapshot_dependency`.
+_SNAPSHOT_PRIVATE_DEPENDENCIES: Final = frozenset({Path("frontend/node_modules")})
+
+
 def _link_snapshot_build_dependency(snapshot: Path, relative: Path) -> None:
     if relative.is_absolute() or not relative.parts or ".." in relative.parts:
         raise ReleaseFailed("release source snapshot dependency path is unsafe")
@@ -1036,7 +1041,39 @@ def _link_snapshot_build_dependency(snapshot: Path, relative: Path) -> None:
     except OSError as error:
         raise ReleaseFailed("release source snapshot Git metadata is unavailable") from error
     target.parent.mkdir(parents=True, exist_ok=True)
+    if relative in _SNAPSHOT_PRIVATE_DEPENDENCIES:
+        _clone_snapshot_dependency(source, target)
+        return
     target.symlink_to(source, target_is_directory=True)
+
+
+def _clone_snapshot_dependency(source: Path, target: Path) -> None:
+    """Give the build its own copy of a dependency it is going to rewrite.
+
+    `frontend/node_modules` used to reach the snapshot as a symlink, and pnpm
+    wrote straight through it: a 2026-08-04 release logged
+    `Recreating …/frontend/node_modules` against the operator's real directory.
+    The snapshot is deleted when the build ends, so every `node_modules/<pkg>`
+    relative symlink into `.pnpm/` was left dangling — `npx vitest` then failed
+    with `Cannot find module …/vitest/vitest.mjs`.
+
+    The expensive part was not reinstalling. It was that the error points
+    nowhere near the release build: somebody who has just shipped a package sees
+    their test runner fail to find itself, half an hour after the command that
+    broke it.
+
+    APFS `clonefile` makes the copy cheap enough to stop caring — 465 MB of
+    `node_modules` in 9.7 s sharing blocks with the original, the same technique
+    `scripts/new_worktree.py` uses for `vendor/`. A filesystem without clone
+    support falls back to a plain copy: slower, never wrong.
+    """
+    command = ["/bin/cp", "-c", "-p", "-R", os.fspath(source), os.fspath(target)]
+    result = subprocess.run(command, check=False, capture_output=True, text=True)
+    if result.returncode != 0:
+        fallback = ["/bin/cp", "-p", "-R", os.fspath(source), os.fspath(target)]
+        result = subprocess.run(fallback, check=False, capture_output=True, text=True)
+    if result.returncode != 0 or not target.is_dir():
+        raise ReleaseFailed("release source snapshot dependency could not be copied")
 
 
 def _read_source_snapshot_capability() -> tuple[Path, str]:
