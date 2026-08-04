@@ -95,10 +95,13 @@ test("EB-11 drives the full normal account page login lifecycle", async () => {
     2,
     "the full signed App identity must be verified before launch and again before evidence",
   );
+  // 3 → 4：2026-08-04 增加了冷启动那一次。此前脚本假定 App 一启动就带着登录态，
+  // 用户实跑时因此报 `did not expose required UI state: 登录正常`——一台干净机器上
+  // 那个前提根本不成立，得先在冷启动分支里扫一次码再回读。
   assert.equal(
     [...acceptanceBody.matchAll(/recheck_healthy_session\(/gu)].length,
-    3,
-    "the normal App action must prove the old session, the new QR login, and restart reuse",
+    4,
+    "the normal App action must prove the cold-start scan, the old session, the new QR login, and restart reuse",
   );
   assert.equal(
     [...acceptanceBody.matchAll(/logout_current_session\(/gu)].length,
@@ -111,9 +114,11 @@ test("EB-11 drives the full normal account page login lifecycle", async () => {
     "safe logout must remove the exact Profile observed through packaged Chromium",
   );
   assert.equal(
+    // 1 → 2：与上面那条 3 → 4 同源。一台干净机器上没有登录态可复查，所以冷启动
+    // 分支要先由操作者扫一次把它建立起来；注销之后的重扫是原来那一次，仍然在。
     [...acceptanceBody.matchAll(/open_login_for_scan\(/gu)].length,
-    1,
-    "the formal App must open a real QR login through the normal page",
+    2,
+    "the formal App must open a real QR login through the normal page, both on a cold start and after the safe logout",
   );
   assert.equal(
     [...acceptanceBody.matchAll(/verify_running_release_process\(/gu)].length,

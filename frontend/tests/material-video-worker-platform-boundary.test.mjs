@@ -28,9 +28,10 @@ test("IM-02 freezes platform-specific Python distributions and Windows cleanup",
   const contract = JSON.parse(contractSource);
   const dependencies = contract.dependencies;
 
+  // Intel Mac 于 2026-08-04 退出交付目标；两个目标的数字不同正是这条断言的意义所在
+  // （Windows 多出 colorama 等平台依赖），所以它仍然分辨得出「按目标冻结」有没有失效。
   assert.deepEqual(dependencies.expectedInstalledDistributionCountByTarget, {
     "macos-arm64": 116,
-    "macos-x86_64": 116,
     "windows-x86_64": 120,
   });
   assert.deepEqual(dependencies.platformRequired["windows-x86_64"], {
