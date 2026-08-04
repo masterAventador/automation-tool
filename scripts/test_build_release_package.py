@@ -8,6 +8,7 @@ notarises, signs or builds a bundle — those need Apple and forty minutes.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import plistlib
 import subprocess
@@ -22,8 +23,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import build_release_package  # noqa: E402
-from build_release_package import attach_command  # noqa: E402
-from build_release_package import embed_release_identity  # noqa: E402
+from build_release_package import (  # noqa: E402
+    attach_command,
+    embed_release_identity,
+)
 from release_identity import SourceFacts  # noqa: E402
 
 
@@ -161,10 +164,8 @@ class SignedReleaseIdentityTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 os.fstat(read_descriptor)
         finally:
-            try:
+            with contextlib.suppress(OSError):
                 os.close(read_descriptor)
-            except OSError:
-                pass
 
     def test_snapshot_capability_cannot_bless_the_ordinary_checkout(self) -> None:
         source_facts = build_release_package.repository_source_facts(ROOT)
@@ -181,23 +182,23 @@ class SignedReleaseIdentityTests(unittest.TestCase):
         os.write(write_descriptor, payload)
         os.close(write_descriptor)
         try:
-            with mock.patch.dict(
-                os.environ,
-                {capability_name: rendered_capability_reference(read_descriptor)},
-                clear=False,
-            ):
-                with self.assertRaisesRegex(
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {capability_name: rendered_capability_reference(read_descriptor)},
+                    clear=False,
+                ),
+                self.assertRaisesRegex(
                     build_release_package.ReleaseFailed,
                     "snapshot layout",
-                ):
-                    build_release_package.require_materialized_source_snapshot(
-                        ROOT / ".local" / "release-work"
-                    )
+                ),
+            ):
+                build_release_package.require_materialized_source_snapshot(
+                    ROOT / ".local" / "release-work"
+                )
         finally:
-            try:
+            with contextlib.suppress(OSError):
                 os.close(read_descriptor)
-            except OSError:
-                pass
 
     def test_snapshot_restart_preserves_the_callers_relative_path_base(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -236,7 +237,9 @@ class SignedReleaseIdentityTests(unittest.TestCase):
                     "run",
                     return_value=child,
                 ) as run,
-                mock.patch.object(sys, "argv", ["build_release_package.py", "--work-dir", "../out"]),
+                mock.patch.object(
+                    sys, "argv", ["build_release_package.py", "--work-dir", "../out"]
+                ),
             ):
                 result = build_release_package.run_from_materialized_source_snapshot(
                     argparse.Namespace(work_dir=work_directory)
@@ -317,11 +320,20 @@ class SignedReleaseIdentityTests(unittest.TestCase):
         self.assertLess(gate, identity)
 
     def test_release_entry_restarts_the_build_from_the_materialized_snapshot(self) -> None:
+        """Whichever platform is being built, the restart comes first.
+
+        This used to look for `build_macos_release(` because that was the only
+        builder `main()` could reach. `main()` now picks between two, so the
+        anchor is the dispatch — searching for one platform's builder would
+        stop covering the other, silently.
+        """
         source = Path(build_release_package.__file__).read_text(encoding="utf-8")
         main = source.index("def main()")
         snapshot = source.index("run_from_materialized_source_snapshot(", main)
-        build = source.index("build_macos_release(", main)
-        self.assertLess(snapshot, build)
+        dispatch = source.index("build_windows_release if", main)
+        invocation = source.index("result = build(", main)
+        self.assertLess(snapshot, dispatch)
+        self.assertLess(dispatch, invocation)
 
     def test_release_identity_is_embedded_before_the_outer_app_seal(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -364,7 +376,15 @@ class SignedReleaseIdentityTests(unittest.TestCase):
 
             with plist_path.open("rb") as plist_source:
                 identity = plistlib.load(plist_source)["AutomationToolReleaseIdentity"]
-            self.assertEqual(plist_path.stat().st_mode & 0o777, 0o644)
+            # Skipped rather than relaxed on Windows. `chmod` there only toggles
+            # the read-only bit, so every mode reads back as 0o666: asserting
+            # equality against 0o644 fails for an unrelated reason, and
+            # asserting "unchanged" instead passes even when the code sets a
+            # different mode — measured, by setting 0o600 and watching this stay
+            # green. A vacuous assertion is worse than an absent one, because it
+            # reads like coverage.
+            if os.name != "nt":
+                self.assertEqual(plist_path.stat().st_mode & 0o777, 0o644)
             self.assertEqual(
                 identity,
                 {
@@ -637,8 +657,8 @@ class WindowsReleaseTests(unittest.TestCase):
             reader = Path(temporary) / "reader.py"
             reader.write_text(
                 "import os, pathlib, sys\n"
-                "sys.path.insert(0, %r)\n" % os.fspath(ROOT / "scripts")
-                + "import build_release_package as release\n"
+                f"sys.path.insert(0, {os.fspath(ROOT / 'scripts')!r})\n"
+                "import build_release_package as release\n"
                 "pathlib.Path(sys.argv[1]).write_bytes("
                 "release.read_source_snapshot_capability_bytes())\n",
                 encoding="utf-8",

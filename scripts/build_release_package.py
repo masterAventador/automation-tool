@@ -29,6 +29,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import platform as platform_module
@@ -129,6 +130,9 @@ DEFAULT_WORK_DIRECTORY = REPOSITORY_ROOT / ".local/release"
 RELEASE_CONFIGURATION_NAME = "tauri.release.generated.json"
 EFFECTIVE_CONFIGURATION_NAME = "tauri.release.effective.json"
 RELEASE_IDENTITY_KEY = "AutomationToolReleaseIdentity"
+# The Windows carrier for the same facts. A file rather than a plist key,
+# because an NSIS package has no plist; see `embed_windows_release_identity`.
+RELEASE_IDENTITY_NAME = "release-identity.v1.json"
 RELEASE_IDENTITY_SCHEMA = "automation-tool.release-identity.v1"
 SOURCE_SNAPSHOT_ENVIRONMENT = "AUTOMATION_TOOL_RELEASE_SOURCE_SNAPSHOT"
 SOURCE_SNAPSHOT_IDENTITY_ENVIRONMENT = "AUTOMATION_TOOL_RELEASE_SOURCE_IDENTITY"
@@ -187,6 +191,15 @@ def require_macos_target() -> tuple[str, str]:
     # Intel Mac 于 2026-08-04 退出交付目标。落到这里必须硬拒绝而不是回退到
     # 一个「能打但没人验过」的包——出厂一个从未验收的架构比不出厂更糟。
     raise ReleaseFailed("this macOS architecture is unsupported")
+
+
+def require_windows_target() -> tuple[str, str]:
+    if os.name != "nt":
+        raise ReleaseFailed("the Windows release package must be built on Windows")
+    machine = platform_module.machine().lower()
+    if machine in {"amd64", "x86_64"}:
+        return "windows-x86_64", "x86_64"
+    raise ReleaseFailed("this Windows architecture is unsupported")
 
 
 def refresh_staging_inventory(staging: Path, target_id: str) -> int:
@@ -882,6 +895,207 @@ def build_macos_release(
     return result
 
 
+def embed_windows_release_identity(
+    *,
+    payload: Path,
+    source: SourceFacts,
+    build_id: str,
+    target_id: str,
+    architecture: str,
+    deployment_profile_id: str,
+) -> Path:
+    """Write release provenance into the payload the NSIS bundler will ship.
+
+    macOS puts this in `Info.plist` and the outer Developer ID signature seals
+    it. Windows has no plist and this host has no Authenticode certificate, so
+    the honest carrier is a file inside the payload, sealed by nothing.
+
+    That is weaker, and the difference is stated rather than papered over: on
+    macOS the identity cannot be edited without breaking the signature, here it
+    can. What it still does is exactly what review round 19 already narrowed the
+    claim to — a reproducibility and misoperation gate inside a trusted release
+    flow, which is the thing that catches "you are testing yesterday's package".
+    It is not a defence against someone editing the file.
+
+    When an Authenticode identity exists this moves under it; the file lands
+    before the bundler runs, so the installer and its payload are signed
+    together and nothing here has to change to gain that.
+    """
+    identity_path = payload / RELEASE_IDENTITY_NAME
+    if identity_path.exists() or identity_path.is_symlink():
+        raise ReleaseFailed("the release payload identity slot is occupied")
+    payload.mkdir(parents=True, exist_ok=True)
+    identity_path.write_text(
+        json.dumps(
+            {
+                "architecture": architecture,
+                "buildId": build_id,
+                "deploymentProfileId": deployment_profile_id,
+                "schema": RELEASE_IDENTITY_SCHEMA,
+                "sourceGitCommit": source.git_commit,
+                "sourceTreeSha256": source.tree_sha256,
+                "target": target_id,
+            },
+            ensure_ascii=False,
+            indent=1,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return identity_path
+
+
+def build_windows_release(
+    *,
+    work_directory: Path,
+    archive: Path | None,
+    build_id: str,
+    deployment: CustomerDemoMaterial | None = None,
+    update_endpoint: str | None = None,
+    update_public_key: str | None = None,
+) -> dict[str, object]:
+    """Produce one distributable Windows package and pass every release gate.
+
+    The same command, the same gates and the same assembler as macOS; only the
+    container differs. Two orderings differ with it, both forced by the format
+    rather than chosen:
+
+    * the browser is installed into the **payload** before the bundler runs.
+      An NSIS installer is a sealed executable that cannot be opened afterwards,
+      whereas an `.app` is a directory the macOS path fills in after bundling;
+    * nothing is signed on the way in. Authenticode is applied by the bundler to
+      the installer and the main binary, which are produced last, so the
+      re-seal macOS needs has no counterpart — `seal_windows_payload` asserts
+      the configuration really declares no signing identity rather than assuming
+      it.
+    """
+    from run_eb_16_windows_acceptance import (
+        build_executor_candidate as build_windows_executor,
+    )
+    from run_eb_16_windows_acceptance import (
+        build_release_package as build_windows_bundle,
+    )
+    from run_eb_16_windows_acceptance import (
+        effective_configuration as windows_effective_configuration,
+    )
+    from run_eb_16_windows_acceptance import (
+        seal_windows_payload,
+        write_release_configuration,
+    )
+
+    work_directory = require_source_stable_work_directory(work_directory)
+    target_id, architecture = require_windows_target()
+    announce("Checking the locked read-only third-party source checkouts")
+    run_checked(
+        [
+            sys.executable,
+            os.fspath(REPOSITORY_ROOT / "scripts/check_third_party_sources.py"),
+        ],
+        cwd=REPOSITORY_ROOT,
+    )
+    source_identity = repository_source_facts(REPOSITORY_ROOT)
+    build_directory = work_directory / "build"
+    cargo_target = work_directory / "cargo-target"
+    work_directory.mkdir(parents=True, exist_ok=True)
+    if build_directory.exists():
+        shutil.rmtree(build_directory)
+    build_directory.mkdir(parents=True)
+
+    staging = build_directory / "browser-staging"
+    announce(f"Staging the digest-locked {target_id} Chromium from the machine cache")
+    copy_staged_browser(target_id=target_id, output=staging)
+    executor = build_directory / "executor" / "automation-tool-executor"
+    public_key, private_key = build_windows_executor(executor, architecture)
+    (build_directory / "executor-verifying-key").write_text(public_key, encoding="utf-8")
+
+    payload = build_directory / "payload"
+    announce("Preparing the pinned video runtime resources (cached per machine)")
+    video_runtime = prepare_video_runtime(platform="windows")
+    announce("Staging the frozen catalog of animation parts")
+    motion_catalog = stage_motion_catalog(staging=build_directory / "catalog").parent
+    announce("Assembling the release payload, verifying it, then sealing")
+    installed_video = install_video_runtime(
+        application=payload, staging=video_runtime, platform="windows"
+    )
+    announce(f"Video runtime staged into the payload: {sorted(installed_video)}")
+    installed_catalog = install_motion_catalog(
+        application=payload, staging=motion_catalog, platform="windows"
+    )
+    announce(f"Catalog staged into the payload: {sorted(installed_catalog)}")
+    if repository_source_facts(REPOSITORY_ROOT) != source_identity:
+        raise ReleaseFailed("release sources changed while the payload was assembled")
+    identity_path = embed_windows_release_identity(
+        payload=payload,
+        source=source_identity,
+        build_id=build_id,
+        target_id=target_id,
+        architecture=architecture,
+        deployment_profile_id="local" if deployment is None else deployment.profile_id,
+    )
+    announce(f"Release identity written to {identity_path.name}")
+    install_and_seal(
+        application=payload,
+        staging=staging,
+        target_id=target_id,
+        platform="windows",
+        seal=seal_windows_payload,
+    )
+    # The release gate, in the position `create_disk_image` holds on macOS:
+    # nothing distributable is produced from an unverified payload.
+    require_packaged_browser(application=payload, target_id=target_id, platform="windows")
+    require_packaged_video_runtime(application=payload, platform="windows")
+    require_packaged_motion_catalog(application=payload, platform="windows")
+
+    configuration = write_release_configuration(build_directory, executor, payload)
+    effective = windows_effective_configuration(configuration, build_directory)
+    environment = release_environment(
+        cargo_target,
+        public_key,
+        deployment_profile=None if deployment is None else deployment.environment(),
+        action_authorization_public_key=(
+            None if deployment is None else deployment.action_authorization_public_key
+        ),
+        update_endpoint=update_endpoint,
+        update_public_key=update_public_key,
+    )
+    if deployment is not None:
+        announce(f"Building for the deployment at {deployment.base_url}")
+    binary, installer = build_windows_bundle(
+        configuration=configuration, environment=environment, target=cargo_target
+    )
+    if deployment is not None:
+        require_compiled_deployment(binary, deployment)
+        announce(f"Binary carries the deployment profile for {deployment.base_url}")
+    audited_assets = snapshot_production_assets(build_directory / AUDITED_DISTRIBUTION_NAME)
+    if repository_source_facts(REPOSITORY_ROOT) != source_identity:
+        raise ReleaseFailed("release sources changed while the App was being built")
+    verify_manifest_signature(payload / EXECUTOR_RESOURCE, private_key)
+    result: dict[str, object] = {
+        "architecture": architecture,
+        "audited_assets": os.fspath(audited_assets),
+        "configuration": os.fspath(effective),
+        "installer": os.fspath(installer),
+        "installer_bytes": installer.stat().st_size,
+        "main_binary": os.fspath(binary),
+        "main_binary_bytes": binary.stat().st_size,
+        "payload": os.fspath(payload),
+        # Measured, never asserted away: this host has no Authenticode identity,
+        # so the package is unsigned and the evidence has to say so.
+        "signing": windows_signing_report(binary, installer),
+        "target": target_id,
+    }
+    if deployment is not None:
+        result["deployment"] = describe_deployment(deployment)
+    return result
+
+
+def windows_signing_report(binary: Path, installer: Path) -> dict[str, Any]:
+    from run_eb_16_windows_acceptance import signing_report
+
+    return signing_report(binary, installer)
+
+
 DEPLOYMENT_ARGUMENTS = (
     "deployment_profile",
     "profile_signing_key",
@@ -1223,10 +1437,8 @@ def read_source_snapshot_capability_bytes() -> bytes:
     except OSError as error:
         raise ReleaseFailed("release source snapshot capability is unavailable") from error
     finally:
-        try:
+        with contextlib.suppress(OSError):
             os.close(descriptor)
-        except OSError:
-            pass
     if not payload or len(payload) > SOURCE_SNAPSHOT_CAPABILITY_MAX_BYTES:
         raise ReleaseFailed("release source snapshot capability is invalid")
     return payload
@@ -1551,15 +1763,6 @@ def run_from_materialized_source_snapshot(arguments: argparse.Namespace) -> int:
 
 def main() -> int:
     arguments = parse_arguments()
-    if arguments.platform == "windows":
-        # Refused rather than half-implemented: the Windows release still runs
-        # through `scripts/run_eb_16_windows_acceptance.py`, which owns the NSIS
-        # payload layout and the installer round trip.
-        raise ReleaseFailed(
-            "the Windows release still runs through "
-            "scripts/run_eb_16_windows_acceptance.py; this command builds macOS "
-            "packages only"
-        )
     if SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT not in os.environ:
         if (
             SOURCE_SNAPSHOT_ENVIRONMENT in os.environ
@@ -1572,7 +1775,11 @@ def main() -> int:
     # refused now rather than twenty minutes from now.
     deployment = resolve_deployment(arguments)
     update_endpoint, update_public_key = resolve_update_configuration(arguments)
-    result = build_macos_release(
+    # One command, one set of gates, and the fork is here rather than in a
+    # second script: the steps above are shared, and the two builders differ
+    # only in the container they put the verified payload into.
+    build = build_windows_release if arguments.platform == "windows" else build_macos_release
+    result = build(
         work_directory=arguments.work_dir,
         archive=arguments.archive,
         build_id=arguments.build_id,
@@ -1584,8 +1791,19 @@ def main() -> int:
         json.dumps(result, ensure_ascii=False, indent=1, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    announce(f"Built application: {result['application']}")
-    announce(f"Built disk image: {result['disk_image']} ({result['disk_image_bytes']} bytes)")
+    if arguments.platform == "windows":
+        announce(
+            f"Built main binary: {result['main_binary']} "
+            f"({result['main_binary_bytes']} bytes)"
+        )
+        announce(
+            f"Built installer: {result['installer']} ({result['installer_bytes']} bytes)"
+        )
+    else:
+        announce(f"Built application: {result['application']}")
+        announce(
+            f"Built disk image: {result['disk_image']} ({result['disk_image_bytes']} bytes)"
+        )
     announce("Release package built and every release gate passed")
     return 0
 
