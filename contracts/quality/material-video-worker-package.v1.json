@@ -48,7 +48,6 @@
   "dependencies": {
     "expectedInstalledDistributionCountByTarget": {
       "macos-arm64": 116,
-      "macos-x86_64": 116,
       "windows-x86_64": 120
     },
     "productRequired": {
@@ -59,7 +58,6 @@
     },
     "platformRequired": {
       "macos-arm64": {},
-      "macos-x86_64": {},
       "windows-x86_64": {
         "colorama": "0.4.6",
         "watchdog": "6.0.0",

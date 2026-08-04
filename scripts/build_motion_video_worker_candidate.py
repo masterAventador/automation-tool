@@ -36,8 +36,6 @@ def _target() -> str:
     machine = platform.machine().lower()
     if system == "Darwin" and machine in {"arm64", "aarch64"}:
         return "darwin-arm64"
-    if system == "Darwin" and machine in {"x86_64", "amd64"}:
-        return "darwin-x64"
     if system == "Windows" and machine in {"x86_64", "amd64"}:
         return "windows-x64"
     raise RuntimeError("BM-02 supports only the declared desktop targets")

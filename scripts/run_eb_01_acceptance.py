@@ -35,15 +35,14 @@ def main() -> None:
     }:
         raise AssertionError("Chromium 完整版本或修订号漂移")
     target_ids = {item["id"] for item in contract["supported_targets"]}
-    if target_ids != {"macos-arm64", "macos-x86_64", "windows-x86_64"}:
-        raise AssertionError("EB-01 必须只声明首发三种目标架构")
+    if target_ids != {"macos-arm64", "windows-x86_64"}:
+        raise AssertionError("EB-01 必须只声明首发两种目标架构")
     if contract["test_harness"]["playwright_node"] != "1.61.1":
         raise AssertionError("Node Playwright 测试工具必须精确锁定 1.61.1")
 
     require_file("scripts/check_embedded_browser_compatibility.py")
     for fixture in (
         "contracts/browser/fixtures/component-valid-macos-arm64.json",
-        "contracts/browser/fixtures/component-valid-macos-x86_64.json",
         "contracts/browser/fixtures/component-valid-windows-x86_64.json",
         "contracts/browser/fixtures/component-invalid-version.json",
         "contracts/browser/fixtures/component-invalid-revision.json",

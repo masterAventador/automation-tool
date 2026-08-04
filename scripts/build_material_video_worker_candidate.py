@@ -74,11 +74,8 @@ def load_contract() -> dict[str, object]:
 
 def current_target_id() -> str:
     machine = platform.machine().lower()
-    if sys.platform == "darwin":
-        if machine in {"arm64", "aarch64"}:
-            return "macos-arm64"
-        if machine in {"x86_64", "amd64"}:
-            return "macos-x86_64"
+    if sys.platform == "darwin" and machine in {"arm64", "aarch64"}:
+        return "macos-arm64"
     if sys.platform == "win32" and machine in {"x86_64", "amd64"}:
         return "windows-x86_64"
     reject(f"不支持的构建平台：{sys.platform}/{machine}")

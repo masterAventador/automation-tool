@@ -20,10 +20,6 @@
       "file": "node-v22.23.1-darwin-arm64.tar.gz",
       "sha256": "ef28d8fab2c0e4314522d4bb1b7173270aa3937e93b92cb7de79c112ac1fa953"
     },
-    "darwin-x64": {
-      "file": "node-v22.23.1-darwin-x64.tar.gz",
-      "sha256": "b8da981b8a0b1241b70249204916da76c63573ddf5814dbd2d1e41069105cb81"
-    },
     "windows-x64": {
       "file": "node-v22.23.1-win-x64.zip",
       "sha256": "7df0bc9375723f4a86b3aa1b7cc73342423d9677a8df4538aca31a049e309c29"

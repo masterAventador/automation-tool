@@ -153,7 +153,7 @@ impl EmbeddedBrowserDistribution {
         resource_directory: &Path,
         target_id: &str,
     ) -> Result<Self, EmbeddedBrowserError> {
-        if !matches!(target_id, "macos-arm64" | "macos-x86_64" | "windows-x86_64") {
+        if !matches!(target_id, "macos-arm64" | "windows-x86_64") {
             return Err(EmbeddedBrowserError::Invalid("unsupported release target"));
         }
         reject_link(resource_directory)?;
@@ -319,8 +319,6 @@ fn cached_executable_still_sound_inner(
 fn release_target_id() -> &'static str {
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         "macos-arm64"
-    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
-        "macos-x86_64"
     } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
         "windows-x86_64"
     } else {
@@ -332,9 +330,6 @@ fn expected_executable(target_id: &str) -> Result<&'static str, EmbeddedBrowserE
     match target_id {
         "macos-arm64" => Ok(
             "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
-        ),
-        "macos-x86_64" => Ok(
-            "chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
         ),
         "windows-x86_64" => Ok("chrome-win64/chrome.exe"),
         _ => Err(EmbeddedBrowserError::Invalid("unsupported release target")),
@@ -587,7 +582,6 @@ fn assert_macho_architecture(path: &Path, target_id: &str) -> Result<(), Embedde
     );
     let expected = match target_id {
         "macos-arm64" => 0x0100_000c,
-        "macos-x86_64" => 0x0100_0007,
         _ => return Err(EmbeddedBrowserError::Invalid("unsupported macOS target")),
     };
     if actual != expected {

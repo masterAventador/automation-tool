@@ -58,7 +58,6 @@ DEFAULT_ARCHIVES: Final = {
         _REPOSITORY_ROOT / _EB_03_CACHE,
         _REPOSITORY_ROOT.parent.parent / _EB_03_CACHE,
     ),
-    "macos-x86_64": _REPOSITORY_ROOT / ".local/eb-mac-x64/chrome-mac-x64.zip",
     "windows-x86_64": _REPOSITORY_ROOT / ".local/eb-04-windows/chrome-win64.zip",
 }
 

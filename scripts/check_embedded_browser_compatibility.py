@@ -119,11 +119,10 @@ def validate_contract(contract: Mapping[str, object]) -> None:
         fail("Chromium metadata authority differs from the installed Playwright driver")
 
     targets = contract["supported_targets"]
-    if not isinstance(targets, list) or len(targets) != 3:
-        fail("supported_targets must contain the three release targets")
+    if not isinstance(targets, list) or len(targets) != 2:
+        fail("supported_targets must contain the two release targets")
     expected_targets = {
         ("macos-arm64", "macos", "arm64"),
-        ("macos-x86_64", "macos", "x86_64"),
         ("windows-x86_64", "windows", "x86_64"),
     }
     actual_targets: set[tuple[object, object, object]] = set()
@@ -275,7 +274,6 @@ def expect_failure(name: str, action: Callable[[], object]) -> None:
 def run_self_test(contract: Mapping[str, object]) -> None:
     for name in (
         "component-valid-macos-arm64.json",
-        "component-valid-macos-x86_64.json",
         "component-valid-windows-x86_64.json",
     ):
         validate_component(load_json(FIXTURE_ROOT / name), contract)

@@ -183,10 +183,6 @@ DEFAULT_ARCHIVES = {
         REPOSITORY_ROOT / _EB_03_CACHE,
         REPOSITORY_ROOT.parent.parent / _EB_03_CACHE,
     ),
-    "macos-x86_64": _first_existing(
-        REPOSITORY_ROOT / ".local/eb-mac-x64/chrome-mac-x64.zip",
-        REPOSITORY_ROOT.parent.parent / ".local/eb-mac-x64/chrome-mac-x64.zip",
-    ),
 }
 
 
@@ -196,8 +192,8 @@ def require_macos_target() -> tuple[str, str]:
     machine = platform_module.machine().lower()
     if machine in {"arm64", "aarch64"}:
         return "macos-arm64", "aarch64"
-    if machine in {"x86_64", "amd64"}:
-        return "macos-x86_64", "x86_64"
+    # Intel Mac 于 2026-08-04 退出交付目标。落到这里必须硬拒绝而不是回退到
+    # 一个「能打但没人验过」的包——出厂一个从未验收的架构比不出厂更糟。
     raise ReleaseFailed("this macOS architecture is unsupported")
 
 

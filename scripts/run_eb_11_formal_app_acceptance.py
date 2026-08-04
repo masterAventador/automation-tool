@@ -747,8 +747,6 @@ def require_release_identity(
     expected_platform = {
         "arm64": ("macos-arm64", "aarch64"),
         "aarch64": ("macos-arm64", "aarch64"),
-        "x86_64": ("macos-x86_64", "x86_64"),
-        "amd64": ("macos-x86_64", "x86_64"),
     }.get(machine)
     if expected_platform is None or (release.target, release.architecture) != expected_platform:
         raise AcceptanceFailed("EB-11 signed release target does not match this Mac")

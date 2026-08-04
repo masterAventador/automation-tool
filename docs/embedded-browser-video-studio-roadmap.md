@@ -550,8 +550,8 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 | ⬜ 未开始 | 0 |
 | 🧪 RED | 0 |
 | 🚧 实现中 | 0 |
-| 🔍 待验收 | 22 |
-| ✅ 已完成 | 48 |
+| 🔍 待验收 | 21 |
+| ✅ 已完成 | 49 |
 | ⏸ 后置 | 9 |
 
 状态统一使用以下取值：
@@ -579,9 +579,9 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 
 | ID | 任务 | 交付与验收 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| EB-01 | Playwright 与 Chromium 兼容矩阵 | 锁定 Playwright、完整 Chromium 版本/修订、macOS arm64、macOS x86_64 和 Windows x86_64；安装包内版本不匹配时 fail closed | AV-04 | ✅ 已完成 |
+| EB-01 | Playwright 与 Chromium 兼容矩阵 | 锁定 Playwright、完整 Chromium 版本/修订、macOS arm64 和 Windows x86_64；安装包内版本不匹配时 fail closed | AV-04 | ✅ 已完成 |
 | EB-02 | 三方共用 Chromium 前置验证门禁 | 在 macOS/Windows 用 EB-01 同一完整 Chromium 分别启动可见 RPA、Browser Use `executable_path`/随机 CDP 两种模式和独立无头渲染进程；渲染 12 套风格、全部 134 项单帧冒烟、字体/图片/视频/音频/Lottie/Canvas/WebGL/WebGPU、透明画面、横竖屏，并验证三方并发、进程/Profile 隔离、控制权租约和无第二套浏览器下载；通过后 ADR 固定为一套，失败则先调整共同版本重跑并暂停后续任务 | AV-02,EB-01 | ✅ 已完成 |
-| EB-03 | macOS 浏览器构建暂存 | Apple Silicon 与 Intel 分目标构建期下载一次、校验来源、裁剪并生成可复现资源；运行时断网仍可启动，单目标资源不得混入另一架构 | EB-02 | 🔍 待验收 |
+| EB-03 | macOS 浏览器构建暂存 | Apple Silicon 目标构建期下载一次、校验来源、裁剪并生成可复现资源；运行时断网仍可启动，资源不得混入另一架构（Intel Mac 于 2026-08-04 退出交付目标，见 §9.11） | EB-02 | ✅ 已完成 |
 | EB-04 | Windows 浏览器构建暂存 | 与 macOS 同等来源、文件清单、平台/架构和离线门禁 | EB-02 | ✅ 已完成 |
 | EB-05 | 单一发行物 Manifest 与摘要 | 记录 Playwright/Chromium/修订、Browser Use harness 与渲染验证版本、平台、架构、每文件摘要、许可证和 SBOM；篡改、缺失、额外浏览器均拒绝 | EB-03,EB-04 | ✅ 已完成 |
 | EB-06 | Rust 内置发行物解析与验证 | 只从 Tauri resource_dir 解析；拒绝 symlink/reparse、目录替换、摘要错、平台错和任意用户路径；绝对路径不进 WebView | EB-05 | ✅ 已完成 |
@@ -594,7 +594,7 @@ Apache-2.0 可以覆盖仓库代码，但不自动替用户取得人物肖像、
 | EB-13 | 评论链路原样迁移 | 本期不接 Browser Use；现有 ActionGate、内容哈希、prepare/dispatch/verify、单次发送和 outcome_uncertain 全部保持 | EB-12 | 🔍 待验收 |
 | EB-14 | 私信与恢复链路原样迁移 | 本期不接 Browser Use；现有目标校验、频控、单次发送、结果验收、暂停/取消/紧停、崩溃和重启恢复保持 | EB-12 | 🔍 待验收 |
 | EB-15 | 诊断、人工接管与进程清理 | headed 窗口、关闭顺序、进程树强杀、Profile 解锁、日志脱敏、休眠/退出/崩溃和手动关闭矩阵；Browser Use 独立会话/渲染进程不得接触运营 Profile/CDP，抖音发布持有租约的短生命周期接管除外 | EB-11..EB-14 | 🔍 待验收 |
-| EB-16 | 首发安装包与签名 | macOS arm64、macOS x86_64、Windows x86_64 每个目标只打包对应的一套完整 Chromium；macOS 内层签名/公证、Windows 签名、首次安装/卸载、包体积、进程退出和残留资源 | EB-15 | 🔍 待验收 |
+| EB-16 | 首发安装包与签名 | macOS arm64、Windows x86_64 每个目标只打包对应的一套完整 Chromium；macOS 内层签名/公证、Windows 签名、首次安装/卸载、包体积、进程退出和残留资源 | EB-15 | 🔍 待验收 |
 | EB-17 | 内置 Chromium 干净机纵向验收 | macOS 和 Windows 都在不依赖任何系统浏览器的全新环境，仅使用正式包内置 Chromium，从 App 正式入口完成安装、RPA 启动、扫码、搜索、受控动作、Browser Use 隔离演示和动效渲染；运行时不下载或调用第二套浏览器且无残留 | EB-16,BU-07 | 🔍 待验收 |
 
 ### 9.3 Browser Use（7 项）
@@ -696,6 +696,36 @@ VE 线整条废弃，由本地 FFmpeg 剪辑取代，见 `docs/local-video-editi
 | CQ-03 | 资源与失败矩阵联合压力测试 | 两种视频任务、Browser Use、双平台发布与 RPA 共用 Chromium/本机资源并发时覆盖 CPU、内存、磁盘、网络、取消、紧停、崩溃、休眠和 App 退出；进程/Profile 互不干扰；B站无凭据时使用 Mock/契约路径并保留待补真实证据（独立剪辑任务的压力验收随 VE 线废弃改由本地剪辑台账承接，见 `docs/local-video-editing-roadmap.md`） | EB-15,BU-07,IM-08,BM-16,PB-08 | 🔍 待验收 |
 | CQ-04 | macOS/Windows 正式包纵向验收 | 从全新安装的真实 App 一句话创建两类视频、预览、成片入库，再用抖音 Browser Use 完成真实发布；B站有凭据则同时真实发布，无凭据则核对完整实现、Mock/契约证据和 `待凭据验收` 状态，不阻塞本任务其余验收 | PB-08,CQ-02,CQ-03 | 🔍 待验收 |
 | CQ-05 | 文档、SBOM 与专项台账收口 | 更新用户帮助、架构、隐私、许可证、版本锁、故障排查和卸载说明；Roadmap 状态与 79 个独立证据文件一致后才能完成 | CQ-04 | 🔍 待验收 |
+
+### 9.11 范围变更记录
+
+任务不会因为范围收缩而消失，只会记在这里并写清原因与替代关系。
+
+#### 2026-08-04：macOS x86_64（Intel Mac）退出交付目标
+
+用户决定不再验证 Intel Mac，该架构不再是本产品的交付目标。
+
+**为什么不是「只把验收项划掉」：** `macos-x86_64` 当时是
+`contracts/browser/embedded-chromium-compatibility.v1.json` 的**强制**受支持目标，
+`scripts/check_embedded_browser_compatibility.py` 还硬断言过恰好三个目标。只删台账行、
+留着代码，等于让构建链继续为一个没有任何人验证的架构装配、签名并出包——出厂一个从未
+验收的分发物，比不出厂更糟。所以按「退出受支持目标」整条摘除。
+
+受影响任务：
+
+- **EB-01** —— 兼容矩阵由三个目标改为 `macos-arm64` + `windows-x86_64`；
+- **EB-03** —— 该任务 2026-07-24 曾因**新增 Intel 目标**由已完成重开为待验收。Intel 出局后
+  其唯一欠账消失，Apple Silicon 侧真实下载、可复现暂存与离线启动探针证据一直完整，
+  故恢复已完成；
+- **EB-16** —— macOS 侧只剩 arm64（已公证并 staple 闭合）；仍待验收的是 Windows
+  Authenticode 段。
+
+**保留下来的东西：** `scripts/verify_macos_chromium_archive.py` 的 x86_64 CPU type 常量
+**没有**跟着删。这个脚本的价值是「arm64 包里混进别的架构就拒绝」，而 x86_64 正是那个
+「别的架构」；连它一起删，自检就只剩「不是 Mach-O」一种反例，
+「是合法 Mach-O 但架构不对」这条路径会失去唯一的证人。同理
+`frontend/src-tauri/tests/embedded_browser_distribution_windows.rs` 里那条用
+`chrome-mac-x64/...` 当外来可执行路径的拒绝用例照常保留。
 
 ## 10. 建议执行顺序
 

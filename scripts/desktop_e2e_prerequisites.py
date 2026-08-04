@@ -73,7 +73,6 @@ if str(SCRIPTS_ROOT) not in sys.path:
 from acceptance_postgres import WINDOWS_POSTGRES_ROOT_ENVIRONMENT  # noqa: E402
 from embedded_browser_archives import (  # noqa: E402
     MACOS_ARM64_ARCHIVE,
-    MACOS_X86_64_ARCHIVE,
     archive_path,
 )
 
@@ -136,7 +135,6 @@ VIDEO_STUDIO_DRIVER_ENVIRONMENT_NAMES: Final = frozenset(
 
 LOCKED_BROWSER_ARCHIVES: Final = {
     "macos-arm64": archive_path(REPOSITORY_ROOT, MACOS_ARM64_ARCHIVE),
-    "macos-x86_64": archive_path(REPOSITORY_ROOT, MACOS_X86_64_ARCHIVE),
 }
 
 _reserved_control_plane_port: int | None = None
@@ -244,8 +242,8 @@ def require_reserved_port_still_free(port: int) -> None:
 def release_target_id() -> str:
     """Mirror `embedded_browser_authority::release_target_id()`."""
     machine = os.uname().machine.lower() if hasattr(os, "uname") else "x86_64"
-    if sys.platform == "darwin":
-        return "macos-arm64" if machine in {"arm64", "aarch64"} else "macos-x86_64"
+    if sys.platform == "darwin" and machine in {"arm64", "aarch64"}:
+        return "macos-arm64"
     if sys.platform == "win32":
         return "windows-x86_64"
     raise DesktopPrerequisiteRejected(

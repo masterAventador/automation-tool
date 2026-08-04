@@ -105,8 +105,6 @@ def require_macos() -> tuple[str, str]:
     machine = platform.machine().lower()
     if machine in {"arm64", "aarch64"}:
         return "macos-arm64", "aarch64"
-    if machine in {"x86_64", "amd64"}:
-        return "macos-x86_64", "x86_64"
     raise AcceptanceFailed("EB-16 macOS architecture is unsupported")
 
 

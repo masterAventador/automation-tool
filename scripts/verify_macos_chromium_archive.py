@@ -20,8 +20,12 @@ from build_embedded_chromium_staging import (  # noqa: E402
 CONTRACT_PATH = ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
 EXPECTED_CPU_TYPES = {
     "macos-arm64": 0x0100000C,
-    "macos-x86_64": 0x01000007,
 }
+# Intel Mac 于 2026-08-04 退出交付目标，所以它不再是可暂存的 target——但这个常量
+# 必须留下：本脚本的价值在于「arm64 包里混进别的架构就拒绝」，而 x86_64 正是那个
+# 「别的架构」。把它一起删掉，自检就只剩「不是 Mach-O」一种拒绝，
+# 「是合法 Mach-O 但架构不对」这条路径会失去唯一的反例。
+FOREIGN_CPU_TYPE_X86_64 = 0x01000007
 MACHO_64_LITTLE_ENDIAN = b"\xcf\xfa\xed\xfe"
 MAX_ARCHIVE_ENTRIES = 20_000
 
@@ -83,18 +87,11 @@ def self_test() -> None:
     arm = MACHO_64_LITTLE_ENDIAN + struct.pack(
         "<II", EXPECTED_CPU_TYPES["macos-arm64"], 0
     )
-    intel = MACHO_64_LITTLE_ENDIAN + struct.pack(
-        "<II", EXPECTED_CPU_TYPES["macos-x86_64"], 0
-    )
+    intel = MACHO_64_LITTLE_ENDIAN + struct.pack("<II", FOREIGN_CPU_TYPE_X86_64, 0)
     verify_macho_header(arm, "macos-arm64")
-    verify_macho_header(intel, "macos-x86_64")
-    for header, target in (
-        (arm, "macos-x86_64"),
-        (intel, "macos-arm64"),
-        (b"not-a-mach-o", "macos-x86_64"),
-    ):
+    for header in (intel, b"not-a-mach-o"):
         try:
-            verify_macho_header(header, target)
+            verify_macho_header(header, "macos-arm64")
         except ArchiveVerificationError:
             continue
         raise ArchiveVerificationError("self-test accepted a wrong architecture")

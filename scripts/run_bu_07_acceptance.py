@@ -316,8 +316,6 @@ def current_target_id() -> str:
     machine = platform.machine().casefold()
     if system == "Darwin" and machine in {"arm64", "aarch64"}:
         return "macos-arm64"
-    if system == "Darwin" and machine in {"x86_64", "amd64"}:
-        return "macos-x86_64"
     if system == "Windows" and machine in {"x86_64", "amd64"}:
         return "windows-x86_64"
     fail(f"unsupported BU-07 host: {system}/{machine}")

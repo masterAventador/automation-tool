@@ -20,7 +20,6 @@ from typing import Final
 MACOS_ARM64_ARCHIVE: Final = (
     ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm64.zip"
 )
-MACOS_X86_64_ARCHIVE: Final = ".local/eb-mac-x64/chrome-mac-x64.zip"
 WINDOWS_X86_64_ARCHIVE: Final = ".local/eb-04-windows/chrome-win64.zip"
 
 
@@ -42,14 +41,12 @@ def default_archives(root: Path) -> dict[str, Path]:
     """Return the locked archive path for every staging target."""
     return {
         "macos-arm64": archive_path(root, MACOS_ARM64_ARCHIVE),
-        "macos-x86_64": archive_path(root, MACOS_X86_64_ARCHIVE),
         "windows-x86_64": archive_path(root, WINDOWS_X86_64_ARCHIVE),
     }
 
 
 __all__ = [
     "MACOS_ARM64_ARCHIVE",
-    "MACOS_X86_64_ARCHIVE",
     "WINDOWS_X86_64_ARCHIVE",
     "archive_path",
     "default_archives",

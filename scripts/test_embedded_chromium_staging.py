@@ -115,29 +115,25 @@ class StagingBuilderTests(unittest.TestCase):
                 "chrome-mac-arm64/Google Chrome for Testing.app/"
             )
         )
-        intel = self.contract.targets["macos-x86_64"]
         windows = self.contract.targets["windows-x86_64"]
-        self.assertTrue(intel.buildable)
-        self.assertEqual(intel.root_entry, "chrome-mac-x64")
-        self.assertEqual(
-            intel.executable,
-            "chrome-mac-x64/Google Chrome for Testing.app/Contents/"
-            "MacOS/Google Chrome for Testing",
-        )
-        self.assertRegex(intel.archive_sha256, r"^[0-9a-f]{64}$")
         self.assertEqual(
             getattr(self.target, "excluded_entry_prefixes", None),
             (WIDEVINE_PREFIX,),
         )
-        self.assertEqual(
-            getattr(intel, "excluded_entry_prefixes", None),
-            (WIDEVINE_X86_64_PREFIX,),
-        )
         self.assertEqual(getattr(windows, "excluded_entry_prefixes", None), ())
         self.assertEqual(
-            {self.target.root_entry, intel.root_entry, windows.root_entry},
-            {"chrome-mac-arm64", "chrome-mac-x64", "chrome-win64"},
+            {self.target.root_entry, windows.root_entry},
+            {"chrome-mac-arm64", "chrome-win64"},
         )
+
+    def test_macos_intel_is_no_longer_a_staging_target(self) -> None:
+        """2026-08-04 产品决定不再交付 Intel Mac，于是它必须**不可暂存**。
+
+        断言写成「键集恰好等于两项」而不是「不含 macos-x86_64」：后者在有人加进
+        第四个目标时照样通过，而那正是这条要拦的事——目标集合就是分发边界，多一个
+        就多出一个没人验证的分发物。
+        """
+        self.assertEqual(set(self.contract.targets), {"macos-arm64", "windows-x86_64"})
 
     def test_contract_rejects_an_excluded_prefix_outside_the_target_root(self) -> None:
         document = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
