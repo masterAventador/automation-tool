@@ -22,6 +22,7 @@ This is a regression gate only. The delivery evidence for user comprehension is
 from __future__ import annotations
 
 import argparse
+import ast
 import fnmatch
 import hashlib
 import json
@@ -179,6 +180,56 @@ def script_literals(text: str) -> list[str]:
     return literals
 
 
+def python_literals(text: str) -> list[str] | None:
+    """Return a Python source's string literals, minus its docstrings.
+
+    A docstring is a string literal, so the "literal carrying Chinese is user
+    copy" rule used to demand a plain-Chinese rewrite of internal technical
+    documentation. Writing
+    ``pyinstaller_support.remove_browser_installer_scripts`` on 2026-07-26 hit
+    exactly that: its docstring said ``Chromium`` and the gate asked for
+    「浏览器组件」. The docstring was rewritten in English to get past it, which
+    is the wrong outcome twice over — the copy rule learned nothing, and the
+    gate had quietly created an incentive not to document in Chinese. ``#``
+    comments were never affected; only docstrings, and only because of their
+    form.
+
+    Positions rather than text decide what is skipped: only the string that *is*
+    a module, class or function body's first statement. A string with identical
+    wording used as real copy elsewhere in the same file is still scanned, and
+    ``test_user_facing_branding.py`` pins that case — without it, "docstrings
+    are skipped" and "native scanning is switched off" would produce the same
+    green.
+
+    Returns ``None`` when the source does not parse, so the caller falls back to
+    the shared scanner rather than skipping the file.
+    """
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return None
+    documented = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+    docstrings: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, documented):
+            continue
+        body = node.body
+        if (
+            body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)
+        ):
+            docstrings.add(id(body[0].value))
+    return [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in docstrings
+    ]
+
+
 def native_literals(suffix: str, text: str) -> list[str]:
     """Return the string literal contents of a Rust or Python source.
 
@@ -186,7 +237,16 @@ def native_literals(suffix: str, text: str) -> list[str]:
     code, internal notes and diagnostics — it is forbidden only where a user
     can read it — so scanning a whole native file would fail on legitimate
     constants such as the worker's environment variable names.
+
+    Python goes through the parser instead of the scanner below, so docstrings
+    can be told apart from copy by position; see ``python_literals``. Rust has
+    no equivalent construct — its documentation is ``///`` comments, which this
+    scanner already skips — so it stays here.
     """
+    if suffix == ".py":
+        parsed = python_literals(text)
+        if parsed is not None:
+            return parsed
     literals: list[str] = []
     index = 0
     length = len(text)

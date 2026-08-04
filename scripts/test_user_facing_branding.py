@@ -120,6 +120,7 @@ def materialize(
     sources: dict[str, str],
     embedded: str = EMBEDDED_WEBUI_OK,
     third_party_sources: dict | None = None,
+    native_sources: dict[str, str] | None = None,
 ) -> Path:
     third_party_sources = (
         THIRD_PARTY_SOURCES_OK if third_party_sources is None else third_party_sources
@@ -144,6 +145,10 @@ def materialize(
     )
     for name, text in sources.items():
         path = directory / "frontend/src" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    for name, text in (native_sources or {}).items():
+        path = directory / "backend/src" / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
     contract_path = directory / "terminology.json"
@@ -173,12 +178,13 @@ def expect(
     passes: bool,
     embedded: str = EMBEDDED_WEBUI_OK,
     third_party_sources: dict | None = None,
+    native_sources: dict[str, str] | None = None,
 ) -> None:
     EXECUTED.append(name)
     with tempfile.TemporaryDirectory(prefix="automation-tool-cq01-test-") as temporary:
         directory = Path(temporary)
         contract_path = materialize(
-            directory, contract, sources, embedded, third_party_sources
+            directory, contract, sources, embedded, third_party_sources, native_sources
         )
         result = run_check(root=directory, contract=contract_path)
         if passes:
@@ -246,6 +252,63 @@ def main() -> int:
         {"Studio.tsx": STUDIO_OK},
         passes=False,
         third_party_sources={"schemaVersion": 1, "sources": []},
+    )
+
+    # 中文 docstring 是写给维护者的内部技术说明，不是用户文案。把它当文案扫，会逼人
+    # 不敢用中文写技术注释——一个门禁不该产生这种激励。`#` 注释本来就不受影响，只有
+    # docstring 会，因为它形式上也是字符串字面量。
+    native_contract = base_contract()
+    native_contract["nativeScan"]["roots"] = ["backend/src"]
+    native_contract["nativeScan"]["excludedGlobs"] = []
+    expect(
+        "Chinese docstring is internal documentation, not copy",
+        native_contract,
+        {"Studio.tsx": STUDIO_OK},
+        passes=True,
+        native_sources={
+            "packaging.py": (
+                "def remove_browser_installer_scripts() -> None:\n"
+                '    """删除随包的 Chromium 安装脚本，避免运行期触发第二次下载。"""\n'
+                "    return None\n"
+            )
+        },
+    )
+
+    # 但跳过 docstring 不能把扫描弄瞎：同一个词出现在真正会显示给用户的字面量里，
+    # 仍然必须红。没有这一条，上面那条「通过」既可能是修对了，也可能是整个原生扫描
+    # 被关掉了——两者输出一模一样。
+    expect(
+        "a real user-facing literal in the same file still fails",
+        native_contract,
+        {"Studio.tsx": STUDIO_OK},
+        passes=False,
+        native_sources={
+            "packaging.py": (
+                "def notice() -> str:\n"
+                '    """删除随包的 Chromium 安装脚本，避免运行期触发第二次下载。"""\n'
+                '    return "Chromium 组件损坏，请重新安装"\n'
+            )
+        },
+    )
+
+    # 模块与类的 docstring 走的是同一条规则，一并钉住：只跳过「体内第一条语句是
+    # 字符串」这一种位置，不是「文件里所有字符串」。
+    expect(
+        "module and class docstrings are skipped the same way",
+        native_contract,
+        {"Studio.tsx": STUDIO_OK},
+        passes=True,
+        native_sources={
+            "packaging.py": (
+                '"""本模块负责 Chromium 随包装配。"""\n'
+                "\n"
+                "\n"
+                "class Packager:\n"
+                '    """按 Profile 决定 Chromium 的落地位置。"""\n'
+                "\n"
+                "    value = 1\n"
+            )
+        },
     )
 
     # Contract declarations are mandatory and closed.
