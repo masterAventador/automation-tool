@@ -104,23 +104,53 @@ def _require(condition: bool, message: str) -> None:
 # Locked catalogs and bounds
 # --------------------------------------------------------------------------- #
 
-# The 12 style presets published on the current upstream design gallery
+_MOTION_STYLE_PRESETS_PATH: Final = CONTRACTS_ROOT / "video/motion-style-presets.v1.json"
+
+
+def _load_style_presets() -> tuple[dict[str, str], ...]:
+    """The published style presets, read from the file the App also reads.
+
+    This was a hand-written frozenset of twelve ids while
+    `frontend/src/features/video-studio/motion-style-catalog.ts` imported the
+    contract. Two sources, and nothing compared them: an upstream bump that
+    changed the published set would leave this process validating against the
+    previous release, and the only symptom would be a legal style refused or an
+    unavailable one accepted — neither of which fails a render.
+
+    The Chinese name and the one-line summary come along because the model has
+    to choose between these twelve. Handing it bare ids is the state the parts
+    table was in until 2026-07-27, when two models overshot the sandbox budget
+    by more than 70% for want of a number they could not see. A style chosen
+    badly is quieter still: nothing overruns, nothing fails, and the film is
+    simply the wrong character.
+    """
+    try:
+        contract = json.loads(_MOTION_STYLE_PRESETS_PATH.read_text(encoding="utf-8"))
+        presets = tuple(
+            {
+                "id": str(preset["id"]),
+                "displayName": str(preset["displayName"]),
+                "summary": str(preset["summary"]),
+            }
+            for preset in contract["presets"]
+        )
+        published = int(contract["publicPresetCount"])
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: motion style preset contract is unreadable"
+        ) from error
+    if not presets or len(presets) != published or len({p["id"] for p in presets}) != len(presets):
+        raise MotionAuthoringRejected(
+            "motion authoring rejected: motion style preset contract drifted"
+        )
+    return presets
+
+
+# The style presets published on the current upstream design gallery
 # (roadmap 6.3). A DESIGN artifact may only name one of these.
+LOCKED_STYLE_PRESETS: Final = _load_style_presets()
 LOCKED_STYLE_PRESET_IDS: Final[frozenset[str]] = frozenset(
-    {
-        "biennale-yellow",
-        "blockframe",
-        "blue-professional",
-        "bold-poster",
-        "broadside",
-        "capsule",
-        "cartesian",
-        "cobalt-grid",
-        "coral",
-        "creative-mode",
-        "daisy-days",
-        "editorial-forest",
-    }
+    preset["id"] for preset in LOCKED_STYLE_PRESETS
 )
 
 _HEX_COLOR: Final = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -1860,6 +1890,24 @@ def _selectable_parts_table() -> str:
     return "\n".join(lines)
 
 
+def _style_presets_table() -> str:
+    """The twelve styles as the model needs to read them, not as bare ids.
+
+    Same shape and same reason as `_selectable_parts_table`: an id carries no
+    information a choice can be made from. `daisy-days` and `cartesian` say
+    nothing about paper texture or ink colour, and the model was picking
+    between them on the strength of the English words in the identifier.
+
+    The Chinese name and summary are the contract's own, which is also what the
+    App shows the operator — so the sentence the model reasons from and the
+    sentence the user reads are the same sentence.
+    """
+    return "\n".join(
+        f"{preset['id']} | {preset['displayName']} | {preset['summary']}"
+        for preset in LOCKED_STYLE_PRESETS
+    )
+
+
 def _first_message_contract(brief: MotionBrief) -> str:
     _suggested_low, _suggested_high = suggested_beat_seconds(brief.duration_seconds)
     return (
@@ -1867,8 +1915,9 @@ def _first_message_contract(brief: MotionBrief) -> str:
         '{"design", "script", "storyboard"}。\n'
         "design 键：{style_preset_id, primary_color(#rrggbb), "
         "secondary_color(#rrggbb), typography}。\n"
-        f"style_preset_id 只能取以下之一：{sorted(LOCKED_STYLE_PRESET_IDS)}；"
-        "蓝色商务风请用 blue-professional。\n"
+        "style_preset_id 决定整条片子的颜色、字体与质感，只能取下面这几套之一，"
+        "请按 Brief 的气质挑最贴近的一套；蓝色商务风请用 blue-professional：\n"
+        f"{_style_presets_table()}\n"
         "typography、primary_color、secondary_color 都必须是普通字符串，"
         "不能是对象或数组；typography 用不超过 100 字的一句话描述字体风格。\n"
         f"script 键：{{one_message, language, beats(1..{MAX_SCRIPT_BEATS} 条)}}；"

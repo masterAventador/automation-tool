@@ -99,6 +99,10 @@ silero_vad_datas = [
 motion_authoring_resources = [
     "contracts/quality/motion-catalog.v1.json",
     "contracts/video/motion-part-usability.v1.json",
+    # The twelve published styles and their one-line summaries: the agent
+    # validates DESIGN against this list and hands the summaries to the model,
+    # so a package without it cannot author at all.
+    "contracts/video/motion-style-presets.v1.json",
     "contracts/video/motion-render-canvas.v1.json",
     "contracts/video/motion-one-sentence-brief.v1.json",
     "contracts/video/motion-authoring-model-call.v1.json",

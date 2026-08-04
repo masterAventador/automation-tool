@@ -44,6 +44,7 @@ from automation_tool.executor.motion_authoring.agent import (
     BRIEF_LANGUAGES,
     COMPOSITION_PATH,
     LOCKED_CATALOG_PART_IDS,
+    LOCKED_STYLE_PRESET_IDS,
     MAX_BRAND_ASSETS,
     MAX_BRIEF_CHARS,
     MAX_DURATION_SECONDS,
@@ -1187,6 +1188,89 @@ class CatalogPartSelectionTest(unittest.TestCase):
         self.assertIn("visual_only", prompt)
         self.assertIn("不会写入 headline / body / items", prompt)
         self.assertIn("只有明确需要保留零件原始画面时才选", prompt)
+
+
+class StylePresetSelectionTests(unittest.TestCase):
+    """The model chooses one of 12 styles; give it what a choice needs.
+
+    The parts table learned this the hard way and wrote it down: until
+    2026-07-27 the model was handed 134 bare ids, and two models overshot the
+    sandbox budget by more than 70% because nothing they could see carried a
+    duration. Styles are still in that earlier state — twelve ids and one
+    hard-coded hint — and the failure is quieter: picking the wrong style does
+    not overrun a budget or fail a render. It produces a film whose colour and
+    character are wrong, and no gate in this repository thinks that is an error.
+    """
+
+    def test_the_prompt_describes_each_style_rather_than_listing_bare_ids(self) -> None:
+        prompt = _first_message_contract(_brief())
+        contract = json.loads(
+            (
+                motion_authoring_agent._CONTRACTS_ROOT / "video/motion-style-presets.v1.json"
+            ).read_text(encoding="utf-8")
+        )
+        for preset in contract["presets"]:
+            self.assertIn(preset["id"], prompt)
+            self.assertIn(preset["displayName"], prompt, preset["id"])
+            self.assertIn(preset["summary"], prompt, preset["id"])
+
+    def test_the_style_ids_are_not_a_second_hand_written_copy(self) -> None:
+        """One source, not two.
+
+        `LOCKED_STYLE_PRESET_IDS` used to be a hand-written frozenset while the
+        App read `motion-style-presets.v1.json`. Nothing compared them, so an
+        upstream bump would leave this process validating against the previous
+        release — a legal style refused, or an unavailable one accepted.
+
+        Asserting the set equals the contract would now be vacuous: the set is
+        derived from that very file, so it is `X == X` and can never fail. What
+        is still worth pinning is that the source carries no second copy.
+        """
+        source = Path(motion_authoring_agent.__file__).read_text(encoding="utf-8")
+        for style_id in LOCKED_STYLE_PRESET_IDS:
+            self.assertNotIn(
+                f'"{style_id}"',
+                source,
+                f"{style_id} is written into the module again; the contract is the one source",
+            )
+
+    def test_a_drifted_style_contract_is_refused_rather_than_half_read(self) -> None:
+        """The loader's own fail-closed rules, exercised rather than assumed.
+
+        `publicPresetCount` is an independent field: a contract whose count and
+        list disagree has been edited wrong, and reading either one of them as
+        the answer would validate against a set nobody published.
+        """
+        contract = json.loads(
+            (
+                motion_authoring_agent._CONTRACTS_ROOT / "video/motion-style-presets.v1.json"
+            ).read_text(encoding="utf-8")
+        )
+        with TemporaryDirectory() as directory:
+            for name, document in (
+                ("count", {**contract, "publicPresetCount": len(contract["presets"]) + 1}),
+                ("empty", {**contract, "presets": [], "publicPresetCount": 0}),
+                (
+                    "duplicate",
+                    {
+                        **contract,
+                        "presets": [contract["presets"][0], contract["presets"][0]],
+                        "publicPresetCount": 2,
+                    },
+                ),
+            ):
+                path = Path(directory) / f"{name}.json"
+                path.write_text(json.dumps(document), encoding="utf-8")
+                with mock.patch.object(
+                    motion_authoring_agent, "_MOTION_STYLE_PRESETS_PATH", path
+                ):
+                    with self.assertRaises(MotionAuthoringRejected, msg=name):
+                        motion_authoring_agent._load_style_presets()
+
+        missing = Path(directory) / "gone.json"
+        with mock.patch.object(motion_authoring_agent, "_MOTION_STYLE_PRESETS_PATH", missing):
+            with self.assertRaises(MotionAuthoringRejected):
+                motion_authoring_agent._load_style_presets()
 
 
 class NoPartsCatalogTests(unittest.TestCase):

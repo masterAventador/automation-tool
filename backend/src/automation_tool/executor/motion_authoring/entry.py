@@ -287,6 +287,8 @@ _AGENT_FIXED_REJECTION_BODIES: Final = frozenset(
         "locked motion catalog is unreadable",
         "motion part usability contract drifted",
         "motion part usability contract is unreadable",
+        "motion style preset contract drifted",
+        "motion style preset contract is unreadable",
         "narrator must be callable or absent",
         "no motion part is selectable",
         "model call contract drifted",
