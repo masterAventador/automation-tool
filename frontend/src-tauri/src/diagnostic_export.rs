@@ -672,6 +672,87 @@ mod tests {
         assert!(!logs.contains("/Users/"));
     }
 
+    /// CQ-05：诊断包是要发给排查方的东西，所以**每一条文本条目**都得脱敏，
+    /// 不只是日志那一条。
+    ///
+    /// 既有用例只读了 `executor/diagnostics.txt`。包里另外三条文本
+    /// （`page-drift/*.json`、`browser/traces/*.json`、`manifest.json`）此前没有
+    /// 任何断言——而它们恰恰是最可能带上 URL、选择器和本机路径的地方。
+    #[test]
+    fn redacts_every_text_entry_not_only_the_log() {
+        let root = TestDirectory::new();
+        let app_data = root.path().join("app-data");
+        let export_directory = root.path().join("exports");
+        fs::create_dir_all(&app_data).expect("app data");
+        fs::create_dir(&export_directory).expect("exports");
+        let service = DiagnosticExportService::initialize(&app_data).expect("service");
+        let state = app_data.join("local-executor/state");
+        let page_id = "123e4567-e89b-42d3-a456-426614174001";
+        let trace_id = "223e4567-e89b-42d3-a456-426614174001";
+        let screenshot_id = "323e4567-e89b-42d3-a456-426614174001";
+
+        // 制品保持各自 schema 要求的形状，否则写入前就会被拒——那样测的是校验
+        // 而不是脱敏。
+        let page = format!(
+            "{{\"artifact_id\":\"{page_id}\",\"artifact_version\":\"executor.page-drift-artifact.v1\",\"evidence\":\"conflicting_anchors\",\"observed_at\":\"2026-07-21T01:02:03Z\",\"operation\":\"douyin_target_discovery\",\"page_revision\":1,\"platform\":\"douyin\",\"stage\":\"search\"}}"
+        );
+        let trace = format!(
+            "{{\"artifact_id\":\"{trace_id}\",\"artifact_version\":\"executor.browser-diagnostic-trace.v1\",\"captured_at\":\"2026-07-21T01:02:03Z\",\"operation\":\"douyin_target_discovery\",\"page_revision\":2,\"platform\":\"douyin\",\"redaction_version\":\"browser-skeleton.v1\",\"screenshot_artifact_id\":\"{screenshot_id}\",\"stage\":\"scroll\",\"trigger\":\"failure\"}}"
+        );
+        write_file(
+            &state,
+            &format!("{PAGE_DRIFT_DIRECTORY}/{page_id}.json"),
+            page.as_bytes(),
+        );
+        write_file(
+            &state,
+            &format!("{TRACE_DIRECTORY}/{trace_id}.json"),
+            trace.as_bytes(),
+        );
+        write_file(
+            &state,
+            &format!("{SCREENSHOT_DIRECTORY}/{screenshot_id}.png"),
+            &png(),
+        );
+
+        let receipt = service
+            .export(
+                &export_directory,
+                &[
+                    "cookie: sessionid=private-cookie-value".to_owned(),
+                    "authorization: Bearer private-bearer-token".to_owned(),
+                    "profile at /Users/private/Library/App/profile".to_owned(),
+                    "cdp endpoint http://127.0.0.1:53211/devtools".to_owned(),
+                ],
+            )
+            .expect("diagnostic export");
+
+        let file = File::open(export_directory.join(&receipt.file_name)).expect("zip");
+        let mut archive = ZipArchive::new(file).expect("archive");
+        let forbidden = [
+            "private-cookie-value",
+            "private-bearer-token",
+            "/Users/",
+            "sessionid=",
+            "Bearer ",
+        ];
+        let mut checked = 0usize;
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index).expect("entry");
+            let name = entry.name().to_owned();
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes).expect("read entry");
+            let text = String::from_utf8_lossy(&bytes);
+            for needle in forbidden {
+                assert!(!text.contains(needle), "诊断包条目 {name} 泄漏了 {needle}");
+            }
+            checked += 1;
+        }
+        // 循环体全是否定断言，漏读一条不会自己报错，所以这里把条数钉死。
+        assert_eq!(checked, 5);
+        assert_eq!(receipt.entry_count, 5);
+    }
+
     #[test]
     fn rejects_untrusted_paths_artifacts_and_output_collisions() {
         let root = TestDirectory::new();
