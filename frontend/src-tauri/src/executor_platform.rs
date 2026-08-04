@@ -1518,8 +1518,155 @@ for line in sys.stdin:
 lifecycle("executor.stopped")
 "#;
 
+    /// 起一个真实执行器，并让它把运营档案租约留在 App 手里。
+    ///
+    /// 返回被租出去的 Profile 标识——退出之后要用它去核对锁**真的**放了，
+    /// 而不是只把内存里那个 `Option` 清成 `None`。
+    #[cfg(target_os = "macos")]
+    fn service_holding_a_leased_profile(
+        app_data: &std::path::Path,
+        fixture: &str,
+    ) -> (
+        ExecutorPlatformService,
+        crate::browser_profiles::BrowserProfileStore,
+        String,
+    ) {
+        use crate::browser_profiles::BrowserProfileStore;
+        use crate::executor_manager::ExecutorLaunchConfiguration;
+
+        write_fixture_package(&app_data.join("local-executor/package"), fixture);
+        let service = ExecutorPlatformService::initialize(app_data).expect("initialize service");
+        service
+            .manager
+            .start(
+                ExecutorLaunchConfiguration::new(
+                    "ws://127.0.0.1:8765/api/v1/executors/connect".to_owned(),
+                    "atds1.private-control-plane-session".to_owned(),
+                    "123e4567-e89b-42d3-a456-426614174003".to_owned(),
+                    "123e4567-e89b-42d3-a456-426614174004".to_owned(),
+                    app_data.join("local-executor/state"),
+                    1,
+                )
+                .expect("launch configuration"),
+            )
+            .expect("start fixture executor");
+
+        let profiles = BrowserProfileStore::initialize(app_data).expect("profile store");
+        let profile = profiles
+            .create_douyin_profile()
+            .expect("operations profile");
+        let profile_id = profile.profile_id().to_owned();
+        let artifact = app_data.join("finished.mp4");
+        std::fs::write(&artifact, b"finished video bytes").expect("write artifact");
+
+        let ready = service
+            .execute_publish_command(
+                "3f155810-eb7c-42d5-8f15-9ab345036f1e".to_owned(),
+                app_data.join("local-executor/package/automation-tool-executor"),
+                profile,
+                true,
+                artifact,
+                "标题".to_owned(),
+                "简介".to_owned(),
+            )
+            .expect("preflight keeps the operations browser");
+        assert_eq!(ready.state(), "publish_pre_submit_ready");
+        assert!(
+            service
+                .platform_profile_lease
+                .lock()
+                .expect("read the lease")
+                .is_some(),
+            "前提没建立：租约压根没留住"
+        );
+        (service, profiles, profile_id)
+    }
+
+    /// 档案的锁真的放了吗——判据是**能不能再租一次**，不是那个 `Option` 是不是空的。
+    ///
+    /// 这两件事在 PC-25 那次事故里正好分开过：内存状态看着干净，磁盘上的锁标记还在，
+    /// 于是下一次开机每个抖音按钮都报 `profile_in_use`，用户只能靠安全注销脱身。
+    #[cfg(target_os = "macos")]
+    fn assert_profile_is_free_again(
+        profiles: &crate::browser_profiles::BrowserProfileStore,
+        profile_id: &str,
+    ) {
+        let reopened = profiles
+            .open_douyin_profile(profile_id)
+            .expect("reopen the operations profile");
+        let relet = reopened
+            .try_acquire_owned_lock()
+            .expect("退出没有把运营档案的锁放掉：下次启动会一直报「档案正被占用」");
+        relet.release().expect("release the probe lease");
+    }
+
+    /// App 正常退出：执行器停掉，运营档案交还。
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn app_exit_stops_the_executor_and_gives_the_operations_profile_back() {
+        let app_data = TemporaryAppData::new();
+        let (service, profiles, profile_id) =
+            service_holding_a_leased_profile(&app_data.0, PUBLISH_LEASE_FIXTURE);
+
+        service.shutdown_for_app_exit().expect("clean App exit");
+
+        assert_eq!(
+            service.status().expect("status after exit").state(),
+            crate::executor_manager::ExecutorManagerState::Stopped
+        );
+        assert_profile_is_free_again(&profiles, &profile_id);
+    }
+
+    /// **执行器停不下来时，运营档案照样要交还。**
+    ///
+    /// `shutdown_for_app_exit` 把停止与释放的结果各算各的，再合并成一个错误，
+    /// 而不是 `stop()?` 之后才释放。差别只在执行器出问题的那一次显现，
+    /// 而那正是最需要它管用的一次：停止失败还把档案锁着退出，用户下次启动
+    /// 只会看到「档案正被占用」，且这台机器上已经没有任何东西还持有它。
+    ///
+    /// 顺路径断言不出这条——那时 `?` 也照样会走到释放。
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn app_exit_gives_the_profile_back_even_when_the_executor_cannot_be_stopped() {
+        let app_data = TemporaryAppData::new();
+        let (service, profiles, profile_id) =
+            service_holding_a_leased_profile(&app_data.0, &silent_exit_fixture());
+
+        let failure = service
+            .shutdown_for_app_exit()
+            .expect_err("前提没建立：这个桩本该让停止失败");
+        assert_eq!(
+            failure.code(),
+            super::ExecutorPlatformErrorCode::ProcessUnavailable
+        );
+
+        assert_profile_is_free_again(&profiles, &profile_id);
+    }
+
+    /// 一个**不告而别**的执行器：命令照答，但 stdin 关闭后直接退出，不发
+    /// `executor.stopped`。这是「执行器已经崩过、用户随后退出 App」的形状，
+    /// 也是让 `manager.stop()` 失败的最便宜前提——事件通道断开即刻返回
+    /// `ProcessUnavailable`，不必等停止超时。
+    ///
+    /// 由同一份命令循环裁掉尾部告别得到，不另抄一份：抄出来就等于多一处要跟着
+    /// 协议改的地方。
+    #[cfg(target_os = "macos")]
+    fn silent_exit_fixture() -> String {
+        const FAREWELL: &str = "lifecycle(\"executor.stopped\")\n";
+        assert!(
+            PUBLISH_LEASE_FIXTURE.ends_with(FAREWELL),
+            "桩的结尾变了，这里就裁错了地方"
+        );
+        PUBLISH_LEASE_FIXTURE.trim_end_matches(FAREWELL).to_owned()
+    }
+
     #[cfg(target_os = "macos")]
     fn write_publish_fixture_package(package_root: &std::path::Path) {
+        write_fixture_package(package_root, PUBLISH_LEASE_FIXTURE);
+    }
+
+    #[cfg(target_os = "macos")]
+    fn write_fixture_package(package_root: &std::path::Path, source: &str) {
         use base64::engine::general_purpose::URL_SAFE_NO_PAD;
         use base64::Engine as _;
         use ed25519_dalek::{Signer, SigningKey};
@@ -1535,7 +1682,7 @@ lifecycle("executor.stopped")
 
         std::fs::create_dir_all(package_root).expect("fixture package root");
         let entrypoint = package_root.join(ENTRYPOINT);
-        std::fs::write(&entrypoint, PUBLISH_LEASE_FIXTURE).expect("fixture entrypoint");
+        std::fs::write(&entrypoint, source).expect("fixture entrypoint");
         std::fs::set_permissions(&entrypoint, std::fs::Permissions::from_mode(0o755))
             .expect("executable fixture");
 
