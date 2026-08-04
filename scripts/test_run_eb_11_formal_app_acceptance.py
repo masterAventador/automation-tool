@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -84,6 +85,32 @@ class VisibleRevisionTests(unittest.TestCase):
 
 
 class AccountPageReadinessTests(unittest.TestCase):
+    def test_press_refuses_a_control_that_is_only_visible_not_enabled(self) -> None:
+        """按名字找到的元素**被禁用**时，AXPress 什么也不会发生。
+
+        2026-08-04 实测：`PlatformSessions.tsx` 上「打开登录处理」「我已处理，重新检查」
+        「安全注销」三个按钮都带 `disabled={pending !== null}`，而禁用元素照样有
+        accessibility name。原实现只按名字匹配后 `perform action "AXPress"` 并把
+        AppleScript 的返回当成点击生效——于是「点了」和「点了个灰按钮」输出完全相同。
+
+        这正是本仓 CLAUDE.md「命令必须能区分『没有』和『没查』」所指的形态，只不过
+        出在驱动侧：脚本据此认为自己操作了 App，实际上 App 一动没动。
+        """
+        runner = load_runner()
+
+        def inspect_script(source: str, *, timeout: float = 30.0) -> str:
+            del timeout
+            # 必须在按下之前问一句「它是不是可用的」。
+            self.assertIn("enabled of elementReference", source)
+            return "disabled"
+
+        with (
+            mock.patch.object(runner, "apple_script", side_effect=inspect_script),
+            self.assertRaises(runner.AcceptanceFailed) as raised,
+        ):
+            runner.press(42, "打开登录处理")
+        self.assertIn("打开登录处理", str(raised.exception))
+
     def test_press_binds_a_webkit_accessibility_name_before_comparing_it(self) -> None:
         runner = load_runner()
 
@@ -114,25 +141,108 @@ class AccountPageReadinessTests(unittest.TestCase):
         runner = load_runner()
         healthy = "当前状态登录正常最近检查：2026/8/1 12:00:00"
 
+        # 第一次点不到（页面还没挂上），重试一次成功；随后界面先是「正在启动」，
+        # 稳定后才呈现登录态。返回值同时带出「已经登录了没有」。
         with (
             mock.patch.object(
                 runner,
                 "press",
                 side_effect=[runner.AcceptanceFailed("not ready"), None],
             ) as press,
-            mock.patch.object(runner, "visible_ui_text", return_value="正在启动"),
-            mock.patch.object(runner, "wait_for_text", return_value=healthy) as wait,
+            mock.patch.object(
+                runner,
+                "visible_ui_text",
+                side_effect=["正在启动", "正在启动", healthy],
+            ),
             mock.patch.object(runner.time, "sleep"),
         ):
-            rendered = runner.open_account_page(42)
+            rendered, already_signed_in = runner.open_account_page(42)
 
         self.assertEqual(rendered, healthy)
+        self.assertTrue(already_signed_in)
         self.assertEqual(press.call_count, 2)
-        wait.assert_called_once_with(
-            42,
-            runner.HEALTHY_LABEL,
-            timeout=runner.ACTION_TIMEOUT_SECONDS,
-        )
+
+
+class RuntimeSamplingTests(unittest.TestCase):
+    def test_short_lived_chromium_between_two_ui_reads_is_still_observed(self) -> None:
+        """浏览器起了又退，正好落在两次界面读取之间——原实现会漏掉它。
+
+        2026-08-04 实测：`recheck_healthy_session()` 每轮先采一次进程、再跑一次
+        `visible_ui_text()`，而后者要遍历整个窗口的可访问性树，是这一轮里最慢的一步。
+        登录态复查由执行器经 Playwright 拉起内置 Chromium 完成，进程很短命；它一旦
+        落在两次采样之间，`require_complete_runtime()` 就报
+        `EB-11 did not observe the embedded Chromium`——而 App 侧其实一切正常。
+
+        判据不是「采样够不够快」，而是**观察不能和慢速操作串在同一条线上**：
+        运行时采样必须在动作窗口内独立持续进行。
+        """
+        runner = load_runner()
+        contract = object()
+        instance = object()
+
+        # 第 1 次采样：还没起浏览器。第 2 次：浏览器在跑。第 3 次起：已经退了。
+        samples = [
+            runner.RuntimeObservation(executor_observed=True),
+            runner.RuntimeObservation(executor_observed=True, embedded_browser_observed=True),
+            runner.RuntimeObservation(executor_observed=True),
+        ]
+        calls = {"n": 0}
+
+        def observe(_contract: object, _instance: object) -> object:
+            index = min(calls["n"], len(samples) - 1)
+            calls["n"] += 1
+            return samples[index]
+
+        with mock.patch.object(runner, "observe_instance_runtime", side_effect=observe):
+            with runner.continuous_runtime_observation(contract, instance) as watcher:
+                # 模拟「一次很慢的界面读取」——采样必须在这段时间里自己继续跑。
+                deadline = time.monotonic() + 1.0
+                while calls["n"] < 3 and time.monotonic() < deadline:
+                    time.sleep(0.01)
+            observed = watcher.result()
+
+        self.assertTrue(observed.embedded_browser_observed)
+
+
+class ColdStartTests(unittest.TestCase):
+    def test_account_page_accepts_a_signed_out_app_instead_of_hanging(self) -> None:
+        """干净机上第一次跑，App 显示的是「需要登录」而不是「登录正常」。
+
+        2026-08-04 用户实测：正式公证包 + 全新 Profile，`open_account_page()` 死等
+        `HEALTHY_LABEL` 直到超时，报 `did not expose required UI state: 登录正常`，
+        然后杀掉 App 退出。这条脚本因此**在干净机上无法完成第一次扫码**——而干净机
+        正是真实用户的状态，也正是 EB-17 的验收对象。
+
+        它验的是「已登录 → 注销 → 重扫 → 重启复用」这条生命周期，起点必须有登录态；
+        但起点是否已登录不该由脚本假设，而该由它自己观察后决定走哪条路。
+        """
+        runner = load_runner()
+        signed_out = "当前状态需要登录"
+
+        with (
+            mock.patch.object(runner, "press"),
+            mock.patch.object(runner, "visible_ui_text", return_value=signed_out),
+            mock.patch.object(runner.time, "sleep"),
+        ):
+            rendered, already_signed_in = runner.open_account_page(42)
+
+        self.assertFalse(already_signed_in)
+        self.assertIn(runner.LOGIN_REQUIRED_LABEL, rendered)
+
+    def test_account_page_still_reports_an_existing_healthy_session(self) -> None:
+        """有登录态时必须照旧识别出来，否则「冷启动兼容」会变成永远走冷启动分支。"""
+        runner = load_runner()
+        healthy = "当前状态登录正常最近检查：2026/8/1 12:00:00"
+
+        with (
+            mock.patch.object(runner, "press"),
+            mock.patch.object(runner, "visible_ui_text", return_value=healthy),
+            mock.patch.object(runner.time, "sleep"),
+        ):
+            rendered, already_signed_in = runner.open_account_page(42)
+
+        self.assertTrue(already_signed_in)
+        self.assertEqual(rendered, healthy)
 
 
 class FormalLoginLifecycleTests(unittest.TestCase):

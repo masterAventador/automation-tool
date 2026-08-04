@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import hashlib
 import importlib
 import json
@@ -22,7 +23,9 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -83,6 +86,10 @@ OBSERVED_REVISION_PATTERN: Final = re.compile(
     r"(?P<hour>\d{1,2}):(?P<minute>\d{2})(?::(?P<second>\d{2}))?$"
 )
 POLL_SECONDS: Final = 0.5
+# The runtime watcher samples far faster than the UI poll: it is racing a
+# short-lived Chromium, not waiting for a human-visible state change.
+RUNTIME_SAMPLE_SECONDS: Final = 0.05
+RUNTIME_WATCHER_JOIN_SECONDS: Final = 5.0
 WINDOW_TIMEOUT_SECONDS: Final = 45.0
 ACTION_TIMEOUT_SECONDS: Final = 150.0
 QUIT_TIMEOUT_SECONDS: Final = 30.0
@@ -1213,6 +1220,73 @@ def verify_runtime_process_identity(
     return True
 
 
+class _RuntimeWatcher:
+    """Samples the packaged runtime on its own thread for as long as it is open."""
+
+    def __init__(self, contract: RuntimeContract, instance: ProcessRecord) -> None:
+        self._contract = contract
+        self._instance = instance
+        self._stop = threading.Event()
+        self._observation = RuntimeObservation()
+        self._failure: BaseException | None = None
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                sample = observe_instance_runtime(self._contract, self._instance)
+            except BaseException as error:  # 存下来，由 result() 在调用方线程上重抛
+                with self._lock:
+                    if self._failure is None:
+                        self._failure = error
+                return
+            with self._lock:
+                self._observation = self._observation.merge(sample)
+            self._stop.wait(RUNTIME_SAMPLE_SECONDS)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def close(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=RUNTIME_WATCHER_JOIN_SECONDS)
+
+    def result(self) -> RuntimeObservation:
+        with self._lock:
+            if self._failure is not None:
+                raise self._failure
+            return self._observation
+
+
+@contextlib.contextmanager
+def continuous_runtime_observation(
+    contract: RuntimeContract,
+    instance: ProcessRecord,
+) -> Iterator[_RuntimeWatcher]:
+    """Observe the packaged runtime *while* something slow happens in the caller.
+
+    The samples used to be taken once per iteration of the same loop that calls
+    `visible_ui_text()`, and that call walks the whole accessibility tree of the
+    front window — by far the slowest step in the loop. The login-state recheck
+    is carried out by the packaged Executor launching the embedded Chromium
+    through Playwright, and that process is short-lived: on 2026-08-04 it started
+    and exited inside one such gap, and `require_complete_runtime()` reported
+    `did not observe the embedded Chromium` for an App that had done exactly what
+    it was asked.
+
+    Sampling faster inside that loop would not fix it — the loop is blocked in
+    AppleScript, not sleeping. The observation has to run on its own thread, so
+    that is what this does.
+    """
+    watcher = _RuntimeWatcher(contract, instance)
+    watcher.start()
+    try:
+        yield watcher
+    finally:
+        watcher.close()
+
+
 def require_complete_runtime(observation: RuntimeObservation) -> None:
     if not observation.executor_observed:
         raise AcceptanceFailed("EB-11 did not observe the packaged Executor")
@@ -1514,6 +1588,19 @@ def visible_ui_text(process_id: int) -> str:
 
 
 def press(process_id: int, label: str) -> None:
+    """Press one named control, refusing to mistake a disabled one for a click.
+
+    `AXPress` on a disabled element does nothing, and a disabled element still
+    carries its accessibility name — so matching on the name alone made "pressed
+    it" and "pressed a greyed-out button" produce the identical result. All three
+    controls this drives (`打开登录处理`, `我已处理，重新检查`, `安全注销`) carry
+    `disabled={pending !== null}` in `PlatformSessions.tsx`, so that state is
+    reached on every one of them while a previous action is still in flight.
+
+    2026-08-04 is when it cost something: the run reported the App had been
+    driven while the App had not moved at all. The enabled check is what makes
+    a negative answer distinguishable from an unasked question.
+    """
     escaped = label.replace('"', '\\"')
     body = f'''
     if (count of windows) is 0 then return "__NO_WINDOW__"
@@ -1522,6 +1609,11 @@ def press(process_id: int, label: str) -> None:
       try
         set elementName to name of elementReference
         if elementName is not missing value and (elementName as text) is "{escaped}" then
+          set controlEnabled to true
+          try
+            set controlEnabled to (enabled of elementReference) as boolean
+          end try
+          if controlEnabled is false then return "disabled"
           perform action "AXPress" of elementReference
           return "pressed"
         end if
@@ -1530,6 +1622,10 @@ def press(process_id: int, label: str) -> None:
     return "not_found"
 '''
     result = apple_script(accessibility_process_script(process_id, body))
+    if result == "disabled":
+        raise AcceptanceFailed(
+            f"EB-11 App control is present but disabled, so it was not pressed: {label}"
+        )
     if result != "pressed":
         raise AcceptanceFailed(f"EB-11 could not press the App control: {label}")
 
@@ -1553,7 +1649,21 @@ def wait_for_text(
     raise AcceptanceFailed(f"EB-11 App did not expose required UI state: {marker}")
 
 
-def open_account_page(process_id: int) -> str:
+def open_account_page(process_id: int) -> tuple[str, bool]:
+    """Land on the account page and report whether a session is already there.
+
+    Returns `(rendered_text, already_signed_in)`.
+
+    This used to wait for `登录正常` and nothing else, which made the whole run
+    depend on a session existing before it started. On a clean machine — the
+    state a real user is in, and the one EB-17 exists to verify — the App shows
+    `需要登录`, so the wait ran to its timeout and the run died with
+    `did not expose required UI state: 登录正常` without ever offering a QR code.
+    The lifecycle this script verifies (recheck → safe logout → rescan → restart
+    reuse) still needs a session to start from; what changed is that the script
+    now *observes* whether it has one instead of assuming it, and the caller
+    establishes one by scanning when it does not.
+    """
     deadline = time.monotonic() + WINDOW_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         try:
@@ -1566,10 +1676,20 @@ def open_account_page(process_id: int) -> str:
                 ) from None
             time.sleep(POLL_SECONDS)
             continue
-        return wait_for_text(
-            process_id,
-            HEALTHY_LABEL,
-            timeout=ACTION_TIMEOUT_SECONDS,
+        landing_deadline = time.monotonic() + ACTION_TIMEOUT_SECONDS
+        while time.monotonic() < landing_deadline:
+            latest = visible_ui_text(process_id)
+            if UNAVAILABLE_CODE in latest:
+                raise AcceptanceFailed(
+                    "EB-11 formal App exposed process_unavailable on the normal user path"
+                )
+            if HEALTHY_LABEL in latest:
+                return latest, True
+            if LOGIN_REQUIRED_LABEL in latest:
+                return latest, False
+            time.sleep(POLL_SECONDS)
+        raise AcceptanceFailed(
+            "EB-11 account page settled on neither a signed-in nor a signed-out state"
         )
     raise AcceptanceFailed("EB-11 account navigation did not become ready")
 
@@ -1594,23 +1714,25 @@ def open_login_for_scan(
     deadline = time.monotonic() + ACTION_TIMEOUT_SECONDS
     observation = RuntimeObservation()
     try:
-        while time.monotonic() < deadline:
-            observation = observation.merge(
-                observe_instance_runtime(runtime_contract, app_instance)
-            )
-            latest = visible_ui_text(process_id)
-            if UNAVAILABLE_CODE in latest:
-                raise AcceptanceFailed(
-                    "EB-11 formal App exposed process_unavailable while opening QR login"
-                )
-            if HEALTHY_LABEL in latest:
-                raise AcceptanceFailed(
-                    "EB-11 QR login unexpectedly reused a session after safe logout"
-                )
-            if any(marker in latest for marker in LOGIN_PROGRESS_MARKERS):
-                require_complete_runtime(observation)
-                return latest, observation
-            time.sleep(POLL_SECONDS)
+        # 采样与界面读取分开跑：`visible_ui_text()` 遍历整棵可访问性树，
+        # 短命的 Chromium 会整个落在两次调用之间。
+        with continuous_runtime_observation(runtime_contract, app_instance) as watcher:
+            while time.monotonic() < deadline:
+                latest = visible_ui_text(process_id)
+                if UNAVAILABLE_CODE in latest:
+                    raise AcceptanceFailed(
+                        "EB-11 formal App exposed process_unavailable while opening QR login"
+                    )
+                if HEALTHY_LABEL in latest:
+                    raise AcceptanceFailed(
+                        "EB-11 QR login unexpectedly reused a session after safe logout"
+                    )
+                if any(marker in latest for marker in LOGIN_PROGRESS_MARKERS):
+                    observation = observation.merge(watcher.result())
+                    require_complete_runtime(observation)
+                    return latest, observation
+                time.sleep(POLL_SECONDS)
+            observation = observation.merge(watcher.result())
         raise AcceptanceFailed("EB-11 formal App did not expose the real QR login flow")
     except BaseException:
         observation.close()
@@ -1675,25 +1797,32 @@ def recheck_healthy_session(
     observation = RuntimeObservation()
     try:
         time.sleep(1.1)
-        press(process_id, RECHECK_LABEL)
-        deadline = time.monotonic() + ACTION_TIMEOUT_SECONDS
-        while time.monotonic() < deadline:
-            if runtime_contract is not None and app_instance is not None:
-                observation = observation.merge(
-                    observe_instance_runtime(runtime_contract, app_instance)
-                )
-            latest = visible_ui_text(process_id)
-            if UNAVAILABLE_CODE in latest:
-                raise AcceptanceFailed(
-                    "EB-11 formal App exposed process_unavailable on the normal user path"
-                )
-            if HEALTHY_LABEL in latest and "最近检查" in latest:
-                after = observed_revision(latest)
-                if observed_time(latest) > before_time:
-                    if runtime_contract is not None:
-                        require_complete_runtime(observation)
-                    return before, after, observation
-            time.sleep(POLL_SECONDS)
+        # 复查由执行器经 Playwright 拉起内置 Chromium 完成，那个进程很短命；
+        # 采样必须独立于下面这条含 `visible_ui_text()` 的慢循环。
+        watching: contextlib.AbstractContextManager[_RuntimeWatcher | None]
+        if runtime_contract is not None and app_instance is not None:
+            watching = continuous_runtime_observation(runtime_contract, app_instance)
+        else:
+            watching = contextlib.nullcontext(None)
+        with watching as watcher:
+            press(process_id, RECHECK_LABEL)
+            deadline = time.monotonic() + ACTION_TIMEOUT_SECONDS
+            while time.monotonic() < deadline:
+                latest = visible_ui_text(process_id)
+                if UNAVAILABLE_CODE in latest:
+                    raise AcceptanceFailed(
+                        "EB-11 formal App exposed process_unavailable on the normal user path"
+                    )
+                if HEALTHY_LABEL in latest and "最近检查" in latest:
+                    after = observed_revision(latest)
+                    if observed_time(latest) > before_time:
+                        if watcher is not None:
+                            observation = observation.merge(watcher.result())
+                            require_complete_runtime(observation)
+                        return before, after, observation
+                time.sleep(POLL_SECONDS)
+            if watcher is not None:
+                observation = observation.merge(watcher.result())
         raise AcceptanceFailed(
             "EB-11 session recheck did not publish a newer healthy visible revision"
         )
@@ -1978,11 +2107,31 @@ def run_acceptance(arguments: Arguments) -> EvidencePublication:
             owned_instance = launch_app(app, identity.executable_path)
             verify_running_release_process(owned_instance, verified_release)
             wait_for_window(owned_instance.pid)
-            initial = open_account_page(owned_instance.pid)
-            if HEALTHY_LABEL not in initial:
-                raise AcceptanceFailed(
-                    "EB-11 requires the authorised Douyin account to be healthy before recheck"
+            initial, already_signed_in = open_account_page(owned_instance.pid)
+            if not already_signed_in:
+                # 干净机的正常状态。先由操作者扫一次把登录态建立起来，之后的
+                # 复查 → 安全注销 → 重扫 → 重启复用整条生命周期照常验证。
+                # 这一步本身也是 EB-11 要求的「首次扫码登录」，不是绕过。
+                print("[EB-11] 当前没有抖音登录态，先扫一次建立，随后照常验证整条生命周期。")
+                initial, bootstrap_runtime = open_login_for_scan(
+                    owned_instance.pid,
+                    runtime_contract,
+                    owned_instance,
                 )
+                runtime_observations.append(bootstrap_runtime)
+                confirm_scan_checkpoint()
+                _, _, bootstrap_recheck = recheck_healthy_session(
+                    owned_instance.pid,
+                    initial,
+                    runtime_contract,
+                    owned_instance,
+                )
+                runtime_observations.append(bootstrap_recheck)
+                initial, already_signed_in = open_account_page(owned_instance.pid)
+                if not already_signed_in:
+                    raise AcceptanceFailed(
+                        "EB-11 first scan did not leave the account healthy"
+                    )
             first_before, first_after, first_runtime = recheck_healthy_session(
                 owned_instance.pid,
                 initial,
@@ -2018,8 +2167,8 @@ def run_acceptance(arguments: Arguments) -> EvidencePublication:
             owned_instance = launch_app(app, identity.executable_path)
             verify_running_release_process(owned_instance, verified_release)
             wait_for_window(owned_instance.pid)
-            restarted = open_account_page(owned_instance.pid)
-            if HEALTHY_LABEL not in restarted or UNAVAILABLE_CODE in restarted:
+            restarted, reused_session = open_account_page(owned_instance.pid)
+            if not reused_session or UNAVAILABLE_CODE in restarted:
                 raise AcceptanceFailed("EB-11 formal App did not reuse the healthy session")
             restart_before, restart_after, restart_runtime = recheck_healthy_session(
                 owned_instance.pid,
