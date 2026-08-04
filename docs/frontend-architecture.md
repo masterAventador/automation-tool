@@ -336,7 +336,7 @@ ADR-0001 已替代外部 Chrome/Edge 生产方案。Tauri/Rust 后续只从安�
 ### 6.2 AV-03 用户品牌与不可信视频内容
 
 - 视频制作页面只显示“智能素材成片”和“品牌动效成片”，消费稳定内部 ID；上游项目名、CLI、原始错误和进程信息不能进入 React DTO、标题、菜单、按钮、加载、错误、无障碍文本、任务或导出。
-- 按 ADR-0002，“视频剪辑”是独立左侧菜单入口和独立模块，不并入“视频制作”页面；剪辑页面只消费供应商无关的内部 DTO，阿里云等供应商名称、任务 ID 和原始错误不进入 React。剪辑入口与页面由 VE-03 交付，交付前不得添加空壳菜单。
+- “视频剪辑”是独立左侧菜单入口和独立模块，不并入“视频制作”页面；剪辑页面只消费内部 DTO，本机执行器的进程细节、任务 ID 和原始错误不进入 React。剪辑在用户本机由随包 FFmpeg 执行，页面不含任何外部媒体服务的凭据入口——`frontend/src/app/no-cloud-editing.test.ts` 守着这一点。入口与页面的交付状态见 `docs/local-video-editing-roadmap.md`，交付前不得添加空壳菜单。
 - `contracts/quality/user-facing-terminology.v1.json` 是中文展示与通俗术语契约。`plainLanguageMappings` 是术语中文说法的**唯一事实源**；`unexplainedIndustryTerms` 只声明哪些术语被强制执行以及执行范围，中文说法一律回查 `plainLanguageMappings`，查不到即 fail closed，不允许出现第二份术语表。契约同时声明两张制作方式卡片必答项和四组概念区分文案。
 - `scripts/check_user_facing_branding.py` 扫描正式 UI 源码、Tauri 标题、JSX 文本节点和`aria-label`/`alt`/`title`/`placeholder` 无障碍名称，对渲染文案中的行业词按 `segment`（同句必须给出中文说法）或 `file`（同一源文件内任意位置给出即可）两种范围 fail closed，并校验 134 个动效零件名称旁始终带中文说明。**已知偏差**：`file` 范围以“同一源文件”近似“同一页面”，一个页面由多个组件文件拼成时可能误报，同一文件被多个 Tab 复用时可能漏报；字段因此命名为 `file` 而不是 `page`。独立第三方软件声明页是唯一名称白名单，但不是功能入口。
 - 该扫描只是回归门禁；普通用户可理解性的交付证据是 `scripts/run_cq_01_acceptance.py`，它构建隐藏测试 App、按左侧菜单真实页面路径断言用户可见文本，并把每个页面的渲染文本与无障碍名称回灌给同一个 Python 匹配函数判定，行业词规则只有一份实现。

@@ -600,9 +600,12 @@ drwx------+ 78 aventador  staff  2496 Jul 26 23:08 /Users/aventador/Library/Appl
 | 1 | 工作台首页「最近任务」 | 每行叫「**07-26 21:33:53 的任务**」这种按创建时间的名字 | 一串裸 UUID |
 | 2 | 工作台首页 | `Revision`、`事件水位` 折在一个**默认收起**的「**诊断信息**」里 | 直接摊在首页上 |
 | 3 | 视频制作 →「新建视频」 | **整页不用滚动**；「新建视频」这四个字在页面上**只出现一次**（页签上）；两张制作方式卡片的「详细说明」**默认收起** | 整页 1240px 要滚；「新建视频」出现两次（页签 + 卡片标题）；说明表默认摊开 |
-| 4 | 设置与诊断 →「视频剪辑服务」 | 凭据表单**和上面的「模型服务」一样宽**（满宽） | 塌成卡片的三分之一宽，地域下拉只有 134px |
 
-**为什么把这四条放在这里**：它们**不用登录、不用配密钥、不用等三分钟**，是全流程里最便宜的「我装的是不是那个包」判据。A2 用时间戳判，这四条用眼睛判——**两个判据独立，一起用比只用一个稳**。
+> **〔2026-08-04 删〕原第 4 条**用「设置与诊断 →『视频剪辑服务』凭据表单够不够宽」当判据。
+> 那张卡片连同它背后的整条外部剪辑服务链路已被删除，剪辑改由随包 FFmpeg 在本机执行。
+> 现在按原文照做只会看到卡片不存在，并据此误判成「装的是旧包」——正好把结论判反了。
+
+**为什么把这几条放在这里**：它们**不用登录、不用配密钥、不用等三分钟**，是全流程里最便宜的「我装的是不是那个包」判据。A2 用时间戳判，这几条用眼睛判——**两个判据独立，一起用比只用一个稳**。
 
 **✅ 2026-07-27 实测（UI Harness，Playwright 无头 Chromium，视窗 = 生产窗口尺寸）**：第 1–4 条对应的用例全部通过。
 
@@ -616,11 +619,10 @@ $ pnpm exec playwright test e2e/video-studio-density.spec.ts e2e/workbench-home.
   ✓ e2e/workbench-home.spec.ts:79        诊断信息 still holds the counters an operator needs
   18 passed (6.0s)
 
-$ pnpm exec playwright test e2e/unstyled-class-hooks.spec.ts
-  ✓ 视频剪辑服务凭据表单填满它的卡片 @ 1280x800 › 和同一页的模型服务表单一样宽
-  ✓ 视频剪辑服务凭据表单填满它的卡片 @ 960x640  › 和同一页的模型服务表单一样宽
-  10 passed (9.6s)
 ```
+
+> **〔2026-08-04 注〕**上面这段是 2026-07-27 的实测记录。其中两条针对「视频剪辑服务凭据
+> 表单宽度」的用例已随该卡片一并删除，不要照抄命令去找它们。
 
 **✅ 2026-07-27 二轮实测**：整套 UI Harness 用例在当前代码上重跑，**73 条全过**（含上面这六条）。四条目视特征在代码层仍然成立。
 
@@ -631,7 +633,7 @@ $ pnpm exec playwright test e2e/unstyled-class-hooks.spec.ts
 - 「制作界面暂时不可用」类提示 → 回到 A3（资源缺失）或 A1（node 跑不了）。
 - 上表四条任意一条长得像「旧包」那一列 → **装错包了**，回到 A2。
 
-〔07-27 改〕上一版只检查了八项导航。新增的四条目视特征全部来自 07-26 夜里到 07-27 凌晨合并的界面改动（T93 首页、T95 视频制作第一步、T88b 剪辑服务表单宽度）。
+〔07-27 改〕上一版只检查了八项导航。新增的目视特征来自 07-26 夜里到 07-27 凌晨合并的界面改动（T93 首页、T95 视频制作第一步）。
 
 ---
 
@@ -678,16 +680,14 @@ ls -la ~/Library/Application\ Support/com.aventador.automationtool/profiles/demo
 | --- | --- | --- |
 | 模型服务 → **文案模型服务** | 阿里百炼 API Key | 点「保存配置」→ 再点「**测试连接**」 |
 | 模型服务 → **视频创作模型服务** | 阿里百炼 API Key | 同上 |
-| **视频剪辑服务** | 阿里云 AccessKey ID + Secret + 地域 | 同上——**这张卡也有「测试连接」按钮** |
 
-**期望**：三处标签都显示「**已配置**」；「测试连接」全部成功。成功时的原文是——
+**期望**：两处标签都显示「**已配置**」；「测试连接」全部成功。成功时的原文是
+`连接成功；<额度信息>。`（服务没返回额度时是 `连接成功；服务未返回可用额度。`）。
 
-- 模型服务：`连接成功；<额度信息>。`（服务没返回额度时是 `连接成功；服务未返回可用额度。`）
-- 视频剪辑服务：`连接成功；访问密钥与所选地域可用。`
+> **〔2026-08-04 删〕**原表还有一行「视频剪辑服务：阿里云 AccessKey ID + Secret + 地域」。
+> 该卡片已删除，剪辑不需要任何外部服务凭据。
 
 **⚠️ 视频创作模型这一份是演示线的硬依赖**——一句话自动制作的文案、分镜、画面全靠它。没配置时点「开始自动制作」会被拒，提示「请先到"设置与诊断"配置视频创作模型服务。」
-
-**顺带确认 B4 第 4 条**：「视频剪辑服务」的凭据表单应该和上面的「模型服务」一样宽。**如果它只占卡片三分之一宽，说明装的是旧包**，不用往下配了，先回 A2。
 
 **不对时怎么办**：
 - `authentication_rejected`（密钥未通过阿里百炼验证）→ 换正确的 Key 重存。密钥保存后**不回显**，看不到不等于没存。
@@ -697,29 +697,28 @@ ls -la ~/Library/Application\ Support/com.aventador.automationtool/profiles/demo
 **怎么确认真的存进去了**（在演示机终端上，只看文件名不看内容）：
 
 ```bash
-ls -la ~/Library/Application\ Support/com.aventador.automationtool/profiles/demo-xuanbai/model-services/ \
-       ~/Library/Application\ Support/com.aventador.automationtool/profiles/demo-xuanbai/editing-services/
+ls -la ~/Library/Application\ Support/com.aventador.automationtool/profiles/demo-xuanbai/model-services/
 ```
 
-**期望**：三个文件，权限均为 `-rw-------`：
+**期望**：两个文件，权限均为 `-rw-------`：
 
 ```text
 model-service-script-v1
 model-service-video-creative-v1
-video-editing-service-aliyun-v1
 ```
 
-**✅ 2026-07-27 实测（开发机）**：三份齐全，权限全对，**20:22 存入，并被 21:39 那次成功出片真实用掉**（见 B9）。
+**✅ 2026-07-27 实测（开发机）**：齐全，权限全对，**20:22 存入，并被 21:39 那次成功出片真实用掉**（见 B9）。
 
 ```text
 model-services/
 -rw-------@ 1 aventador staff 204 Jul 26 20:22 model-service-script-v1
 -rw-------@ 1 aventador staff 212 Jul 26 20:22 model-service-video-creative-v1
-editing-services/
--rw-------@ 1 aventador staff 138 Jul 26 20:22 video-editing-service-aliyun-v1
 ```
 
-〔07-27 改〕三处：① 视频剪辑服务那行从含糊的「保存并按页面提示验证」改成明确的「点测试连接」，并写出两种成功原文；② 补了「额度用尽」这条容易被当成密钥错误的失败；③ 挂上 B4 第 4 条的宽度目视。另：上一版说「三处都显示已配置」时没写标签原文，现已确认就是「已配置 / 未配置」两个词。
+> **〔2026-08-04 删〕**原文还要求核对 `editing-services/video-editing-service-aliyun-v1`。
+> 该目录与凭据随外部剪辑服务链路一并删除，剪辑由随包 FFmpeg 在本机执行，不需要凭据。
+
+〔07-27 改〕补了「额度用尽」这条容易被当成密钥错误的失败。标签原文已确认就是「已配置 / 未配置」两个词。
 
 ---
 
@@ -959,7 +958,6 @@ ls -la ~/Library/Application\ Support/com.aventador.automationtool/profiles/demo
 | `device-credential-v1` | 设备已绑定 |
 | `current-douyin-profile-v1` | 指向当前抖音运营档案 |
 | `model-services/` | 两份模型密钥 |
-| `editing-services/` | 剪辑密钥 |
 | `embedded-browser-profiles/` | 运营浏览器档案 |
 | `video-workspaces-v1/artifacts/` | **彩排产出的成片应该在这里，非空** |
 

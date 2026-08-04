@@ -47,7 +47,7 @@ P9 以前的第一期是本地单设备 MVP：
 
 专项 Roadmap 例外一：`docs/embedded-browser-video-studio-roadmap.md` 是其中 79 个内置浏览器、Browser Use、视频制作和首期发布任务的唯一状态台账，
 
-专项 Roadmap 例外二：`docs/local-video-editing-roadmap.md` 是本地智能剪辑 24 个任务的唯一状态台账。**视频剪辑已从上面那份台账整条移出**——原 VE-01～VE-08 的阿里云云剪辑路线由 LE-01 废弃删除，改用随包 FFmpeg 本地剪辑，设计见 `docs/superpowers/specs/2026-07-28-local-smart-edit-design.md`。两份专项台账适用同一套规则：只保留任务、依赖和当前状态，不得把完成记录不断追加到专项 Roadmap。每个专项任务必须单独使用 `docs/development/<任务ID>.md` 记录日期、提交、RED、GREEN、失败矩阵、正常用户路径验收或不适用原因、真实边界、清理和文档证据，并与代码及状态变更在同一提交完成。专项以外的任务仍遵守上一段规则。
+专项 Roadmap 例外二：`docs/local-video-editing-roadmap.md` 是本地智能剪辑 24 个任务的唯一状态台账。**视频剪辑已从上面那份台账整条移出**，改由本文件承接；剪辑由随包 FFmpeg 在用户本机执行，设计见 `docs/superpowers/specs/2026-07-28-local-smart-edit-design.md`。两份专项台账适用同一套规则：只保留任务、依赖和当前状态，不得把完成记录不断追加到专项 Roadmap。每个专项任务必须单独使用 `docs/development/<任务ID>.md` 记录日期、提交、RED、GREEN、失败矩阵、正常用户路径验收或不适用原因、真实边界、清理和文档证据，并与代码及状态变更在同一提交完成。专项以外的任务仍遵守上一段规则。
 
 **台账的唯一用途是跟踪进度，所以它的状态必须随时是对的。任务验收通过后，第一件要做的事就是更新台账——排在写总结、向用户汇报和开始下一个任务之前。**
 

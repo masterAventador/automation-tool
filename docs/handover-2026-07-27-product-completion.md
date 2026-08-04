@@ -146,7 +146,6 @@ scripts/test_motion_part_typography.py:155                          ← 唯一�
 
 ```
 bailian-model.json          百炼 key —— PC-04 与 PC-07 全靠它
-aliyun-video-editing.json   阿里云剪辑
 ```
 
 百炼那份的**内容在 Git 里**：`docs/credentials-bailian-model.md`（负责人 07-23 明确要求提交的

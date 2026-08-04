@@ -392,7 +392,6 @@ python scripts/deploy_customer_demo.py \
 - 服务地址不用配，`PRODUCTION_BASE_URL` 硬编码为 `https://dashscope.aliyuncs.com/compatible-mode/v1`；
 - 也可以让 App 自己写：打开「模型服务设置」页填一次即可，效果等价。手工写文件的好处是**领导不用碰这一页**。
 
-29. （若演示涉及视频剪辑）同样方式预置 `.../profiles/<profileId>/editing-services/video-editing-service-aliyun-v1`，字段 `{"version":1,"region":"cn-beijing","access_key_id":"…","access_key_secret":"…"}`，值取 `docs/credentials-aliyun-video-editing.md`；
 30. **抖音扫码要重来一次**。浏览器 Profile 也在 `.../profiles/<profileId>/embedded-browser-profiles/` 之下，demo Profile 的目录是全新的，开发机上现有的登录态不会被复用。必须在预置阶段用真人手机扫，**不能留到客户面前**；
 31. 跑通一遍完整链路，让库里有真实历史记录，避免演示第一分钟面对空列表。
 

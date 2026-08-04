@@ -18,7 +18,7 @@
 
 后端阿里云 IMS 能力（Timeline 编译、提交、回调对账、成片导入）确实实现了，`backend/tests/real_cloud/` 下也有真调阿里云的测试，但**只有 pytest 够得着，产品路径够不着**——中间缺 API 层与前端接线。
 
-`docs/development/VE-08.md` 的遗留项第一条已经写明这个缺口：
+当年 VE-08 证据文件的遗留项第一条已经写明这个缺口（该文件已于 2026-08-04 随整条路线删除，原文摘录如下）：
 
 > Control Plane 剪辑 API 正式装配（把 `SqlAlchemyAliyunEditingIntentStore`、`SqlAlchemyEditingOutputLedger`、Provider Registry 与工作台 Gateway 接通）仍是 VE 线后续装配缺口
 

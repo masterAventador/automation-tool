@@ -334,7 +334,7 @@ MVP 必须同时满足：
 - 供应商无关 Timeline 和模板；
 - 一键剪辑、模板剪辑和批量任务；
 - `VideoRenderProvider`；
-- MVP 后根据成本和网络条件在阿里云 IMS/ICE 与本地 FFmpeg 之间做正式 Provider 决策。
+- 视频剪辑由随包 FFmpeg 在用户本机执行；不引入外部媒体处理服务，也不做多实现的可插拔抽象。
 
 #### P2.2 多平台分发
 

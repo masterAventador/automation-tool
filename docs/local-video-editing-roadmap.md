@@ -172,11 +172,14 @@ LE-14 模块收口实跑 `acceptance evidence depth: 40 checks passed`。此前 
 
 全分支终审（25 提交）确认删除本身可合并，但留下六项，按归属分列。
 
-### 8.1 需用户决定：阿里云凭据已无消费者
+### 8.1 ✅ 已闭合（2026-08-04）：无消费者的外部服务凭据
 
-`docs/credentials-aliyun-video-editing.md` 含真实 RAM AccessKey 明文，入库理由是「视频剪辑模块 VE-04+ 的 OSS 暂存与 IMS 云剪辑验收」。LE-01 删除了它的全部消费者：两个 VE 验收驱动，以及 `run_cq_04_acceptance.py` 对 `.local/secrets/aliyun-video-editing.json` 的探测。该密钥现在没有任何用途。
+那份凭据文档含真实 AccessKey 明文，而 LE-01 已删除它的全部消费者，密钥再无任何用途。
+密钥一旦进入 git 历史，删文件并不能移除它——**唯一有效的补救是在控制台轮换或禁用**。
 
-**该密钥已进入 git 历史，删除文件并不能移除它——唯一有效的补救是在阿里云控制台轮换或禁用。** 文件本身写明「不要顺手清理；如迁移到更安全的方案需用户确认」，故 LE-01 不擅自处理。`docs/development/RESEARCH-cloud-deployment-readiness.md:395` 仍指示把该密钥预置进 Demo Profile，一并待处理。
+2026-08-04 收口：用户已在控制台禁用该 AccessKey 并删除对应 bucket；仓库内的凭据文档、
+`RESEARCH-cloud-deployment-readiness.md` 里的 Demo Profile 预置指令，以及 demo 预检清单
+中要求核对该凭据的步骤一并删除。
 
 ### 8.2 归 LE-17：工作台四句文案已成假话
 
@@ -186,9 +189,17 @@ LE-14 模块收口实跑 `acceptance evidence depth: 40 checks passed`。此前 
 
 §7 的「必须恰好两条」目前只是散文约定，而 `check_user_facing_branding.py` 是 `.github/workflows/quality.yml` governance 作业的必跑步骤，在 LE-02 到 LE-19 这段长窗口里，第三条出现在一个已经红的门禁里不会有人发现。建议在 checker 内把这两条编码为显式豁免并加测试断言「恰好这两条」，LE-19 转绿时一并删除。
 
-### 8.4 归后续文档任务：架构基线仍描述已删结构
+### 8.4 ✅ 已闭合（2026-08-04）：架构基线仍描述已删结构
 
-`docs/development-roadmap.md:25,27`、`docs/project-structure.md:100`、`docs/backend-architecture.md:913-921`（描述已删的 `video_editing.py`、`EditingProject`、`VideoEditingProvider` 契约与「首期只接阿里云 IMS/ICE」）、`docs/frontend-architecture.md:339`（「剪辑入口由 VE-03 交付」）。CLAUDE.md §1 把这些列为必读基线，冲突不得静默保留。
+必读基线里有若干处仍按已删除的外部剪辑服务结构描述本模块。CLAUDE.md §1 把这些列为
+必读基线，冲突不得静默保留——每个新会话都会读到一个已经不成立的前提。
+
+2026-08-04 收口：`development-roadmap.md`、`backend-architecture.md`、
+`frontend-architecture.md`、`product-plan.md`、`embedded-browser-video-studio-roadmap.md`
+§2.5/§3.2、`embedded-browser-video-security-and-branding.md`、ADR-0002 与两份交接文档
+全部改为本地 FFmpeg 表述；ADR-0002 保留仍然成立的决策（独立模块、三个互不嵌套的状态机、
+共享 Timeline 词汇），只把已废止的可插拔外部服务抽象标注出来。VE-01～VE-08 八份证据文件
+一并删除。
 
 ### 8.5 归后续：Demo 检查清单含误导性判据
 

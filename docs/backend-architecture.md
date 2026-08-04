@@ -924,15 +924,16 @@ Timeline 只表达画面、音频、字幕、片段与通用转场；Artifact �
 领域对象中，必须留在后续 Adapter 私有边界。当前契约不持久化、不启动 Worker、
 不创建文件，也不改变 H8-09 本机 Artifact Store。
 
-VE-01（ADR-0002）在同一领域层建立独立剪辑模块的唯一 `video_editing.py`：
-`EditingProject`（用户剪辑工作区，标题不进 repr/错误）、`EditingTimeline`
-（锚定项目的时间轴修订，轨道/片段/字幕/音频/转场完全复用 `video_creation`
-的共享词汇与 `TimelineId`）、封闭状态机的 `EditingJob`（含暂停、取消、失败与
-`outcome_uncertain`，非法转换拒绝）与既有 `Artifact` 引用。RenderJob、
-EditingJob、PublishJob 三个状态机互不嵌套，只通过 Artifact 谱系衔接；
-供应商（首期阿里云 IMS/ICE）DTO 不进入领域层，依赖方向为
-剪辑页面 → 剪辑领域 → Provider Adapter 单向。`VideoEditingProvider`
-契约由 VE-02 定义；本任务不建表、不加 API、不做 UI。
+独立剪辑模块在同一领域层拥有唯一的剪辑领域文件：`EditingProject`（用户剪辑工作区，
+标题不进 repr/错误）、`EditingTimeline`（锚定项目的时间轴修订，轨道/片段/字幕/音频/
+转场完全复用 `video_creation` 的共享词汇与 `TimelineId`）、封闭状态机的 `EditingJob`
+（含暂停、取消、失败与 `outcome_uncertain`，非法转换拒绝）与既有 `Artifact` 引用。
+RenderJob、EditingJob、PublishJob 三个状态机互不嵌套，只通过 Artifact 谱系衔接。
+
+剪辑由**随包 FFmpeg 在用户本机执行**，不调用任何外部媒体处理服务；依赖方向为
+剪辑页面 → 剪辑领域 → 本机执行器单向。任务、依赖、状态与验收证据见
+`docs/local-video-editing-roadmap.md`，设计见
+`docs/superpowers/specs/2026-07-28-local-smart-edit-design.md`。
 
 ### 17.1 两种视频制作执行链
 
@@ -1079,7 +1080,7 @@ C10-03 的 PostgreSQL 权限事实只存在于 `deploy/postgresql/roles.sql` 与
 - Control Plane 增加素材、Timeline、渲染任务和发布计划；
 - 云端对象存储成为共享素材的权威字节存储；
 - Local Executor 只接收 Artifact ID 和短期授权执行平台发布；
-- `VideoRenderProvider` 隔离阿里云 IMS/ICE 或本地 FFmpeg。
+- `VideoRenderProvider` 隔离渲染实现；当前唯一实现是随包 FFmpeg 本机渲染。
 
 ### AI 员工与工作流
 

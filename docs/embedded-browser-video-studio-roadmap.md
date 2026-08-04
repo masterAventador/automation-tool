@@ -81,10 +81,9 @@
 
 - “视频剪辑”是独立产品模块和独立后端边界，不隶属于“智能素材成片”或“品牌动效成片”；两个制作方式只产出素材、镜头和初始 Timeline。
 - 领域层只认识 `EditingProject`、供应商无关 `Timeline`、`EditingJob` 和 `Artifact`，不出现任何云服务商 DTO。
-- **首期改为随包 FFmpeg 本地剪辑（2026-07-28 起）。** 原「首期只实现阿里云 IMS/ICE 云剪辑」已由
-  `LE-01` 废弃删除——那条路线的凭据设置页与 Tauri 桥从未接到产品路径上（提交按钮固定抛错），
-  删除后由 `frontend/src/app/no-cloud-editing.test.ts` 守着不许回来。本模块的任务、依赖与状态
-  全部改由 `docs/local-video-editing-roadmap.md` 承接，设计见
+- **剪辑由随包 FFmpeg 在用户本机执行**，不接入任何外部媒体处理服务；页面不含此类凭据入口，
+  由 `frontend/src/app/no-cloud-editing.test.ts` 守着。本模块的任务、依赖与状态全部由
+  `docs/local-video-editing-roadmap.md` 承接，设计见
   `docs/superpowers/specs/2026-07-28-local-smart-edit-design.md`；本文件不再登记该模块的任务状态。
 - 左侧“视频剪辑”入口、剪辑项目、任务和成片记录与“视频制作”入口分开；生成完成后可把素材一键送入剪辑模块，但两个模块没有共享的供应商状态机。
 
@@ -251,11 +250,11 @@ Browser Use 直接通过 CDP 驱动 Chrome/Chromium，支持 `executable_path` �
 
 每个 RenderJob 使用独立私有目录，只允许访问声明的输入 Artifact。生成的 HTML、网页内容、文件名、模型输出和远程素材都视为不可信输入，禁止直接进入 Shell、任意路径或任意网络请求。
 
-### 4.5 独立视频剪辑控制面（已废弃）
+### 4.5 独立视频剪辑控制面（已移出本文件）
 
-原 `VideoEditingProvider` Registry 设计（Control Plane `EditingProject` / `Timeline` /
-`EditingJob` / `Artifact`，首期 `AliyunImsEditingProvider`）随 VE 线一并废弃，由本地
-FFmpeg 剪辑取代，详见 `docs/local-video-editing-roadmap.md` 与 9.7。
+剪辑模块的控制面设计、任务与状态全部由 `docs/local-video-editing-roadmap.md` 承接，
+设计见 `docs/superpowers/specs/2026-07-28-local-smart-edit-design.md`。剪辑由随包 FFmpeg
+在用户本机执行。本文件不再登记该模块的任何内容，另见 9.7。
 
 ## 5. “智能素材成片”集成设计
 
