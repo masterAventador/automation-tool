@@ -936,11 +936,67 @@ class CatalogPartSelectionTest(unittest.TestCase):
             StoryboardArtifact.from_payload(payload)
         self.assertIn("catalog", str(ctx.exception))
 
-    def test_storyboard_accepts_locked_catalog_ids(self) -> None:
+    def test_storyboard_accepts_one_locked_catalog_id(self) -> None:
+        payload = _valid_storyboard()
+        payload["beats"][0]["catalog_parts"] = ["data-chart"]
+        storyboard = StoryboardArtifact.from_payload(payload)
+        self.assertEqual(storyboard.beats[0].catalog_parts, ("data-chart",))
+
+    def test_storyboard_refuses_more_than_one_part_in_one_shot(self) -> None:
+        """A shot renders exactly one document, so a second part reaches nothing.
+
+        This used to be accepted up to sixteen, and everything below the
+        storyboard reads `catalog_parts[0]` only: `BeatPlan.part` and
+        `FilmSegment.part` are both singular, a segment loads one `entry_html`
+        on one `canvas`, and `copy_for` fills the first part's slots. So parts
+        two through sixteen were dropped without a word — no error, no warning,
+        and a film that renders exactly like a film that named one.
+
+        Refusing here is what makes the model's answer and the product's
+        ability the same thing. Combining is not a missing feature but an
+        unanswered question: two parts declare two stages, two timelines and two
+        full-frame backgrounds, and nothing decides which wins.
+        """
         payload = _valid_storyboard()
         payload["beats"][0]["catalog_parts"] = ["data-chart", "flowchart"]
-        storyboard = StoryboardArtifact.from_payload(payload)
-        self.assertEqual(storyboard.beats[0].catalog_parts, ("data-chart", "flowchart"))
+        with self.assertRaises(MotionAuthoringRejected) as ctx:
+            StoryboardArtifact.from_payload(payload)
+        self.assertIn("at most one part per shot", str(ctx.exception))
+
+    def test_naming_too_many_parts_is_a_different_finding_from_naming_a_wrong_one(
+        self,
+    ) -> None:
+        """Two rules, two messages, two refusal tokens.
+
+        `motion-authoring-refusal.v1` argues this for itself: "Merging them is
+        not recoverable later; keeping them apart costs one name." One message
+        would leave the App unable to tell "the model named a part we do not
+        carry" from "the model wanted to combine parts" — and only the second
+        says our prompt and our renderer disagree.
+        """
+        too_many = _valid_storyboard()
+        too_many["beats"][0]["catalog_parts"] = ["data-chart", "flowchart"]
+        unknown = _valid_storyboard()
+        unknown["beats"][0]["catalog_parts"] = ["definitely-not-a-real-part"]
+
+        messages = []
+        for payload in (too_many, unknown):
+            with self.assertRaises(MotionAuthoringRejected) as ctx:
+                StoryboardArtifact.from_payload(payload)
+            messages.append(str(ctx.exception))
+        self.assertNotEqual(messages[0], messages[1])
+
+    def test_the_prompt_asks_for_one_best_part_rather_than_up_to_sixteen(self) -> None:
+        """The prompt is the other half of the same rule.
+
+        It used to read `每段最多 16 项`, which invited exactly the answer the
+        layer below throws away. A model that picks three complementary parts
+        for one shot is following the instructions it was given.
+        """
+        prompt = _first_message_contract(_brief())
+        self.assertNotIn("16 项", prompt)
+        self.assertIn("最多 1 个", prompt)
+        self.assertIn("最合适", prompt)
 
     def test_user_overrides_replace_only_the_shots_the_user_owns(self) -> None:
         storyboard = StoryboardArtifact.from_payload(

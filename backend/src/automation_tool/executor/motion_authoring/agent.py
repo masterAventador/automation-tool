@@ -814,10 +814,31 @@ class StoryboardBeat:
             "beat timing is out of range",
         )
         parts = data["catalog_parts"]
+        # Two checks rather than one, because they are two findings and
+        # `motion-authoring-refusal.v1` says so in its own words: "Merging them
+        # is not recoverable later; keeping them apart costs one name." The
+        # refusal token is derived from this message, so one message would mean
+        # the App could never tell "the model named a part we do not have" from
+        # "the model wanted to combine parts".
+        #
+        # At most one, because a shot is one render of one document:
+        # `BeatPlan.part` and `FilmSegment.part` are singular, a segment loads
+        # one `entry_html` on one `canvas`, and `copy_for` fills the first
+        # part's slots. Sixteen was accepted here and everything below reads
+        # `[0]`, so parts two through sixteen were dropped without a word — the
+        # film renders exactly like a film that named one, which is why nothing
+        # ever noticed.
+        #
+        # Combining is not a feature that is merely missing. Two parts declare
+        # two stages (most are 1920x1080, three are 1080x1920), two timelines,
+        # and — for the 109 full-frame blocks — two opaque backgrounds. Nothing
+        # decides which wins, and there is no compositing step to ask.
         _require(
-            isinstance(parts, list)
-            and len(parts) <= 16
-            and all(type(part) is str and part in SELECTABLE_CATALOG_PART_IDS for part in parts),
+            isinstance(parts, list) and len(parts) <= 1,
+            "catalog_parts must name at most one part per shot",
+        )
+        _require(
+            all(type(part) is str and part in SELECTABLE_CATALOG_PART_IDS for part in parts),
             "catalog_parts must be selectable catalog ids",
         )
         _require(data["layout"] in SCENE_LAYOUTS, "beat layout is not published")
@@ -1869,8 +1890,14 @@ def _first_message_contract(brief: MotionBrief) -> str:
         f"控制在 30 字以内；items 最多 {MAX_SCENE_ITEMS} 项、每项 8 字以内；\n"
         "- headline / body / items 是观众直接看到的成片文案，请写完整、可读的短句，"
         "不要写导演备注；purpose 才是给内部看的说明。\n"
-        "catalog_parts 请按每段分镜的内容从下面的零件目录里选（可为空数组，"
-        f"每段最多 16 项），只能使用目录中的 ID。共 {len(SELECTABLE_CATALOG_PARTS)} 个，"
+        # Says one because the product renders one: a shot is a single render of
+        # a single document. The old wording invited up to sixteen, and a model
+        # that answered with three complementary parts was following its
+        # instructions while two of the three reached nothing.
+        "catalog_parts 每段最多 1 个：请从下面的目录里挑出**最合适这一段内容的那一个**，"
+        "写成只有一个 ID 的数组；这一段不需要零件时给空数组，不要为了凑数硬选。"
+        "一个镜头只渲染一个零件，多写的会被拒绝。"
+        f"只能使用目录中的 ID。共 {len(SELECTABLE_CATALOG_PARTS)} 个，"
         "每行是「ID | 中文分类 | 时长秒 | 文案模式 | 英文说明」。文案模式 text_slots "
         "表示零件通过冻结槽位承载当前分镜文案；beat_host 表示受审宿主或转场场景会承载 "
         "headline / body / items；visual_only 表示零件保留冻结的原始画面，不会写入 headline "

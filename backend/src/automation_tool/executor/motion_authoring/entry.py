@@ -257,6 +257,7 @@ _AGENT_FIXED_REJECTION_BODIES: Final = frozenset(
         "catalog purposes missing",
         "the storyboard names catalog parts but this installation carries no parts catalog",
         "catalog_parts must be selectable catalog ids",
+        "catalog_parts must name at most one part per shot",
         "composition html must be a non-empty string",
         "composition not seekable",
         "motion part slot table is unreadable",
