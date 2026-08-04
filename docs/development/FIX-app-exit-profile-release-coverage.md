@@ -194,8 +194,25 @@ jobs 目录、绝对路径落在本次临时目录（`Path::join` 遇到绝对�
 
 | 函数 | 坏掉的后果 | 为什么这轮没做 |
 | --- | --- | --- |
-| `rollback_committed_smart_edit` | 智能剪辑补偿失效：生成的旁白素材与 `generated-materials/<job>` 目录双双泄漏 | `pub(crate)`，集成测试看不见；in-src 测试又要把 `tests/local_video_orchestrator.rs` 那套 Worker 夹具抄一份。需要先决定是放宽可见性（它的四个同族方法都是 `pub`）还是下沉夹具 |
-| `dispatch_submitted_job` / `fail_submitted_job` | 剪辑任务派发与失败终态；后者坏掉意味着失败的任务**永远停在进行中** | 两者都吃 `tauri::AppHandle`，要先有 App 夹具 |
+| `rollback_committed_smart_edit` | 智能剪辑补偿失效：生成的旁白素材与 `generated-materials/<job>` 目录双双泄漏 | 见下「为什么不是顺手就能补」 |
+| `dispatch_submitted_job` / `fail_submitted_job` | 剪辑任务派发与失败终态；后者坏掉意味着失败的任务**永远停在进行中** | 两者都吃 `tauri::AppHandle`。本 crate 没有开 `tauri` 的 `test` feature，全仓也没有任何 `mock_builder` / `mock_app` 用法——要补就得先加这项 dev 依赖并定下 App 夹具的做法 |
+
+### 为什么 `rollback_committed_smart_edit` 不是顺手就能补
+
+它是 `pub(crate)`，集成测试看不见；而 in-src 测试模块里没有 Worker 夹具——那套
+（签名的 Python Worker、`TemporaryWorker`、`editing_launch`）整个住在
+`tests/local_video_orchestrator.rs` 里。三条路都不是白拿的：
+
+1. **放宽成 `pub`**：它的四个同族方法（`commit` / `abort` / `emergency_stop` /
+   `finish`）确实都是 `pub`。但看清楚区别——那四个是 Tauri Command 从 `lib.rs` 调的，
+   而它只被 `smart_edit_runtime` 调，跟同样是 `pub(crate)` 的 `smart_edit_job_owner`、
+   `worker_uses_script_model`、`local_editing_job_owner` 同一类。**按调用方划分是对的，
+   为了测试把它挪到另一类不对。**
+2. **把夹具抄进 in-src**：约 250 行，从此两份要跟着协议一起改。
+3. **下沉成共享夹具**：`#[cfg(test)]` 的模块集成测试看不见，要让两边都用就得开
+   feature——那正好撞上「单一构建路径」不许用 feature 改变产品行为的那条。
+
+所以这不是「还没排上」，是**一个需要先定的设计选择**。挑哪条路都要单开一个任务。
 
 ## 清理
 
