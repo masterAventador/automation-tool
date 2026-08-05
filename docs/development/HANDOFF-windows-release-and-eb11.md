@@ -42,6 +42,11 @@
 | `1bae5d93` | 制品改摘要绑定（用户拍板） |
 | `ea1a4d4e` | 进程归属两条路线实测，定为读 PEB |
 | `c34b44fd` | Windows 进程事实读取模块 |
+| `ce381355` | 交接（本文件，第二版） |
+| `0179d9be` | 进程层接进 runner（含 `Contents/` 前缀那处沉默假设） |
+| `a8c16c16` | 启动、正常退出、强制清理 |
+| `5816680e` | 打开的文件审计（`lsof -p` 对应物） |
+| `4f007741` | 资源布局与发布目标按宿主派生 |
 
 ## 出包：可用，且这次真的完整
 
@@ -73,7 +78,10 @@ EB-11 把包里的 `sourceTreeSha256` 与当前源码树逐位比对
 | `read_release_identity` | ✅ 读安装根的 `release-identity.v1.json` |
 | `press` / `visible_ui_text` / `wait_for_window` | ✅ UIA，**实测按得动**（连接计数 1→2） |
 | `verify_artifact` | ✅ 摘要绑定，`code_signing` 记录实测 Authenticode 状态 |
-| `windows_processes` 模块 | ✅ pid/ppid/创建时间/命令行/环境，但**还没接进 runner** |
+| `process_snapshot` / `process_has_launch_nonce` / `packaged_prefix` | ✅ 真实 App 上认领成立 |
+| `start_app` / `request_quit` / 强制清理 | ✅ 起停实测，且有对照证明 `request_quit` 承重 |
+| `read_process_open_paths` | ✅ 系统句柄表 + `GetFileType` 防挂死 |
+| `resource_root` / `expected_release_target` | ✅ 真实安装包上两个清单都在位 |
 
 ### 启动 App 必须带这个环境变量
 
@@ -85,57 +93,63 @@ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--force-renderer-accessibility
 常量已在 `run_eb_11_formal_app_acceptance.py`：`WEBVIEW_ACCESSIBILITY_ENVIRONMENT` /
 `WEBVIEW_ACCESSIBILITY_ARGUMENT`。
 
-## EB-11 Windows：还缺什么（按建议顺序）
+## EB-11 Windows：还缺什么（按阻塞顺序）
 
-### 1. `process_snapshot()` 接进 runner
+`verify_release_artifact()` 是整条运行的入口，它自上而下第一个卡住的地方就是下一件事。
 
-`windows_processes` 已经就位，缺的是拼装成 `ProcessRecord(pid, ppid, command, started_at)`：
+### 1. `read_identity()` —— 第一个卡点
 
-- `command`：命令行读得到就用命令行，读不到退回映像路径。三处调用点分别要
-  「以安装目录开头」「抠 `--user-data-dir`」「判断跑的是不是包里那个可执行文件」；
-- `started_at`：`created_at()`，**不可省**——`ProcessRecord` 比较包含它，没有它一个被复用
-  的 pid 会和本轮启动的那个比相等；
-- `process_has_launch_nonce`：`environment(pid).get(LAUNCH_NONCE_ENVIRONMENT) == nonce`。
+macOS 读 `Info.plist` 拿 `CFBundleIdentifier` / `CFBundleShortVersionString` /
+`CFBundleExecutable`。Windows 没有 plist，建议：
 
-macOS 那三个实现建议同样改名 `macos_*` 并加 driver 分发，和 UI 三件一样的做法。
+- 可执行文件：`windows_product_binary()`（已有）；
+- 版本：主二进制的版本资源（`GetFileVersionInfoW` 的 `ProductVersion`）；
+- bundle identifier：**别凭空造**。二进制里编译进了 Tauri 配置，
+  `compiled_deployment_profile_root()` 已经在用「扫二进制找一段字节」这个手法，
+  同样手法可以断言它确实带着 `APP_IDENTIFIER`。
 
-### 2. 启动与退出
+### 2. 部署 Profile 需要一个 `demo-*` 档案
 
-- 启动：macOS 走 `/usr/bin/open`；Windows 直接 `Popen(exe)` 并注入 a11y 变量与 nonce；
-- 正常退出：macOS 发 ⌘Q；Windows 用 UIA 的 `WindowPattern.Close()`（同一套 PowerShell
-  管道，加一个 body 即可），别用 `taskkill` ——那是强杀，验的是「正常退出后清零」；
-- 强制清理：`terminate_records` 的 `SIGTERM`/`SIGKILL` → `TerminateProcess`。
-  **Job Object 在这一步值得叠加**（见 `FINDING-windows-process-ownership.md`），
-  它不改记录形状，可后加。
+`compiled_deployment_profile_root()` 要求 `profileId` 匹配 `demo-[a-z0-9-]+`，
+并且那段 base64 必须真的出现在主二进制里。**本机跑要么造一个 demo profile 出包，
+要么这条门也得换。** 这一条会决定 `--deployment-profile` 参数怎么给，先想清楚再动手。
 
-### 3. 运行时身份：同样换成摘要
+### 3. `bind_runtime_code_identities()` / `verify_runtime_process_identity()`
 
-`verify_runtime_process_identity` 在 macOS 上对活 PID 跑 `codesign`。Windows 的对应物是
+macOS 对可执行文件和活 PID 跑 `codesign`。按已决策的摘要绑定，Windows 的对应物是
 「进程的映像路径 == 验过的那个可执行文件，且该文件摘要 == 验过的摘要」。
-`CodeIdentity` 需要加一个 `image_sha256` 字段（macOS 字段保持不变、有默认值，
-和 `ArtifactFacts` 那次一样的做法）。
+`CodeIdentity` 加一个 `image_sha256` 字段，macOS 字段保持不变、带默认值——
+和 `ArtifactFacts` 那次一样的做法。
 
 **弱在哪里要写清楚**：macOS 验的是加载进内存的代码，Windows 验的是磁盘上那个文件
 （运行中被映射，不能被替换，但可以被改名）。
 
-### 4. 两处文件系统观测
+### 4. 已删 Profile 的「再无名称」
 
-- 浏览器打开的是哪个 Profile：macOS 用 `lsof`；Windows 走
-  `NtQuerySystemInformation(SystemExtendedHandleInformation)` + `GetFinalPathNameByHandle`；
-- 已删 Profile 的 inode 再无名称：macOS 用保留目录句柄 + `fcntl F_GETPATH`；
-  Windows 用 NTFS file id + `GetFinalPathNameByHandle`。
+macOS 保留目录句柄 + `fcntl F_GETPATH`。Windows 用 NTFS file id +
+`GetFinalPathNameByHandle`：删除前拿到 file id，删除后确认这个 id 解析不出任何名称。
+句柄枚举那一半已经做完了（`windows_processes.open_file_paths`），可以照抄它的
+`GetFinalPathNameByHandle` 用法。
 
-### 5. 剩下的杂项
+### 5. 私有目录判定与目录句柄
 
-- `read_identity`：`Info.plist` → Windows 没有 plist，用 `release-identity.v1.json`
-  加产品可执行文件（`windows_product_binary()` 已有）；
-- `APP_DATA`：`~/Library/Application Support/<id>` → `%APPDATA%`/`%LOCALAPPDATA%` 下对应目录，
-  **要和 Rust 侧 `app_data_dir` 实际用的那个一致，去代码里核，别猜**；
-- `require_release_identity` 的 target 映射目前只有 `macos-arm64`，要加 `windows-x86_64`；
-- `require_device_boundary` 目前 `if driver.platform != "darwin": raise`，且要求 `.app`
-  后缀、`os.geteuid() == 0` 检查——Windows 三条都不适用；
-- EB-11 还要求一个 `demo-*` 的部署 Profile（`compiled_deployment_profile_root`），
-  本机跑要么造一个，要么这条也得换。
+- `require_private_directory_identity()` 用 `st_mode == 0o700` 和
+  `st_uid == os.geteuid()`。Windows 上 `st_uid` 无意义、`st_mode` 只表达只读位，
+  **这条要换成 ACL 检查还是换成别的，是个真问题**，别糊过去；
+- `open_absolute_directory()` 用 `os.O_DIRECTORY`（Windows 没有）。
+  打开目录句柄要走 `CreateFileW` + `FILE_FLAG_BACKUP_SEMANTICS`
+  （`test_windows_processes.py` 里那个握目录的用例就是这么开的，抄它）。
+
+### 6. 最后再放开闸门
+
+`require_device_boundary()` 目前 `if driver.platform != "darwin": raise`，另外要求
+`.app` 后缀、`os.geteuid() == 0` 检查。**这三条留到最后改**——在上面五条完成之前放开，
+只会让运行死在更深、更难读的地方。
+
+另有两条 macOS 系统浏览器 Profile 路径（`~/Library/Application Support/Google/Chrome`
+等），用于「不碰用户日常浏览器」的检查，Windows 要换成 `%LOCALAPPDATA%` 下对应目录。
+
+`APP_DATA` 同理：**要和 Rust 侧 `app_data_dir` 实际用的那个一致，去代码里核，别猜。**
 
 ## 制品验证：已决策，别再自行改
 
@@ -169,9 +183,12 @@ macOS 那三个实现建议同样改名 `macos_*` 并加 driver 分发，和 UI 
 
 ## 真实边界
 
-Windows 出包已多次跑通并核对产物，**但当前装着的包是身份修复之前的**。
-EB-11 Windows 验收**一步都没走**：UI 三件仪器与制品验证已实测可用，进程层模块已就位
-但未接线，其余按上文清单仍缺。macOS 侧本轮改动均未复跑（本机是 Windows）。
+Windows 出包已多次跑通并核对产物，**但当前装着的包是身份修复之前、走 EB-16 路径出的**
+（清单里 `build_id` 是 `eb-16-windows-release`），跑验收前必须重出重装。
+
+EB-11 Windows 验收**一步都没走**。仪器侧已实测可用的部分见上表；`verify_release_artifact`
+自上而下第一个卡点是 `read_identity`。macOS 侧本轮改动均未复跑（本机是 Windows），
+改动形状一律是「加可选字段 + 委托到原实现」，macOS 代码路径未变。
 
 ## 清理
 
