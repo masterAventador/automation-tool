@@ -695,6 +695,44 @@ class WindowsReleaseTests(unittest.TestCase):
                 Path(temporary), "windows-release"
             )
 
+    def test_the_default_work_directory_passes_the_gate_that_guards_it(self) -> None:
+        """A default the tool itself rejects is not a default.
+
+        `.local/release` is 33 characters against this checkout and the NSIS
+        path budget allows 31, so `--platform windows` with no `--work-dir`
+        could never run — measured 2026-08-05, and the refusal even suggested
+        `C:\\atrel`, sending the operator outside the project for no reason. A
+        shorter name under `.local` fits, so the release output stays where
+        every other build artefact in this project lives.
+        """
+        arguments = build_release_package.parse_arguments(["--platform", "windows"])
+
+        build_release_package.require_windows_path_budget(arguments.work_dir)
+
+        self.assertEqual(
+            arguments.work_dir.parent, build_release_package.REPOSITORY_ROOT / ".local"
+        )
+
+    def test_each_platform_keeps_its_own_default_work_directory(self) -> None:
+        """macOS has no such limit, so it keeps the name that says what it is."""
+        macos = build_release_package.parse_arguments(["--platform", "macos"]).work_dir
+        windows = build_release_package.parse_arguments(["--platform", "windows"]).work_dir
+
+        self.assertEqual(macos, build_release_package.REPOSITORY_ROOT / ".local/release")
+        self.assertLess(len(os.fspath(windows)), len(os.fspath(macos)))
+        for default in (macos, windows):
+            self.assertTrue(default.is_relative_to(build_release_package.REPOSITORY_ROOT))
+
+    def test_the_refusal_points_inside_the_project(self) -> None:
+        """The message is the only guidance an operator gets at that moment."""
+        deep = build_release_package.REPOSITORY_ROOT / ".local" / ("d" * 60)
+
+        with self.assertRaises(build_release_package.ReleaseFailed) as raised:
+            build_release_package.require_windows_path_budget(deep)
+
+        self.assertNotIn("C:\\atrel", str(raised.exception))
+        self.assertIn(".local", str(raised.exception))
+
     def test_the_windows_platform_has_a_release_builder(self) -> None:
         self.assertTrue(
             hasattr(build_release_package, "build_windows_release"),

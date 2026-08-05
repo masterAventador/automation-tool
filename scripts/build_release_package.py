@@ -128,6 +128,12 @@ from run_p9_03_acceptance import (  # noqa: E402
 
 STAGING_CONTRACT = REPOSITORY_ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
 DEFAULT_WORK_DIRECTORY = REPOSITORY_ROOT / ".local/release"
+# The same place, under a name the NSIS path budget can afford. `makensis`
+# cannot read `\\?\` paths, so the whole work directory has to fit in what is
+# left of `MAX_PATH` after the deepest file in the payload — 31 characters
+# against this checkout. `.local/release` is 33 and was therefore a default
+# that could never be used; see `require_windows_path_budget`.
+WINDOWS_DEFAULT_WORK_DIRECTORY = REPOSITORY_ROOT / ".local/rel"
 RELEASE_CONFIGURATION_NAME = "tauri.release.generated.json"
 EFFECTIVE_CONFIGURATION_NAME = "tauri.release.effective.json"
 RELEASE_IDENTITY_KEY = "AutomationToolReleaseIdentity"
@@ -928,8 +934,8 @@ def require_windows_path_budget(work_directory: Path) -> None:
     if length > budget:
         raise ReleaseFailed(
             f"the Windows release work directory is {length} characters and the "
-            f"NSIS bundler leaves room for {budget}: pass a shorter --work-dir "
-            r"such as C:\atrel"
+            f"NSIS bundler leaves room for {budget}: pass a shorter --work-dir, "
+            f"such as the default {WINDOWS_DEFAULT_WORK_DIRECTORY}"
         )
 
 
@@ -1214,7 +1220,7 @@ DEPLOYMENT_ARGUMENTS = (
 def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform", choices=("macos", "windows"), default="macos")
-    parser.add_argument("--work-dir", type=Path, default=DEFAULT_WORK_DIRECTORY)
+    parser.add_argument("--work-dir", type=Path, default=None)
     parser.add_argument("--archive", type=Path)
     # Derived from the platform rather than defaulted to one of them. A real
     # Windows release shipped `"buildId": "macos-release"` in its own
@@ -1261,6 +1267,12 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     arguments = parser.parse_args(argv)
     if arguments.build_id is None:
         arguments.build_id = f"{arguments.platform}-release"
+    if arguments.work_dir is None:
+        arguments.work_dir = (
+            WINDOWS_DEFAULT_WORK_DIRECTORY
+            if arguments.platform == "windows"
+            else DEFAULT_WORK_DIRECTORY
+        )
     # Every step of a release runs a subprocess with `cwd=frontend/`, so a
     # relative path given on the command line would be re-interpreted against
     # a directory the operator never named. Bind them all to the invocation
