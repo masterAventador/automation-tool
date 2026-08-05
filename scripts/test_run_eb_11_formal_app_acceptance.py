@@ -337,23 +337,44 @@ class FormalLoginLifecycleTests(unittest.TestCase):
                 profile_bindings=(binding,),
             )
 
+        # The two deterministic facts the check now also reads after the restart:
+        # the bound directory still has a name, and the App still records it as
+        # the Profile in use. Held steady here so this test keeps measuring what
+        # it always measured — that a *different* inode is refused.
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        (root / runner.CURRENT_PROFILE_MARKER_NAME).write_text(
+            first_path.name, encoding="utf-8"
+        )
+
+        class Driver:
+            platform = "recording"
+
+            def open_directory_identity(self, directory_fd: int) -> tuple[int, int] | None:
+                del directory_fd
+                return (1, 3)
+
         qr_open = observation(first_path, (1, 3))
         qr_recheck = observation(first_path, (1, 3))
         restarted = observation(first_path, (1, 3))
-        runner.require_same_profile_reuse(qr_open, qr_recheck, restarted)
 
-        with self.assertRaises(runner.AcceptanceFailed):
-            runner.require_same_profile_reuse(
-                qr_open,
-                observation(replacement_path, (1, 4)),
-                restarted,
-            )
-        with self.assertRaises(runner.AcceptanceFailed):
-            runner.require_same_profile_reuse(
-                qr_open,
-                qr_recheck,
-                observation(first_path, (1, 5)),
-            )
+        with mock.patch.object(runner, "device_driver", return_value=Driver()):
+            runner.require_same_profile_reuse(qr_open, qr_recheck, restarted, root)
+
+            with self.assertRaises(runner.AcceptanceFailed):
+                runner.require_same_profile_reuse(
+                    qr_open,
+                    observation(replacement_path, (1, 4)),
+                    restarted,
+                    root,
+                )
+            with self.assertRaises(runner.AcceptanceFailed):
+                runner.require_same_profile_reuse(
+                    qr_open,
+                    qr_recheck,
+                    observation(first_path, (1, 5)),
+                    root,
+                )
 
     def test_safe_logout_uses_the_visible_confirmation_and_waits_for_missing(self) -> None:
         runner = load_runner()
@@ -859,6 +880,179 @@ class ReleaseIdentityTests(unittest.TestCase):
                 profile_root=profile_root,
                 source=current,
             )
+
+
+class ProfileReuseTests(unittest.TestCase):
+    """What proves the restarted App reused the same Profile.
+
+    2026-08-05, Windows, installed release package, real operator, two real
+    scans: the run reached the final phase and died with `Chromium did not use
+    the App-owned Profile`. Measured afterwards against a healthy session, the
+    recheck browser lives about **0.7 seconds** — the Executor opens it, checks,
+    reaches `healthy`, and closes it before returning the result:
+
+        t+2.95s  browsers=1  chromium=True  profile=True
+        t+3.31s  browsers=1  chromium=True  profile=False
+        t+3.67s  browsers=0
+
+    A sample costs ~0.30s while a browser is up, because the Windows open-handle
+    audit walks the whole system handle table. So the window offers one or two
+    chances and only one of those carried the Profile handle. Requiring the
+    sampler to catch it is betting the run on a 0.7-second coincidence, and the
+    operator is the one who pays when the bet loses — two scans, twenty minutes.
+
+    So the claim "the restart reused the same Profile" is proved from something
+    that does not expire: the directory the QR login was bound to is still the
+    only Profile under `douyin/`, checked through the descriptor this run has
+    held open since before the restart. A browser caught in that window is still
+    checked when it is caught — it must match — but its capture is no longer
+    what the run depends on.
+    """
+
+    @staticmethod
+    def _observation(
+        runner: ModuleType,
+        path: Path,
+        identity: tuple[int, int],
+        *,
+        with_browser: bool = True,
+    ) -> object:
+        if not with_browser:
+            return runner.RuntimeObservation(executor_observed=True)
+        binding = runner.ProfileDirectoryBinding(
+            path=path,
+            parent_fd=10,
+            directory_fd=11,
+            parent_identity=(1, 2),
+            identity=identity,
+        )
+        return runner.RuntimeObservation(
+            executor_observed=True,
+            embedded_browser_observed=True,
+            app_owned_profile_observed=True,
+            profile_directories=(path,),
+            profile_bindings=(binding,),
+        )
+
+    @staticmethod
+    def _driver(surviving: tuple[int, int] | None):
+        class Driver:
+            platform = "recording"
+
+            def open_directory_identity(self, directory_fd: int) -> tuple[int, int] | None:
+                del directory_fd
+                return surviving
+
+        return Driver()
+
+    def _profile_root(self, runner: ModuleType, recorded: str | None) -> Path:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        if recorded is not None:
+            (root / runner.CURRENT_PROFILE_MARKER_NAME).write_text(recorded, encoding="utf-8")
+        return root
+
+    PROFILE_NAME = "6d9221cb-e9dc-4359-9f6b-34f7fbc55316"
+
+    def _scene(self, runner: ModuleType) -> tuple[Path, object, object]:
+        path = Path("/tmp/embedded-browser-profiles/douyin") / self.PROFILE_NAME
+        return (
+            path,
+            self._observation(runner, path, (1, 3)),
+            self._observation(runner, path, (1, 3), with_browser=False),
+        )
+
+    def test_a_recheck_that_caught_no_browser_is_not_a_failure(self) -> None:
+        runner = load_runner()
+        path, qr_open, blind = self._scene(runner)
+        root = self._profile_root(runner, self.PROFILE_NAME)
+
+        with mock.patch.object(runner, "device_driver", return_value=self._driver((1, 3))):
+            runner.require_same_profile_reuse(qr_open, blind, blind, root)
+
+    def test_a_profile_replaced_after_the_restart_still_fails(self) -> None:
+        """The property being proved must still fail when it is false."""
+        runner = load_runner()
+        path, qr_open, blind = self._scene(runner)
+        root = self._profile_root(runner, self.PROFILE_NAME)
+
+        with (
+            mock.patch.object(runner, "device_driver", return_value=self._driver((1, 9))),
+            self.assertRaisesRegex(runner.AcceptanceFailed, "same App-owned Profile"),
+        ):
+            runner.require_same_profile_reuse(qr_open, blind, blind, root)
+
+    def test_a_profile_removed_after_the_restart_still_fails(self) -> None:
+        runner = load_runner()
+        path, qr_open, blind = self._scene(runner)
+        root = self._profile_root(runner, self.PROFILE_NAME)
+
+        with (
+            mock.patch.object(runner, "device_driver", return_value=self._driver(None)),
+            self.assertRaisesRegex(runner.AcceptanceFailed, "same App-owned Profile"),
+        ):
+            runner.require_same_profile_reuse(qr_open, blind, blind, root)
+
+    def test_an_abandoned_profile_left_on_disk_still_fails(self) -> None:
+        """The surviving-name check alone cannot see this one.
+
+        A restart that quietly starts using a *different* Profile leaves the old
+        directory exactly where it was, so its name survives and its inode is
+        unchanged. What changes is the App's own record of which Profile it is
+        using, which is why that record is read rather than inferred.
+        """
+        runner = load_runner()
+        path, qr_open, blind = self._scene(runner)
+        root = self._profile_root(runner, "46ea626c-fddb-49bc-9269-a50368f687ca")
+
+        with (
+            mock.patch.object(runner, "device_driver", return_value=self._driver((1, 3))),
+            self.assertRaisesRegex(runner.AcceptanceFailed, "same App-owned Profile"),
+        ):
+            runner.require_same_profile_reuse(qr_open, blind, blind, root)
+
+    def test_a_browser_that_was_caught_on_another_profile_still_fails(self) -> None:
+        """Capture stopped being required; it did not stop being checked."""
+        runner = load_runner()
+        path, qr_open, blind = self._scene(runner)
+        other = Path("/tmp/embedded-browser-profiles/douyin/46ea626c-fddb-49bc-9269-a50368f687ca")
+        restarted = self._observation(runner, other, (1, 4))
+        root = self._profile_root(runner, self.PROFILE_NAME)
+
+        with (
+            mock.patch.object(runner, "device_driver", return_value=self._driver((1, 3))),
+            self.assertRaisesRegex(runner.AcceptanceFailed, "same App-owned Profile"),
+        ):
+            runner.require_same_profile_reuse(qr_open, blind, restarted, root)
+
+    def test_the_qr_login_window_must_still_carry_a_full_observation(self) -> None:
+        """The one window that reliably holds a browser keeps the strict rule.
+
+        The login browser stays open for the operator to scan, so it is observed
+        for as long as the scan takes. That is where the packaged Executor, the
+        packaged Chromium and the App-owned Profile are proved to be one chain,
+        and nothing about the short recheck window changes it.
+        """
+        runner = load_runner()
+        path, _, blind = self._scene(runner)
+        root = self._profile_root(runner, self.PROFILE_NAME)
+
+        with (
+            mock.patch.object(runner, "device_driver", return_value=self._driver((1, 3))),
+            self.assertRaises(runner.AcceptanceFailed),
+        ):
+            runner.require_same_profile_reuse(blind, blind, blind, root)
+
+    def test_an_unreadable_profile_record_is_a_failure(self) -> None:
+        runner = load_runner()
+        path, qr_open, blind = self._scene(runner)
+        root = self._profile_root(runner, None)
+
+        with (
+            mock.patch.object(runner, "device_driver", return_value=self._driver((1, 3))),
+            self.assertRaisesRegex(runner.AcceptanceFailed, "Profile record is unreadable"),
+        ):
+            runner.require_same_profile_reuse(qr_open, blind, blind, root)
 
 
 class ProfileBoundaryTests(unittest.TestCase):

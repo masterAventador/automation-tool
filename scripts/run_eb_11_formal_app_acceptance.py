@@ -90,6 +90,10 @@ LOGIN_PROGRESS_MARKERS: Final = (
 UNAVAILABLE_CODE: Final = "process_unavailable"
 # How a Chromium process says it is a child of a browser rather than one.
 CHROMIUM_CHILD_PROCESS_SWITCH: Final = "--type="
+# Where the App records which operations Profile it is using. It sits beside the
+# `douyin/` directory that holds the Profile itself, and survives the App
+# exiting — measured 2026-08-05, unchanged across launch, recheck and quit.
+CURRENT_PROFILE_MARKER_NAME: Final = "current-douyin-profile-v1"
 SIGNING_CONTRACT: Final = (
     REPOSITORY_ROOT / "contracts" / "quality" / "macos-release-signing.v1.json"
 )
@@ -2619,28 +2623,91 @@ def require_same_profile_reuse(
     qr_open: RuntimeObservation,
     qr_recheck: RuntimeObservation,
     restarted: RuntimeObservation,
+    profile_root: Path,
 ) -> None:
-    """Bind QR confirmation and restart health to one exact Profile inode."""
+    """Bind QR confirmation and restart health to one exact Profile inode.
 
-    identities: list[tuple[Path, tuple[int, int], tuple[int, int]]] = []
-    for observation in (qr_open, qr_recheck, restarted):
-        require_complete_runtime(observation)
-        if len(observation.profile_bindings) != 1:
-            raise AcceptanceFailed(
-                "EB-11 session reuse did not retain exactly one Profile identity"
-            )
-        binding = observation.profile_bindings[0]
-        if (
-            binding.parent_fd < 0
-            or binding.directory_fd < 0
-            or binding.path != observation.profile_directories[0]
-        ):
-            raise AcceptanceFailed("EB-11 session reuse Profile identity is unavailable")
-        identities.append((binding.path, binding.parent_identity, binding.identity))
-    if any(identity != identities[0] for identity in identities[1:]):
+    The anchor is the QR login window, and only that window is required to hold
+    a complete runtime observation: the browser stays open there for as long as
+    the operator takes to scan, so the packaged Executor, the packaged Chromium
+    and the App-owned Profile are proved to be one chain while it is wide open.
+
+    The two recheck windows are not required to have caught a browser, because
+    the product does not keep one there to be caught. Measured on 2026-08-05
+    against the installed release with a healthy session, the recheck browser
+    lives about **0.7 seconds** — opened, checked, and closed the moment the
+    state reaches `healthy`, before the result is even returned:
+
+        t+2.95s  browsers=1  chromium=True  profile=True
+        t+3.31s  browsers=1  chromium=True  profile=False
+        t+3.67s  browsers=0
+
+    while one sample costs ~0.30s with a browser up, because the Windows
+    open-handle audit walks the whole system handle table. Demanding that the
+    sampler land inside that window is a coin flip, and it came up tails on a
+    real run after the operator had scanned twice.
+
+    What replaces it does not expire. The Profile directory this run bound at
+    QR-login time must still carry a name in its parent — proving the restart
+    did not replace it — and the App's own record of which Profile it is using
+    must still name that same directory. Both are read after the restart, both
+    are deterministic, and together they say what the coin flip was reaching
+    for: the same Profile, still there, still the one in use. A browser that
+    *was* caught in either window is still held to it.
+    """
+
+    require_complete_runtime(qr_open)
+    if len(qr_open.profile_bindings) != 1:
+        raise AcceptanceFailed("EB-11 session reuse did not retain exactly one Profile identity")
+    anchor = qr_open.profile_bindings[0]
+    if (
+        anchor.parent_fd < 0
+        or anchor.directory_fd < 0
+        or anchor.path != qr_open.profile_directories[0]
+    ):
+        raise AcceptanceFailed("EB-11 session reuse Profile identity is unavailable")
+
+    expected = (anchor.path, anchor.parent_identity, anchor.identity)
+    for observation in (qr_recheck, restarted):
+        if not observation.executor_observed:
+            raise AcceptanceFailed("EB-11 did not observe the packaged Executor")
+        for binding in observation.profile_bindings:
+            if (binding.path, binding.parent_identity, binding.identity) != expected:
+                raise AcceptanceFailed(
+                    "EB-11 QR login and restart did not reuse the same App-owned Profile"
+                )
+
+    if device_driver().open_directory_identity(anchor.directory_fd) != anchor.identity:
         raise AcceptanceFailed(
             "EB-11 QR login and restart did not reuse the same App-owned Profile"
         )
+    if read_current_profile_name(profile_root) != anchor.path.name:
+        raise AcceptanceFailed(
+            "EB-11 QR login and restart did not reuse the same App-owned Profile"
+        )
+
+
+def read_current_profile_name(profile_root: Path) -> str:
+    """Which Profile the App itself records as the one in use.
+
+    The App writes the identifier it will reopen next into this file, so it is
+    the product's own answer to "which Profile am I using" — not an inference
+    from a process that happens to be running. Reading it is how a restart that
+    quietly abandoned the old Profile for a fresh one is caught, which the
+    surviving-name check alone would miss if the old directory were orphaned
+    rather than removed.
+    """
+
+    marker = profile_root / CURRENT_PROFILE_MARKER_NAME
+    if marker.is_symlink() or not marker.is_file():
+        raise AcceptanceFailed("EB-11 App-owned Profile record is unreadable")
+    try:
+        rendered = marker.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError) as error:
+        raise AcceptanceFailed("EB-11 App-owned Profile record is unreadable") from error
+    if not rendered:
+        raise AcceptanceFailed("EB-11 App-owned Profile record is empty")
+    return rendered
 
 
 def require_observed_profile_unlinked(binding: ProfileDirectoryBinding) -> None:
@@ -3509,6 +3576,7 @@ def run_acceptance(arguments: Arguments) -> EvidencePublication:
                 qr_open_runtime,
                 qr_recheck_runtime,
                 restart_runtime,
+                profile_root,
             )
             qr_runtime = qr_open_runtime.merge(qr_recheck_runtime)
             verify_running_release_process(owned_instance, verified_release)
