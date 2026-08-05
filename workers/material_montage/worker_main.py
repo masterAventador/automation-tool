@@ -218,7 +218,11 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
             else None
         )
         webui = (
-            start_webui(bootstrap.asset_root, bootstrap.script_model)
+            start_webui(
+                bootstrap.asset_root,
+                bootstrap.script_model,
+                bootstrap.pexels_api_key,
+            )
             if bootstrap.web_ui
             else None
         )

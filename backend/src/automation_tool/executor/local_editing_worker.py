@@ -42,6 +42,7 @@ _ROOT_KEYS = frozenset(
         "enableWebUi",
         "localSessionToken",
         "mediaTools",
+        "pexelsApiKey",
         "protocolVersion",
         "renderBrowser",
         "scriptModel",
@@ -1089,6 +1090,13 @@ def parse_local_editing_worker_bootstrap(
         or document.get("workerKind") != "python"
         or document.get("enableWebUi") is not False
         or document.get("renderBrowser") is not None
+        # Carried for the material worker's WebUI. This worker has no use for
+        # a stock-footage key and never reads the value, but a document whose
+        # shape it does not fully recognise is still rejected.
+        or not (
+            document.get("pexelsApiKey") is None
+            or isinstance(document.get("pexelsApiKey"), str)
+        )
         or not isinstance(token, str)
         or _TOKEN_PATTERN.fullmatch(token) is None
     ):

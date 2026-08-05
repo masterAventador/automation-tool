@@ -2834,10 +2834,35 @@ struct VideoWorkerBootstrapDocument<'a> {
     local_session_token: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     media_tools: Option<VideoWorkerMediaToolsBootstrap<'a>>,
+    /// Always serialized (null when the build carries no key): both worker
+    /// readers verify the exact document shape, so an optional field would
+    /// make "packaged with a key" and "packaged without" two different
+    /// protocols.
+    pexels_api_key: Option<&'static str>,
     protocol_version: &'static str,
     render_browser: Option<VideoWorkerRenderBrowserBootstrap<'a>>,
     script_model: Option<VideoWorkerScriptModelBootstrap<'a>>,
     worker_kind: &'static str,
+}
+
+/// The stock-footage key the release pipeline baked in, if any.
+///
+/// Compile-time like the deployment profile: the key ships inside the binary
+/// and never appears in argv, the environment of a child process, or a log
+/// line. A build without the variable simply sends null and the WebUI asks
+/// the operator, which is exactly the pre-key behaviour.
+fn compiled_pexels_api_key() -> Option<&'static str> {
+    configured_pexels_api_key(option_env!("AUTOMATION_TOOL_PEXELS_API_KEY"))
+}
+
+fn configured_pexels_api_key(configured: Option<&'static str>) -> Option<&'static str> {
+    let value = configured?;
+    let shape_is_sane = (20..=120).contains(&value.len())
+        && value.bytes().all(|byte| byte.is_ascii_alphanumeric());
+    // A malformed value is dropped rather than shipped: the worker rejects it
+    // at the bootstrap boundary anyway, and a package that cannot search stock
+    // footage beats one that dies on its first bootstrap line.
+    shape_is_sane.then_some(value)
 }
 
 #[derive(Serialize)]
@@ -4018,6 +4043,7 @@ fn write_bootstrap(
         enable_web_ui: launch.web_ui,
         local_session_token: &encoded,
         media_tools,
+        pexels_api_key: compiled_pexels_api_key(),
         protocol_version: WORKER_PROTOCOL_VERSION,
         render_browser,
         script_model: launch.script_model.as_ref().map(|configuration| {
@@ -4679,10 +4705,33 @@ const fn timed_out() -> VideoWorkerError {
 
 #[cfg(test)]
 mod tests {
-    use super::{unsafe_path_component, VideoWorkerSmartEditResult};
+    use super::{
+        configured_pexels_api_key, unsafe_path_component, VideoWorkerSmartEditResult,
+    };
 
     #[cfg(windows)]
     use super::remove_windows_regular_file_by_handle;
+
+    #[test]
+    fn packaged_pexels_key_of_the_real_shape_is_forwarded() {
+        // 56 alphanumeric characters — the shape Pexels actually issues.
+        let key: &'static str =
+            "HOD4Nyf1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        assert_eq!(configured_pexels_api_key(Some(key)), Some(key));
+    }
+
+    #[test]
+    fn absent_or_malformed_pexels_keys_are_dropped_not_shipped() {
+        assert_eq!(configured_pexels_api_key(None), None);
+        assert_eq!(configured_pexels_api_key(Some("")), None);
+        assert_eq!(configured_pexels_api_key(Some("short")), None);
+        assert_eq!(
+            configured_pexels_api_key(Some(
+                "has spaces AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            )),
+            None
+        );
+    }
 
     #[test]
     fn smart_edit_result_accepts_one_static_image_in_multiple_paragraphs() {

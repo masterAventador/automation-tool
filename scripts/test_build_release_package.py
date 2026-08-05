@@ -544,5 +544,46 @@ class TheOutputDirectoryIsCreatedBeforeItIsUsed(unittest.TestCase):
             "anything creates it",
         )
 
+
+
+class ThePexelsKeyRidesTheBuildNotTheRepository(unittest.TestCase):
+    """The stock-footage key is baked in at compile time, from an operator file.
+
+    Measured 2026-08-05: the packaged App demanded a Pexels key from the
+    operator because nothing on the release path ever carried one. The key
+    file lives outside the repository (like the deployment signing keys) and
+    its value must reach the compile environment — and argv, logs and the
+    repository never.
+    """
+
+    def test_a_wellformed_key_file_reaches_the_compile_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            key_file = Path(directory) / "pexels-api-key"
+            key_file.write_text("C" * 56 + "\n", encoding="utf-8")
+            key_file.chmod(0o600)
+
+            value = build_release_package.read_pexels_api_key(key_file)
+
+            self.assertEqual(value, "C" * 56)
+
+    def test_malformed_or_worldreadable_key_files_are_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "absent"
+            with self.assertRaises(build_release_package.ReleaseFailed):
+                build_release_package.read_pexels_api_key(missing)
+
+            wide_open = Path(directory) / "wide-open"
+            wide_open.write_text("D" * 56, encoding="utf-8")
+            wide_open.chmod(0o644)
+            with self.assertRaises(build_release_package.ReleaseFailed):
+                build_release_package.read_pexels_api_key(wide_open)
+
+            garbage = Path(directory) / "garbage"
+            garbage.write_text("not a key at all!!", encoding="utf-8")
+            garbage.chmod(0o600)
+            with self.assertRaises(build_release_package.ReleaseFailed):
+                build_release_package.read_pexels_api_key(garbage)
+
+
 if __name__ == "__main__":
     unittest.main()

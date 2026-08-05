@@ -68,6 +68,7 @@ def bootstrap(app_data: Path) -> LocalEditingWorkerBootstrap:
                         "ffmpegPath": str(ffmpeg),
                         "ffprobePath": str(ffprobe),
                     },
+                    "pexelsApiKey": None,
                     "protocolVersion": "1.0",
                     "renderBrowser": None,
                     "scriptModel": None,

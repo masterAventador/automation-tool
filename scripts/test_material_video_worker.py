@@ -127,6 +127,7 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
                 "bootstrapVersion": "1",
                 "enableWebUi": False,
                 "localSessionToken": "a" * 64,
+                "pexelsApiKey": None,
                 "protocolVersion": "1.0",
                 "renderBrowser": None,
                 "scriptModel": None,
@@ -164,6 +165,7 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
                     "ffmpegPath": str(ffmpeg),
                     "ffprobePath": str(ffprobe),
                 },
+                "pexelsApiKey": None,
                 "protocolVersion": "1.0",
                 "renderBrowser": None,
                 "scriptModel": None,
@@ -210,6 +212,7 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
                     "ffmpegPath": str(ffmpeg),
                     "ffprobePath": str(ffprobe),
                 },
+                "pexelsApiKey": None,
                 "protocolVersion": "1.0",
                 "renderBrowser": None,
                 "scriptModel": None,
@@ -304,6 +307,7 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
                     "ffmpegPath": str(ffmpeg),
                     "ffprobePath": str(ffprobe),
                 },
+                "pexelsApiKey": None,
                 "protocolVersion": "1.0",
                 "renderBrowser": None,
                 "scriptModel": None,
@@ -377,6 +381,7 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
                     "ffmpegPath": str(ffmpeg),
                     "ffprobePath": str(ffprobe),
                 },
+                "pexelsApiKey": None,
                 "protocolVersion": "1.0",
                 "renderBrowser": None,
                 "scriptModel": {
@@ -624,6 +629,7 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
                     "ffmpegPath": str(ffmpeg),
                     "ffprobePath": str(ffprobe),
                 },
+                "pexelsApiKey": None,
                 "protocolVersion": "1.0",
                 "renderBrowser": None,
                 "scriptModel": None,
@@ -1154,24 +1160,25 @@ class SubtitleFontRightsTest(unittest.TestCase):
             self.assertGreater(font.bytes, 0)
             self.assertTrue(font.attribution)
 
-    def test_no_font_binary_is_checked_into_the_repository(self) -> None:
-        # A 33 MB binary in Git history is unremovable without rewriting history,
-        # and every other large locked artifact (Chromium, ffmpeg) is fetched at
-        # build time instead. The fonts follow that rule rather than being the
-        # one exception.
-        self.assertFalse((ROOT / "assets/fonts").exists())
-        tracked = subprocess.run(
-            ["git", "ls-files"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.splitlines()
+    def test_every_cleared_font_is_committed_with_its_locked_digest(self) -> None:
+        # Reversed on 2026-08-05 by explicit decision: the fonts are immutable,
+        # not compiled per machine, and re-downloading them on every clean
+        # machine made the build depend on hosts some machines cannot reach
+        # (the Windows box fails the TLS handshake to the font hosts). They are
+        # committed once; the rights contract digest still decides what counts
+        # as the font, so a drifted committed file is as rejected as a
+        # corrupted download ever was.
+        committed_root = ROOT / "assets/subtitle-fonts"
         for font in subtitle_font_assets.bundled_subtitle_fonts():
+            committed = committed_root / font.packaged_name
+            self.assertTrue(
+                committed.is_file(),
+                f"{font.packaged_name} must be committed under assets/subtitle-fonts",
+            )
             self.assertEqual(
-                [path for path in tracked if path.endswith(font.packaged_name)],
-                [],
-                "a cleared font must not be committed to the repository",
+                hashlib.sha256(committed.read_bytes()).hexdigest(),
+                font.sha256,
+                f"{font.packaged_name} drifted from the rights contract digest",
             )
 
     def test_no_registered_font_is_a_proprietary_system_face(self) -> None:
@@ -1548,6 +1555,67 @@ class MaterialVideoWorkerDefaultSubtitleFontTest(unittest.TestCase):
             document,
             '[app]\nvalue = 1\n\n[ui]\nfont_name = "NotoSansCJKsc-Bold.ttf"\n'
             "hide_log = false\n",
+        )
+
+    def test_bootstrap_carries_an_optional_pexels_api_key(self) -> None:
+        # 产品从未把素材站点密钥接进上游 WebUI（2026-08-05 用户实测：内置包
+        # 仍要求手工填写）。密钥走已有的 stdin 引导通道，与模型密钥同一条路。
+        document = {
+            "assetRoot": "unused",
+            "bootstrapVersion": "1",
+            "enableWebUi": True,
+            "localSessionToken": "a" * 64,
+            "pexelsApiKey": "A" * 56,
+            "protocolVersion": "1.0",
+            "renderBrowser": None,
+            "scriptModel": None,
+            "workerKind": "python",
+        }
+        with tempfile.TemporaryDirectory(
+            prefix="material-video-pexels-", dir=ROOT / ".local"
+        ) as directory:
+            asset_root = Path(directory) / "assets"
+            asset_root.mkdir()
+            document["assetRoot"] = str(asset_root)
+            line = json.dumps(document, separators=(",", ":")).encode() + b"\n"
+
+            bootstrap = gateway.parse_bootstrap(line)
+
+            self.assertEqual(bootstrap.pexels_api_key, "A" * 56)
+
+    def test_bootstrap_rejects_a_malformed_pexels_api_key(self) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="material-video-pexels-bad-", dir=ROOT / ".local"
+        ) as directory:
+            asset_root = Path(directory) / "assets"
+            asset_root.mkdir()
+            for bad in ("", "short", "契约外字符" * 10, "with space " + "a" * 40, 7):
+                document = {
+                    "assetRoot": str(asset_root),
+                    "bootstrapVersion": "1",
+                    "enableWebUi": True,
+                    "localSessionToken": "a" * 64,
+                    "pexelsApiKey": bad,
+                    "protocolVersion": "1.0",
+                    "renderBrowser": None,
+                    "scriptModel": None,
+                    "workerKind": "python",
+                }
+                line = json.dumps(document, separators=(",", ":")).encode() + b"\n"
+                with self.assertRaises(gateway.GatewayRejected):
+                    gateway.parse_bootstrap(line)
+
+    def test_private_config_pins_the_pexels_key_in_the_app_section(self) -> None:
+        # 与字幕字体同一机制：插进上游自己的 [app] 段，其余内容逐字保留。
+        document = _private_config_document(
+            "[app]\nvalue = 1\n\n[ui]\nhide_log = false\n",
+            "NotoSansCJKsc-Bold.ttf",
+            pexels_api_key="B" * 56,
+        )
+        self.assertEqual(
+            document,
+            "[app]\npexels_api_keys = [\"" + "B" * 56 + "\"]\nvalue = 1\n\n"
+            '[ui]\nfont_name = "NotoSansCJKsc-Bold.ttf"\nhide_log = false\n',
         )
 
     def test_private_config_refuses_upstream_configuration_without_a_webui_section(

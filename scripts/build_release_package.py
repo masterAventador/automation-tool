@@ -178,6 +178,30 @@ DEFAULT_ARCHIVES = {
 }
 
 
+def read_pexels_api_key(path: Path) -> str:
+    """Read the operator's stock-footage key file for compile-time baking.
+
+    Same posture as the deployment key files: a path on argv, never a value;
+    the file must be a private regular file. The shape check mirrors the
+    worker's bootstrap gate so a bad key fails the build here, not the first
+    video twenty minutes after installation.
+    """
+    try:
+        stats = path.lstat()
+    except OSError as error:
+        raise ReleaseFailed(f"pexels api key file is unavailable: {path}") from error
+    if not stat.S_ISREG(stats.st_mode):
+        raise ReleaseFailed("pexels api key file must be a regular file")
+    if stat.S_IMODE(stats.st_mode) & 0o077:
+        raise ReleaseFailed("pexels api key file must not be group or world accessible")
+    if stats.st_size > 4096:
+        raise ReleaseFailed("pexels api key file is implausibly large")
+    value = path.read_text(encoding="utf-8").strip()
+    if not (20 <= len(value) <= 120) or not value.isalnum() or not value.isascii():
+        raise ReleaseFailed("pexels api key file does not hold a plausible key")
+    return value
+
+
 def require_macos_target() -> tuple[str, str]:
     if platform_module.system() != "Darwin":
         raise ReleaseFailed("the macOS release package must be built on macOS")
@@ -755,6 +779,7 @@ def build_macos_release(
     deployment: CustomerDemoMaterial | None = None,
     update_endpoint: str | None = None,
     update_public_key: str | None = None,
+    pexels_api_key: str | None = None,
 ) -> dict[str, object]:
     """Produce one distributable macOS package and pass every release gate.
 
@@ -815,6 +840,7 @@ def build_macos_release(
         ),
         update_endpoint=update_endpoint,
         update_public_key=update_public_key,
+        pexels_api_key=pexels_api_key,
     )
     if deployment is not None:
         announce(f"Building for the deployment at {deployment.base_url}")
@@ -930,6 +956,14 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
             "action-authorization-private-key Secret (mode 0600)"
         ),
     )
+    parser.add_argument(
+        "--pexels-api-key",
+        type=Path,
+        help=(
+            "path to a private file (mode 0600) holding the stock-footage key "
+            "to bake into the binary; omit to build without one"
+        ),
+    )
     arguments = parser.parse_args(argv)
     # Every step of a release runs a subprocess with `cwd=frontend/`, so a
     # relative path given on the command line would be re-interpreted against
@@ -939,6 +973,7 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         "work_dir",
         "archive",
         "update_public_key_file",
+        "pexels_api_key",
         *DEPLOYMENT_ARGUMENTS,
     ):
         path = getattr(arguments, name)
@@ -1314,6 +1349,13 @@ def main() -> int:
         deployment=deployment,
         update_endpoint=update_endpoint,
         update_public_key=update_public_key,
+        # Read now, inside the reviewed snapshot's parent: a bad key file
+        # fails the build before a compiler runs.
+        pexels_api_key=(
+            None
+            if arguments.pexels_api_key is None
+            else read_pexels_api_key(arguments.pexels_api_key)
+        ),
     )
     (arguments.work_dir / "release-package.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=1, sort_keys=True) + "\n",
