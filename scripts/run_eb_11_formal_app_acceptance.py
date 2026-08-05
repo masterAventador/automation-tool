@@ -44,7 +44,6 @@ from release_identity import (  # noqa: E402
 
 REPOSITORY_ROOT: Final = Path(__file__).resolve().parents[1]
 APP_IDENTIFIER: Final = "com.aventador.automationtool"
-APP_DATA: Final = Path.home() / "Library" / "Application Support" / APP_IDENTIFIER
 DEMO_PROFILE_VERSION: Final = "customer-demo-profile.v1"
 DEMO_PROFILE_KIND: Final = "demo"
 LAUNCH_NONCE_ENVIRONMENT: Final = "AUTOMATION_TOOL_EB11_ACCEPTANCE_NONCE"
@@ -437,6 +436,13 @@ class DeviceDriver:
     def read_process_open_paths(self, records: list[ProcessRecord]) -> list[Path] | None:
         raise self.unavailable("audit which files a process holds open")
 
+    def read_identity(self, app: Path) -> AppIdentity:
+        raise self.unavailable("read the installed package's identity")
+
+    def app_data_root(self) -> Path:
+        """Where the product keeps its own data, per this platform's convention."""
+        raise self.unavailable("locate the product's data directory")
+
     def require_private_directory(self, path: Path) -> tuple[int, tuple[int, int]]:
         """Open a directory only this user can read, and return its identity.
 
@@ -524,6 +530,12 @@ class MacosDeviceDriver(DeviceDriver):
 
     def read_process_open_paths(self, records: list[ProcessRecord]) -> list[Path] | None:
         return macos_read_process_open_paths(records)
+
+    def read_identity(self, app: Path) -> AppIdentity:
+        return macos_read_identity(app)
+
+    def app_data_root(self) -> Path:
+        return Path.home() / "Library" / "Application Support" / APP_IDENTIFIER
 
     def require_private_directory(self, path: Path) -> tuple[int, tuple[int, int]]:
         return macos_require_private_directory(path)
@@ -648,6 +660,55 @@ def windows_command_arguments(command_line: str) -> str:
     if not remainder:
         return ""
     return remainder if remainder.startswith(" ") else f" {remainder}"
+
+
+def windows_file_version(binary: Path) -> str:
+    """The binary's own `FileVersion`, as `a.b.c.d`, or "" if it carries none.
+
+    The Tauri bundler writes this from the same `version` a macOS bundle would
+    put in `CFBundleShortVersionString`, so it is the honest counterpart rather
+    than a second source of truth.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    version_api = ctypes.WinDLL("version", use_last_error=True)
+    rendered = os.fspath(binary)
+    size = version_api.GetFileVersionInfoSizeW(rendered, None)
+    if not size:
+        return ""
+    buffer = ctypes.create_string_buffer(size)
+    if not version_api.GetFileVersionInfoW(rendered, 0, size, buffer):
+        return ""
+    block = ctypes.c_void_p()
+    length = wintypes.UINT(0)
+    if not version_api.VerQueryValueW(
+        buffer, "\\", ctypes.byref(block), ctypes.byref(length)
+    ):
+        return ""
+
+    class FixedFileInfo(ctypes.Structure):
+        _fields_ = (
+            ("dwSignature", wintypes.DWORD),
+            ("dwStrucVersion", wintypes.DWORD),
+            ("dwFileVersionMS", wintypes.DWORD),
+            ("dwFileVersionLS", wintypes.DWORD),
+        )
+
+    if length.value < ctypes.sizeof(FixedFileInfo):
+        return ""
+    information = FixedFileInfo.from_address(block.value or 0)
+    if information.dwSignature != 0xFEEF04BD:
+        return ""
+    return ".".join(
+        str(part)
+        for part in (
+            information.dwFileVersionMS >> 16,
+            information.dwFileVersionMS & 0xFFFF,
+            information.dwFileVersionLS >> 16,
+            information.dwFileVersionLS & 0xFFFF,
+        )
+    )
 
 
 def windows_product_binary(app: Path) -> Path:
@@ -859,6 +920,44 @@ class WindowsDeviceDriver(DeviceDriver):
         if result != "requested":
             raise AcceptanceFailed("EB-11 could not request normal App quit")
 
+    def read_identity(self, app: Path) -> AppIdentity:
+        """The three facts `Info.plist` carries, found where Windows keeps them.
+
+        * the executable — resolved from the artifact, as `windows_product_binary`
+          explains;
+        * the version — the binary's own version resource, which the Tauri
+          bundler fills from the same `version` the plist would have carried;
+        * the identifier — **verified rather than read.** An NSIS install root
+          holds no manifest naming the product, but the Tauri configuration is
+          compiled into the binary, and `compiled_deployment_profile_root`
+          already establishes facts about this binary by finding a byte sequence
+          in it. A package built for some other product does not contain this
+          one's identifier, so it cannot pass by being silent.
+        """
+        binary = windows_product_binary(app)
+        try:
+            compiled = binary.read_bytes()
+        except OSError as error:
+            raise AcceptanceFailed("EB-11 App executable is unavailable") from error
+        if APP_IDENTIFIER.encode("utf-8") not in compiled:
+            raise AcceptanceFailed("EB-11 requires the production bundle identifier")
+        version = windows_file_version(binary)
+        if not version:
+            raise AcceptanceFailed("EB-11 App version is unavailable")
+        return AppIdentity(APP_IDENTIFIER, version, binary)
+
+    def app_data_root(self) -> Path:
+        """`%APPDATA%\\<identifier>` — Roaming, which is what Tauri uses.
+
+        Measured against the running product rather than taken from the docs:
+        the App has created exactly this directory on this machine, and every
+        Profile path in the run hangs off it.
+        """
+        roaming = os.environ.get("APPDATA")
+        if not roaming:
+            raise AcceptanceFailed("EB-11 product data directory is unavailable")
+        return Path(roaming) / APP_IDENTIFIER
+
     def require_private_directory(self, path: Path) -> tuple[int, tuple[int, int]]:
         """The `0o700` check, in the terms this platform actually has.
 
@@ -1061,7 +1160,7 @@ def require_evidence_outside_app(app: Path, evidence: Path) -> Path:
     resolved_app = app.resolve(strict=True)
     resolved_parent = evidence.parent.resolve(strict=True)
     resolved_evidence = resolved_parent / evidence.name
-    resolved_app_data = APP_DATA.resolve(strict=False)
+    resolved_app_data = device_driver().app_data_root().resolve(strict=False)
     if resolved_evidence == resolved_app or resolved_app in resolved_evidence.parents:
         raise AcceptanceFailed("EB-11 evidence must stay outside the App bundle")
     if resolved_evidence == resolved_app_data or resolved_app_data in resolved_evidence.parents:
@@ -1110,7 +1209,22 @@ def run_checked(
     )
 
 
+def app_data_root() -> Path:
+    """Where the product keeps its own data on this host.
+
+    A function rather than the module constant it used to be: the answer is
+    `~/Library/Application Support/<id>` on macOS and `%APPDATA%\<id>` on
+    Windows, and resolving it at import time would make this module fail to
+    import on a host with no driver at all.
+    """
+    return device_driver().app_data_root()
+
+
 def read_identity(app: Path) -> AppIdentity:
+    return device_driver().read_identity(app)
+
+
+def macos_read_identity(app: Path) -> AppIdentity:
     information_path = app / "Contents" / "Info.plist"
     if information_path.is_symlink() or not information_path.is_file():
         raise AcceptanceFailed("EB-11 App Info.plist is unavailable")
@@ -1206,7 +1320,12 @@ def compiled_deployment_profile_root(executable: Path, deployment_profile: Path)
         raise AcceptanceFailed(
             "EB-11 App does not carry the expected signed deployment Profile"
         )
-    return APP_DATA / "profiles" / profile_id / "embedded-browser-profiles"
+    return (
+        device_driver().app_data_root()
+        / "profiles"
+        / profile_id
+        / "embedded-browser-profiles"
+    )
 
 
 def read_runtime_contract(app: Path, profile_root: Path) -> tuple[RuntimeContract, str]:

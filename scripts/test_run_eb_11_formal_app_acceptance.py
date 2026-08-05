@@ -499,7 +499,7 @@ class EvidenceBoundaryTests(unittest.TestCase):
             with self.assertRaises(runner.AcceptanceFailed):
                 runner.require_evidence_outside_app(
                     app,
-                    runner.APP_DATA / "embedded-browser-profiles" / "eb11.json",
+                    runner.app_data_root() / "embedded-browser-profiles" / "eb11.json",
                 )
 
     @unittest.skipUnless(os.name == "posix", "POSIX evidence publication contract")
@@ -709,7 +709,7 @@ class ReleaseIdentityTests(unittest.TestCase):
             architecture="aarch64",
             deployment_profile_id="demo-xuanbai",
         )
-        profile_root = runner.APP_DATA / "profiles/demo-xuanbai/embedded-browser-profiles"
+        profile_root = runner.app_data_root() / "profiles/demo-xuanbai/embedded-browser-profiles"
 
         runner.require_release_identity(
             release,
@@ -766,7 +766,7 @@ class ReleaseIdentityTests(unittest.TestCase):
             deployment_profile_id="demo-xuanbai",
         )
         current = runner.SourceFacts(git_commit="d" * 40, tree_sha256="e" * 64)
-        profile_root = runner.APP_DATA / "profiles/demo-xuanbai/embedded-browser-profiles"
+        profile_root = runner.app_data_root() / "profiles/demo-xuanbai/embedded-browser-profiles"
 
         with mock.patch.object(
             runner,
@@ -805,7 +805,7 @@ class RuntimeObservationTests(unittest.TestCase):
         executor = app / "Contents/Resources/local-executor/package/executor"
         browser = app / "Contents/Resources/embedded-browser/Browser"
         profile = (
-            runner.APP_DATA
+            runner.app_data_root()
             / "profiles/demo-xuanbai/embedded-browser-profiles/douyin"
             / "6d9221cb-e9dc-4359-9f6b-34f7fbc55316"
         )
@@ -847,7 +847,7 @@ class RuntimeObservationTests(unittest.TestCase):
         executor = app / "Contents/Resources/local-executor/package/executor"
         browser = app / "Contents/Resources/embedded-browser/Browser"
         profile = (
-            runner.APP_DATA
+            runner.app_data_root()
             / "profiles/demo-xuanbai/embedded-browser-profiles/douyin"
             / "6d9221cb-e9dc-4359-9f6b-34f7fbc55316"
         )
@@ -1227,7 +1227,7 @@ class RuntimeObservationTests(unittest.TestCase):
 
             self.assertEqual(
                 runner.compiled_deployment_profile_root(executable, profile),
-                runner.APP_DATA
+                runner.app_data_root()
                 / "profiles"
                 / "demo-xuanbai"
                 / "embedded-browser-profiles",
@@ -1385,7 +1385,7 @@ class RuntimeObservationTests(unittest.TestCase):
             executor_path=executor,
             browser_path=browser,
             profile_root=(
-                runner.APP_DATA
+                runner.app_data_root()
                 / "profiles"
                 / "demo-xuanbai"
                 / "embedded-browser-profiles"
@@ -2413,6 +2413,53 @@ class WindowsAccessibilityTests(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         return directory
+
+    def test_the_app_identity_comes_from_the_installed_package(self) -> None:
+        """`Info.plist` has no Windows counterpart, so the three facts are found elsewhere.
+
+        The identifier is *verified*, not read: an NSIS install root carries no
+        manifest naming it, but the binary has the Tauri configuration compiled
+        in, and `compiled_deployment_profile_root` already proves things about
+        this binary by looking for a byte sequence in it. Same technique, so a
+        package built for a different product cannot pass by being silent.
+        """
+        runner = load_runner()
+        app = INSTALLED_APP
+        if not (app / "automation-tool-desktop.exe").is_file():
+            self.skipTest("the installed Windows package is required")
+
+        identity = runner.WindowsDeviceDriver().read_identity(app)
+
+        self.assertEqual(identity.bundle_identifier, runner.APP_IDENTIFIER)
+        self.assertRegex(identity.version, r"^\d+\.\d+\.\d+")
+        self.assertEqual(identity.executable_path, runner.windows_product_binary(app))
+
+    def test_a_package_that_is_not_this_product_is_refused(self) -> None:
+        runner = load_runner()
+        root = Path(tempfile.mkdtemp(prefix="eb11-foreign-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        (root / "someone-elses.exe").write_bytes(b"MZ not our product")
+
+        with self.assertRaises(runner.AcceptanceFailed):
+            runner.WindowsDeviceDriver().read_identity(root)
+
+    def test_the_app_data_root_is_where_tauri_actually_puts_it(self) -> None:
+        """Measured against the running product, not guessed from the docs.
+
+        Tauri's `app_data_dir()` is `%APPDATA%\\<identifier>` on Windows —
+        Roaming, not Local — and the App really has created it there. Every
+        Profile path in this run hangs off it, so a wrong root makes the whole
+        Profile lifecycle assert against directories nothing writes to.
+        """
+        runner = load_runner()
+
+        root = runner.WindowsDeviceDriver().app_data_root()
+
+        self.assertEqual(root, Path(os.environ["APPDATA"]) / runner.APP_IDENTIFIER)
+        self.assertTrue(
+            root.is_dir(),
+            "the product has run on this machine, so this directory must exist",
+        )
 
     def test_a_vanished_window_is_reported_as_the_app_disappearing(self) -> None:
         runner = load_runner()
