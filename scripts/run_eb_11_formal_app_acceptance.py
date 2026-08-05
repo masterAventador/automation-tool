@@ -73,6 +73,12 @@ SIGNING_CONTRACT: Final = (
 )
 RELEASE_IDENTITY_KEY: Final = "AutomationToolReleaseIdentity"
 RELEASE_IDENTITY_SCHEMA: Final = "automation-tool.release-identity.v1"
+# Read a file without following a link into it. POSIX closes the window between
+# `lstat` saying "regular file" and `open` acting on it; Windows has no such
+# flag, so there the check and the read are two steps, and a reparse point
+# swapped in between them would not be caught. Named rather than branched at the
+# call site, so the gap is stated once, where it is decided.
+NO_FOLLOW_OPEN_FLAG: Final = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
 OBSERVED_AT_PATTERN: Final = re.compile(
     r"最近检查[：:]\s*("
     r"\d{4}(?:[/-]\d{1,2}[/-]\d{1,2}|年\d{1,2}月\d{1,2}日)"
@@ -140,12 +146,29 @@ class CodeIdentity:
 
 @dataclass(frozen=True)
 class ArtifactFacts:
-    authority: str
-    team_id: str
-    bundle_cdhash: str
+    """What is known about the installed package, and how it came to be known.
+
+    The first three fields hold on every host: the exact bytes of the install
+    tree, and which Executor build they carry. The rest is the OS trust chain,
+    and it is optional because on Windows there is none — this machine has no
+    code-signing certificate, so nothing can be verified against a signer.
+
+    That asymmetry is carried in the data rather than papered over. macOS fills
+    `authority` / `team_id` / `bundle_cdhash` from the Developer ID chain and
+    sets `code_signing` to the same authority; Windows leaves them empty and
+    records the measured `Get-AuthenticodeSignature` status, which is `NotSigned`
+    today and will change on its own if a certificate ever appears. An empty
+    signer field reads as "not established"; a filled one that meant "we did not
+    check" would read as the opposite.
+    """
+
     bundle_tree_sha256: str
     bundle_bytes: int
     executor_build_id: str
+    authority: str = ""
+    team_id: str = ""
+    bundle_cdhash: str = ""
+    code_signing: str = ""
 
 
 @dataclass(frozen=True)
@@ -380,6 +403,9 @@ class DeviceDriver:
     def read_release_identity(self, app: Path) -> SignedReleaseIdentity:
         raise self.unavailable("read the signed release identity")
 
+    def verify_artifact(self, app: Path, executor_build_id: str) -> ArtifactFacts:
+        raise self.unavailable("verify the installed package")
+
 
 class MacosDeviceDriver(DeviceDriver):
     platform = "darwin"
@@ -396,7 +422,15 @@ class MacosDeviceDriver(DeviceDriver):
     def read_release_identity(self, app: Path) -> SignedReleaseIdentity:
         return read_signed_release_identity(app)
 
+    def verify_artifact(self, app: Path, executor_build_id: str) -> ArtifactFacts:
+        return verify_formal_app(app, executor_build_id)
 
+
+AUTHENTICODE_PATH_ENVIRONMENT: Final = "AUTOMATION_TOOL_EB11_SIGNED_PATH"
+# NSIS writes its own uninstaller into the install root; it is not a product
+# binary, and it is excluded by exact name so a genuine second executable still
+# makes the choice ambiguous rather than being silently picked.
+WINDOWS_UNINSTALLER_NAME: Final = "uninstall.exe"
 UIA_PROCESS_ENVIRONMENT: Final = "AUTOMATION_TOOL_EB11_UIA_PID"
 UIA_LABEL_ENVIRONMENT: Final = "AUTOMATION_TOOL_EB11_UIA_LABEL"
 # What WebView2 needs before it builds an accessibility tree at all. Chromium
@@ -467,6 +501,27 @@ UIA_WINDOW_READY_BODY: Final = """
 Write-Output 'ready'
 """
 UIA_NO_TREE: Final = frozenset({"no_process", "no_window"})
+
+
+def windows_product_binary(app: Path) -> Path:
+    """The one product executable in an installed Windows package.
+
+    Tauri names it from `mainBinaryName`, falling back to the product name; the
+    production configuration sets neither, so it is resolved from the artifact
+    rather than assumed — the same rule `run_eb_16_windows_acceptance.main_binary`
+    follows, and for the same reason.
+    """
+    candidates = sorted(
+        path
+        for path in app.glob("*.exe")
+        if path.is_file() and path.name.lower() != WINDOWS_UNINSTALLER_NAME
+    )
+    if len(candidates) != 1:
+        raise AcceptanceFailed(
+            "EB-11 installed package does not hold exactly one product executable: "
+            f"{[path.name for path in candidates]}"
+        )
+    return candidates[0]
 
 
 def power_shell(
@@ -572,6 +627,48 @@ class WindowsDeviceDriver(DeviceDriver):
         except (OSError, json.JSONDecodeError) as error:
             raise AcceptanceFailed("EB-11 signed release identity is unavailable") from error
         return release_identity_from_record(record)
+
+    def authenticode_status(self, path: Path) -> str:
+        """What Windows says about this file's signature, whatever that is.
+
+        Measured on every run rather than assumed. Today it is `NotSigned` on
+        this host — no code-signing certificate exists in either store — and
+        that is exactly why it is recorded instead of asserted: the run states
+        what it found, so the evidence changes by itself the day a real
+        certificate appears.
+        """
+        rendered = power_shell(
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n"
+            "$target = $env:AUTOMATION_TOOL_EB11_SIGNED_PATH\n"
+            "Write-Output (Get-AuthenticodeSignature -LiteralPath $target).Status\n",
+            environment={AUTHENTICODE_PATH_ENVIRONMENT: os.fspath(path)},
+        )
+        return rendered or "Unknown"
+
+    def verify_artifact(self, app: Path, executor_build_id: str) -> ArtifactFacts:
+        """Bind the installed package by its bytes, and claim nothing more.
+
+        macOS binds it by the Developer ID chain — `codesign --verify`, `spctl`
+        and `stapler` together mean "the OS trusts this and it has not been
+        altered since it was signed". This host has no certificate at all, so
+        there is no signer to verify against and no Gatekeeper to ask.
+
+        What is still true, and is what this returns: the install tree hashes to
+        exactly one value, that value can be compared against the package the
+        release produced, and the Executor inside it carries a signed manifest
+        of its own. That proves *this is the package built from this source
+        tree*. It does not prove that nobody altered it before the digest was
+        taken, and it does not prove the OS trusts it. The difference is
+        recorded in `code_signing` rather than argued away.
+        """
+        binary = windows_product_binary(app)
+        tree_sha256, bundle_bytes = bundle_tree_digest(app)
+        return ArtifactFacts(
+            bundle_tree_sha256=tree_sha256,
+            bundle_bytes=bundle_bytes,
+            executor_build_id=executor_build_id,
+            code_signing=self.authenticode_status(binary),
+        )
 
 
 DEVICE_DRIVERS: tuple[type[DeviceDriver], ...] = (MacosDeviceDriver, WindowsDeviceDriver)
@@ -824,7 +921,7 @@ def bundle_tree_digest(app: Path) -> tuple[str, int]:
                 visit(path)
             elif stat.S_ISREG(metadata.st_mode):
                 hash_field(digest, b"F", relative, metadata.st_size.to_bytes(8, "big"))
-                descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+                descriptor = os.open(path, os.O_RDONLY | NO_FOLLOW_OPEN_FLAG)
                 try:
                     while chunk := os.read(descriptor, 1024 * 1024):
                         digest.update(chunk)
@@ -866,12 +963,15 @@ def verify_formal_app(app: Path, executor_build_id: str) -> ArtifactFacts:
     run_checked(["xcrun", "stapler", "validate", os.fspath(app)])
     tree_sha256, bundle_bytes = bundle_tree_digest(app)
     return ArtifactFacts(
-        authority=expected_certificate,
-        team_id=expected_team,
-        bundle_cdhash=cdhash_match.group(1).lower(),
         bundle_tree_sha256=tree_sha256,
         bundle_bytes=bundle_bytes,
         executor_build_id=executor_build_id,
+        authority=expected_certificate,
+        team_id=expected_team,
+        bundle_cdhash=cdhash_match.group(1).lower(),
+        # Everything above this line was verified against the Developer ID
+        # chain, `spctl` and `stapler`, so the trust statement names it.
+        code_signing=expected_certificate,
     )
 
 
@@ -1043,10 +1143,11 @@ def verify_release_artifact(app: Path, deployment_profile: Path) -> VerifiedRele
         app_identity.executable_path,
         deployment_profile,
     )
+    driver = device_driver()
     runtime_contract, executor_build_id = read_runtime_contract(app, profile_root)
-    artifact = verify_formal_app(app, executor_build_id)
+    artifact = driver.verify_artifact(app, executor_build_id)
     runtime_contract = bind_runtime_code_identities(runtime_contract, artifact)
-    release_identity = read_signed_release_identity(app)
+    release_identity = driver.read_release_identity(app)
     require_release_identity(
         release_identity,
         artifact=artifact,
@@ -2477,6 +2578,13 @@ def run_acceptance(arguments: Arguments) -> EvidencePublication:
                 "signingAuthority": artifact.authority,
                 "signingTeamId": artifact.team_id,
                 "bundleCdHash": artifact.bundle_cdhash,
+                # What the artifact binding actually rests on. On macOS the
+                # Developer ID authority; on Windows the measured Authenticode
+                # status, which is `NotSigned` on a host with no certificate —
+                # so a reader can tell "the OS vouches for this" from "the bytes
+                # match what we built" without inferring it from three empty
+                # fields.
+                "codeSigning": artifact.code_signing,
                 "bundleTreeSha256": artifact.bundle_tree_sha256,
                 "bundleBytes": artifact.bundle_bytes,
                 "executorBuildId": artifact.executor_build_id,

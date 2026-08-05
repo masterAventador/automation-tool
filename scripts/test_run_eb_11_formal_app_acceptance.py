@@ -1966,6 +1966,93 @@ class WindowsAccessibilityTests(unittest.TestCase):
         ):
             runner.WindowsDeviceDriver().wait_for_window(42)
 
+    def test_the_windows_artifact_is_bound_by_digest_and_says_so(self) -> None:
+        """No certificate on this host, so identity is the bytes, not a signer.
+
+        macOS binds the artifact through the Developer ID chain: `codesign
+        --verify`, `spctl` and `stapler` together say "the OS trusts this and it
+        has not been altered since signing". Windows has no counterpart here —
+        measured 2026-08-05, both certificate stores hold 0 code-signing certs
+        and the installed binary reads `NotSigned`.
+
+        The chosen replacement (user decision, 2026-08-05) is a digest binding:
+        it proves the install *is* the package built from this source tree, and
+        it does not pretend to prove that the OS trusts it or that nobody edited
+        it. So the signer fields stay empty rather than being filled with
+        something that reads like a signature, and the measured Authenticode
+        status is carried explicitly.
+        """
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "nested").mkdir()
+            (root / "automation-tool-desktop.exe").write_bytes(b"MZ binary")
+            (root / "nested" / "resource.json").write_text("{}", encoding="utf-8")
+
+            with mock.patch.object(
+                runner.WindowsDeviceDriver,
+                "authenticode_status",
+                return_value="NotSigned",
+            ):
+                facts = runner.WindowsDeviceDriver().verify_artifact(root, "windows-release")
+
+            self.assertEqual(facts.executor_build_id, "windows-release")
+            self.assertEqual(facts.authority, "")
+            self.assertEqual(facts.team_id, "")
+            self.assertEqual(facts.bundle_cdhash, "")
+            self.assertEqual(facts.code_signing, "NotSigned")
+            self.assertRegex(facts.bundle_tree_sha256, r"^[0-9a-f]{64}$")
+            self.assertEqual(facts.bundle_bytes, len(b"MZ binary") + len("{}"))
+
+            # The digest has to move when the tree moves, or it binds nothing.
+            (root / "nested" / "resource.json").write_text('{"x":1}', encoding="utf-8")
+            with mock.patch.object(
+                runner.WindowsDeviceDriver,
+                "authenticode_status",
+                return_value="NotSigned",
+            ):
+                changed = runner.WindowsDeviceDriver().verify_artifact(root, "windows-release")
+            self.assertNotEqual(facts.bundle_tree_sha256, changed.bundle_tree_sha256)
+
+    def test_a_signed_windows_package_is_not_silently_accepted_as_unsigned(self) -> None:
+        """If a certificate ever appears, the evidence must stop saying NotSigned.
+
+        The digest binding is what this host can honestly claim today. It is not
+        a decision to ignore Authenticode forever — the status is measured on
+        every run and recorded, so the day a real signature exists the evidence
+        changes by itself instead of quietly under-reporting.
+        """
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "automation-tool-desktop.exe").write_bytes(b"MZ binary")
+
+            with mock.patch.object(
+                runner.WindowsDeviceDriver,
+                "authenticode_status",
+                return_value="Valid",
+            ):
+                facts = runner.WindowsDeviceDriver().verify_artifact(root, "windows-release")
+
+        self.assertEqual(facts.code_signing, "Valid")
+
+    def test_the_tree_digest_runs_on_this_host(self) -> None:
+        """`O_NOFOLLOW` does not exist on Windows, and the digest opened with it.
+
+        A digest binding that cannot be computed on the host it binds is not a
+        binding. This is the one place the macOS implementation reaches for a
+        POSIX-only flag.
+        """
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "file.bin").write_bytes(b"\x00\x01\x02")
+
+            digest, total = runner.bundle_tree_digest(root)
+
+        self.assertRegex(digest, r"^[0-9a-f]{64}$")
+        self.assertEqual(total, 3)
+
     def test_a_vanished_window_is_reported_as_the_app_disappearing(self) -> None:
         runner = load_runner()
 
