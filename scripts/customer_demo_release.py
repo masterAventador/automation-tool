@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import stat
 from dataclasses import dataclass
 from itertools import pairwise
@@ -100,6 +101,28 @@ def _decode_canonical(value: str) -> bytes:
     return decoded
 
 
+def _require_windows_private_key_file(path: Path) -> None:
+    """Refuse a key file any other principal can read.
+
+    Opened rather than queried by name so the descriptor that is checked is the
+    one that will be read, and closed immediately: this only inspects the
+    security descriptor, the seed is read afterwards through the ordinary path.
+    """
+    from windows_private_directory import PrivateDirectoryRejected, require_private_dacl
+
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_BINARY)
+    except OSError as error:
+        _reject(f"key file could not be opened: {path}")
+        raise AssertionError("unreachable") from error
+    try:
+        require_private_dacl(descriptor)
+    except PrivateDirectoryRejected as error:
+        _reject(f"key file must be readable only by this user: {path} ({error})")
+    finally:
+        os.close(descriptor)
+
+
 def load_signing_seed(path: Path) -> bytes:
     """Read one Ed25519 seed from a file only its owner can read.
 
@@ -109,7 +132,14 @@ def load_signing_seed(path: Path) -> bytes:
     metadata = path.lstat()
     if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
         _reject(f"key file must be a regular file: {path}")
-    if stat.S_IMODE(metadata.st_mode) != REQUIRED_KEY_MODE:
+    if os.name == "nt":
+        # `0o600` has no Windows form: `S_IMODE` is `0o666` for every writable
+        # file here, so the comparison below could never pass and no Windows
+        # release could be built at all. The property it protects does have a
+        # Windows form, and the product already uses it for Profile
+        # directories — a DACL granting this user and nobody else.
+        _require_windows_private_key_file(path)
+    elif stat.S_IMODE(metadata.st_mode) != REQUIRED_KEY_MODE:
         _reject(
             f"key file must be mode {REQUIRED_KEY_MODE:04o}, not "
             f"{stat.S_IMODE(metadata.st_mode):04o}: {path}"
