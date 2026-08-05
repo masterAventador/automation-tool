@@ -1568,7 +1568,7 @@ class LaunchCleanupTests(unittest.TestCase):
             mock.patch.object(runner, "run_checked", return_value=replacement),
             self.assertRaises(runner.AcceptanceFailed),
         ):
-            runner.verify_running_release_process(instance, release)
+            runner.macos_require_running_release(instance, release)
 
         expected = subprocess.CompletedProcess(
             ["codesign"],
@@ -1580,7 +1580,7 @@ class LaunchCleanupTests(unittest.TestCase):
             mock.patch.object(runner, "process_snapshot", return_value=[instance]),
             mock.patch.object(runner, "run_checked", return_value=expected),
         ):
-            runner.verify_running_release_process(instance, release)
+            runner.macos_require_running_release(instance, release)
 
     def test_launch_open_interruption_reclaims_nonce_owned_processes(self) -> None:
         runner = load_runner()
@@ -2694,6 +2694,87 @@ class WindowsAccessibilityTests(unittest.TestCase):
         for root in roots:
             self.assertTrue(root.is_absolute())
             self.assertNotIn("Library", root.parts)
+
+    def test_the_running_app_is_checked_against_the_release_without_codesign(
+        self,
+    ) -> None:
+        """The one instrument the port missed, found by running the thing.
+
+        `verify_running_release_process` still shelled out to `codesign` on a
+        live pid. Every other macOS instrument had moved behind the driver, and
+        a grep for the helper *names* missed this one because it invokes the
+        tool directly. It failed as `[WinError 2] 系统找不到指定的文件` —
+        accurate and useless — after the run had already verified the artifact
+        and launched the App.
+        """
+        runner = load_runner()
+        driver = runner.WindowsDeviceDriver()
+        child = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import os,time\nprint(os.getpid(), flush=True)\ntime.sleep(30)",
+            ],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            import windows_processes
+
+            assert child.stdout is not None
+            process_id = int(child.stdout.readline().strip())
+            record = next(
+                item for item in runner.process_snapshot() if item.pid == process_id
+            )
+            image = windows_processes.image_path(process_id)
+            assert image is not None
+            release = runner.VerifiedRelease(
+                app_identity=runner.AppIdentity(
+                    bundle_identifier=runner.APP_IDENTIFIER,
+                    version="0.1.0.0",
+                    executable_path=Path(image),
+                ),
+                runtime_contract=runner.RuntimeContract(
+                    app_path=Path(image).parent,
+                    executor_path=Path(image),
+                    browser_path=Path(image),
+                    profile_root=Path(image).parent,
+                ),
+                artifact=runner.ArtifactFacts(
+                    bundle_tree_sha256="a" * 64,
+                    bundle_bytes=1,
+                    executor_build_id="customer-demo-xuanbai",
+                ),
+                release_identity=runner.SignedReleaseIdentity(
+                    source_git_commit="c" * 40,
+                    source_tree_sha256="d" * 64,
+                    executor_build_id="customer-demo-xuanbai",
+                    target="windows-x86_64",
+                    architecture="x86_64",
+                    deployment_profile_id="demo-xuanbai",
+                ),
+                profile_root=Path(image).parent,
+            )
+
+            driver.require_running_release(record, release)
+
+            # A process running something else is refused, or this proves nothing.
+            elsewhere = runner.VerifiedRelease(
+                app_identity=runner.AppIdentity(
+                    bundle_identifier=runner.APP_IDENTIFIER,
+                    version="0.1.0.0",
+                    executable_path=Path(r"C:\somewhere\else.exe"),
+                ),
+                runtime_contract=release.runtime_contract,
+                artifact=release.artifact,
+                release_identity=release.release_identity,
+                profile_root=release.profile_root,
+            )
+            with self.assertRaises(runner.AcceptanceFailed):
+                driver.require_running_release(record, elsewhere)
+        finally:
+            child.terminate()
+            child.wait(timeout=15)
 
     def test_a_vanished_window_is_reported_as_the_app_disappearing(self) -> None:
         runner = load_runner()

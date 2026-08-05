@@ -468,6 +468,12 @@ class DeviceDriver:
         """
         raise self.unavailable("identify a running packaged process")
 
+    def require_running_release(
+        self, instance: ProcessRecord, release: VerifiedRelease
+    ) -> None:
+        """The App this run launched must be the release that was verified."""
+        raise self.unavailable("verify the running App against the release")
+
     def app_data_root(self) -> Path:
         """Where the product keeps its own data, per this platform's convention."""
         raise self.unavailable("locate the product's data directory")
@@ -654,6 +660,11 @@ class MacosDeviceDriver(DeviceDriver):
         self, record: ProcessRecord, expected: CodeIdentity
     ) -> bool:
         return macos_verify_runtime_process_identity(record, expected)
+
+    def require_running_release(
+        self, instance: ProcessRecord, release: VerifiedRelease
+    ) -> None:
+        macos_require_running_release(instance, release)
 
     def app_data_root(self) -> Path:
         return Path.home() / "Library" / "Application Support" / APP_IDENTIFIER
@@ -1361,6 +1372,22 @@ class WindowsDeviceDriver(DeviceDriver):
             root / "Microsoft/Edge/User Data",
         )
 
+    def require_running_release(
+        self, instance: ProcessRecord, release: VerifiedRelease
+    ) -> None:
+        """The running App must be the binary the verified package installed.
+
+        macOS asks `codesign` about the pid. There is nothing to ask here, so
+        the same substitution the rest of this driver already makes applies:
+        the process's image path must be the product executable the release
+        identified, and the file there must still hash to what it hashes to now.
+        That binary sits inside the install tree whose digest `verify_artifact`
+        already took, which is what ties this back to the package.
+        """
+        expected = self.code_identity(release.app_identity.executable_path)
+        if not self.verify_runtime_process_identity(instance, expected):
+            raise AcceptanceFailed("EB-11 formal App process identity changed")
+
     def require_private_directory(self, path: Path) -> tuple[int, tuple[int, int]]:
         """The `0o700` check, in the terms this platform actually has.
 
@@ -1608,7 +1635,7 @@ def app_data_root() -> Path:
     """Where the product keeps its own data on this host.
 
     A function rather than the module constant it used to be: the answer is
-    `~/Library/Application Support/<id>` on macOS and `%APPDATA%\<id>` on
+    `~/Library/Application Support/<id>` on macOS and `%APPDATA%` + the id on
     Windows, and resolving it at import time would make this module fail to
     import on a host with no driver at all.
     """
@@ -2657,6 +2684,13 @@ def macos_process_has_launch_nonce(record: ProcessRecord, nonce: str) -> bool:
 
 
 def verify_running_release_process(
+    instance: ProcessRecord,
+    release: VerifiedRelease,
+) -> None:
+    device_driver().require_running_release(instance, release)
+
+
+def macos_require_running_release(
     instance: ProcessRecord,
     release: VerifiedRelease,
 ) -> None:
