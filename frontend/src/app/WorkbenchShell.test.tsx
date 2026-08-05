@@ -360,6 +360,7 @@ describe("video studio watched from anywhere in the app", () => {
       deleteMotionArtifact: vi.fn().mockRejectedValue(new Error("not reached")),
       submitMotionBrief: vi.fn().mockRejectedValue(new Error("not reached")),
       readMaterialArtifact: vi.fn().mockRejectedValue(new Error("not reached")),
+      submitMaterialMontage: vi.fn().mockRejectedValue(new Error("not reached")),
     };
   }
 

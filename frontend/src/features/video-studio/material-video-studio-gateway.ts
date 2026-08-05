@@ -177,7 +177,27 @@ export class MaterialVideoStudioGatewayError extends Error {
   }
 }
 
+/** One headless montage job, exactly as the in-page form collected it. */
+export interface MaterialMontageRequest {
+  readonly subject: string;
+  readonly script: string | null;
+  readonly aspect: "9:16" | "16:9" | "1:1";
+  readonly clipDurationSeconds: number;
+  readonly voiceName: string;
+  readonly subtitleEnabled: boolean;
+  readonly fontSizePx: number;
+  readonly textColor: string;
+  readonly strokeColor: string;
+  readonly strokeWidthPx: number;
+}
+
 export interface MaterialVideoStudioGateway {
+  /**
+   * Start one montage job through the packaged worker and return its render
+   * job id. Since 2026-08-05 this is the material path: the parameters come
+   * from the product's own form, and no WebView overlay is ever mounted.
+   */
+  submitMaterialMontage(request: MaterialMontageRequest): Promise<string>;
   open(view: MaterialVideoStudioView): Promise<MaterialVideoStudioSnapshot>;
   updateView(view: MaterialVideoStudioView): Promise<void>;
   close(): Promise<void>;

@@ -155,6 +155,10 @@ export class TestHarnessVideoStudio implements MaterialVideoStudioGateway {
     throw new Error("Harness video studio has no finished film to read");
   }
 
+  async submitMaterialMontage(): Promise<string> {
+    throw new Error("Harness video studio does not run montage jobs");
+  }
+
   #start(subject: string, styleDisplayName: string): MotionRenderJobSnapshot {
     this.#renderStartedAt = Date.now();
     this.#job = {

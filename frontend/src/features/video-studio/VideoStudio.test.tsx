@@ -85,6 +85,9 @@ function gateway(): MaterialVideoStudioGateway {
       mediaType: "video/mp4",
       base64: "BBBB",
     }),
+    submitMaterialMontage: vi
+      .fn()
+      .mockResolvedValue("7d3f2f5e-52f7-4bd0-9c8a-4a4f8f2ce111"),
   };
 }
 
@@ -194,29 +197,51 @@ describe("video studio shell", () => {
     expect(materialMethod).toHaveAttribute("aria-pressed", "true");
     expect(motionMethod).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByText("已选择：智能素材成片")).toBeVisible();
+    // 2026-08-05 起素材成片是页面自己的表单：不再挂原生 WebView 浮层，
+    // 也就不存在「打开工作室」这个原生调用。
     expect(
-      screen.getByRole("region", { name: "智能素材成片完整制作界面" }),
+      screen.getByRole("region", { name: "智能素材成片制作表单" }),
     ).toBeVisible();
-    expect(screen.queryByRole("button", { name: "打开完整制作界面" })).toBeNull();
-    await waitFor(() =>
-      expect(studioGateway.open).toHaveBeenCalledWith({
-        x: 40,
-        y: 120,
-        width: 900,
-        height: 640,
-        visible: true,
-      }),
-    );
+    expect(screen.getByRole("button", { name: "开始制作" })).toBeVisible();
+    expect(studioGateway.open).not.toHaveBeenCalled();
 
     await user.click(motionMethod);
     expect(materialMethod).toHaveAttribute("aria-pressed", "false");
     expect(motionMethod).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("已选择：品牌动效成片")).toBeVisible();
-    await waitFor(() => expect(studioGateway.close).toHaveBeenCalledOnce());
+    // 没有 WebView 就没有需要关闭的原生视图。
+    expect(studioGateway.close).not.toHaveBeenCalled();
 
     expect(document.body).not.toHaveTextContent(/真人生成|网址转视频/iu);
     view.unmount();
     bounds.mockRestore();
+  });
+
+  it("submits a montage from the in-page form with the collected fields", async () => {
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    render(
+      <VideoStudio gateway={studioGateway} />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "新建视频" }));
+    await user.click(screen.getByRole("button", { name: "选择智能素材成片" }));
+    await user.type(
+      screen.getByLabelText("视频主题"),
+      "护肤知识三条",
+    );
+    await user.click(screen.getByRole("button", { name: "开始制作" }));
+
+    await waitFor(() => {
+      expect(studioGateway.submitMaterialMontage).toHaveBeenCalledTimes(1);
+    });
+    const request = vi.mocked(studioGateway.submitMaterialMontage).mock.calls[0]?.[0];
+    expect(request).toMatchObject({
+      subject: "护肤知识三条",
+      aspect: "9:16",
+      subtitleEnabled: true,
+    });
+    expect(await screen.findByText(/已提交制作任务/u)).toBeVisible();
   });
 
   it("keeps the settings page gated until the brand motion method is selected", async () => {
