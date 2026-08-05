@@ -33,6 +33,7 @@ from automation_tool.executor.automation_skill import (
     AutomationSkillRejected,
     parse_automation_skill,
 )
+from automation_tool.executor.skill_replayer import ReplayOutcome
 
 _SIGNATURE_DOMAIN = b"automation-tool.automation-skill.v1\0"
 _APPROVAL_KEYS = frozenset({"reviewer", "decision", "reviewedAt"})
@@ -79,12 +80,24 @@ def _valid_approval(approval: object) -> dict[str, object]:
     return approval
 
 
+def _valid_replay(skill: AutomationSkill, replay: object) -> None:
+    # The replay-sandbox gate (SA-04). A candidate is not publishable until a
+    # deterministic replay has driven every one of its steps to success. This is
+    # a process gate, not an attacker boundary: the operator who runs the sandbox
+    # and holds the signing key is the trust boundary, as SA-03 states.
+    if not isinstance(replay, ReplayOutcome):
+        _reject("publishing needs a replay-sandbox report")
+    if not replay.passed or replay.completed_steps != len(skill.steps):
+        _reject("the replay sandbox did not complete every step")
+
+
 def sign_candidate(
-    candidate: object, *, approval: object, seed: bytes
+    candidate: object, *, approval: object, seed: bytes, replay: object
 ) -> dict[str, object]:
     """Return a signed, publishable record for a reviewed candidate skill."""
     skill = _schema_ok(candidate)
     _lint(skill)
+    _valid_replay(skill, replay)
     review = _valid_approval(approval)
     if len(seed) != 32:
         _reject("the signing seed must be 32 bytes")
@@ -154,10 +167,9 @@ class SkillRegistry:
         key = (record.skill.skill_id, record.version)
         if key in self._records:
             _reject("this version is already published and records are immutable")
-        if record.version == 1:
-            if record.skill.parent_version is not None:
-                _reject("a first version must not name a parent")
-        else:
+        if record.version == 1 and record.skill.parent_version is not None:
+            _reject("a first version must not name a parent")
+        if record.version != 1:
             parent = record.skill.parent_version
             if parent is None or (record.skill.skill_id, parent) not in self._records:
                 _reject("a new version must name a published parent version")
