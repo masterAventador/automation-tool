@@ -64,6 +64,21 @@ LOGOUT_LABEL: Final = "安全注销"
 CONFIRM_LOGOUT_LABEL: Final = "确认注销"
 LOGIN_REQUIRED_LABEL: Final = "需要登录"
 HEALTHY_LABEL: Final = "登录正常"
+# Every state the account page can settle on — `STATE_LABELS` in
+# `PlatformSessions.tsx`, which is a closed set keyed by the snapshot state.
+# Copied rather than shared because that page is TypeScript and this is Python;
+# `test_the_state_labels_match_the_page_that_renders_them` pins the two together,
+# because both times this list was short the script did not fail on the missing
+# state — it timed out somewhere else and reported something unrelated.
+SESSION_STATE_LABELS: Final = frozenset(
+    {
+        HEALTHY_LABEL,
+        "登录已过期",
+        LOGIN_REQUIRED_LABEL,
+        "需要人工处理",
+        "尚未确认",
+    }
+)
 SCAN_CHECKPOINT: Final = "douyin_scan_confirmed"
 LOGIN_PROGRESS_MARKERS: Final = (
     "请在打开的运营浏览器中扫码登录。",
@@ -2924,13 +2939,19 @@ def open_account_page(process_id: int) -> tuple[str, bool]:
 
     This used to wait for `登录正常` and nothing else, which made the whole run
     depend on a session existing before it started. On a clean machine — the
-    state a real user is in, and the one EB-17 exists to verify — the App shows
-    `需要登录`, so the wait ran to its timeout and the run died with
-    `did not expose required UI state: 登录正常` without ever offering a QR code.
-    The lifecycle this script verifies (recheck → safe logout → rescan → restart
-    reuse) still needs a session to start from; what changed is that the script
-    now *observes* whether it has one instead of assuming it, and the caller
-    establishes one by scanning when it does not.
+    state a real user is in, and the one EB-17 exists to verify — no session is
+    there, so the wait ran to its timeout and the run died without ever offering
+    a QR code. The lifecycle this script verifies (recheck → safe logout →
+    rescan → restart reuse) still needs a session to start from; what changed is
+    that the script now *observes* whether it has one instead of assuming it,
+    and the caller establishes one by scanning when it does not.
+
+    Which state a clean machine actually shows was then got wrong twice, so the
+    question is settled structurally rather than by naming states one at a time:
+    the page publishes exactly one of `SESSION_STATE_LABELS`, and only
+    `登录正常` is a session. A freshly installed package with no check on record
+    reads `尚未确认`, not `需要登录` — the first guess — and the second miss cost
+    the operator a run that ended before the QR code, same as the first.
     """
     deadline = time.monotonic() + WINDOW_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
@@ -2953,11 +2974,11 @@ def open_account_page(process_id: int) -> tuple[str, bool]:
                 )
             if HEALTHY_LABEL in latest:
                 return latest, True
-            if LOGIN_REQUIRED_LABEL in latest:
+            if any(label in latest for label in SESSION_STATE_LABELS):
                 return latest, False
             time.sleep(POLL_SECONDS)
         raise AcceptanceFailed(
-            "EB-11 account page settled on neither a signed-in nor a signed-out state"
+            "EB-11 account page settled on no state this App can publish"
         )
     raise AcceptanceFailed("EB-11 account navigation did not become ready")
 

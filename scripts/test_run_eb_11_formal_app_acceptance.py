@@ -5,6 +5,7 @@ import builtins
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -246,6 +247,68 @@ class ColdStartTests(unittest.TestCase):
 
         self.assertTrue(already_signed_in)
         self.assertEqual(rendered, healthy)
+
+    def test_account_page_accepts_a_session_that_was_never_checked(self) -> None:
+        """真正的干净机不是「需要登录」，是「尚未确认」。
+
+        2026-08-05 用户实测：Windows 正式包全新安装，账号页落在
+
+            当前状态 / 尚未确认 / 尚无检查记录
+
+        既不是 `登录正常` 也不是 `需要登录`，于是 `open_account_page()` 空转到超时并报
+        `settled on neither a signed-in nor a signed-out state`——**在提供二维码之前就
+        结束了**，和 2026-08-04 那次冷启动失败是同一个形状：脚本手里的状态清单不全。
+
+        `unknown` 表示服务端还没有任何检查记录，它当然不是已登录；正确处置是走冷启动
+        分支，由操作者扫一次把登录态建立起来。
+        """
+        runner = load_runner()
+        never_checked = "当前状态\n尚未确认\n尚无检查记录"
+
+        with (
+            mock.patch.object(runner, "press"),
+            mock.patch.object(runner, "visible_ui_text", return_value=never_checked),
+            mock.patch.object(runner.time, "sleep"),
+        ):
+            rendered, already_signed_in = runner.open_account_page(42)
+
+        self.assertFalse(already_signed_in)
+        self.assertEqual(rendered, never_checked)
+
+    def test_account_page_accepts_every_state_the_app_can_publish(self) -> None:
+        """五种状态里只有 `登录正常` 算已登录，其余四种都必须走冷启动分支。"""
+        runner = load_runner()
+
+        for label in sorted(runner.SESSION_STATE_LABELS):
+            with self.subTest(label=label):
+                with (
+                    mock.patch.object(runner, "press"),
+                    mock.patch.object(
+                        runner, "visible_ui_text", return_value=f"当前状态\n{label}"
+                    ),
+                    mock.patch.object(runner.time, "sleep"),
+                ):
+                    _, already_signed_in = runner.open_account_page(42)
+
+                self.assertEqual(already_signed_in, label == runner.HEALTHY_LABEL)
+
+    def test_the_state_labels_match_the_page_that_renders_them(self) -> None:
+        """两份清单不许各走各的。
+
+        这条脚本读的是界面文字，而那些文字由 `PlatformSessions.tsx` 的 `STATE_LABELS`
+        产生。上面两次失败（`需要登录` 漏了、`尚未确认` 漏了）都是同一个原因：那是一个
+        封闭集合，而这里只抄了其中几项。抄写本身没法避免，能避免的是**抄漏了没人发现**。
+        """
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "frontend/src/features/platform-sessions/PlatformSessions.tsx"
+        ).read_text(encoding="utf-8")
+        block = re.search(
+            r"const STATE_LABELS[^=]*=\s*\{(.*?)\}", source, re.DOTALL
+        )
+        self.assertIsNotNone(block, "PlatformSessions.tsx no longer declares STATE_LABELS")
+        rendered = set(re.findall(r':\s*"([^"]+)"', block.group(1)))
+        self.assertEqual(rendered, set(load_runner().SESSION_STATE_LABELS))
 
 
 class FormalLoginLifecycleTests(unittest.TestCase):

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import threading
-from io import BytesIO, StringIO
+from io import BytesIO, StringIO, TextIOWrapper
 from pathlib import Path
 from queue import Queue
 from typing import Any, cast
@@ -24,6 +24,7 @@ from automation_tool.executor.platform_commands import (
     read_platform_command,
     write_platform_command_result,
 )
+from automation_tool.executor.runtime import ExecutorProcessReporter
 
 TOKEN = "".join(f"{value:02x}" for value in range(32))
 COMMAND_ID = "123e4567-e89b-42d3-a456-426614174005"
@@ -143,6 +144,63 @@ def test_result_is_exact_authenticated_and_contains_no_local_path() -> None:
     assert EXECUTABLE not in output.getvalue()
     assert PROFILE not in output.getvalue()
     assert TOKEN not in output.getvalue()
+
+
+def test_result_frame_survives_a_newline_translating_stdout() -> None:
+    r"""The frame must reach the manager as bytes, not as whatever the OS spells.
+
+    2026-08-05, Windows, installed release package: pressing 打开登录处理 answered
+    `process_unavailable`, and every platform command did — login, recheck and
+    safe logout alike. The Executor was not at fault: it ran the command, wrote
+    its ledger row, stayed alive (no `executor.process.exited`) and printed
+    nothing to stderr.
+
+    The manager reads lifecycle frames with `parse_line`, which rejects a line
+    ending `\r`; a rejected line closes the channel, and a closed channel is
+    reported as `process_unavailable`. On Windows `sys.stdout` is a text stream,
+    so `"…\n"` leaves the process as `"…\r\n"` and every frame written through
+    it is refused.
+
+    `ExecutorProcessReporter._write` had already solved this by writing exact
+    bytes through `output.buffer` — which is why the handshake arrived and the
+    first command did not, and why the failure looked like the Executor dying
+    when it was healthy the whole time. The framing rule has to be one rule.
+
+    A `StringIO`, which every existing test used, translates nothing, so this
+    could not have been caught there.
+    """
+    authenticator = LocalSessionAuthenticator(SecretStr(TOKEN))
+    raw = BytesIO()
+    output = TextIOWrapper(raw, encoding="utf-8", newline="\r\n")
+
+    write_platform_command_result(
+        output,
+        authenticator,
+        command_id=COMMAND_ID,
+        state="awaiting_scan",
+        command_type="douyin.login.open",
+    )
+
+    written = raw.getvalue()
+    assert written.endswith(b"\n")
+    assert b"\r" not in written
+
+
+def test_reporter_frames_survive_a_newline_translating_stdout() -> None:
+    """The handshake writer answers to the same rule, from the same code."""
+    authenticator = LocalSessionAuthenticator(SecretStr(TOKEN))
+    raw = BytesIO()
+    reporter = ExecutorProcessReporter(
+        TextIOWrapper(raw, encoding="utf-8", newline="\r\n"),
+        authenticator,
+    )
+
+    reporter.healthy()
+    reporter.stopped()
+
+    written = raw.getvalue()
+    assert written.count(b"\n") == 2
+    assert b"\r" not in written
 
 
 def test_worker_processes_each_authenticated_line_and_closes_its_operation() -> None:
