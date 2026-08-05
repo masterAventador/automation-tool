@@ -176,6 +176,10 @@ class SkillRegistry:
         self._records[key] = record
         return record
 
+    def records(self) -> list[SignedSkill]:
+        """Every published record, for the SA-07 management projection."""
+        return list(self._records.values())
+
     def at(self, skill_id: str, version: int) -> SignedSkill:
         try:
             return self._records[(skill_id, version)]
