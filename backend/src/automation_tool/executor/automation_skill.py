@@ -36,8 +36,9 @@ _PATH_PATTERN: Final = re.compile(r"^/[A-Za-z0-9/_.-]{0,200}$")
 _PARAMETER_NAME: Final = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 # 语义目标与附近文字里绝不该出现的东西：CSS 选择器、JS、Shell、密钥词。
 # 判据 fail-closed：真实页面的按钮名不含这些字符与词；含了就不收。
-_FORBIDDEN_CHARACTERS: Final = frozenset('<>{}$`;|&\\#"')
-_FORBIDDEN_WORDS: Final = (
+# 公开导出：SA-02 清洗器复用同一套禁止集，避免两份定义各自漂移。
+FORBIDDEN_TEXT_CHARACTERS: Final = frozenset('<>{}$`;|&\\#"')
+FORBIDDEN_TEXT_WORDS: Final = (
     "javascript:",
     "data:",
     "cookie",
@@ -101,10 +102,10 @@ def _limits() -> dict[str, int]:
 def _safe_text(value: object, where: str, *, maximum: int) -> str:
     if not isinstance(value, str) or not 0 < len(value) <= maximum:
         _reject(f"{where} must be bounded text")
-    if any(character in _FORBIDDEN_CHARACTERS for character in value):
+    if any(character in FORBIDDEN_TEXT_CHARACTERS for character in value):
         _reject(f"{where} contains forbidden characters")
     lowered = value.lower()
-    if any(word in lowered for word in _FORBIDDEN_WORDS):
+    if any(word in lowered for word in FORBIDDEN_TEXT_WORDS):
         _reject(f"{where} contains forbidden words")
     if any(ord(character) < 32 or ord(character) == 127 for character in value):
         _reject(f"{where} contains forbidden control characters")
