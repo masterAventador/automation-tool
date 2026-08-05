@@ -150,10 +150,20 @@ class AppIdentity:
 
 @dataclass(frozen=True)
 class CodeIdentity:
+    """What identifies one packaged executable, by whatever this host can prove.
+
+    macOS fills the Developer ID triple and leaves `image_sha256` empty; Windows
+    has no signature to read on this machine and fills the digest instead. The
+    same asymmetry as `ArtifactFacts`, for the same reason: an empty signer
+    field reads as "not established", while a filled one that meant "not
+    checked" would read as its opposite.
+    """
+
     identifier: str
-    authority: str
-    team_id: str
-    cdhash: str
+    authority: str = ""
+    team_id: str = ""
+    cdhash: str = ""
+    image_sha256: str = ""
 
 
 @dataclass(frozen=True)
@@ -439,6 +449,21 @@ class DeviceDriver:
     def read_identity(self, app: Path) -> AppIdentity:
         raise self.unavailable("read the installed package's identity")
 
+    def code_identity(
+        self, executable: Path, artifact: ArtifactFacts | None = None
+    ) -> CodeIdentity:
+        raise self.unavailable("identify a packaged executable")
+
+    def verify_runtime_process_identity(
+        self, record: ProcessRecord, expected: CodeIdentity
+    ) -> bool:
+        """Is this live process still running exactly what was verified?
+
+        `False` means it exited while being sampled, which the caller retries.
+        A mismatch raises.
+        """
+        raise self.unavailable("identify a running packaged process")
+
     def app_data_root(self) -> Path:
         """Where the product keeps its own data, per this platform's convention."""
         raise self.unavailable("locate the product's data directory")
@@ -533,6 +558,20 @@ class MacosDeviceDriver(DeviceDriver):
 
     def read_identity(self, app: Path) -> AppIdentity:
         return macos_read_identity(app)
+
+    def code_identity(
+        self, executable: Path, artifact: ArtifactFacts | None = None
+    ) -> CodeIdentity:
+        if artifact is None:
+            raise AcceptanceFailed("EB-11 runtime code identity needs the release signer")
+        return signed_code_identity(
+            executable, authority=artifact.authority, team_id=artifact.team_id
+        )
+
+    def verify_runtime_process_identity(
+        self, record: ProcessRecord, expected: CodeIdentity
+    ) -> bool:
+        return macos_verify_runtime_process_identity(record, expected)
 
     def app_data_root(self) -> Path:
         return Path.home() / "Library" / "Application Support" / APP_IDENTIFIER
@@ -945,6 +984,58 @@ class WindowsDeviceDriver(DeviceDriver):
         if not version:
             raise AcceptanceFailed("EB-11 App version is unavailable")
         return AppIdentity(APP_IDENTIFIER, version, binary)
+
+    def code_identity(
+        self, executable: Path, artifact: ArtifactFacts | None = None
+    ) -> CodeIdentity:
+        """Identify an executable by its bytes, since there is no signer to ask.
+
+        The same substitution the artifact binding already made, one level down:
+        the identifier is the path the package puts it at, and the identity is
+        the digest of what is there.
+        """
+        del artifact
+        digest = hashlib.sha256()
+        try:
+            with executable.open("rb") as source:
+                while chunk := source.read(1024 * 1024):
+                    digest.update(chunk)
+        except OSError as error:
+            raise AcceptanceFailed("EB-11 packaged runtime executable is unavailable") from error
+        return CodeIdentity(
+            identifier=os.path.normcase(os.fspath(executable)),
+            image_sha256=digest.hexdigest(),
+        )
+
+    def verify_runtime_process_identity(
+        self, record: ProcessRecord, expected: CodeIdentity
+    ) -> bool:
+        """The running process must *be* the executable that was verified.
+
+        macOS asks `codesign` about the pid, which answers about the code
+        actually loaded. There is no such question here, so two weaker facts are
+        combined: the image path the kernel reports for this process, and the
+        digest of the file now at that path. Windows keeps a running image
+        mapped, so the file cannot be replaced underneath it — it can be
+        renamed, which is why the digest is compared and not only the path.
+
+        Stated plainly because it is weaker than the macOS check: this proves
+        the process was started from those bytes, not that those bytes are what
+        is currently executing in memory.
+        """
+        import windows_processes
+
+        if record not in process_snapshot():
+            return False
+        image = windows_processes.image_path(record.pid)
+        if image is None:
+            return False
+        observed = self.code_identity(Path(image))
+        if record not in process_snapshot():
+            return False
+        if observed != expected:
+            raise AcceptanceFailed("EB-11 packaged runtime process does not match the signed App")
+        return True
 
     def app_data_root(self) -> Path:
         """`%APPDATA%\\<identifier>` — Roaming, which is what Tauri uses.
@@ -1487,21 +1578,14 @@ def bind_runtime_code_identities(
     contract: RuntimeContract,
     artifact: ArtifactFacts,
 ) -> RuntimeContract:
+    driver = device_driver()
     return RuntimeContract(
         app_path=contract.app_path,
         executor_path=contract.executor_path,
         browser_path=contract.browser_path,
         profile_root=contract.profile_root,
-        executor_identity=signed_code_identity(
-            contract.executor_path,
-            authority=artifact.authority,
-            team_id=artifact.team_id,
-        ),
-        browser_identity=signed_code_identity(
-            contract.browser_path,
-            authority=artifact.authority,
-            team_id=artifact.team_id,
-        ),
+        executor_identity=driver.code_identity(contract.executor_path, artifact),
+        browser_identity=driver.code_identity(contract.browser_path, artifact),
     )
 
 
@@ -2028,6 +2112,13 @@ def observe_instance_runtime(
 
 
 def verify_runtime_process_identity(
+    record: ProcessRecord,
+    expected: CodeIdentity,
+) -> bool:
+    return device_driver().verify_runtime_process_identity(record, expected)
+
+
+def macos_verify_runtime_process_identity(
     record: ProcessRecord,
     expected: CodeIdentity,
 ) -> bool:

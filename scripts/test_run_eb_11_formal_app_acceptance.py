@@ -904,6 +904,12 @@ class RuntimeObservationTests(unittest.TestCase):
         )
 
         with (
+            # macOS 形状的固定装置（`.app` / `Contents/…` / codesign 输出），
+            # 验的是替换进程会被识别出来这条性质本身。宿主钉在 macOS driver 上，
+            # 否则 `verify_runtime_process_identity` 会走 Windows 那一支的摘要比对。
+            mock.patch.object(
+                runner, "device_driver", return_value=runner.MacosDeviceDriver()
+            ),
             mock.patch.object(
                 runner,
                 "process_snapshot",
@@ -963,7 +969,7 @@ class RuntimeObservationTests(unittest.TestCase):
             ),
             mock.patch.object(runner, "run_checked", side_effect=[verified, details]),
         ):
-            self.assertFalse(runner.verify_runtime_process_identity(record, expected))
+            self.assertFalse(runner.macos_verify_runtime_process_identity(record, expected))
 
     def test_runtime_identity_sampling_treats_codesign_failure_after_exit_as_transient(
         self,
@@ -998,7 +1004,7 @@ class RuntimeObservationTests(unittest.TestCase):
                     side_effect=signing_results,
                 ),
             ):
-                self.assertFalse(runner.verify_runtime_process_identity(record, expected))
+                self.assertFalse(runner.macos_verify_runtime_process_identity(record, expected))
 
         with (
             mock.patch.object(
@@ -1009,7 +1015,7 @@ class RuntimeObservationTests(unittest.TestCase):
             mock.patch.object(runner, "run_checked", side_effect=signing_failure),
             self.assertRaises(runner.AcceptanceFailed),
         ):
-            runner.verify_runtime_process_identity(record, expected)
+            runner.macos_verify_runtime_process_identity(record, expected)
 
     def test_open_file_sampling_retries_only_when_a_sampled_process_exits(self) -> None:
         runner = load_runner()
@@ -2460,6 +2466,80 @@ class WindowsAccessibilityTests(unittest.TestCase):
             root.is_dir(),
             "the product has run on this machine, so this directory must exist",
         )
+
+    def test_a_running_process_is_matched_by_the_bytes_it_is_running(self) -> None:
+        """The digest binding, applied to a live process instead of a package.
+
+        macOS asks `codesign` about a pid, which answers about the code actually
+        loaded. There is no such question to ask here, so what is checked is
+        that the process's image path is the executable that was verified and
+        that the file at that path still hashes to what was verified. Windows
+        keeps the image mapped while the process runs, so it cannot be replaced
+        underneath — it can be renamed, which is why the digest is compared and
+        not only the path.
+        """
+        import windows_processes
+
+        runner = load_runner()
+        driver = runner.WindowsDeviceDriver()
+        child = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import os,time\nprint(os.getpid(), flush=True)\ntime.sleep(30)",
+            ],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            assert child.stdout is not None
+            # The self-reported pid, not `Popen.pid`: a uv virtualenv launches
+            # through a trampoline, and the image being run belongs to the
+            # grandchild.
+            process_id = int(child.stdout.readline().strip())
+            record = next(
+                item for item in runner.process_snapshot() if item.pid == process_id
+            )
+            image = windows_processes.image_path(process_id)
+            self.assertIsNotNone(image)
+            assert image is not None
+            expected = driver.code_identity(Path(image))
+
+            self.assertTrue(driver.verify_runtime_process_identity(record, expected))
+
+            # Same path, different bytes: the digest is what has to catch this,
+            # because a renamed-in executable would keep the path intact.
+            forged = runner.CodeIdentity(
+                identifier=expected.identifier, image_sha256="0" * 64
+            )
+            with self.assertRaises(runner.AcceptanceFailed):
+                driver.verify_runtime_process_identity(record, forged)
+
+            # Same bytes, different path: a second process running an identical
+            # copy is still not the process that was verified.
+            elsewhere = runner.CodeIdentity(
+                identifier=r"C:\somewhere\else.exe",
+                image_sha256=expected.image_sha256,
+            )
+            with self.assertRaises(runner.AcceptanceFailed):
+                driver.verify_runtime_process_identity(record, elsewhere)
+        finally:
+            child.terminate()
+            child.wait(timeout=15)
+
+    def test_an_exited_process_is_a_resample_not_a_mismatch(self) -> None:
+        runner = load_runner()
+        driver = runner.WindowsDeviceDriver()
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        record = next(
+            item for item in runner.process_snapshot() if item.pid == child.pid
+        )
+        child.terminate()
+        child.wait(timeout=15)
+
+        identity = driver.code_identity(Path(sys.executable))
+
+        self.assertFalse(driver.verify_runtime_process_identity(record, identity))
 
     def test_a_vanished_window_is_reported_as_the_app_disappearing(self) -> None:
         runner = load_runner()
