@@ -94,6 +94,12 @@ CHROMIUM_CHILD_PROCESS_SWITCH: Final = "--type="
 # `douyin/` directory that holds the Profile itself, and survives the App
 # exiting — measured 2026-08-05, unchanged across launch, recheck and quit.
 CURRENT_PROFILE_MARKER_NAME: Final = "current-douyin-profile-v1"
+# Digests of packaged executables, by file identity — see `code_identity`.
+# Module level rather than per driver, because `device_driver()` constructs a
+# new driver on every call and the sampler calls it many times a second: an
+# instance-held cache would be empty every time it was asked, which is a cache
+# that measures well in a test and does nothing in the run.
+PACKAGED_CODE_IDENTITIES: dict[tuple[str, int, int, int, int], "CodeIdentity"] = {}
 SIGNING_CONTRACT: Final = (
     REPOSITORY_ROOT / "contracts" / "quality" / "macos-release-signing.v1.json"
 )
@@ -1196,8 +1202,35 @@ class WindowsDeviceDriver(DeviceDriver):
         The same substitution the artifact binding already made, one level down:
         the identifier is the path the package puts it at, and the identity is
         the digest of what is there.
+
+        The answer is kept, because this is asked on every runtime sample and
+        the file cannot change while a process holds its image mapped. Reading
+        it again bought nothing and cost a great deal: 8.6MB for the Executor
+        plus Chromium, about ten times a second, which is what made a sample
+        take 0.30s while a browser was up and — measured on 2026-08-05 — made
+        the Executor fail about one session recheck in two while the sampler
+        ran. An acceptance runner that changes the outcome it is measuring is
+        not measuring anything.
+
+        The key is the file's own identity rather than its path, so a different
+        file at the same path is hashed again and a substitute renamed into
+        place does not inherit the previous answer.
         """
         del artifact
+        try:
+            metadata = executable.stat()
+        except OSError as error:
+            raise AcceptanceFailed("EB-11 packaged runtime executable is unavailable") from error
+        key = (
+            os.path.normcase(os.fspath(executable)),
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_size,
+            metadata.st_mtime_ns,
+        )
+        cached = PACKAGED_CODE_IDENTITIES.get(key)
+        if cached is not None:
+            return cached
         digest = hashlib.sha256()
         try:
             with executable.open("rb") as source:
@@ -1205,10 +1238,12 @@ class WindowsDeviceDriver(DeviceDriver):
                     digest.update(chunk)
         except OSError as error:
             raise AcceptanceFailed("EB-11 packaged runtime executable is unavailable") from error
-        return CodeIdentity(
+        identity = CodeIdentity(
             identifier=os.path.normcase(os.fspath(executable)),
             image_sha256=digest.hexdigest(),
         )
+        PACKAGED_CODE_IDENTITIES[key] = identity
+        return identity
 
     def verify_runtime_process_identity(
         self, record: ProcessRecord, expected: CodeIdentity

@@ -1055,6 +1055,79 @@ class ProfileReuseTests(unittest.TestCase):
             runner.require_same_profile_reuse(qr_open, blind, blind, root)
 
 
+@unittest.skipUnless(os.name == "nt", "the Windows code identity is Windows-only")
+class WindowsCodeIdentityCacheTests(unittest.TestCase):
+    """Identifying a running process must not cost a re-read of its image.
+
+    2026-08-05, Windows: the acceptance runner was disturbing the product it
+    measures. A session recheck answered `process_unavailable` about one time in
+    two — but only while the runtime sampler was running:
+
+        sampler off                     0 failures / 8 attempts
+        sampler on, all instruments     2 failures / 4
+        sampler on, no handle audit     2 failures / 4
+        sampler on, no identity check   0 failures / 2
+
+    The instrument left in the failing configurations and removed from the
+    passing one hashes the whole packaged executable on **every sample** — 8.6MB
+    for the Executor plus Chromium, at roughly ten samples a second, which is
+    why a sample cost 0.30s while a browser was up. The Executor was losing a
+    race it should never have been in, and the operator paid for it with a run.
+
+    The bytes cannot change while the process holds the image mapped, so reading
+    them again says nothing new. The digest is kept per file identity — volume,
+    file index, size and modification time — so a file that really is different
+    is hashed again and a renamed-in substitute does not inherit the answer.
+    """
+
+    def test_the_same_executable_is_hashed_once_across_drivers(self) -> None:
+        """Across drivers, not within one.
+
+        `device_driver()` returns `candidate()` — a **new** driver on every
+        call, and the sampler calls it many times a second. A cache held on the
+        instance would be empty every time it was asked: perfect in a test that
+        reuses one driver, and worth nothing in the run. So the test asks a
+        fresh driver each time, the way the runner does.
+        """
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as raw:
+            binary = Path(raw) / "packaged.exe"
+            binary.write_bytes(b"first")
+
+            reads = {"n": 0}
+            real_open = Path.open
+
+            def counting_open(self: Path, *args: object, **kwargs: object):
+                if self == binary:
+                    reads["n"] += 1
+                return real_open(self, *args, **kwargs)
+
+            with mock.patch.object(Path, "open", counting_open):
+                first = runner.WindowsDeviceDriver().code_identity(binary)
+                for _ in range(20):
+                    self.assertEqual(
+                        runner.WindowsDeviceDriver().code_identity(binary), first
+                    )
+
+            self.assertEqual(reads["n"], 1)
+
+    def test_a_changed_executable_is_hashed_again(self) -> None:
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as raw:
+            binary = Path(raw) / "packaged.exe"
+            binary.write_bytes(b"first")
+            driver = runner.WindowsDeviceDriver()
+            before = driver.code_identity(binary)
+
+            # Distinct length and a moved timestamp: either alone must be enough
+            # to make this a different file as far as the cache is concerned.
+            binary.write_bytes(b"second payload")
+            os.utime(binary, (0, 0))
+            after = driver.code_identity(binary)
+
+        self.assertNotEqual(before.image_sha256, after.image_sha256)
+
+
 class RecheckRuntimeTests(unittest.TestCase):
     """A recheck is held to what a recheck can be held to.
 
