@@ -1580,7 +1580,9 @@ class LaunchCleanupTests(unittest.TestCase):
 
         with (
             mock.patch.object(runner.secrets, "token_urlsafe", return_value="launch-nonce"),
-            mock.patch.object(runner, "run_checked", side_effect=KeyboardInterrupt),
+            # 打断的是「启动 App」这一步，不是 `run_checked`：启动已按宿主分发，
+            # Windows 上根本不经过 run_checked，继续 patch 它等于什么都没打断。
+            mock.patch.object(runner, "start_app", side_effect=KeyboardInterrupt),
             mock.patch.object(
                 runner,
                 "nonce_owned_process_records",
@@ -1607,7 +1609,9 @@ class LaunchCleanupTests(unittest.TestCase):
 
         with (
             mock.patch.object(runner.secrets, "token_urlsafe", return_value="launch-nonce"),
-            mock.patch.object(runner, "run_checked", side_effect=KeyboardInterrupt),
+            # 打断的是「启动 App」这一步，不是 `run_checked`：启动已按宿主分发，
+            # Windows 上根本不经过 run_checked，继续 patch 它等于什么都没打断。
+            mock.patch.object(runner, "start_app", side_effect=KeyboardInterrupt),
             mock.patch.object(
                 runner,
                 "nonce_owned_process_records",
@@ -1685,7 +1689,13 @@ class LaunchCleanupTests(unittest.TestCase):
         instance = runner.ProcessRecord(10, 1, os.fspath(executable), "started")
 
         with (
-            mock.patch.object(runner, "run_checked"),
+            # 这两条用的是 macOS 形状的固定装置（`.app` / `Contents/MacOS`），
+            # 验的是启动失败后的清理逻辑本身，不是宿主。启动打桩掉，宿主
+            # 钉在 macOS driver 上，`packaged_process_records` 才认得这个前缀。
+            mock.patch.object(runner, "start_app"),
+            mock.patch.object(
+                runner, "device_driver", return_value=runner.MacosDeviceDriver()
+            ),
             mock.patch.object(
                 runner,
                 "process_snapshot",
@@ -1708,7 +1718,13 @@ class LaunchCleanupTests(unittest.TestCase):
         instance = runner.ProcessRecord(10, 1, os.fspath(executable), "started")
 
         with (
-            mock.patch.object(runner, "run_checked"),
+            # 这两条用的是 macOS 形状的固定装置（`.app` / `Contents/MacOS`），
+            # 验的是启动失败后的清理逻辑本身，不是宿主。启动打桩掉，宿主
+            # 钉在 macOS driver 上，`packaged_process_records` 才认得这个前缀。
+            mock.patch.object(runner, "start_app"),
+            mock.patch.object(
+                runner, "device_driver", return_value=runner.MacosDeviceDriver()
+            ),
             mock.patch.object(runner, "process_snapshot", return_value=[instance]),
             mock.patch.object(runner, "process_has_launch_nonce", return_value=True),
             mock.patch.object(runner, "bundle_process_ids", side_effect=KeyboardInterrupt),
@@ -2174,6 +2190,43 @@ class WindowsAccessibilityTests(unittest.TestCase):
             f"{bundle}{os.sep}Contents{os.sep}",
         )
 
+    def test_forceful_termination_names_a_signal_this_host_has(self) -> None:
+        """`signal.SIGKILL` does not exist on Windows.
+
+        `cleanup_owned_runtime` escalates SIGTERM → SIGKILL, and the escalation
+        is what the launch-failure paths rely on to leave nothing behind. Naming
+        `signal.SIGKILL` directly would raise `AttributeError` on this host — at
+        cleanup time, inside an exception handler, which is the worst place for a
+        second failure.
+        """
+        runner = load_runner()
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            # From the snapshot, not hand-built: `ProcessRecord` compares its
+            # command and start time too, and `terminate_records` skips anything
+            # that is not in the current snapshot. A hand-built record is simply
+            # never recognised, so a broken kill would look like a passing test.
+            record = next(
+                item for item in runner.process_snapshot() if item.pid == child.pid
+            )
+
+            runner.terminate_records([record], runner.FORCEFUL_SIGNAL)
+
+            self.assertEqual(child.wait(timeout=15), runner.FORCEFUL_SIGNAL)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=15)
+
+    def test_terminating_an_already_dead_process_is_not_an_error(self) -> None:
+        """Cleanup runs after things have gone wrong, so it races with exits."""
+        runner = load_runner()
+        child = subprocess.Popen([sys.executable, "-c", "raise SystemExit(0)"])
+        child.wait(timeout=15)
+        record = runner.ProcessRecord(pid=child.pid, ppid=os.getpid(), command="")
+
+        runner.terminate_records([record], runner.FORCEFUL_SIGNAL)
+
     def test_a_vanished_window_is_reported_as_the_app_disappearing(self) -> None:
         runner = load_runner()
 
@@ -2182,6 +2235,83 @@ class WindowsAccessibilityTests(unittest.TestCase):
             self.assertRaisesRegex(runner.AcceptanceFailed, "disappeared"),
         ):
             runner.WindowsDeviceDriver().visible_ui_text(42)
+
+
+INSTALLED_APP = (
+    Path(os.environ.get("LOCALAPPDATA", "")) / "自动化运营工具"
+    if os.name == "nt"
+    else Path("/nonexistent")
+)
+
+
+@unittest.skipUnless(
+    os.name == "nt" and (INSTALLED_APP / "automation-tool-desktop.exe").is_file(),
+    "the installed Windows package is required",
+)
+class WindowsAppLifecycleTests(unittest.TestCase):
+    """Start it, find it, ask it to quit, and prove nothing of ours is left.
+
+    Against the real installed package, because every one of these steps is a
+    claim about the operating system rather than about this code: that the
+    environment reaches the process, that a foreign instance would be visible,
+    that a window close request is honoured rather than the process being shot.
+
+    `quit_app` is the reason the last one matters. EB-11's final assertion is
+    that a *normal* exit leaves no Executor and no Chromium behind; killing the
+    process would prove nothing about that, so the Windows path has to close the
+    window the way a person does.
+    """
+
+    def test_the_app_starts_carrying_what_the_runner_put_in_its_environment(
+        self,
+    ) -> None:
+        import windows_processes
+
+        runner = load_runner()
+        driver = runner.WindowsDeviceDriver()
+        nonce = "eb11-lifecycle-probe-2c8d"
+        driver.start_app(INSTALLED_APP, nonce)
+        started: set[int] = set()
+        try:
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                started = driver.bundle_process_ids(INSTALLED_APP)
+                if started:
+                    break
+                time.sleep(0.5)
+
+            self.assertEqual(len(started), 1, started)
+            process_id = next(iter(started))
+            values = windows_processes.environment(process_id)
+            self.assertIsNotNone(values)
+            assert values is not None
+            self.assertEqual(values.get(runner.LAUNCH_NONCE_ENVIRONMENT), nonce)
+            self.assertEqual(
+                values.get(runner.WEBVIEW_ACCESSIBILITY_ENVIRONMENT),
+                runner.WEBVIEW_ACCESSIBILITY_ARGUMENT,
+                "without this the WebView2 tree is empty and nothing can be driven",
+            )
+
+            driver.wait_for_window(process_id)
+            driver.request_quit(process_id)
+
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                if not driver.bundle_process_ids(INSTALLED_APP):
+                    break
+                time.sleep(0.5)
+            self.assertEqual(
+                driver.bundle_process_ids(INSTALLED_APP),
+                set(),
+                "a normal quit has to end the process, or EB-11's final "
+                "assertion measures a kill instead of an exit",
+            )
+            started = set()
+        finally:
+            for process_id in started:
+                subprocess.run(
+                    ["taskkill", "/PID", str(process_id), "/F"], capture_output=True
+                )
 
 
 if __name__ == "__main__":

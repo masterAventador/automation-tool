@@ -79,6 +79,13 @@ RELEASE_IDENTITY_SCHEMA: Final = "automation-tool.release-identity.v1"
 # swapped in between them would not be caught. Named rather than branched at the
 # call site, so the gap is stated once, where it is decided.
 NO_FOLLOW_OPEN_FLAG: Final = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+# Cleanup escalates from "ask" to "insist". `signal.SIGKILL` does not exist on
+# Windows, where `os.kill` calls `TerminateProcess` for any signal that is not a
+# console control event — so both rungs are the same act there, and naming
+# `signal.SIGKILL` directly would raise `AttributeError` inside the exception
+# handler that runs after a launch has already gone wrong.
+GRACEFUL_SIGNAL: Final = signal.SIGTERM
+FORCEFUL_SIGNAL: Final = getattr(signal, "SIGKILL", signal.SIGTERM)
 OBSERVED_AT_PATTERN: Final = re.compile(
     r"最近检查[：:]\s*("
     r"\d{4}(?:[/-]\d{1,2}[/-]\d{1,2}|年\d{1,2}月\d{1,2}日)"
@@ -412,6 +419,15 @@ class DeviceDriver:
     def process_has_launch_nonce(self, record: ProcessRecord, nonce: str) -> bool:
         raise self.unavailable("read a process launch nonce")
 
+    def start_app(self, app: Path, nonce: str) -> None:
+        raise self.unavailable("start the formal App")
+
+    def bundle_process_ids(self, app: Path) -> set[int]:
+        raise self.unavailable("list this product's running processes")
+
+    def request_quit(self, process_id: int) -> None:
+        raise self.unavailable("ask the App to quit normally")
+
     def packaged_prefix(self, app: Path) -> str:
         """Where a packaged process's image path starts.
 
@@ -449,6 +465,24 @@ class MacosDeviceDriver(DeviceDriver):
 
     def packaged_prefix(self, app: Path) -> str:
         return f"{app}{os.sep}Contents{os.sep}"
+
+    def start_app(self, app: Path, nonce: str) -> None:
+        run_checked(
+            [
+                "/usr/bin/open",
+                "-n",
+                "-a",
+                os.fspath(app),
+                "--env",
+                f"{LAUNCH_NONCE_ENVIRONMENT}={nonce}",
+            ]
+        )
+
+    def bundle_process_ids(self, app: Path) -> set[int]:
+        return macos_bundle_process_ids()
+
+    def request_quit(self, process_id: int) -> None:
+        macos_request_quit(process_id)
 
 
 AUTHENTICODE_PATH_ENVIRONMENT: Final = "AUTOMATION_TOOL_EB11_SIGNED_PATH"
@@ -524,6 +558,16 @@ Write-Output ($collected -join [Environment]::NewLine)
 """
 UIA_WINDOW_READY_BODY: Final = """
 Write-Output 'ready'
+"""
+UIA_QUIT_BODY: Final = """
+$close = $null
+if (-not $window.TryGetCurrentPattern(
+        [System.Windows.Automation.WindowPattern]::Pattern, [ref]$close)) {
+    Write-Output 'no_window_pattern'
+    exit 0
+}
+$close.Close()
+Write-Output 'requested'
 """
 UIA_NO_TREE: Final = frozenset({"no_process", "no_window"})
 
@@ -697,6 +741,70 @@ class WindowsDeviceDriver(DeviceDriver):
 
     def packaged_prefix(self, app: Path) -> str:
         return f"{app}{os.sep}"
+
+    def start_app(self, app: Path, nonce: str) -> None:
+        """Run the installed executable, with what the run needs in its environment.
+
+        macOS asks LaunchServices for a new instance and hands it one variable;
+        Windows has no such service, so the runner starts the process itself.
+        Two things go in:
+
+        * the launch nonce, which is how a reparented helper is later recognised
+          as this run's;
+        * `--force-renderer-accessibility`, without which WebView2 builds no
+          accessibility tree and nothing in the App can be read or pressed.
+
+        The child is deliberately not waited on. `quit_app` proves the App exits
+        on its own when asked, and holding it open here would make this process
+        its reaper — which is exactly the relationship being measured.
+        """
+        binary = windows_product_binary(app)
+        environment = dict(
+            os.environ,
+            **{
+                LAUNCH_NONCE_ENVIRONMENT: nonce,
+                WEBVIEW_ACCESSIBILITY_ENVIRONMENT: WEBVIEW_ACCESSIBILITY_ARGUMENT,
+            },
+        )
+        try:
+            subprocess.Popen(
+                [os.fspath(binary)],
+                env=environment,
+                cwd=os.fspath(app),
+                close_fds=True,
+            )
+        except OSError as error:
+            raise AcceptanceFailed("EB-11 formal App could not be started") from error
+
+    def bundle_process_ids(self, app: Path) -> set[int]:
+        """Every running process that *is* this product, however it was started.
+
+        macOS asks for processes with the product bundle identifier. Windows has
+        no such identifier, so the equivalent question is which processes are
+        running the installed product executable — which is the fact the check
+        actually wants: a second instance someone launched by hand would show up
+        here just the same.
+        """
+        import windows_processes
+
+        binary = os.path.normcase(os.fspath(windows_product_binary(app)))
+        found: set[int] = set()
+        for process_id in windows_processes.process_table():
+            image = windows_processes.image_path(process_id)
+            if image and os.path.normcase(image) == binary:
+                found.add(process_id)
+        return found
+
+    def request_quit(self, process_id: int) -> None:
+        """Close the window, the way a person closes it.
+
+        Not `TerminateProcess`. EB-11's closing assertion is that a *normal*
+        exit leaves no Executor and no Chromium behind; killing the process
+        would leave that unmeasured while looking identical in the evidence.
+        """
+        result = self._query(process_id, UIA_QUIT_BODY)
+        if result != "requested":
+            raise AcceptanceFailed("EB-11 could not request normal App quit")
 
     def process_snapshot(self) -> list[ProcessRecord]:
         """The `ps -axo pid,ppid,lstart,command` of this host.
@@ -1275,7 +1383,7 @@ def apple_script(source: str, *, timeout: float = 30.0) -> str:
     return result.stdout.strip()
 
 
-def bundle_process_ids() -> set[int]:
+def macos_bundle_process_ids() -> set[int]:
     rendered = apple_script(
         f'''
 tell application "System Events"
@@ -1306,6 +1414,14 @@ tell application "System Events"
   end tell
 end tell
 '''
+
+
+def start_app(app: Path, nonce: str) -> None:
+    device_driver().start_app(app, nonce)
+
+
+def bundle_process_ids(app: Path) -> set[int]:
+    return device_driver().bundle_process_ids(app)
 
 
 def process_snapshot() -> list[ProcessRecord]:
@@ -1876,7 +1992,7 @@ def require_safe_logout_cleanup(
 
 
 def require_isolated_launch(app: Path) -> None:
-    if bundle_process_ids() or packaged_process_records(app, process_snapshot()):
+    if bundle_process_ids(app) or packaged_process_records(app, process_snapshot()):
         raise AcceptanceFailed(
             "EB-11 refuses to share a running production App with another session"
         )
@@ -1927,16 +2043,7 @@ def launch_app(app: Path, executable_path: Path) -> ProcessRecord:
     nonce = secrets.token_urlsafe(24)
     identified: dict[tuple[int, str], ProcessRecord] = {}
     try:
-        run_checked(
-            [
-                "/usr/bin/open",
-                "-n",
-                "-a",
-                os.fspath(app),
-                "--env",
-                f"{LAUNCH_NONCE_ENVIRONMENT}={nonce}",
-            ]
-        )
+        start_app(app, nonce)
         deadline = time.monotonic() + WINDOW_TIMEOUT_SECONDS
         expected_command = os.fspath(executable_path)
         while time.monotonic() < deadline:
@@ -1961,7 +2068,7 @@ def launch_app(app: Path, executable_path: Path) -> ProcessRecord:
                 instance = own_records[0]
                 if len(main_records) != 1:
                     raise AcceptanceFailed("EB-11 launched alongside another App process")
-                visible_ids = bundle_process_ids()
+                visible_ids = bundle_process_ids(app)
                 if visible_ids and visible_ids != {instance.pid}:
                     raise AcceptanceFailed("EB-11 launched an ambiguous App process")
                 instance_process_records(app, instance, process_snapshot())
@@ -2319,6 +2426,14 @@ def terminate_records(records: list[ProcessRecord], signal_number: int) -> None:
             os.kill(record.pid, signal_number)
         except ProcessLookupError:
             continue
+        except PermissionError:
+            # Windows raises this for a process that has exited but whose id is
+            # still visible. Cleanup runs after something has already gone
+            # wrong, so it races with exits by construction; a process that is
+            # gone is the outcome being asked for, not a failure.
+            if still_running([record]):
+                raise
+            continue
 
 
 def cleanup_owned_runtime(
@@ -2337,7 +2452,7 @@ def cleanup_owned_runtime(
     root_pid = instance.pid if instance is not None else None
     root = [record for record in records if record.pid == root_pid]
     descendants = [record for record in records if record.pid != root_pid]
-    terminate_records(root + descendants, signal.SIGTERM)
+    terminate_records(root + descendants, GRACEFUL_SIGNAL)
     deadline = time.monotonic() + 8.0
     while time.monotonic() < deadline:
         residual = still_running(records)
@@ -2352,7 +2467,7 @@ def cleanup_owned_runtime(
             *owned_process_records(app, instance, reject_foreign=False),
         ]
     }
-    terminate_records(list(residual_by_pid.values()), signal.SIGKILL)
+    terminate_records(list(residual_by_pid.values()), FORCEFUL_SIGNAL)
     deadline = time.monotonic() + 8.0
     while time.monotonic() < deadline:
         residual = still_running(records)
@@ -2360,20 +2475,14 @@ def cleanup_owned_runtime(
         residual_by_pid = {record.pid: record for record in residual}
         if not residual_by_pid:
             return
-        terminate_records(list(residual_by_pid.values()), signal.SIGKILL)
+        terminate_records(list(residual_by_pid.values()), FORCEFUL_SIGNAL)
         time.sleep(0.2)
     raise AcceptanceFailed("EB-11 could not clean its owned App process tree")
 
 
-def quit_app(app: Path, instance: ProcessRecord) -> None:
-    process_id = instance.pid
-    tracked = owned_process_records(app, instance)
-    if instance not in tracked:
-        cleanup_owned_runtime(app, instance, tracked)
-        raise AcceptanceFailed("EB-11 formal App exited before normal quit")
-    try:
-        result = apple_script(
-            f'''
+def macos_request_quit(process_id: int) -> None:
+    result = apple_script(
+        f'''
 tell application "System Events"
   set matches to every application process whose unix id is {process_id}
   if (count of matches) is not 1 then return "not_running"
@@ -2384,9 +2493,19 @@ tell application "System Events"
   return "requested"
 end tell
 '''
-        )
-        if result != "requested":
-            raise AcceptanceFailed("EB-11 could not request normal App quit")
+    )
+    if result != "requested":
+        raise AcceptanceFailed("EB-11 could not request normal App quit")
+
+
+def quit_app(app: Path, instance: ProcessRecord) -> None:
+    process_id = instance.pid
+    tracked = owned_process_records(app, instance)
+    if instance not in tracked:
+        cleanup_owned_runtime(app, instance, tracked)
+        raise AcceptanceFailed("EB-11 formal App exited before normal quit")
+    try:
+        device_driver().request_quit(process_id)
         deadline = time.monotonic() + QUIT_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
             residual = still_running(tracked)
