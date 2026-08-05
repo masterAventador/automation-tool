@@ -593,6 +593,30 @@ class WindowsReleaseTests(unittest.TestCase):
     2026-07-26 the shipped one went out with three resources missing.
     """
 
+    def test_the_build_id_names_the_platform_being_built(self) -> None:
+        """A real Windows release shipped `"buildId": "macos-release"`.
+
+        The default was the literal string `macos-release`, and nothing changed
+        it when `--platform windows` was passed. The field is not decoration:
+        the EB-11 runner matches it against the packaged executor's build id, so
+        a package that misnames itself either fails there for a confusing reason
+        or agrees because both sides carry the same wrong name.
+        """
+        for platform_name in ("macos", "windows"):
+            with self.subTest(platform=platform_name):
+                arguments = build_release_package.parse_arguments(
+                    ["--platform", platform_name]
+                )
+
+                self.assertEqual(f"{platform_name}-release", arguments.build_id)
+
+    def test_an_explicit_build_id_still_wins(self) -> None:
+        arguments = build_release_package.parse_arguments(
+            ["--platform", "windows", "--build-id", "customer-demo-xuanbai"]
+        )
+
+        self.assertEqual("customer-demo-xuanbai", arguments.build_id)
+
     def test_the_windows_platform_has_a_release_builder(self) -> None:
         self.assertTrue(
             hasattr(build_release_package, "build_windows_release"),

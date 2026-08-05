@@ -1155,7 +1155,13 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--platform", choices=("macos", "windows"), default="macos")
     parser.add_argument("--work-dir", type=Path, default=DEFAULT_WORK_DIRECTORY)
     parser.add_argument("--archive", type=Path)
-    parser.add_argument("--build-id", default="macos-release")
+    # Derived from the platform rather than defaulted to one of them. A real
+    # Windows release shipped `"buildId": "macos-release"` in its own
+    # `release-identity.v1.json`, and that field is not decoration: the EB-11
+    # runner matches it against the packaged executor's build id, so a package
+    # that misnames itself either fails there or — worse — agrees because both
+    # sides are wrong in the same way.
+    parser.add_argument("--build-id", default=None)
     parser.add_argument(
         "--update-endpoint",
         help=(
@@ -1192,6 +1198,8 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     arguments = parser.parse_args(argv)
+    if arguments.build_id is None:
+        arguments.build_id = f"{arguments.platform}-release"
     # Every step of a release runs a subprocess with `cwd=frontend/`, so a
     # relative path given on the command line would be re-interpreted against
     # a directory the operator never named. Bind them all to the invocation
