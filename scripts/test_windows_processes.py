@@ -10,8 +10,10 @@ agree about a struct offset — which is exactly the thing most likely to be wro
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -123,6 +125,111 @@ class ProcessFactTests(unittest.TestCase):
         finally:
             later.terminate()
             later.wait(timeout=15)
+
+
+@WINDOWS_ONLY
+class OpenFileTests(unittest.TestCase):
+    """The `lsof -p` of this host.
+
+    EB-11 uses it for one question: does the browser process actually hold the
+    Profile directory this run created, or is it merely running with a matching
+    `--user-data-dir` on its command line? A command line is what a process was
+    asked to do; an open handle is what it is doing.
+    """
+
+    def _scratch(self) -> Path:
+        """A directory removed *after* the holder stops.
+
+        `addCleanup` unwinds last-registered-first, so registering this before
+        starting a holder is what lets the holder release the file first. A
+        `with TemporaryDirectory()` block instead unwinds before any cleanup
+        runs, and Windows refuses to delete a file somebody still has open.
+        """
+        temporary = Path(tempfile.mkdtemp(prefix="eb11-open-files-"))
+        self.addCleanup(shutil.rmtree, temporary, True)
+        return temporary
+
+    def _holder(self, body: str, argument: Path) -> tuple[subprocess.Popen[str], int]:
+        """Start a process that holds something open, and learn its real pid.
+
+        `Popen.pid` is not it. A uv virtualenv's `python.exe` is a trampoline
+        that execs nothing — it *spawns* the real interpreter and waits — so the
+        pid this process gets back holds only the inherited stdout and cwd, and
+        every handle the script actually opens belongs to a grandchild. The
+        first debug run of these tests looked like the enumerator was dropping
+        file handles; it was enumerating the wrong process.
+        """
+        holder = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                f"import os,sys,time\n{body}\nprint(os.getpid(), flush=True)\ntime.sleep(30)",
+                str(argument),
+            ],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        self.addCleanup(self._stop_holder, holder)
+        assert holder.stdout is not None
+        return holder, int(holder.stdout.readline().strip())
+
+    @staticmethod
+    def _stop_holder(holder: subprocess.Popen[str]) -> None:
+        holder.terminate()
+        try:
+            holder.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            holder.kill()
+            holder.wait(timeout=15)
+
+    def test_a_file_a_process_has_open_is_listed_for_that_process(self) -> None:
+        import windows_processes
+
+        temporary = self._scratch()
+        target = temporary / "held-open.txt"
+        target.write_text("held", encoding="utf-8")
+        _, process_id = self._holder("handle = open(sys.argv[1], 'rb')", target)
+
+        found = [Path(item) for item in windows_processes.open_file_paths([process_id])]
+
+        self.assertIn(
+            target.resolve(),
+            [item.resolve() for item in found],
+            f"the held file is missing from {len(found)} listed paths",
+        )
+        # A sibling nobody opened must not appear, or the listing is not
+        # per-process and proves nothing about who holds what.
+        self.assertNotIn(temporary / "never-opened.txt", found)
+
+    def test_a_directory_a_process_holds_open_is_listed(self) -> None:
+        """Chromium holds the Profile *directory*, not only files inside it."""
+        import windows_processes
+
+        directory = self._scratch() / "profile"
+        directory.mkdir()
+        _, process_id = self._holder(
+            "import ctypes\n"
+            "kernel32 = ctypes.WinDLL('kernel32')\n"
+            "held = kernel32.CreateFileW(\n"
+            "    sys.argv[1], 0x80000000, 7, None, 3, 0x02000000, None)\n"
+            "assert held != -1",
+            directory,
+        )
+
+        found = [
+            Path(item).resolve()
+            for item in windows_processes.open_file_paths([process_id])
+        ]
+
+        self.assertIn(directory.resolve(), found)
+
+    def test_an_exited_process_reports_nothing_rather_than_failing(self) -> None:
+        import windows_processes
+
+        child = subprocess.Popen([sys.executable, "-c", "raise SystemExit(0)"])
+        child.wait(timeout=15)
+
+        self.assertEqual(windows_processes.open_file_paths([child.pid]), [])
 
 
 @WINDOWS_ONLY

@@ -45,6 +45,16 @@ PARAMETERS_ENVIRONMENT_SIZE_OFFSET: Final = 0x3F0
 # length comes from another process's memory.
 ENVIRONMENT_READ_LIMIT: Final = 1 << 20
 ANCESTOR_WALK_LIMIT: Final = 64
+PROCESS_DUP_HANDLE: Final = 0x0040
+DUPLICATE_SAME_ACCESS: Final = 0x00000002
+FILE_TYPE_DISK: Final = 0x0001
+FILE_NAME_NORMALIZED: Final = 0x0
+SYSTEM_EXTENDED_HANDLE_INFORMATION: Final = 64
+STATUS_INFO_LENGTH_MISMATCH: Final = 0xC0000004 - (1 << 32)
+# `GetFinalPathNameByHandleW` answers in extended-length form. Nothing else in
+# this project speaks it, and a path that keeps the prefix compares unequal to
+# the very directory it names.
+EXTENDED_LENGTH_PREFIX: Final = "\\\\?\\"
 
 
 class WindowsProcessesUnavailable(RuntimeError):
@@ -334,6 +344,125 @@ def environment(process_id: int) -> dict[str, str] | None:
     return values or None
 
 
+class _SystemHandleEntry(ctypes.Structure):
+    """One row of `SystemExtendedHandleInformation`."""
+
+    _fields_ = (
+        ("Object", ctypes.c_void_p),
+        ("UniqueProcessId", ctypes.c_size_t),
+        ("HandleValue", ctypes.c_size_t),
+        ("GrantedAccess", wintypes.ULONG),
+        ("CreatorBackTraceIndex", wintypes.USHORT),
+        ("ObjectTypeIndex", wintypes.USHORT),
+        ("HandleAttributes", wintypes.ULONG),
+        ("Reserved", wintypes.ULONG),
+    )
+
+
+class _SystemHandleInformationEx(ctypes.Structure):
+    _fields_ = (
+        ("NumberOfHandles", ctypes.c_size_t),
+        ("Reserved", ctypes.c_size_t),
+        ("Handles", _SystemHandleEntry * 1),
+    )
+
+
+def _system_handle_table() -> list[_SystemHandleEntry]:
+    ntdll = _ntdll()
+    size = 1 << 22
+    for _ in range(12):
+        buffer = ctypes.create_string_buffer(size)
+        written = wintypes.ULONG(0)
+        status = ntdll.NtQuerySystemInformation(
+            SYSTEM_EXTENDED_HANDLE_INFORMATION,
+            buffer,
+            wintypes.ULONG(size),
+            ctypes.byref(written),
+        )
+        if status == STATUS_INFO_LENGTH_MISMATCH:
+            size *= 2
+            continue
+        if status != 0:
+            raise WindowsProcessesUnavailable("the Windows handle table is unavailable")
+        header = _SystemHandleInformationEx.from_buffer(buffer)
+        count = int(header.NumberOfHandles)
+        rows = (_SystemHandleEntry * count).from_buffer(
+            buffer, _SystemHandleInformationEx.Handles.offset
+        )
+        return list(rows)
+    raise WindowsProcessesUnavailable("the Windows handle table kept growing")
+
+
+def open_file_paths(process_ids: list[int]) -> list[str]:
+    """Every on-disk path the given processes hold open — this host's `lsof -p`.
+
+    Windows has no per-process handle query, so the whole system table is taken
+    once and filtered. Each candidate handle is duplicated into this process and
+    kept only if `GetFileType` says it is a disk object.
+
+    **That type check is the thing that stops this hanging.** The well-known way
+    to hang here is asking a synchronous pipe for its name: the query blocks
+    until the other end responds, which for an idle pipe is never. `GetFileType`
+    never blocks, and by the time `GetFinalPathNameByHandle` runs the handle is
+    known to be a file or directory.
+
+    Returns `[]` rather than raising when the processes are gone; a run that
+    samples a process which has just exited is the ordinary case, not an error.
+    """
+    wanted = {int(process_id) for process_id in process_ids}
+    if not wanted:
+        return []
+    kernel32 = _kernel32()
+    this_process = kernel32.GetCurrentProcess()
+    paths: list[str] = []
+    seen: set[str] = set()
+    handles: dict[int, _Handle] = {}
+    try:
+        for row in _system_handle_table():
+            owner = int(row.UniqueProcessId)
+            if owner not in wanted:
+                continue
+            source = handles.get(owner)
+            if source is None:
+                source = _Handle(owner, PROCESS_DUP_HANDLE)
+                handles[owner] = source
+            if source.value is None:
+                continue
+            duplicate = wintypes.HANDLE()
+            ok = kernel32.DuplicateHandle(
+                wintypes.HANDLE(source.value),
+                wintypes.HANDLE(int(row.HandleValue)),
+                wintypes.HANDLE(this_process),
+                ctypes.byref(duplicate),
+                0,
+                False,
+                DUPLICATE_SAME_ACCESS,
+            )
+            if not ok:
+                continue
+            try:
+                if kernel32.GetFileType(duplicate) != FILE_TYPE_DISK:
+                    continue
+                buffer = ctypes.create_unicode_buffer(32768)
+                length = kernel32.GetFinalPathNameByHandleW(
+                    duplicate, buffer, 32768, FILE_NAME_NORMALIZED
+                )
+                if not length or length >= 32768:
+                    continue
+                rendered = buffer.value
+                if rendered.startswith(EXTENDED_LENGTH_PREFIX):
+                    rendered = rendered[len(EXTENDED_LENGTH_PREFIX) :]
+                if rendered not in seen:
+                    seen.add(rendered)
+                    paths.append(rendered)
+            finally:
+                kernel32.CloseHandle(duplicate)
+    finally:
+        for source in handles.values():
+            source.__exit__()
+    return paths
+
+
 __all__ = [
     "WindowsProcess",
     "WindowsProcessesUnavailable",
@@ -342,5 +471,6 @@ __all__ = [
     "created_at",
     "environment",
     "image_path",
+    "open_file_paths",
     "process_table",
 ]

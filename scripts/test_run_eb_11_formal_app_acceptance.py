@@ -1020,18 +1020,21 @@ class RuntimeObservationTests(unittest.TestCase):
         )
         failure = subprocess.CalledProcessError(1, ["/usr/sbin/lsof"])
 
+        # 点名 macOS 那一支：`read_process_open_paths` 已按宿主分发，验的是 `lsof`
+        # 失败之后怎么区分「进程没了」和「审计坏了」，那是 AppleScript/lsof 侧的形状。
+        # Windows 侧同一条性质由 `WindowsAccessibilityTests` 里对应的用例守。
         with (
             mock.patch.object(runner, "run_checked", side_effect=failure),
             mock.patch.object(runner, "process_snapshot", return_value=[]),
         ):
-            self.assertIsNone(runner.read_process_open_paths([record]))
+            self.assertIsNone(runner.macos_read_process_open_paths([record]))
 
         with (
             mock.patch.object(runner, "run_checked", side_effect=failure),
             mock.patch.object(runner, "process_snapshot", return_value=[record]),
             self.assertRaises(runner.AcceptanceFailed),
         ):
-            runner.read_process_open_paths([record])
+            runner.macos_read_process_open_paths([record])
 
     @unittest.skipUnless(os.name == "posix", "POSIX Profile boundary contract")
     def test_runtime_observation_rejects_a_profile_symlinked_outside_app_data(self) -> None:
@@ -2226,6 +2229,41 @@ class WindowsAccessibilityTests(unittest.TestCase):
         record = runner.ProcessRecord(pid=child.pid, ppid=os.getpid(), command="")
 
         runner.terminate_records([record], runner.FORCEFUL_SIGNAL)
+
+    def test_open_file_audit_tells_a_vanished_process_from_a_broken_audit(self) -> None:
+        """`None` means "sample again", an exception means "stop the run".
+
+        The Chromium processes this audits are short-lived by nature, so one
+        exiting between the snapshot and the handle walk is ordinary and must
+        not end the run. An audit that genuinely cannot be taken must, or the
+        run would loop on a broken instrument reporting nothing was open.
+        """
+        runner = load_runner()
+        record = runner.ProcessRecord(12, 11, r"C:\Product\browser.exe", "C")
+        import windows_processes
+
+        broken = windows_processes.WindowsProcessesUnavailable("no handle table")
+        driver = runner.WindowsDeviceDriver()
+
+        with (
+            mock.patch.object(windows_processes, "open_file_paths", side_effect=broken),
+            mock.patch.object(runner, "process_snapshot", return_value=[]),
+        ):
+            self.assertIsNone(driver.read_process_open_paths([record]))
+
+        with (
+            mock.patch.object(windows_processes, "open_file_paths", side_effect=broken),
+            mock.patch.object(runner, "process_snapshot", return_value=[record]),
+            self.assertRaises(runner.AcceptanceFailed),
+        ):
+            driver.read_process_open_paths([record])
+
+        # And a process that exits during a *successful* walk is still a resample.
+        with (
+            mock.patch.object(windows_processes, "open_file_paths", return_value=[]),
+            mock.patch.object(runner, "process_snapshot", return_value=[]),
+        ):
+            self.assertIsNone(driver.read_process_open_paths([record]))
 
     def test_a_vanished_window_is_reported_as_the_app_disappearing(self) -> None:
         runner = load_runner()

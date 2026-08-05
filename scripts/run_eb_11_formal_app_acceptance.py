@@ -428,6 +428,9 @@ class DeviceDriver:
     def request_quit(self, process_id: int) -> None:
         raise self.unavailable("ask the App to quit normally")
 
+    def read_process_open_paths(self, records: list[ProcessRecord]) -> list[Path] | None:
+        raise self.unavailable("audit which files a process holds open")
+
     def packaged_prefix(self, app: Path) -> str:
         """Where a packaged process's image path starts.
 
@@ -483,6 +486,9 @@ class MacosDeviceDriver(DeviceDriver):
 
     def request_quit(self, process_id: int) -> None:
         macos_request_quit(process_id)
+
+    def read_process_open_paths(self, records: list[ProcessRecord]) -> list[Path] | None:
+        return macos_read_process_open_paths(records)
 
 
 AUTHENTICODE_PATH_ENVIRONMENT: Final = "AUTOMATION_TOOL_EB11_SIGNED_PATH"
@@ -805,6 +811,33 @@ class WindowsDeviceDriver(DeviceDriver):
         result = self._query(process_id, UIA_QUIT_BODY)
         if result != "requested":
             raise AcceptanceFailed("EB-11 could not request normal App quit")
+
+    def read_process_open_paths(self, records: list[ProcessRecord]) -> list[Path] | None:
+        """Which files these processes hold open — the `lsof -p` of this host.
+
+        `None` means one of them exited mid-audit, which the caller retries; an
+        empty list means they are alive and hold nothing on disk. Windows has no
+        per-process handle query, so the whole system table is taken and
+        filtered; `windows_processes.open_file_paths` documents why that cannot
+        hang.
+        """
+        import windows_processes
+
+        try:
+            paths = windows_processes.open_file_paths(
+                [record.pid for record in records]
+            )
+        except windows_processes.WindowsProcessesUnavailable as error:
+            current = process_snapshot()
+            if any(record not in current for record in records):
+                return None
+            raise AcceptanceFailed(
+                "EB-11 could not audit stable Chromium open files"
+            ) from error
+        current = process_snapshot()
+        if any(record not in current for record in records):
+            return None
+        return [Path(item) for item in paths]
 
     def process_snapshot(self) -> list[ProcessRecord]:
         """The `ps -axo pid,ppid,lstart,command` of this host.
@@ -1596,6 +1629,10 @@ def require_private_directory_identity(path: Path) -> tuple[int, tuple[int, int]
 
 
 def read_process_open_paths(records: list[ProcessRecord]) -> list[Path] | None:
+    return device_driver().read_process_open_paths(records)
+
+
+def macos_read_process_open_paths(records: list[ProcessRecord]) -> list[Path] | None:
     process_ids = ",".join(str(record.pid) for record in records)
     try:
         rendered = run_checked(
