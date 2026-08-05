@@ -88,6 +88,8 @@ LOGIN_PROGRESS_MARKERS: Final = (
     "抖音仍未登录，请在运营浏览器中继续处理。",
 )
 UNAVAILABLE_CODE: Final = "process_unavailable"
+# How a Chromium process says it is a child of a browser rather than one.
+CHROMIUM_CHILD_PROCESS_SWITCH: Final = "--type="
 SIGNING_CONTRACT: Final = (
     REPOSITORY_ROOT / "contracts" / "quality" / "macos-release-signing.v1.json"
 )
@@ -2368,6 +2370,36 @@ def require_browser_profile_boundary(
             os.close(descriptor)
 
 
+def packaged_browser_records(
+    records: list[ProcessRecord],
+    browser_path: Path,
+) -> list[ProcessRecord]:
+    """The browsers among these processes — a browser's own children are not one.
+
+    Chromium runs its renderers, GPU process, network and storage services and
+    crash handler as children of the browser, and states which it is with
+    `--type=`; the browser process itself carries none. On macOS those children
+    execute a separate helper binary inside the bundle, so matching on the
+    packaged executable already excluded them and this made no difference. On
+    Windows they are all the same `chrome.exe`: measured on the installed
+    release on 2026-08-05, one open QR login showed eleven processes running it,
+    one browser and ten children, which the duplicate-instance check then read
+    as ten browsers.
+
+    So the rule is Chromium's own rather than a per-host guess, and it holds on
+    both platforms. What it must not do is weaken the check it unblocked: a
+    second process running the packaged browser with no `--type=` is a second
+    browser and still fails.
+    """
+
+    return [
+        record
+        for record in records
+        if command_runs(record.command, browser_path)
+        and CHROMIUM_CHILD_PROCESS_SWITCH not in record.command
+    ]
+
+
 def observe_runtime(
     contract: RuntimeContract,
     records: list[ProcessRecord],
@@ -2377,9 +2409,7 @@ def observe_runtime(
     executor_observed = any(
         command_runs(record.command, contract.executor_path) for record in records
     )
-    browser_records = [
-        record for record in records if command_runs(record.command, contract.browser_path)
-    ]
+    browser_records = packaged_browser_records(records, contract.browser_path)
     profile_directories = tuple(
         sorted(
             set(verified_profile_directories),
@@ -2407,9 +2437,7 @@ def observe_instance_runtime(
     executor_records = [
         record for record in scoped if command_runs(record.command, contract.executor_path)
     ]
-    browser_records = [
-        record for record in scoped if command_runs(record.command, contract.browser_path)
-    ]
+    browser_records = packaged_browser_records(scoped, contract.browser_path)
     if len(executor_records) > 1 or len(browser_records) > 1:
         raise AcceptanceFailed("EB-11 observed duplicate packaged runtime processes")
     if browser_records:

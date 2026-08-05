@@ -862,6 +862,131 @@ class ReleaseIdentityTests(unittest.TestCase):
 
 
 class RuntimeObservationTests(unittest.TestCase):
+    def test_one_browser_with_its_own_children_is_one_browser(self) -> None:
+        """Chromium's children are not additional browsers.
+
+        2026-08-05, Windows, installed release package: the QR flow opened
+        correctly and the observation then failed with
+        `observed duplicate packaged runtime processes`. Measured on the live
+        App: eleven processes ran the packaged `chrome.exe` — one browser and
+        ten of its own children (`--type=renderer`, `--type=gpu-process`,
+        `--type=utility`, `--type=crashpad-handler`), every one of them
+        parented to that browser.
+
+        macOS never showed this because its helper processes run a *different*
+        binary inside the bundle, so they never matched `browser_path` at all.
+        Windows runs the same executable for all of them, so counting by
+        executable turns one browser into ten.
+
+        The discriminator is Chromium's own: the browser process carries no
+        `--type=`, and every process that does is a child of one. That is true
+        on both platforms, so it is one rule rather than a host seam.
+        """
+        runner = load_runner()
+        app = Path("/Applications/Formal Product.app")
+        executor = app / "Contents/Resources/local-executor/package/executor"
+        browser = app / "Contents/Resources/embedded-browser/Browser"
+        profile = (
+            runner.app_data_root()
+            / "profiles/demo-xuanbai/embedded-browser-profiles/douyin"
+            / "6d9221cb-e9dc-4359-9f6b-34f7fbc55316"
+        )
+        contract = runner.RuntimeContract(
+            app_path=app,
+            executor_path=executor,
+            browser_path=browser,
+            profile_root=profile.parents[1],
+            executor_identity=runner.CodeIdentity("executor", "Expected", "TEAM", "a" * 40),
+            browser_identity=runner.CodeIdentity("browser", "Expected", "TEAM", "b" * 40),
+        )
+        instance = runner.ProcessRecord(10, 1, os.fspath(app / "Contents/MacOS/App"), "A")
+        executor_process = runner.ProcessRecord(11, 10, os.fspath(executor), "B")
+        browser_process = runner.ProcessRecord(
+            12,
+            11,
+            f"{browser} --user-data-dir={profile}",
+            "C",
+        )
+        children = [
+            runner.ProcessRecord(
+                pid,
+                12,
+                f"{browser} --type={kind} --user-data-dir={profile}",
+                "D",
+            )
+            for pid, kind in (
+                (13, "renderer"),
+                (14, "gpu-process"),
+                (15, "utility"),
+                (16, "crashpad-handler"),
+            )
+        ]
+        binding = runner.ProfileDirectoryBinding(
+            path=profile,
+            parent_fd=10,
+            directory_fd=11,
+            parent_identity=(1, 2),
+            identity=(1, 3),
+        )
+
+        with (
+            mock.patch.object(
+                runner,
+                "process_snapshot",
+                return_value=[instance, executor_process, browser_process, *children],
+            ),
+            mock.patch.object(runner, "verify_runtime_process_identity", return_value=True),
+            mock.patch.object(
+                runner,
+                "require_browser_profile_boundary",
+                return_value=binding,
+            ),
+        ):
+            observed = runner.observe_instance_runtime(contract, instance)
+
+        self.assertTrue(observed.executor_observed)
+        self.assertTrue(observed.embedded_browser_observed)
+        self.assertEqual(observed.profile_directories, (profile,))
+
+    def test_a_second_real_browser_is_still_a_duplicate(self) -> None:
+        """The filter must not turn the duplicate check off.
+
+        A second process running the packaged browser with no `--type=` is a
+        second browser, and that is exactly what the check exists to catch.
+        """
+        runner = load_runner()
+        app = Path("/Applications/Formal Product.app")
+        executor = app / "Contents/Resources/local-executor/package/executor"
+        browser = app / "Contents/Resources/embedded-browser/Browser"
+        profile = (
+            runner.app_data_root()
+            / "profiles/demo-xuanbai/embedded-browser-profiles/douyin"
+            / "6d9221cb-e9dc-4359-9f6b-34f7fbc55316"
+        )
+        contract = runner.RuntimeContract(
+            app_path=app,
+            executor_path=executor,
+            browser_path=browser,
+            profile_root=profile.parents[1],
+            executor_identity=runner.CodeIdentity("executor", "Expected", "TEAM", "a" * 40),
+            browser_identity=runner.CodeIdentity("browser", "Expected", "TEAM", "b" * 40),
+        )
+        instance = runner.ProcessRecord(10, 1, os.fspath(app / "Contents/MacOS/App"), "A")
+        executor_process = runner.ProcessRecord(11, 10, os.fspath(executor), "B")
+        first = runner.ProcessRecord(12, 11, f"{browser} --user-data-dir={profile}", "C")
+        second = runner.ProcessRecord(13, 11, f"{browser} --user-data-dir={profile}", "D")
+
+        with (
+            mock.patch.object(
+                runner,
+                "process_snapshot",
+                return_value=[instance, executor_process, first, second],
+            ),
+            mock.patch.object(runner, "verify_runtime_process_identity", return_value=True),
+            self.assertRaises(runner.AcceptanceFailed),
+        ):
+            runner.observe_instance_runtime(contract, instance)
+
     def test_runtime_observation_requires_browser_to_descend_from_executor(self) -> None:
         runner = load_runner()
         app = Path("/Applications/Formal Product.app")
