@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-# ruff: noqa: RUF001
 import base64
 import builtins
 import importlib.util
@@ -1717,6 +1716,89 @@ class LaunchCleanupTests(unittest.TestCase):
             runner.launch_app(app, executable)
 
         cleanup.assert_called_once_with(app, instance)
+
+
+class DeviceDriverSeamTests(unittest.TestCase):
+    """One runner, two hosts — the lifecycle must not fork into a second script.
+
+    Everything this runner *decides* is platform-neutral: sign in, re-check,
+    log out and prove the old Profile is gone, scan again, restart and prove the
+    same Profile came back, exit and prove nothing of ours is left. Only the
+    *observations* are macOS-specific — AppleScript for the accessibility tree,
+    `codesign` against a live PID, `lsof` for open files, `F_GETPATH` to prove
+    an inode has no name.
+
+    Splitting those into a second Windows runner would fork the definition of
+    what EB-11 means, which is the valuable part and the part that must stay
+    single. So the platform sits behind a driver, and `require_device_boundary`
+    picks one instead of refusing every host that is not a Mac.
+    """
+
+    def test_a_driver_exists_for_this_host(self) -> None:
+        runner = load_runner()
+
+        driver = runner.device_driver()
+
+        self.assertEqual(sys.platform, driver.platform)
+
+    def test_an_unimplemented_capability_names_itself(self) -> None:
+        """A gap has to say which gap it is.
+
+        `EB-11 formal App acceptance requires macOS` told an operator on
+        Windows nothing about what was missing or what would fix it. Each
+        capability the Windows driver has yet to grow reports its own name, so
+        the message points at the next piece of work rather than at the host.
+        """
+        runner = load_runner()
+
+        driver = runner.WindowsDeviceDriver()
+
+        with self.assertRaisesRegex(runner.AcceptanceFailed, "accessibility"):
+            driver.press(4321, "确认注销")
+
+    def test_the_windows_driver_reads_the_release_identity_it_ships(self) -> None:
+        """`build_release_package --platform windows` writes this file.
+
+        macOS carries the same seven fields in `Info.plist` under the outer
+        Developer ID seal. An NSIS package has no plist, so the release writes
+        `release-identity.v1.json` into the payload; this is the reader for it,
+        and the two must agree field for field or a Windows package can never
+        be matched against the source tree it came from.
+        """
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "release-identity.v1.json").write_text(
+                json.dumps(
+                    {
+                        "architecture": "x86_64",
+                        "buildId": "eb11-windows",
+                        "deploymentProfileId": "local",
+                        "schema": runner.RELEASE_IDENTITY_SCHEMA,
+                        "sourceGitCommit": "c" * 40,
+                        "sourceTreeSha256": "d" * 64,
+                        "target": "windows-x86_64",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            identity = runner.WindowsDeviceDriver().read_release_identity(root)
+
+        self.assertEqual(identity.target, "windows-x86_64")
+        self.assertEqual(identity.source_tree_sha256, "d" * 64)
+        self.assertEqual(identity.deployment_profile_id, "local")
+
+    def test_the_windows_driver_refuses_an_identity_with_the_wrong_fields(self) -> None:
+        runner = load_runner()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "release-identity.v1.json").write_text(
+                json.dumps({"target": "windows-x86_64"}), encoding="utf-8"
+            )
+
+            with self.assertRaisesRegex(runner.AcceptanceFailed, "invalid"):
+                runner.WindowsDeviceDriver().read_release_identity(root)
 
 
 if __name__ == "__main__":

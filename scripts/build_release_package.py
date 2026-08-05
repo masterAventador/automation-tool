@@ -1313,6 +1313,8 @@ def _copy_tree_preserving_links(source: Path, target: Path) -> None:
     target, so it is resolved — against **this copy**, never against the
     operator's tree, which is the entire property this function exists for.
     """
+    source = _long_path(source)
+    target = _long_path(target)
     links: list[tuple[Path, str]] = []
     for directory, subdirectories, files in os.walk(source, followlinks=False):
         here = Path(directory)
@@ -1337,6 +1339,29 @@ def _copy_tree_preserving_links(source: Path, target: Path) -> None:
                 shutil.copy2(entry, target / relative / name, follow_symlinks=False)
     for relative, raw_target in links:
         _recreate_dependency_link(target / relative, raw_target, root=target)
+
+
+def _long_path(path: Path) -> Path:
+    """Lift the 260-character path limit for one tree, on the hosts that have it.
+
+    Measured, and only by a real release: a probe copied `node_modules` to
+    `.local/eb18-clone-probe/` and passed, while the actual snapshot writes to
+    `.local/<work>/source-snapshot-XXXXXX/repository/frontend/node_modules/`
+    and then pnpm's own `.pnpm/<87-character-hash>/node_modules/<pkg>/…` on top
+    of that. The first file past 260 characters ends the build with
+
+        FileNotFoundError: [WinError 3] 系统找不到指定的路径。
+
+    The `\\\\?\\` prefix raises the limit to about 32,767, and requires a
+    fully-qualified path with no `.` or `..` components — hence `resolve()`
+    rather than a string concatenation.
+    """
+    if os.name != "nt":
+        return path
+    resolved = path.resolve()
+    if os.fspath(resolved).startswith("\\\\?\\"):
+        return resolved
+    return Path("\\\\?\\" + os.fspath(resolved))
 
 
 def _recreate_dependency_link(link: Path, raw_target: str, *, root: Path) -> None:
@@ -1637,17 +1662,31 @@ def require_snapshot_repository_layout(snapshot: Path, work_directory: Path) -> 
         git_metadata = git_directory.lstat()
     except OSError as error:
         raise ReleaseFailed("release source snapshot layout is unavailable") from error
+    # POSIX ownership and mode, where they exist. Windows has neither
+    # `os.geteuid` nor meaningful `st_uid`/`st_mode` bits — `os.chmod` there
+    # only toggles the read-only flag — so asserting 0o700 and a matching uid
+    # would either raise `AttributeError` or, worse, pass vacuously. The layout
+    # checks that do carry over (private work directory, exact
+    # `source-snapshot-*/repository` shape, real `.git` directory, no symlink
+    # anywhere on the path) are enforced on both.
+    owned_by_this_user = (
+        True
+        if os.name == "nt"
+        else (
+            container_metadata.st_uid == os.geteuid()
+            and snapshot_metadata.st_uid == os.geteuid()
+            and git_metadata.st_uid == os.geteuid()
+            and stat.S_IMODE(container_metadata.st_mode) == 0o700
+        )
+    )
     if (
         stat.S_ISLNK(container_metadata.st_mode)
         or not stat.S_ISDIR(container_metadata.st_mode)
-        or container_metadata.st_uid != os.geteuid()
-        or stat.S_IMODE(container_metadata.st_mode) != 0o700
         or stat.S_ISLNK(snapshot_metadata.st_mode)
         or not stat.S_ISDIR(snapshot_metadata.st_mode)
-        or snapshot_metadata.st_uid != os.geteuid()
         or stat.S_ISLNK(git_metadata.st_mode)
         or not stat.S_ISDIR(git_metadata.st_mode)
-        or git_metadata.st_uid != os.geteuid()
+        or not owned_by_this_user
     ):
         raise ReleaseFailed("release source snapshot layout is invalid")
     try:
@@ -1758,7 +1797,10 @@ def run_from_materialized_source_snapshot(arguments: argparse.Namespace) -> int:
     except ReleaseIdentityRejected as error:
         raise ReleaseFailed("release source snapshot could not be materialized") from error
     finally:
-        shutil.rmtree(container)
+        # Long-path prefixed for the same reason the copy is: the tree being
+        # removed is the one that needed it, and `rmtree` hits WinError 3 on
+        # the first pnpm path past 260 characters.
+        shutil.rmtree(_long_path(container), ignore_errors=False)
 
 
 def main() -> int:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ruff: noqa: RUF001, UP017
+# ruff: noqa: UP017
 """Accept EB-11 only through the notarized macOS App's normal account page.
 
 The accessibility tree is the sole source of product state.  The runner never
@@ -72,6 +72,9 @@ SIGNING_CONTRACT: Final = (
 )
 RELEASE_IDENTITY_KEY: Final = "AutomationToolReleaseIdentity"
 RELEASE_IDENTITY_SCHEMA: Final = "automation-tool.release-identity.v1"
+# The Windows carrier for the same seven fields. An NSIS package has no
+# `Info.plist`; `build_release_package.py` writes this into the payload.
+RELEASE_IDENTITY_NAME: Final = "release-identity.v1.json"
 OBSERVED_AT_PATTERN: Final = re.compile(
     r"最近检查[：:]\s*("
     r"\d{4}(?:[/-]\d{1,2}[/-]\d{1,2}|年\d{1,2}月\d{1,2}日)"
@@ -308,12 +311,11 @@ class EvidencePublication:
         descriptor = self.target.parent_fd
         self.target.parent_fd = -1
         self.active = False
-        try:
+        # The evidence was already inode-verified, fsynced and reported, so a
+        # close interrupted here changes nothing a reader would see; process
+        # exit reclaims the descriptor.
+        with contextlib.suppress(OSError):
             os.close(descriptor)
-        except OSError:
-            # The evidence was already inode-verified, fsynced and reported.
-            # Process exit will reclaim a descriptor whose close was interrupted.
-            pass
 
 
 def parse_arguments() -> Arguments:
@@ -342,9 +344,92 @@ def require_no_symlink_components(path: Path, *, include_leaf: bool) -> None:
             raise AcceptanceFailed("EB-11 refuses a path with a symlink component")
 
 
+class DeviceDriver:
+    """How one host is observed. What is being observed does not vary.
+
+    EB-11's definition is platform-neutral: sign in, re-check, log out and prove
+    the old Profile is gone, scan again, restart and prove the same Profile came
+    back, exit and prove none of our processes survive. Only the instruments are
+    macOS-specific — AppleScript for the accessibility tree, `codesign` against
+    a live PID, `lsof` for open files, `F_GETPATH` to prove an inode has no name.
+
+    A second Windows runner would fork that definition, and the definition is
+    the valuable part. So it stays in one file and the instruments sit here.
+    """
+
+    platform = ""
+
+    def unavailable(self, capability: str) -> AcceptanceFailed:
+        """Name the gap, not the host.
+
+        `EB-11 formal App acceptance requires macOS` told an operator on Windows
+        nothing about what was missing or what would close it.
+        """
+        return AcceptanceFailed(
+            f"EB-11 cannot {capability} on {self.platform}: this observation has "
+            "no implementation for this host yet"
+        )
+
+    def press(self, process_id: int, label: str) -> None:
+        raise self.unavailable(f"press {label!r} through the accessibility tree")
+
+    def read_release_identity(self, app: Path) -> SignedReleaseIdentity:
+        raise self.unavailable("read the signed release identity")
+
+
+class MacosDeviceDriver(DeviceDriver):
+    platform = "darwin"
+
+    def press(self, process_id: int, label: str) -> None:
+        press(process_id, label)
+
+    def read_release_identity(self, app: Path) -> SignedReleaseIdentity:
+        return read_signed_release_identity(app)
+
+
+class WindowsDeviceDriver(DeviceDriver):
+    """The Windows instruments, as they arrive.
+
+    Implemented: the release identity, because
+    `build_release_package.py --platform windows` writes it. An NSIS package has
+    no `Info.plist`, so the seven fields macOS keeps under the Developer ID seal
+    are written to `release-identity.v1.json` in the payload instead — weaker,
+    and recorded as such where it is written.
+
+    Not yet implemented, each failing by name rather than as "requires macOS":
+    driving the WebView2 accessibility tree, verifying a running PID's
+    Authenticode signature, proving which Profile directory the browser has
+    open, and proving a deleted Profile's file id has no remaining name.
+    """
+
+    platform = "win32"
+
+    def read_release_identity(self, app: Path) -> SignedReleaseIdentity:
+        identity_path = app / RELEASE_IDENTITY_NAME
+        try:
+            record = json.loads(identity_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise AcceptanceFailed("EB-11 signed release identity is unavailable") from error
+        return release_identity_from_record(record)
+
+
+DEVICE_DRIVERS: tuple[type[DeviceDriver], ...] = (MacosDeviceDriver, WindowsDeviceDriver)
+
+
+def device_driver() -> DeviceDriver:
+    for candidate in DEVICE_DRIVERS:
+        if candidate.platform == sys.platform:
+            return candidate()
+    raise AcceptanceFailed(f"EB-11 has no device driver for {sys.platform}")
+
+
 def require_device_boundary(arguments: Arguments) -> tuple[Path, Path]:
-    if sys.platform != "darwin":
-        raise AcceptanceFailed("EB-11 formal App acceptance requires macOS")
+    # Selected rather than refused. A host without a driver still fails here;
+    # a host with a partial one now fails at the specific observation it cannot
+    # make, which is where the next piece of work is.
+    driver = device_driver()
+    if driver.platform != "darwin":
+        raise driver.unavailable("run the full formal-App lifecycle")
     if not arguments.interactive_device_acceptance:
         raise AcceptanceFailed("EB-11 requires --interactive-device-acceptance")
     if not sys.stdin.isatty() or not sys.stdout.isatty():
@@ -703,6 +788,15 @@ def read_signed_release_identity(app: Path) -> SignedReleaseIdentity:
             record = plistlib.load(source).get(RELEASE_IDENTITY_KEY)
     except (OSError, plistlib.InvalidFileException, AttributeError) as error:
         raise AcceptanceFailed("EB-11 signed release identity is unavailable") from error
+    return release_identity_from_record(record)
+
+
+def release_identity_from_record(record: object) -> SignedReleaseIdentity:
+    """Validate the seven fields, wherever this platform carries them.
+
+    Shared so a Windows package cannot be accepted on looser terms than a macOS
+    one: the carrier differs, what has to be true of the contents does not.
+    """
     required = {
         "architecture",
         "buildId",
