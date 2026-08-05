@@ -1,4 +1,5 @@
 import {
+  ArrowLeftOutlined,
   BellOutlined,
   CalendarOutlined,
   CheckCircleFilled,
@@ -603,6 +604,13 @@ export function CreationHub({
         </div>
       ) : studioOpen ? (
         <div className="embedded-workbench embedded-workbench--focused">
+          <Button
+            className="embedded-workbench__back"
+            icon={<ArrowLeftOutlined />}
+            onClick={() => setStudioOpen(false)}
+          >
+            返回创作方式
+          </Button>
           <VideoStudio
             gateway={gateway}
             onPublishArtifact={onPublishArtifact}

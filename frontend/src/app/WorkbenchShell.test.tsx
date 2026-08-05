@@ -59,6 +59,29 @@ describe("workbench shell navigation", () => {
     expect(screen.getByText("已选择：智能素材成片")).toBeVisible();
   });
 
+  it("closes the studio from a button inside it", async () => {
+    // 实测缺陷（2026-08-05 用户报告）：面板打开后没有任何关闭/返回入口，
+    // 只能靠切换顶部分段控件间接退出。
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkbenchShell />
+      </QueryClientProvider>,
+    );
+
+    await user.click(screen.getByRole("menuitem", { name: "创作" }));
+    await user.click(screen.getByRole("radio", { name: "智能素材成片" }).closest("label")!);
+    await user.click(screen.getByRole("button", { name: "打开完整制作面板" }));
+    // antd 的图标自带 aria-label，按钮可访问名是「arrow-left 返回创作方式」。
+    await user.click(screen.getByRole("button", { name: /返回创作方式/ }));
+
+    expect(screen.getByRole("button", { name: "打开完整制作面板" })).toBeVisible();
+    expect(
+      screen.queryByRole("region", { name: "视频制作工作区" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("opens video creation from the normal left navigation", async () => {
     const user = userEvent.setup();
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

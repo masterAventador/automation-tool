@@ -1925,6 +1925,10 @@ body {
   border: 0;
 }
 
+.embedded-workbench__back {
+  margin-bottom: 12px;
+}
+
 .embedded-workbench__note {
   display: flex;
   padding: 0 2px 16px;
