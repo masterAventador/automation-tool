@@ -713,19 +713,25 @@ class WindowsReleaseTests(unittest.TestCase):
             arguments.work_dir.parent, build_release_package.REPOSITORY_ROOT / ".local"
         )
 
-    def test_each_platform_keeps_its_own_default_work_directory(self) -> None:
-        """macOS has no such limit, so it keeps the name that says what it is."""
+    def test_both_platforms_share_one_default_work_directory(self) -> None:
+        """One name, because the reason for a second one was removed.
+
+        A shorter Windows default existed only to survive the 67 characters the
+        bundler used to walk through: the resource sources were written relative
+        to the Tauri root, so `makensis` saw
+        `…\source-snapshot-XXXXXXXX\repository\frontend\src-tauri\..\..\..\..\build\payload\…`
+        — a detour that resolves straight back to the work directory. Absolute
+        sources, which macOS has always used, removed it.
+        """
         macos = build_release_package.parse_arguments(["--platform", "macos"]).work_dir
         windows = build_release_package.parse_arguments(["--platform", "windows"]).work_dir
 
+        self.assertEqual(macos, windows)
         self.assertEqual(macos, build_release_package.REPOSITORY_ROOT / ".local/release")
-        self.assertLess(len(os.fspath(windows)), len(os.fspath(macos)))
-        for default in (macos, windows):
-            self.assertTrue(default.is_relative_to(build_release_package.REPOSITORY_ROOT))
 
     def test_the_refusal_points_inside_the_project(self) -> None:
         """The message is the only guidance an operator gets at that moment."""
-        deep = build_release_package.REPOSITORY_ROOT / ".local" / ("d" * 60)
+        deep = build_release_package.REPOSITORY_ROOT / ".local" / ("d" * 200)
 
         with self.assertRaises(build_release_package.ReleaseFailed) as raised:
             build_release_package.require_windows_path_budget(deep)

@@ -191,12 +191,17 @@ def write_windows_release_configuration(
         sources[resource_name] = payload.joinpath(
             *installed_destination(resource_name).split("/")
         )
+    # Absolute, like macOS. Written relative to the Tauri root instead, every
+    # source became `../../../../build/payload/…`, which the bundler resolves
+    # through `<work>/source-snapshot-XXXXXXXX/repository/frontend/src-tauri/`
+    # — 67 characters of round trip inside a 260-character limit `makensis`
+    # cannot escape. Measured 2026-08-05: the deepest payload file landed on
+    # exactly 260 and the build died at its last step.
     return write_release_configuration(
         directory=directory,
         platform="windows",
         sources=sources,
         name=name,
-        relative_sources=True,
         release_identity=release_identity,
     )
 

@@ -477,6 +477,33 @@ class ReleaseConfigurationTests(unittest.TestCase):
             {"signingIdentity": "-"},
         )
 
+    def test_the_windows_configuration_names_its_sources_absolutely(self) -> None:
+        """`makensis` walks these paths, and it cannot read `\\?\` ones.
+
+        Written relative to the Tauri root, every source became
+        `../../../../build/payload/…` — which the bundler resolves through
+        `<work>/source-snapshot-XXXXXXXX/repository/frontend/src-tauri/`, adding
+        67 characters of round trip to a path that has 260 to live in. Measured
+        2026-08-05: the deepest payload file came to exactly 260 and the build
+        died at the last step. Absolute sources are what macOS has always used.
+        """
+        from release_configuration import write_windows_release_configuration
+
+        written = write_windows_release_configuration(
+            directory=self.base,
+            executor=self.executor,
+            payload=self.payload,
+            name="tauri.test-windows-absolute.json",
+        )
+
+        sources = json.loads(written.read_text(encoding="utf-8"))["bundle"]["resources"]
+        for source in sources:
+            self.assertTrue(
+                Path(source).is_absolute(),
+                f"a relative source sends the bundler through the snapshot: {source}",
+            )
+            self.assertNotIn("..", Path(source).parts)
+
     def test_the_windows_configuration_declares_every_bundled_resource(self) -> None:
         from release_configuration import write_windows_release_configuration
 

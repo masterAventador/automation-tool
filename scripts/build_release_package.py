@@ -128,12 +128,6 @@ from run_p9_03_acceptance import (  # noqa: E402
 
 STAGING_CONTRACT = REPOSITORY_ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
 DEFAULT_WORK_DIRECTORY = REPOSITORY_ROOT / ".local/release"
-# The same place, under a name the NSIS path budget can afford. `makensis`
-# cannot read `\\?\` paths, so the whole work directory has to fit in what is
-# left of `MAX_PATH` after the deepest file in the payload — 31 characters
-# against this checkout. `.local/release` is 33 and was therefore a default
-# that could never be used; see `require_windows_path_budget`.
-WINDOWS_DEFAULT_WORK_DIRECTORY = REPOSITORY_ROOT / ".local/rel"
 RELEASE_CONFIGURATION_NAME = "tauri.release.generated.json"
 EFFECTIVE_CONFIGURATION_NAME = "tauri.release.effective.json"
 RELEASE_IDENTITY_KEY = "AutomationToolReleaseIdentity"
@@ -916,7 +910,7 @@ def build_macos_release(
 # A first attempt at this constant guessed 218 and let the 41-character path
 # through, which is worth recording: a budget that admits the exact path already
 # observed to fail is not a budget.
-WINDOWS_DEEPEST_PAYLOAD_PATH = 229
+WINDOWS_DEEPEST_PAYLOAD_PATH = 164
 WINDOWS_PATH_LIMIT = 260
 
 
@@ -929,13 +923,15 @@ def require_windows_path_budget(work_directory: Path) -> None:
     that a directory name was too long — and the message they get names one
     `pyproject.toml` inside streamlit, which points nowhere useful.
     """
-    budget = WINDOWS_PATH_LIMIT - WINDOWS_DEEPEST_PAYLOAD_PATH
+    # `MAX_PATH` counts the terminating NUL, so 259 characters is the most a
+    # path may actually be. The failing measurement landed on exactly 260.
+    budget = WINDOWS_PATH_LIMIT - 1 - WINDOWS_DEEPEST_PAYLOAD_PATH
     length = len(os.fspath(work_directory))
     if length > budget:
         raise ReleaseFailed(
             f"the Windows release work directory is {length} characters and the "
             f"NSIS bundler leaves room for {budget}: pass a shorter --work-dir, "
-            f"such as the default {WINDOWS_DEFAULT_WORK_DIRECTORY}"
+            f"such as the default {DEFAULT_WORK_DIRECTORY}"
         )
 
 
@@ -1268,11 +1264,7 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     if arguments.build_id is None:
         arguments.build_id = f"{arguments.platform}-release"
     if arguments.work_dir is None:
-        arguments.work_dir = (
-            WINDOWS_DEFAULT_WORK_DIRECTORY
-            if arguments.platform == "windows"
-            else DEFAULT_WORK_DIRECTORY
-        )
+        arguments.work_dir = DEFAULT_WORK_DIRECTORY
     # Every step of a release runs a subprocess with `cwd=frontend/`, so a
     # relative path given on the command line would be re-interpreted against
     # a directory the operator never named. Bind them all to the invocation
