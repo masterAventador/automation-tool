@@ -2265,6 +2265,57 @@ class WindowsAccessibilityTests(unittest.TestCase):
         ):
             self.assertIsNone(driver.read_process_open_paths([record]))
 
+    def test_the_packaged_manifests_are_where_this_package_puts_them(self) -> None:
+        """`Contents/Resources/` is a macOS bundle path, and there is no such level here.
+
+        The Executor build id and the browser's distribution manifest are read
+        out of these two files, and both feed the release match. A Windows
+        install root holds the same trees directly — the resource contract says
+        so (`resourceRoot.windows` is empty) — so a hard-coded bundle path makes
+        both reads fail with "packaged runtime manifest is unavailable", which
+        reads like a broken package rather than a wrong path.
+        """
+        runner = load_runner()
+        app = Path(r"C:\Users\someone\AppData\Local\Product")
+
+        driver = runner.WindowsDeviceDriver()
+
+        self.assertEqual(
+            driver.executor_manifest(app),
+            app / "local-executor/package/executor-manifest.v1.json",
+        )
+        self.assertEqual(
+            driver.browser_manifest(app),
+            app / "embedded-browser/distribution-manifest.v1.json",
+        )
+        bundle = Path("/Applications/P.app")
+        self.assertEqual(
+            runner.MacosDeviceDriver().executor_manifest(bundle),
+            bundle / "Contents/Resources/local-executor/package/executor-manifest.v1.json",
+        )
+
+    def test_the_expected_release_target_names_this_host(self) -> None:
+        """A package built for another target must not be accepted here.
+
+        The map held only `macos-arm64`, so on Windows every release — including
+        a correct one — failed as "does not match this Mac". The check is worth
+        keeping; it just has to know two hosts.
+        """
+        runner = load_runner()
+
+        self.assertEqual(
+            runner.WindowsDeviceDriver().expected_release_target("amd64"),
+            ("windows-x86_64", "x86_64"),
+        )
+        self.assertEqual(
+            runner.MacosDeviceDriver().expected_release_target("arm64"),
+            ("macos-arm64", "aarch64"),
+        )
+        self.assertIsNone(
+            runner.WindowsDeviceDriver().expected_release_target("itanium")
+        )
+        self.assertIsNone(runner.MacosDeviceDriver().expected_release_target("amd64"))
+
     def test_a_vanished_window_is_reported_as_the_app_disappearing(self) -> None:
         runner = load_runner()
 

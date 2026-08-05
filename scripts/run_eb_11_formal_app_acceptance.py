@@ -48,10 +48,16 @@ APP_DATA: Final = Path.home() / "Library" / "Application Support" / APP_IDENTIFI
 DEMO_PROFILE_VERSION: Final = "customer-demo-profile.v1"
 DEMO_PROFILE_KIND: Final = "demo"
 LAUNCH_NONCE_ENVIRONMENT: Final = "AUTOMATION_TOOL_EB11_ACCEPTANCE_NONCE"
-EXECUTOR_MANIFEST: Final = Path(
-    "Contents/Resources/local-executor/package/executor-manifest.v1.json"
+# Relative to the packaged resource root, which differs by target: a macOS
+# bundle nests it under `Contents/Resources`, a Windows install root *is* it.
+# The two names below do not vary, and `DeviceDriver.resource_root` supplies the
+# part that does.
+EXECUTOR_MANIFEST_RELATIVE: Final = Path(
+    "local-executor/package/executor-manifest.v1.json"
 )
-BROWSER_MANIFEST: Final = Path("Contents/Resources/embedded-browser/distribution-manifest.v1.json")
+BROWSER_MANIFEST_RELATIVE: Final = Path(
+    "embedded-browser/distribution-manifest.v1.json"
+)
 ACCOUNT_PAGE_LABEL: Final = "账号与平台"
 RECHECK_LABEL: Final = "我已处理，重新检查"
 OPEN_LOGIN_LABEL: Final = "打开登录处理"
@@ -431,6 +437,25 @@ class DeviceDriver:
     def read_process_open_paths(self, records: list[ProcessRecord]) -> list[Path] | None:
         raise self.unavailable("audit which files a process holds open")
 
+    def resource_root(self, app: Path) -> Path:
+        """Where the packaged resource trees live inside an installed package."""
+        raise self.unavailable("locate the packaged resources")
+
+    def executor_manifest(self, app: Path) -> Path:
+        return self.resource_root(app) / EXECUTOR_MANIFEST_RELATIVE
+
+    def browser_manifest(self, app: Path) -> Path:
+        return self.resource_root(app) / BROWSER_MANIFEST_RELATIVE
+
+    def expected_release_target(self, machine: str) -> tuple[str, str] | None:
+        """The one `(target, architecture)` a package may claim on this machine.
+
+        `None` means this host is not a target the project builds for, which is
+        refused rather than waved through — a package that names a different
+        architecture is not one this run can conclude anything about.
+        """
+        raise self.unavailable("name the release target for this host")
+
     def packaged_prefix(self, app: Path) -> str:
         """Where a packaged process's image path starts.
 
@@ -489,6 +514,15 @@ class MacosDeviceDriver(DeviceDriver):
 
     def read_process_open_paths(self, records: list[ProcessRecord]) -> list[Path] | None:
         return macos_read_process_open_paths(records)
+
+    def resource_root(self, app: Path) -> Path:
+        return app / "Contents" / "Resources"
+
+    def expected_release_target(self, machine: str) -> tuple[str, str] | None:
+        return {
+            "arm64": ("macos-arm64", "aarch64"),
+            "aarch64": ("macos-arm64", "aarch64"),
+        }.get(machine)
 
 
 AUTHENTICODE_PATH_ENVIRONMENT: Final = "AUTOMATION_TOOL_EB11_SIGNED_PATH"
@@ -812,6 +846,22 @@ class WindowsDeviceDriver(DeviceDriver):
         if result != "requested":
             raise AcceptanceFailed("EB-11 could not request normal App quit")
 
+    def resource_root(self, app: Path) -> Path:
+        """The install root itself.
+
+        `contracts/quality/release-package-resources.v1.json` says so: its
+        `resourceRoot.windows` is the empty list, against `["Contents",
+        "Resources"]` for macOS. The bundler copies every declared tree straight
+        into the directory holding the executable.
+        """
+        return app
+
+    def expected_release_target(self, machine: str) -> tuple[str, str] | None:
+        return {
+            "amd64": ("windows-x86_64", "x86_64"),
+            "x86_64": ("windows-x86_64", "x86_64"),
+        }.get(machine)
+
     def read_process_open_paths(self, records: list[ProcessRecord]) -> list[Path] | None:
         """Which files these processes hold open — the `lsof -p` of this host.
 
@@ -1106,10 +1156,13 @@ def compiled_deployment_profile_root(executable: Path, deployment_profile: Path)
 
 
 def read_runtime_contract(app: Path, profile_root: Path) -> tuple[RuntimeContract, str]:
-    executor_root = app / EXECUTOR_MANIFEST.parent
-    executor_manifest = read_packaged_json(app, EXECUTOR_MANIFEST)
-    browser_root = app / BROWSER_MANIFEST.parent
-    browser_manifest = read_packaged_json(app, BROWSER_MANIFEST)
+    driver = device_driver()
+    executor_path = driver.executor_manifest(app)
+    browser_path = driver.browser_manifest(app)
+    executor_root = executor_path.parent
+    executor_manifest = read_packaged_json(app, executor_path.relative_to(app))
+    browser_root = browser_path.parent
+    browser_manifest = read_packaged_json(app, browser_path.relative_to(app))
     build_id = executor_manifest.get("build_id")
     if not isinstance(build_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", build_id):
         raise AcceptanceFailed("EB-11 packaged Executor build identity is invalid")
@@ -1342,13 +1395,11 @@ def require_release_identity(
     profile_root: Path,
     source: SourceFacts,
 ) -> None:
-    machine = platform.machine().lower()
-    expected_platform = {
-        "arm64": ("macos-arm64", "aarch64"),
-        "aarch64": ("macos-arm64", "aarch64"),
-    }.get(machine)
+    expected_platform = device_driver().expected_release_target(
+        platform.machine().lower()
+    )
     if expected_platform is None or (release.target, release.architecture) != expected_platform:
-        raise AcceptanceFailed("EB-11 signed release target does not match this Mac")
+        raise AcceptanceFailed("EB-11 signed release target does not match this host")
     if app_identity.bundle_identifier != APP_IDENTIFIER or not app_identity.version:
         raise AcceptanceFailed("EB-11 signed release App identity is invalid")
     if release.source_tree_sha256 != source.tree_sha256:
