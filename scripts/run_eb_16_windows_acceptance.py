@@ -91,10 +91,10 @@ from run_p9_04_acceptance import (  # noqa: E402
     authenticode_facts,
     executor_signing_material,
     install_root,
+    installer_environment,
     one_file,
     package_files,
     release_environment,
-    installer_environment,
     require_non_elevated_process,
     require_windows,
     run_checked,
@@ -142,7 +142,18 @@ def stage_browser_distribution(archive: Path, output: Path) -> None:
     build_distribution_manifest(staging=output, target_id=TARGET_ID)
 
 
-def build_executor_candidate(output: Path, architecture: str) -> tuple[str, Any]:
+def build_executor_candidate(
+    output: Path,
+    architecture: str,
+    build_id: str = "eb-16-windows-release",
+) -> tuple[str, Any]:
+    """Build and sign the Local Executor package.
+
+    `build_id` is what the signed manifest records, and a release compares it
+    against the identity it embeds — so the caller names the build rather than
+    inheriting this acceptance's own name. The default keeps EB-16 calling
+    itself what it always has.
+    """
     from automation_tool.executor.package_manifest import (
         write_signed_executor_manifest,
     )
@@ -158,7 +169,7 @@ def build_executor_candidate(output: Path, architecture: str) -> tuple[str, Any]
     write_signed_executor_manifest(
         bundle_directory=output,
         executor_version="0.1.0",
-        build_id="eb-16-windows-release",
+        build_id=build_id,
         target_platform="windows",
         target_architecture=architecture,
         signing_private_key=seed,

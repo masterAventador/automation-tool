@@ -656,6 +656,45 @@ class WindowsReleaseTests(unittest.TestCase):
 
             build_release_package.require_declared_release_identity(configuration)
 
+    def test_the_packaged_executor_carries_the_build_id_the_identity_claims(
+        self,
+    ) -> None:
+        """Two names for one build is the same defect as `buildId: macos-release`.
+
+        The Windows executor builder lives in the EB-16 acceptance script and
+        hardcoded `eb-16-windows-release` into the manifest it signs, while the
+        release identity beside it carried `--build-id`. Measured on the package
+        installed 2026-08-05: the identity said `windows-release` and the
+        packaged executor manifest said `eb-16-windows-release`.
+
+        That is not cosmetic. `require_release_identity` compares the two, so
+        EB-11 refuses the package with "signed release does not match the
+        packaged Executor" — an accurate message pointing at a build that was
+        internally inconsistent from the start.
+        """
+        with tempfile.TemporaryDirectory() as temporary:
+            executor = Path(temporary)
+            manifest = executor / "executor-manifest.v1.json"
+            manifest.write_text(
+                json.dumps({"build_id": "eb-16-windows-release"}), encoding="utf-8"
+            )
+
+            with self.assertRaises(build_release_package.ReleaseFailed):
+                build_release_package.require_executor_build_id(executor, "windows-release")
+
+            manifest.write_text(json.dumps({"build_id": "windows-release"}), encoding="utf-8")
+
+            build_release_package.require_executor_build_id(executor, "windows-release")
+
+    def test_a_missing_executor_manifest_is_refused_rather_than_assumed(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            self.assertRaises(build_release_package.ReleaseFailed),
+        ):
+            build_release_package.require_executor_build_id(
+                Path(temporary), "windows-release"
+            )
+
     def test_the_windows_platform_has_a_release_builder(self) -> None:
         self.assertTrue(
             hasattr(build_release_package, "build_windows_release"),

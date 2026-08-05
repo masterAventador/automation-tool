@@ -984,6 +984,35 @@ def embed_windows_release_identity(
     return identity_path
 
 
+def require_executor_build_id(executor: Path, build_id: str) -> None:
+    """One build, one name.
+
+    The release identity records `--build-id`; the packaged Executor records its
+    own in a signed manifest, and `run_eb_11_formal_app_acceptance` compares the
+    two. The Windows Executor builder is borrowed from the EB-16 acceptance
+    script, which hardcoded its own name into that manifest — so every Windows
+    release shipped an identity and an Executor that disagreed, and EB-11
+    refused the package with a message about a mismatch nobody had introduced
+    on purpose.
+
+    Checked here rather than trusted, because the two names are written by two
+    different pieces of code and nothing else brings them together until the
+    acceptance run does.
+    """
+    manifest = executor / "executor-manifest.v1.json"
+    try:
+        recorded = json.loads(manifest.read_text(encoding="utf-8")).get("build_id")
+    except (OSError, json.JSONDecodeError, AttributeError) as error:
+        raise ReleaseFailed(
+            f"the packaged Executor manifest is unavailable: {manifest}"
+        ) from error
+    if recorded != build_id:
+        raise ReleaseFailed(
+            f"the packaged Executor calls this build {recorded!r} while the release "
+            f"identity calls it {build_id!r}; EB-11 compares the two"
+        )
+
+
 def require_declared_release_identity(configuration: Path) -> None:
     """Refuse to build an installer that would leave the identity behind.
 
@@ -1075,7 +1104,8 @@ def build_windows_release(
     announce(f"Staging the digest-locked {target_id} Chromium from the machine cache")
     copy_staged_browser(target_id=target_id, output=staging)
     executor = build_directory / "executor" / "automation-tool-executor"
-    public_key, private_key = build_windows_executor(executor, architecture)
+    public_key, private_key = build_windows_executor(executor, architecture, build_id)
+    require_executor_build_id(executor, build_id)
     (build_directory / "executor-verifying-key").write_text(public_key, encoding="utf-8")
 
     payload = build_directory / "payload"

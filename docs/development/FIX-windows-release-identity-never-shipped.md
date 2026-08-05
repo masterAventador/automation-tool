@@ -126,19 +126,52 @@ Windows 的资源根就是安装根目录（契约里 `resourceRoot.windows` 是
 
 ## 正常用户路径验收
 
-**待补，且必须等**：验收要看装好的 App 根目录里有没有这个文件，那需要重新出包 + 重装。
+**已补**（2026-08-05 晚）。重新出包、静默安装，读安装根目录：
 
-不现在做，是因为 EB-11 会把包里的 `sourceTreeSha256` 和当前源码树逐位比对
-（`run_eb_11_formal_app_acceptance.py:854`，不一致直接判「不是从当前源码树构建的」）。
-Windows runner 的四项观测手段还要继续改 `run_eb_11_formal_app_acceptance.py`，**现在出的包
-会被接下来的每一次改动作废**。所以顺序固定为：runner 改完 → 出包一次 → 装 → 跑 EB-11，
-届时安装根目录里那个文件就是本条的终态证据。
+```text
+%LOCALAPPDATA%\自动化运营工具\
+  automation-tool-desktop.exe   embedded-browser\
+  local-executor\               material-video-worker\
+  media-toolchain\              motion-catalog\
+  motion-video-worker\          uninstall.exe
+  release-identity.v1.json      ← 在了
+
+release-identity.v1.json:
+  buildId          windows-release
+  sourceGitCommit  2b5e4b8737d570f100092650e9e12f5fbb4a644d
+  sourceTreeSha256 33b746471055d924…
+  target           windows-x86_64
+```
+
+出包侧 `bundle.resources` 里这一项是 `release-identity.v1.json`（**没有尾斜杠**，
+按设计），安装后落在资源根即安装根目录。EB-11 的 `WindowsDeviceDriver.read_release_identity`
+从装好的包里读回来成功：
+
+```text
+SignedReleaseIdentity(source_git_commit='2b5e4b87…', source_tree_sha256='33b74647…',
+                      executor_build_id='windows-release', target='windows-x86_64',
+                      architecture='x86_64', deployment_profile_id='local')
+```
+
+出包 `REAL_EXIT=0`，installer 450,952,363 字节，主二进制 27,181,568 字节。
+
+## 读产物又抓到一条：安装用的静默开关根本没送到
+
+安装那一步卡了 50 分钟，从外面看和「正在装一个 450 MB 的包」一模一样。实际是
+`installer.exe /S` 经 Git Bash 时被 MSYS 参数转换当成路径改写了，installer 收到一个
+不认识的参数就弹了 GUI，然后静静等着——**不报错、不退出**。
+
+改从 PowerShell 启动（`Start-Process -ArgumentList '/S' -Wait`）后 `INSTALL_EXIT=0`。
+
+与本仓已记的两条同类：`nohup cmd > log 2>&1 &` 那次退出码来自包装命令，这次是参数没送到。
+判据都一样——**看被测的东西自己在干什么，别看包装层说了什么**；卡住时先看有没有窗口在等人。
 
 ## 真实边界
 
-- 已证明：配置**会**声明它，出包门禁会在缺失时拒绝，两者都经变异确认；
-- 未证明：装好的包里**确实有**它。中间还隔着 `makensis` 的实际行为——虽然目标解析路径是
-  读源码确认的，但那不等于实测；
+- 已证明：配置会声明它、出包门禁会在缺失时拒绝（两者都经变异确认）、`makensis` 确实把它
+  装进安装根目录、runner 从装好的包里读得回来。整条闭合；
+- **这个包本身仍不能跑 EB-11**，原因与本条无关：它是 `deploymentProfileId: local` 的包，
+  而 EB-11 要求 `demo-*` 的客户 Demo 档案。跑验收要另出一个带部署 Profile 的包；
 - macOS 侧未跑：本次改动只在 Windows 分支上生效，macOS 配置写入器的调用形状未变
   （`write_macos_release_configuration` 不传该参数），但本机是 Windows，macOS 未复跑。
 
@@ -152,6 +185,4 @@ Windows runner 的四项观测手段还要继续改 `run_eb_11_formal_app_accept
 
 ## 遗留项
 
-| 项 | 状态 |
-| --- | --- |
-| 装好的包里存在 `release-identity.v1.json` | 待出包后实测，见上文顺序说明 |
+无。装好的包里存在 `release-identity.v1.json` 已于 2026-08-05 晚实测闭合。
