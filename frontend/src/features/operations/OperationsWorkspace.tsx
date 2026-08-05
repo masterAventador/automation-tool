@@ -51,6 +51,7 @@ import type { MaterialLibraryGateway } from "../video-editing/material-library-g
 import type { SmartEditGateway } from "../video-editing/smart-edit-gateway";
 import { VideoStudio } from "../video-studio/VideoStudio";
 import type { MaterialVideoStudioGateway } from "../video-studio/material-video-studio-gateway";
+import { setMotionMethod } from "../video-studio/motion-run-store";
 
 const { Text, Title, Paragraph } = Typography;
 
@@ -608,7 +609,19 @@ export function CreationHub({
           />
         </div>
       ) : (
-        <CreationMethodPanel kind={section} onOpenStudio={() => setStudioOpen(true)} />
+        <CreationMethodPanel
+          kind={section}
+          onOpenStudio={() => {
+            // The studio keeps its method in motion-run-store (it outlives this
+            // component). Opening from a card means the operator already chose:
+            // the card *is* the choice, so the studio must open preselected —
+            // both cards opening onto 智能素材成片 was a reported defect.
+            setMotionMethod(
+              section === "motion" ? "motion_composition_v1" : "material_montage_v1",
+            );
+            setStudioOpen(true);
+          }}
+        />
       )}
     </section>
   );

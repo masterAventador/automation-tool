@@ -24,6 +24,41 @@ describe("workbench shell navigation", () => {
     resetMotionRunStore();
   });
 
+  it("opens the studio with 品牌动效成片 preselected from its own card", async () => {
+    // 实测缺陷（2026-08-05 用户报告）：两张创作卡片共用同一个回调，点「品牌
+    // 动效成片」的「打开完整制作面板」进去的也是智能素材成片。判据是面板里
+    // 的「已选择」标签——它读的是 motion-run-store 里真实的 selectedMethod。
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkbenchShell />
+      </QueryClientProvider>,
+    );
+
+    await user.click(screen.getByRole("menuitem", { name: "创作" }));
+    await user.click(screen.getByRole("radio", { name: "品牌动效成片" }).closest("label")!);
+    await user.click(screen.getByRole("button", { name: "打开完整制作面板" }));
+
+    expect(screen.getByText("已选择：品牌动效成片")).toBeVisible();
+  });
+
+  it("opens the studio with 智能素材成片 preselected from its own card", async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkbenchShell />
+      </QueryClientProvider>,
+    );
+
+    await user.click(screen.getByRole("menuitem", { name: "创作" }));
+    await user.click(screen.getByRole("radio", { name: "智能素材成片" }).closest("label")!);
+    await user.click(screen.getByRole("button", { name: "打开完整制作面板" }));
+
+    expect(screen.getByText("已选择：智能素材成片")).toBeVisible();
+  });
+
   it("opens video creation from the normal left navigation", async () => {
     const user = userEvent.setup();
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
