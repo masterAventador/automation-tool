@@ -131,14 +131,15 @@ macOS 保留目录句柄 + `fcntl F_GETPATH`。Windows 用 NTFS file id +
 句柄枚举那一半已经做完了（`windows_processes.open_file_paths`），可以照抄它的
 `GetFinalPathNameByHandle` 用法。
 
-### 5. 私有目录判定与目录句柄
+### 5. 剩下的目录句柄
 
-- `require_private_directory_identity()` 用 `st_mode == 0o700` 和
-  `st_uid == os.geteuid()`。Windows 上 `st_uid` 无意义、`st_mode` 只表达只读位，
-  **这条要换成 ACL 检查还是换成别的，是个真问题**，别糊过去；
-- `open_absolute_directory()` 用 `os.O_DIRECTORY`（Windows 没有）。
-  打开目录句柄要走 `CreateFileW` + `FILE_FLAG_BACKUP_SEMANTICS`
-  （`test_windows_processes.py` 里那个握目录的用例就是这么开的，抄它）。
+`require_private_directory_identity()` 已经做完（见 EB-11.md 同日条目）：验的是产品
+自己写的那套 DACL——一条 ACE、当前用户、`SE_DACL_PROTECTED`。**不要把它当成
+「Windows 上没意义所以删掉」**，那是这一条最早的误判。
+
+仍缺的是另外两个用 `os.O_DIRECTORY` 的调用点：`open_evidence_target()` 与
+`open_absolute_directory()` 在证据文件那条路径上的用法。可以照
+`windows_private_directory.open_private_directory()` 抄。
 
 ### 6. 最后再放开闸门
 

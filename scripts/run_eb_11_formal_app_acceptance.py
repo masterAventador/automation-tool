@@ -437,6 +437,16 @@ class DeviceDriver:
     def read_process_open_paths(self, records: list[ProcessRecord]) -> list[Path] | None:
         raise self.unavailable("audit which files a process holds open")
 
+    def require_private_directory(self, path: Path) -> tuple[int, tuple[int, int]]:
+        """Open a directory only this user can read, and return its identity.
+
+        Returns `(descriptor, (device, inode))`. The identity is what binds "the
+        same Profile came back after a restart" and "the deleted Profile has no
+        name left"; the privacy check is what keeps platform session cookies
+        from being readable by anyone else.
+        """
+        raise self.unavailable("check that a directory is private to this user")
+
     def resource_root(self, app: Path) -> Path:
         """Where the packaged resource trees live inside an installed package."""
         raise self.unavailable("locate the packaged resources")
@@ -514,6 +524,9 @@ class MacosDeviceDriver(DeviceDriver):
 
     def read_process_open_paths(self, records: list[ProcessRecord]) -> list[Path] | None:
         return macos_read_process_open_paths(records)
+
+    def require_private_directory(self, path: Path) -> tuple[int, tuple[int, int]]:
+        return macos_require_private_directory(path)
 
     def resource_root(self, app: Path) -> Path:
         return app / "Contents" / "Resources"
@@ -845,6 +858,47 @@ class WindowsDeviceDriver(DeviceDriver):
         result = self._query(process_id, UIA_QUIT_BODY)
         if result != "requested":
             raise AcceptanceFailed("EB-11 could not request normal App quit")
+
+    def require_private_directory(self, path: Path) -> tuple[int, tuple[int, int]]:
+        """The `0o700` check, in the terms this platform actually has.
+
+        `st_mode` and `st_uid` are the meaningless part on Windows — CPython
+        reports `0o777` and `0` for every directory, so the macOS comparison
+        cannot be true even for a correctly private one. The property is not
+        meaningless at all: `browser_profiles_windows.rs` writes a DACL with one
+        access-allowed ACE for the token user and sets `SE_DACL_PROTECTED`, and
+        that is what is verified here.
+
+        The identity half needs no translation. Measured 2026-08-05: `os.fstat`
+        on a directory handle reports `S_ISDIR` and the same `(st_dev, st_ino)`
+        as `os.stat`, stable across calls and distinct per directory.
+        """
+        from windows_private_directory import (
+            PrivateDirectoryRejected,
+            open_private_directory,
+            require_private_dacl,
+        )
+
+        try:
+            descriptor = open_private_directory(path)
+        except PrivateDirectoryRejected as error:
+            raise AcceptanceFailed(
+                f"EB-11 App-owned Profile directory is unsafe: {error}"
+            ) from error
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISDIR(metadata.st_mode):
+                raise AcceptanceFailed("EB-11 App-owned Profile directory is unsafe")
+            require_private_dacl(descriptor)
+        except PrivateDirectoryRejected as error:
+            os.close(descriptor)
+            raise AcceptanceFailed(
+                f"EB-11 App-owned Profile directory is not private: {error}"
+            ) from error
+        except BaseException:
+            os.close(descriptor)
+            raise
+        return descriptor, (metadata.st_dev, metadata.st_ino)
 
     def resource_root(self, app: Path) -> Path:
         """The install root itself.
@@ -1664,6 +1718,10 @@ def path_is_within(path: Path, root: Path) -> bool:
 
 
 def require_private_directory_identity(path: Path) -> tuple[int, tuple[int, int]]:
+    return device_driver().require_private_directory(path)
+
+
+def macos_require_private_directory(path: Path) -> tuple[int, tuple[int, int]]:
     try:
         descriptor = open_absolute_directory(path)
         metadata = os.fstat(descriptor)

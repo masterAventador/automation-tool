@@ -5,6 +5,7 @@ import builtins
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -2315,6 +2316,103 @@ class WindowsAccessibilityTests(unittest.TestCase):
             runner.WindowsDeviceDriver().expected_release_target("itanium")
         )
         self.assertIsNone(runner.MacosDeviceDriver().expected_release_target("amd64"))
+
+    def test_a_private_directory_is_the_one_the_product_actually_writes(self) -> None:
+        """`0o700` has a Windows counterpart, and the product already writes it.
+
+        `st_uid` and `st_mode` are the meaningless part here: CPython reports 0
+        and `0o777` for every directory on this host, so the macOS comparison is
+        not merely wrong, it can never be true. The *property* is very much
+        alive — `browser_profiles_windows.rs` builds a security descriptor whose
+        DACL holds exactly one access-allowed ACE for the token user and sets
+        `SE_DACL_PROTECTED` so nothing is inherited. Measured on the real
+        Profile root, `icacls` shows one entry and no `(I)`, against four
+        inherited entries on `%LOCALAPPDATA%` one directory away.
+
+        So this asserts what the product guarantees rather than deleting a
+        comparison that cannot hold.
+        """
+        runner = load_runner()
+        driver = runner.WindowsDeviceDriver()
+        private = self._private_directory()
+
+        descriptor, identity = driver.require_private_directory(private)
+        try:
+            expected = os.stat(private)
+            self.assertEqual(identity, (expected.st_dev, expected.st_ino))
+            self.assertNotEqual(expected.st_ino, 0)
+        finally:
+            os.close(descriptor)
+
+    def test_an_inherited_directory_is_refused(self) -> None:
+        """A directory that anyone else can read is exactly what this catches.
+
+        `%LOCALAPPDATA%` on this machine grants `CodexSandboxUsers` read access
+        through inheritance. A Profile created without breaking inheritance
+        would carry that too — the Douyin session cookies would be readable by
+        every process in that group, and nothing else in the run would notice.
+        """
+        runner = load_runner()
+        driver = runner.WindowsDeviceDriver()
+        inherited = Path(tempfile.mkdtemp(prefix="eb11-inherited-"))
+        self.addCleanup(shutil.rmtree, inherited, True)
+
+        with self.assertRaises(runner.AcceptanceFailed):
+            driver.require_private_directory(inherited)
+
+    def test_a_directory_that_only_looks_private_is_refused(self) -> None:
+        """One ACE for me is not enough — it has to be *mine*, not inherited.
+
+        A child of a private parent inherits exactly one entry granting exactly
+        this user full access. Count and identity both match; only the protected
+        bit tells it apart from a directory the product created. Without that
+        check, re-parenting a Profile under a laxer directory later would
+        silently loosen it and every count-based assertion would stay green.
+        """
+        runner = load_runner()
+        private = self._private_directory()
+        inheriting = private / "child"
+        inheriting.mkdir()
+
+        with self.assertRaisesRegex(runner.AcceptanceFailed, "inherits"):
+            runner.WindowsDeviceDriver().require_private_directory(inheriting)
+
+    def test_a_file_is_not_a_private_directory(self) -> None:
+        runner = load_runner()
+        private = self._private_directory()
+        target = private / "not-a-directory"
+        target.write_text("x", encoding="utf-8")
+
+        with self.assertRaises(runner.AcceptanceFailed):
+            runner.WindowsDeviceDriver().require_private_directory(target)
+
+    def _private_directory(self) -> Path:
+        """A directory carrying the DACL the product writes for a Profile.
+
+        Built with `icacls` rather than by hand: what is under test is whether
+        the reader recognises the shape the *product* produces, and a fixture
+        assembled with the same ctypes calls as the reader would only prove the
+        two agree with each other.
+        """
+        root = Path(tempfile.mkdtemp(prefix="eb11-private-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        directory = root / "profile"
+        directory.mkdir()
+        user = f"{os.environ['USERDOMAIN']}\\{os.environ['USERNAME']}"
+        for arguments in (
+            ["/inheritance:r"],
+            ["/grant", f"{user}:(OI)(CI)(F)"],
+            ["/setowner", user],
+        ):
+            completed = subprocess.run(
+                ["icacls", str(directory), *arguments],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        return directory
 
     def test_a_vanished_window_is_reported_as_the_app_disappearing(self) -> None:
         runner = load_runner()
