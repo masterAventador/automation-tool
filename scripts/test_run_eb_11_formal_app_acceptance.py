@@ -2675,6 +2675,26 @@ class WindowsAccessibilityTests(unittest.TestCase):
             driver.require_app_path(INSTALLED_APP / "does-not-exist")
         self.assertFalse(driver.running_as_administrator() is None)
 
+    def test_the_daily_browser_profiles_it_must_not_touch_are_this_host_s(self) -> None:
+        """"Do not touch the user's own Chrome" needs this host's Chrome.
+
+        The list held `~/Library/Application Support/Google/Chrome`. On Windows
+        nothing is ever inside that path, so the check could never fire — and it
+        is the check that catches the packaged browser opening the operator's
+        real profile, cookies and all. `CLAUDE.md` §5 forbids exactly that, and
+        an assertion that cannot fail forbids nothing.
+        """
+        runner = load_runner()
+
+        roots = runner.WindowsDeviceDriver().daily_browser_profile_roots()
+
+        local = Path(os.environ["LOCALAPPDATA"])
+        self.assertIn(local / "Google/Chrome/User Data", roots)
+        self.assertIn(local / "Microsoft/Edge/User Data", roots)
+        for root in roots:
+            self.assertTrue(root.is_absolute())
+            self.assertNotIn("Library", root.parts)
+
     def test_a_vanished_window_is_reported_as_the_app_disappearing(self) -> None:
         runner = load_runner()
 

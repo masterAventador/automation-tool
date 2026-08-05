@@ -124,10 +124,6 @@ CURRENT_DOUYIN_PROFILE_FILE: Final = "current-douyin-profile-v1"
 PROFILE_LEASE_FILE_PREFIX: Final = ".automation-tool-profile-lease-v1-"
 PRIVATE_DIRECTORY_MODE: Final = 0o700
 PRIVATE_EVIDENCE_MODE: Final = 0o600
-DEFAULT_BROWSER_PROFILE_ROOTS: Final = (
-    Path.home() / "Library/Application Support/Google/Chrome",
-    Path.home() / "Library/Application Support/Microsoft Edge",
-)
 
 
 class AcceptanceFailed(RuntimeError):
@@ -476,6 +472,16 @@ class DeviceDriver:
         """Where the product keeps its own data, per this platform's convention."""
         raise self.unavailable("locate the product's data directory")
 
+    def daily_browser_profile_roots(self) -> tuple[Path, ...]:
+        """The user's own browser profiles, which the packaged browser must never open.
+
+        `CLAUDE.md` §5: the product does not automate the operator's day-to-day
+        Chrome or Edge and never reads their cookies. This is the run-time proof
+        of it, so the paths have to be the ones this host actually uses — a list
+        naming another platform's layout forbids nothing at all.
+        """
+        raise self.unavailable("name this host's everyday browser profiles")
+
     def open_directory(self, path: Path) -> int:
         """A descriptor that keeps naming this directory after it is renamed."""
         raise self.unavailable("hold a directory open")
@@ -651,6 +657,10 @@ class MacosDeviceDriver(DeviceDriver):
 
     def app_data_root(self) -> Path:
         return Path.home() / "Library" / "Application Support" / APP_IDENTIFIER
+
+    def daily_browser_profile_roots(self) -> tuple[Path, ...]:
+        support = Path.home() / "Library/Application Support"
+        return (support / "Google/Chrome", support / "Microsoft Edge")
 
     def open_directory(self, path: Path) -> int:
         return open_absolute_directory(path)
@@ -1336,6 +1346,20 @@ class WindowsDeviceDriver(DeviceDriver):
         if not roaming:
             raise AcceptanceFailed("EB-11 product data directory is unavailable")
         return Path(roaming) / APP_IDENTIFIER
+
+    def daily_browser_profile_roots(self) -> tuple[Path, ...]:
+        local = os.environ.get("LOCALAPPDATA")
+        if not local:
+            raise AcceptanceFailed("EB-11 cannot locate this user's browser profiles")
+        root = Path(local)
+        # Chromium keeps profiles under `User Data` on Windows, one level deeper
+        # than the macOS layout. Naming the vendor directory alone would also
+        # match the browser's own installation and turn this into a check that
+        # fires on a healthy run.
+        return (
+            root / "Google/Chrome/User Data",
+            root / "Microsoft/Edge/User Data",
+        )
 
     def require_private_directory(self, path: Path) -> tuple[int, tuple[int, int]]:
         """The `0o700` check, in the terms this platform actually has.
@@ -2271,7 +2295,7 @@ def require_browser_profile_boundary(
         if any(
             path_is_within(path, default_root)
             for path in opened_paths
-            for default_root in DEFAULT_BROWSER_PROFILE_ROOTS
+            for default_root in device_driver().daily_browser_profile_roots()
         ):
             raise AcceptanceFailed("EB-11 Chromium opened a default browser Profile")
 
