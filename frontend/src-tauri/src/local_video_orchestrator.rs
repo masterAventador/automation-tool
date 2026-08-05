@@ -214,6 +214,7 @@ pub struct VideoWorkerLaunch {
     script_model: Option<VideoWorkerScriptModelConfiguration>,
     render_browser: Option<VideoWorkerRenderBrowserConfiguration>,
     web_ui: bool,
+    montage_request: Option<VideoWorkerMontageRequest>,
 }
 
 /// The exact packaged FFmpeg pair a local-editing Worker may use.
@@ -1324,6 +1325,7 @@ impl VideoWorkerLaunch {
             expected_version,
             restart_policy,
             script_model: None,
+            montage_request: None,
             render_browser: None,
             web_ui: false,
         })
@@ -1409,6 +1411,11 @@ impl VideoWorkerLaunch {
 
     pub fn with_script_model(mut self, configuration: VideoWorkerScriptModelConfiguration) -> Self {
         self.script_model = Some(configuration);
+        self
+    }
+
+    pub fn with_montage_request(mut self, request: VideoWorkerMontageRequest) -> Self {
+        self.montage_request = Some(request);
         self
     }
 
@@ -2838,11 +2845,100 @@ struct VideoWorkerBootstrapDocument<'a> {
     /// readers verify the exact document shape, so an optional field would
     /// make "packaged with a key" and "packaged without" two different
     /// protocols.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    montage_request: Option<&'a VideoWorkerMontageRequest>,
     pexels_api_key: Option<&'static str>,
     protocol_version: &'static str,
     render_browser: Option<VideoWorkerRenderBrowserBootstrap<'a>>,
     script_model: Option<VideoWorkerScriptModelBootstrap<'a>>,
     worker_kind: &'static str,
+}
+
+/// One validated headless montage job, as the product form submitted it.
+///
+/// Field bounds mirror `montage_runtime.parse_montage_request` exactly — the
+/// worker re-validates, so a mismatch here fails the job at spawn instead of
+/// at the bootstrap line twenty seconds later.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoWorkerMontageRequest {
+    subject: String,
+    script: Option<String>,
+    aspect: String,
+    clip_duration_seconds: u8,
+    voice_name: String,
+    subtitle_enabled: bool,
+    font_size_px: u16,
+    text_color: String,
+    stroke_color: String,
+    stroke_width_px: f32,
+}
+
+impl fmt::Debug for VideoWorkerMontageRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The subject and script are operator content; keep them out of logs.
+        formatter
+            .debug_struct("VideoWorkerMontageRequest")
+            .field("aspect", &self.aspect)
+            .finish_non_exhaustive()
+    }
+}
+
+impl VideoWorkerMontageRequest {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        subject: impl Into<String>,
+        script: Option<String>,
+        aspect: impl Into<String>,
+        clip_duration_seconds: u8,
+        voice_name: impl Into<String>,
+        subtitle_enabled: bool,
+        font_size_px: u16,
+        text_color: impl Into<String>,
+        stroke_color: impl Into<String>,
+        stroke_width_px: f32,
+    ) -> Result<Self, VideoWorkerError> {
+        let subject = subject.into();
+        let aspect = aspect.into();
+        let voice_name = voice_name.into();
+        let text_color = text_color.into();
+        let stroke_color = stroke_color.into();
+        let color_is_sane = |value: &str| {
+            value.len() == 7
+                && value.starts_with('#')
+                && value.bytes().skip(1).all(|byte| byte.is_ascii_hexdigit())
+        };
+        let voice_is_sane = voice_name.len() <= 80
+            && voice_name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-');
+        let subject_characters = subject.trim().chars().count();
+        if subject_characters == 0
+            || subject_characters > 240
+            || script.as_ref().is_some_and(|value| value.chars().count() > 5000)
+            || !matches!(aspect.as_str(), "9:16" | "16:9" | "1:1")
+            || !(2..=10).contains(&clip_duration_seconds)
+            || !voice_is_sane
+            || !(24..=120).contains(&font_size_px)
+            || !color_is_sane(&text_color)
+            || !color_is_sane(&stroke_color)
+            || !(0.0..=5.0).contains(&stroke_width_px)
+        {
+            return Err(configuration_invalid());
+        }
+        Ok(Self {
+            subject,
+            script,
+            aspect,
+            clip_duration_seconds,
+            voice_name,
+            subtitle_enabled,
+            font_size_px,
+            text_color,
+            stroke_color,
+            stroke_width_px,
+        })
+    }
 }
 
 /// The stock-footage key the release pipeline baked in, if any.
@@ -4043,6 +4139,7 @@ fn write_bootstrap(
         enable_web_ui: launch.web_ui,
         local_session_token: &encoded,
         media_tools,
+        montage_request: launch.montage_request.as_ref(),
         pexels_api_key: compiled_pexels_api_key(),
         protocol_version: WORKER_PROTOCOL_VERSION,
         render_browser,
@@ -4711,6 +4808,56 @@ mod tests {
 
     #[cfg(windows)]
     use super::remove_windows_regular_file_by_handle;
+
+    fn montage_request(
+        aspect: &str,
+        clip: u8,
+        font: u16,
+        color: &str,
+    ) -> Result<super::VideoWorkerMontageRequest, super::VideoWorkerError> {
+        super::VideoWorkerMontageRequest::new(
+            "护肤知识三条",
+            None,
+            aspect,
+            clip,
+            "zh-CN-XiaoxiaoNeural-Female",
+            true,
+            font,
+            color,
+            "#000000",
+            1.5,
+        )
+    }
+
+    #[test]
+    fn a_wellformed_montage_request_is_accepted() {
+        assert!(montage_request("9:16", 4, 60, "#FFFFFF").is_ok());
+    }
+
+    #[test]
+    fn montage_bounds_mirror_the_worker_gate() {
+        assert!(montage_request("21:9", 4, 60, "#FFFFFF").is_err());
+        assert!(montage_request("9:16", 1, 60, "#FFFFFF").is_err());
+        assert!(montage_request("9:16", 11, 60, "#FFFFFF").is_err());
+        assert!(montage_request("9:16", 4, 23, "#FFFFFF").is_err());
+        assert!(montage_request("9:16", 4, 121, "#FFFFFF").is_err());
+        assert!(montage_request("9:16", 4, 60, "red").is_err());
+        assert!(montage_request("9:16", 4, 60, "#GGGGGG").is_err());
+        assert!(
+            super::VideoWorkerMontageRequest::new(
+                "", None, "9:16", 4, "zh-CN-Xiaoxiao", true, 60, "#FFFFFF", "#000000", 1.5
+            )
+            .is_err(),
+            "an empty subject must be refused"
+        );
+        assert!(
+            super::VideoWorkerMontageRequest::new(
+                "主题", None, "9:16", 4, "../evil", true, 60, "#FFFFFF", "#000000", 1.5
+            )
+            .is_err(),
+            "a voice name that could not be a voice must be refused"
+        );
+    }
 
     #[test]
     fn packaged_pexels_key_of_the_real_shape_is_forwarded() {

@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib
 import importlib.metadata
 import json
+import os
 import re
 import sys
 import threading
@@ -226,12 +227,13 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
             if bootstrap.web_ui
             else None
         )
+        montage_thread = None
         if bootstrap.montage_request is not None:
             from montage_runtime import MontageRequest, start_montage
 
             montage_request = bootstrap.montage_request
             assert isinstance(montage_request, MontageRequest)
-            start_montage(
+            montage_thread = start_montage(
                 bootstrap.asset_root,
                 bootstrap.script_model,
                 bootstrap.pexels_api_key,
@@ -305,6 +307,21 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
             print(line, file=sink, flush=True)
 
     emit(ready)
+    if montage_thread is not None:
+        # Headless montage owns this process: when the pipeline thread ends
+        # (success or failure — the observation bridge has already written the
+        # terminal state atomically), the process exits so the orchestrator
+        # slot frees without anyone having to "close a studio" that has no UI.
+        def _exit_after_montage(finished: threading.Thread = montage_thread) -> None:
+            finished.join()
+            with suppress(Exception):
+                server.shutdown()
+                server.server_close()
+            os._exit(0)
+
+        threading.Thread(
+            target=_exit_after_montage, name="montage-exit-watcher", daemon=True
+        ).start()
     render_thread: threading.Thread | None = None
     material_thread: threading.Thread | None = None
     cancel_requested = threading.Event()
