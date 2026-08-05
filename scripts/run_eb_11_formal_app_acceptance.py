@@ -468,6 +468,23 @@ class DeviceDriver:
         """Where the product keeps its own data, per this platform's convention."""
         raise self.unavailable("locate the product's data directory")
 
+    def open_directory(self, path: Path) -> int:
+        """A descriptor that keeps naming this directory after it is renamed."""
+        raise self.unavailable("hold a directory open")
+
+    def directory_entry_identities(self, directory_fd: int) -> list[tuple[int, int]]:
+        """The identity of everything currently inside an open directory."""
+        raise self.unavailable("list an open directory")
+
+    def open_directory_identity(self, directory_fd: int) -> tuple[int, int] | None:
+        """What this handle's surviving name resolves to, or `None` if it has none.
+
+        This is the disk-side half of safe logout: after the App removes a
+        Profile, the directory this run held open must have no name left
+        anywhere. `None` is the passing answer.
+        """
+        raise self.unavailable("ask whether an open directory still has a name")
+
     def require_private_directory(self, path: Path) -> tuple[int, tuple[int, int]]:
         """Open a directory only this user can read, and return its identity.
 
@@ -576,6 +593,29 @@ class MacosDeviceDriver(DeviceDriver):
     def app_data_root(self) -> Path:
         return Path.home() / "Library" / "Application Support" / APP_IDENTIFIER
 
+    def open_directory(self, path: Path) -> int:
+        return open_absolute_directory(path)
+
+    def directory_entry_identities(self, directory_fd: int) -> list[tuple[int, int]]:
+        identities: list[tuple[int, int]] = []
+        for name in os.listdir(directory_fd):
+            try:
+                entry = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            identities.append((entry.st_dev, entry.st_ino))
+        return identities
+
+    def open_directory_identity(self, directory_fd: int) -> tuple[int, int] | None:
+        macos_fcntl = importlib.import_module("fcntl")
+        raw_path = macos_fcntl.fcntl(directory_fd, macos_fcntl.F_GETPATH, b"\0" * 1024)
+        current_path = Path(os.fsdecode(raw_path.split(b"\0", 1)[0]))
+        try:
+            current = current_path.lstat()
+        except FileNotFoundError:
+            return None
+        return (current.st_dev, current.st_ino)
+
     def require_private_directory(self, path: Path) -> tuple[int, tuple[int, int]]:
         return macos_require_private_directory(path)
 
@@ -590,6 +630,11 @@ class MacosDeviceDriver(DeviceDriver):
 
 
 AUTHENTICODE_PATH_ENVIRONMENT: Final = "AUTOMATION_TOOL_EB11_SIGNED_PATH"
+EXTENDED_LENGTH_PREFIX: Final = "\\\\?\\"
+# Where NTFS parks a file that has been deleted while a handle is still open.
+# A handle whose final path lands here has no name in the ordinary namespace,
+# which is precisely what safe logout has to prove.
+NTFS_DELETED_HOLDING_AREA: Final = "\\$Extend\\$Deleted\\"
 # NSIS writes its own uninstaller into the install root; it is not a product
 # binary, and it is excluded by exact name so a genuine second executable still
 # makes the choice ambiguous rather than being silently picked.
@@ -1036,6 +1081,85 @@ class WindowsDeviceDriver(DeviceDriver):
         if observed != expected:
             raise AcceptanceFailed("EB-11 packaged runtime process does not match the signed App")
         return True
+
+    def open_directory(self, path: Path) -> int:
+        from windows_private_directory import (
+            PrivateDirectoryRejected,
+            open_private_directory,
+        )
+
+        try:
+            return open_private_directory(path)
+        except PrivateDirectoryRejected as error:
+            raise AcceptanceFailed(f"EB-11 directory could not be held open: {error}") from error
+
+    def directory_entry_identities(self, directory_fd: int) -> list[tuple[int, int]]:
+        """What is inside this open directory, by identity.
+
+        Windows has no `dir_fd`, so the handle is turned back into a path and
+        listed. That is one step less atomic than the macOS `openat` walk, and
+        it is the same gap `open_private_directory` already states: this is a
+        misoperation and regression gate inside a trusted flow.
+        """
+        directory = self._named_path(directory_fd)
+        if directory is None:
+            return []
+        identities: list[tuple[int, int]] = []
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    try:
+                        # `entry.stat()` on Windows answers from the directory
+                        # listing, which carries no file index — it reports
+                        # `st_ino` 0 for everything, so every identity would
+                        # compare equal to every other. A real `os.stat` opens
+                        # the entry and fills it in.
+                        metadata = os.stat(entry.path, follow_symlinks=False)
+                    except OSError:
+                        continue
+                    identities.append((metadata.st_dev, metadata.st_ino))
+        except OSError:
+            return identities
+        return identities
+
+    def open_directory_identity(self, directory_fd: int) -> tuple[int, int] | None:
+        """`None` once NTFS has no name for it — which is what deletion looks like.
+
+        Measured 2026-08-05: a directory deleted while this handle is open (the
+        handle carries `FILE_SHARE_DELETE`, so the delete succeeds) vanishes
+        from its parent at once, and `GetFinalPathNameByHandleW` then answers
+        `\\\\?\\C:\\$Extend\\$Deleted\\…` — NTFS's holding area for
+        delete-pending files. A rename, by contrast, keeps answering a real
+        path, which is why safe logout cannot be satisfied by one.
+        """
+        named = self._named_path(directory_fd)
+        if named is None:
+            return None
+        try:
+            current = named.lstat()
+        except (OSError, ValueError):
+            return None
+        return (current.st_dev, current.st_ino)
+
+    @staticmethod
+    def _named_path(directory_fd: int) -> Path | None:
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = kernel32.GetFinalPathNameByHandleW(
+            wintypes.HANDLE(msvcrt.get_osfhandle(directory_fd)), buffer, 32768, 0
+        )
+        if not length or length >= 32768:
+            return None
+        rendered = buffer.value
+        if rendered.startswith(EXTENDED_LENGTH_PREFIX):
+            rendered = rendered[len(EXTENDED_LENGTH_PREFIX) :]
+        if NTFS_DELETED_HOLDING_AREA in rendered:
+            return None
+        return Path(rendered)
 
     def app_data_root(self) -> Path:
         """`%APPDATA%\\<identifier>` — Roaming, which is what Tauri uses.
@@ -2270,27 +2394,14 @@ def require_observed_profile_unlinked(binding: ProfileDirectoryBinding) -> None:
         profile.st_ino,
     ) != binding.identity:
         raise AcceptanceFailed("EB-11 observed Profile identity changed")
-    for name in os.listdir(binding.parent_fd):
-        try:
-            candidate = os.stat(name, dir_fd=binding.parent_fd, follow_symlinks=False)
-        except FileNotFoundError:
-            continue
-        if (candidate.st_dev, candidate.st_ino) == binding.identity:
-            raise AcceptanceFailed("EB-11 safe logout retained the old Profile inode")
+    driver = device_driver()
+    if binding.identity in driver.directory_entry_identities(binding.parent_fd):
+        raise AcceptanceFailed("EB-11 safe logout retained the old Profile inode")
     try:
-        macos_fcntl = importlib.import_module("fcntl")
-        raw_path = macos_fcntl.fcntl(
-            binding.directory_fd,
-            macos_fcntl.F_GETPATH,
-            b"\0" * 1024,
-        )
-        current_path = Path(os.fsdecode(raw_path.split(b"\0", 1)[0]))
-        current = current_path.lstat()
-    except FileNotFoundError:
-        return
+        surviving = driver.open_directory_identity(binding.directory_fd)
     except OSError as error:
         raise AcceptanceFailed("EB-11 could not verify the removed Profile inode") from error
-    if (current.st_dev, current.st_ino) == binding.identity:
+    if surviving == binding.identity:
         raise AcceptanceFailed("EB-11 safe logout retained the old Profile inode")
 
 

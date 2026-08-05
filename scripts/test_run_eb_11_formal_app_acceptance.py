@@ -2541,6 +2541,72 @@ class WindowsAccessibilityTests(unittest.TestCase):
 
         self.assertFalse(driver.verify_runtime_process_identity(record, identity))
 
+    def test_a_deleted_profile_has_no_name_left(self) -> None:
+        """Safe logout's disk-side proof, in NTFS terms.
+
+        macOS unlinks an open directory and asks the descriptor for its path
+        with `F_GETPATH`. NTFS answers the same question differently and very
+        precisely: measured 2026-08-05, a directory deleted while this run holds
+        a handle open (the handle is opened `FILE_SHARE_DELETE`, so the delete
+        is allowed) disappears from its parent immediately, and
+        `GetFinalPathNameByHandleW` then reports
+        `\\\\?\\C:\\$Extend\\$Deleted\\…` — NTFS's holding area for
+        delete-pending files. That is exactly "the inode has no name".
+        """
+        runner = load_runner()
+        driver = runner.WindowsDeviceDriver()
+        root = Path(tempfile.mkdtemp(prefix="eb11-unlink-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        profile = root / "a3b06c48"
+        profile.mkdir()
+        (profile / "Cookies").write_text("x", encoding="utf-8")
+        identity = (os.stat(profile).st_dev, os.stat(profile).st_ino)
+
+        descriptor = driver.open_directory(profile)
+        try:
+            self.assertEqual(driver.open_directory_identity(descriptor), identity)
+            self.assertIn(
+                identity, driver.directory_entry_identities(driver.open_directory(root))
+            )
+
+            shutil.rmtree(profile)
+
+            self.assertIsNone(
+                driver.open_directory_identity(descriptor),
+                "a deleted directory must report no surviving name",
+            )
+            self.assertNotIn(
+                identity,
+                driver.directory_entry_identities(driver.open_directory(root)),
+            )
+        finally:
+            os.close(descriptor)
+
+    def test_a_renamed_profile_still_counts_as_surviving(self) -> None:
+        """Renaming is not deleting, and safe logout must not accept it.
+
+        The old Profile carries the platform session. A run that treated a
+        rename as removal would report the cookies gone while they sat one
+        directory away under another name.
+        """
+        runner = load_runner()
+        driver = runner.WindowsDeviceDriver()
+        root = Path(tempfile.mkdtemp(prefix="eb11-rename-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        profile = root / "a3b06c48"
+        profile.mkdir()
+        identity = (os.stat(profile).st_dev, os.stat(profile).st_ino)
+        descriptor = driver.open_directory(profile)
+        try:
+            profile.rename(root / "staged-removal")
+
+            self.assertEqual(driver.open_directory_identity(descriptor), identity)
+            self.assertIn(
+                identity, driver.directory_entry_identities(driver.open_directory(root))
+            )
+        finally:
+            os.close(descriptor)
+
     def test_a_vanished_window_is_reported_as_the_app_disappearing(self) -> None:
         runner = load_runner()
 
