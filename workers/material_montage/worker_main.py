@@ -226,6 +226,17 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
             if bootstrap.web_ui
             else None
         )
+        if bootstrap.montage_request is not None:
+            from montage_runtime import MontageRequest, start_montage
+
+            montage_request = bootstrap.montage_request
+            assert isinstance(montage_request, MontageRequest)
+            start_montage(
+                bootstrap.asset_root,
+                bootstrap.script_model,
+                bootstrap.pexels_api_key,
+                montage_request,
+            )
         material_preview = (
             LocalMaterialPreviewSource(
                 state_directory=(

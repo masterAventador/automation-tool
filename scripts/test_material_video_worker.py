@@ -1721,3 +1721,144 @@ class MaterialVideoWorkerBackgroundMusicTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MaterialMontageRequestTest(unittest.TestCase):
+    """The headless montage path: React collects the parameters, no Streamlit.
+
+    The request rides the already-authenticated stdin bootstrap — one worker
+    process per job, exactly the WebUI's lifecycle — and the upstream pipeline
+    (`app.services.task.start`) runs under the same private runtime the WebUI
+    used, so the observation bridge, the render-job ledger and cancel handling
+    are all unchanged.
+    """
+
+    def _request(self) -> dict[str, object]:
+        return {
+            "aspect": "9:16",
+            "clipDurationSeconds": 4,
+            "fontSizePx": 60,
+            "strokeWidthPx": 1.5,
+            "subject": "护肤知识三条",
+            "script": None,
+            "subtitleEnabled": True,
+            "textColor": "#FFFFFF",
+            "strokeColor": "#000000",
+            "voiceName": "zh-CN-XiaoxiaoNeural-Female",
+        }
+
+    def test_a_wellformed_request_parses_into_upstream_video_params(self) -> None:
+        from montage_runtime import parse_montage_request
+
+        request = parse_montage_request(self._request())
+
+        self.assertEqual(request.subject, "护肤知识三条")
+        self.assertEqual(request.aspect, "9:16")
+        self.assertEqual(request.clip_duration_seconds, 4)
+        self.assertTrue(request.subtitle_enabled)
+
+    def test_malformed_requests_are_rejected_not_defaulted(self) -> None:
+        from montage_runtime import MontageRejected, parse_montage_request
+
+        for field, value in (
+            ("subject", ""),
+            ("subject", "长" * 241),
+            ("aspect", "21:9"),
+            ("clipDurationSeconds", 0),
+            ("clipDurationSeconds", 61),
+            ("fontSizePx", 3),
+            ("textColor", "red"),
+            ("textColor", "#GGGGGG"),
+            ("voiceName", "../evil"),
+            ("script", 7),
+        ):
+            document = self._request()
+            document[field] = value
+            with self.assertRaises(MontageRejected, msg=f"{field}={value!r}"):
+                parse_montage_request(document)
+        with self.assertRaises(MontageRejected):
+            parse_montage_request({**self._request(), "extra": 1})
+        with self.assertRaises(MontageRejected):
+            parse_montage_request("not a dict")
+
+    def test_bootstrap_accepts_a_montage_request_and_refuses_it_with_webui(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="material-montage-bootstrap-", dir=ROOT / ".local"
+        ) as directory:
+            asset_root = Path(directory) / "assets"
+            asset_root.mkdir()
+            document = {
+                "assetRoot": str(asset_root),
+                "bootstrapVersion": "1",
+                "enableWebUi": False,
+                "localSessionToken": "a" * 64,
+                "montageRequest": self._request(),
+                "pexelsApiKey": None,
+                "protocolVersion": "1.0",
+                "renderBrowser": None,
+                "scriptModel": None,
+                "workerKind": "python",
+            }
+            line = json.dumps(document, separators=(",", ":")).encode() + b"\n"
+
+            bootstrap = gateway.parse_bootstrap(line)
+
+            self.assertIsNotNone(bootstrap.montage_request)
+            self.assertEqual(bootstrap.montage_request.subject, "护肤知识三条")
+
+            hybrid = dict(document)
+            hybrid["enableWebUi"] = True
+            hybrid_line = json.dumps(hybrid, separators=(",", ":")).encode() + b"\n"
+            with self.assertRaises(gateway.GatewayRejected):
+                gateway.parse_bootstrap(hybrid_line)
+
+    def test_start_montage_drives_the_upstream_pipeline_under_the_bridge(self) -> None:
+        import montage_runtime
+        from montage_runtime import parse_montage_request, start_montage
+
+        request = parse_montage_request(self._request())
+        with tempfile.TemporaryDirectory(
+            prefix="material-montage-run-", dir=ROOT / ".local"
+        ) as directory:
+            workspace = Path(directory) / str(uuid4())
+            asset_root = workspace / "assets"
+            asset_root.mkdir(parents=True)
+            # 与 WebUI 的工作区布局一致：outputs 与 assets 平级。
+            (workspace / "outputs").mkdir()
+            observed: dict[str, object] = {}
+
+            def fake_pipeline(task_id: str, params: object, stop_at: str) -> None:
+                observed["task_id"] = task_id
+                observed["params"] = params
+                observed["stop_at"] = stop_at
+
+            def fake_preload(runtime_root: Path, pexels_api_key: object = None) -> None:
+                # 真身会 exec 上游 config（依赖只存在于冻结环境），它有自己的
+                # 独立用例；这里只断言 montage 路径把密钥递到了它手上。
+                observed["preload_key"] = pexels_api_key
+                observed["runtime_root"] = runtime_root
+
+            with mock.patch.object(
+                montage_runtime, "_preload", fake_preload, create=True
+            ), mock.patch(
+                "webui_runtime._preload_private_config", fake_preload
+            ):
+                runtime = start_montage(
+                    asset_root,
+                    None,
+                    "P" * 56,
+                    request,
+                    pipeline=fake_pipeline,
+                )
+                runtime.join(timeout=30)
+            self.assertEqual(observed["preload_key"], "P" * 56)
+
+            self.assertFalse(runtime.is_alive(), "the montage thread must finish")
+            params = observed["params"]
+            self.assertEqual(observed["stop_at"], "video")
+            self.assertEqual(params.video_subject, "护肤知识三条")
+            self.assertEqual(params.video_source, "pexels")
+            self.assertEqual(params.video_count, 1)
+            self.assertEqual(params.bgm_type, "")

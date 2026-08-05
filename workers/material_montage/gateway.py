@@ -86,6 +86,7 @@ class GatewayBootstrap:
     web_ui: bool = False
     local_editing: bool = False
     pexels_api_key: str | None = None
+    montage_request: object | None = None
 
     def __repr__(self) -> str:
         return "GatewayBootstrap(<redacted>)"
@@ -166,10 +167,23 @@ def parse_bootstrap(line: bytes) -> GatewayBootstrap:
     # would make "packaged with a key" and "packaged without" two different
     # protocols, and the two workers reading this document would drift.
     base_keys.add("pexelsApiKey")
-    keys = set(value)
+    keys = set(value) - {"montageRequest"}
     local_editing = keys == base_keys | {"mediaTools"}
     if keys != base_keys and not local_editing:
         raise GatewayRejected("invalid bootstrap")
+    montage_request = None
+    if "montageRequest" in value and value.get("montageRequest") is not None:
+        # One process, one surface: the montage pipeline and the WebUI both
+        # own the worker's private runtime, so a bootstrap asking for both is
+        # a caller bug rather than a combination to support.
+        if value.get("enableWebUi") is not False or local_editing:
+            raise GatewayRejected("invalid bootstrap")
+        try:
+            from montage_runtime import parse_montage_request
+
+            montage_request = parse_montage_request(value.get("montageRequest"))
+        except ValueError as error:
+            raise GatewayRejected("invalid bootstrap") from error
     pexels_api_key = value.get("pexelsApiKey")
     if pexels_api_key is not None and (
         not isinstance(pexels_api_key, str)
@@ -212,6 +226,7 @@ def parse_bootstrap(line: bytes) -> GatewayBootstrap:
         web_ui=value["enableWebUi"],
         local_editing=local_editing,
         pexels_api_key=pexels_api_key,
+        montage_request=montage_request,
     )
 
 
