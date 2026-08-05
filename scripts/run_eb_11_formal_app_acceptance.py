@@ -371,6 +371,12 @@ class DeviceDriver:
     def press(self, process_id: int, label: str) -> None:
         raise self.unavailable(f"press {label!r} through the accessibility tree")
 
+    def visible_ui_text(self, process_id: int) -> str:
+        raise self.unavailable("read the accessibility tree")
+
+    def wait_for_window(self, process_id: int) -> None:
+        raise self.unavailable("wait for the App window")
+
     def read_release_identity(self, app: Path) -> SignedReleaseIdentity:
         raise self.unavailable("read the signed release identity")
 
@@ -379,10 +385,121 @@ class MacosDeviceDriver(DeviceDriver):
     platform = "darwin"
 
     def press(self, process_id: int, label: str) -> None:
-        press(process_id, label)
+        macos_press(process_id, label)
+
+    def visible_ui_text(self, process_id: int) -> str:
+        return macos_visible_ui_text(process_id)
+
+    def wait_for_window(self, process_id: int) -> None:
+        macos_wait_for_window(process_id)
 
     def read_release_identity(self, app: Path) -> SignedReleaseIdentity:
         return read_signed_release_identity(app)
+
+
+UIA_PROCESS_ENVIRONMENT: Final = "AUTOMATION_TOOL_EB11_UIA_PID"
+UIA_LABEL_ENVIRONMENT: Final = "AUTOMATION_TOOL_EB11_UIA_LABEL"
+# What WebView2 needs before it builds an accessibility tree at all. Chromium
+# accessibility is lazy: with no client attached the tree holds two shell panes
+# and nothing else — measured 2026-08-05, 17 descendants and 2 names against 27
+# and 9 with the flag. The runner sets this when it launches the App; the
+# shipped package is unchanged, exactly as macOS relies on the system a11y
+# stack without the product knowing.
+WEBVIEW_ACCESSIBILITY_ENVIRONMENT: Final = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"
+WEBVIEW_ACCESSIBILITY_ARGUMENT: Final = "--force-renderer-accessibility"
+# Bind the window, then hand the body a live element collection. The process id
+# arrives through the environment rather than the source so this stays a
+# constant: a script assembled per call is a script that can be assembled
+# wrongly, and one of the two values it would interpolate is a UI label.
+UIA_WINDOW_PRELUDE: Final = """
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$targetPid = [int]$env:AUTOMATION_TOOL_EB11_UIA_PID
+if ($targetPid -le 0) { Write-Output 'no_process'; exit 0 }
+if ($null -eq (Get-Process -Id $targetPid -ErrorAction SilentlyContinue)) {
+    Write-Output 'no_process'
+    exit 0
+}
+$root = [System.Windows.Automation.AutomationElement]::RootElement
+$byProcess = New-Object System.Windows.Automation.PropertyCondition(
+    [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $targetPid)
+$window = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $byProcess)
+if ($null -eq $window) { Write-Output 'no_window'; exit 0 }
+$all = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+    [System.Windows.Automation.Condition]::TrueCondition)
+"""
+UIA_PRESS_BODY: Final = """
+$label = $env:AUTOMATION_TOOL_EB11_UIA_LABEL
+foreach ($element in $all) {
+    if ($element.Current.Name -cne $label) { continue }
+    if (-not $element.Current.IsEnabled) { Write-Output 'disabled'; exit 0 }
+    $invoke = $null
+    if (-not $element.TryGetCurrentPattern(
+            [System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke)) {
+        Write-Output 'no_invoke_pattern'
+        exit 0
+    }
+    $invoke.Invoke()
+    Write-Output 'pressed'
+    exit 0
+}
+Write-Output 'not_found'
+"""
+UIA_VISIBLE_TEXT_BODY: Final = """
+$collected = New-Object System.Collections.Generic.List[string]
+foreach ($element in $all) {
+    $name = $element.Current.Name
+    if ($name) { [void]$collected.Add($name) }
+    $value = $null
+    if ($element.TryGetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern, [ref]$value)) {
+        $rendered = $value.Current.Value
+        if ($rendered -and -not $collected.Contains($rendered)) {
+            [void]$collected.Add($rendered)
+        }
+    }
+}
+Write-Output ($collected -join [Environment]::NewLine)
+"""
+UIA_WINDOW_READY_BODY: Final = """
+Write-Output 'ready'
+"""
+UIA_NO_TREE: Final = frozenset({"no_process", "no_window"})
+
+
+def power_shell(
+    source: str,
+    *,
+    environment: dict[str, str],
+    timeout: float = 30.0,
+) -> str:
+    """Run one PowerShell script, the way `apple_script` runs one AppleScript.
+
+    `-EncodedCommand` rather than a command line or stdin: the argument is
+    UTF-16LE, which is what PowerShell itself is, so nothing depends on the
+    console code page for input. Output goes the other way through
+    `[Console]::OutputEncoding` in the prelude, because a redirected PowerShell
+    5.1 otherwise writes the OEM code page — 936 on this machine, which turns
+    every Chinese UI label into mojibake at the exact moment the runner
+    compares one.
+    """
+    encoded = base64.b64encode(source.encode("utf-16-le")).decode("ascii")
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        env={**os.environ, **environment},
+    )
+    if result.returncode != 0:
+        message = (result.stderr or "").strip() or "unknown UI automation failure"
+        raise AcceptanceFailed(f"EB-11 App UI automation failed: {message}")
+    return (result.stdout or "").strip()
 
 
 class WindowsDeviceDriver(DeviceDriver):
@@ -392,15 +509,61 @@ class WindowsDeviceDriver(DeviceDriver):
     `build_release_package.py --platform windows` writes it. An NSIS package has
     no `Info.plist`, so the seven fields macOS keeps under the Developer ID seal
     are written to `release-identity.v1.json` in the payload instead — weaker,
-    and recorded as such where it is written.
+    and recorded as such where it is written. And the accessibility tree, via
+    UIAutomation: reading it was measured on 2026-08-05, and so was pressing —
+    an external client invoked `重新检查` on the installed formal package and the
+    App opened a fresh control-plane connection, 1 → 2 on a counting listener.
+
+    Which process is being driven is *not* re-established here. macOS can ask
+    AppleScript for a process's bundle identifier almost for free; UIA addresses
+    windows by process id, and this host has no Authenticode identity to check a
+    live PID against at all. The binding that does hold is the runner's own:
+    it launched the App, holds a `ProcessRecord` with its start time, and every
+    sample re-checks that record. A recycled pid fails there, not here — so this
+    script only distinguishes "that pid is gone" from "it has no window yet".
 
     Not yet implemented, each failing by name rather than as "requires macOS":
-    driving the WebView2 accessibility tree, verifying a running PID's
-    Authenticode signature, proving which Profile directory the browser has
-    open, and proving a deleted Profile's file id has no remaining name.
+    verifying a running PID's Authenticode signature, proving which Profile
+    directory the browser has open, and proving a deleted Profile's file id has
+    no remaining name.
     """
 
     platform = "win32"
+
+    def _query(self, process_id: int, body: str, label: str = "") -> str:
+        return power_shell(
+            UIA_WINDOW_PRELUDE + body,
+            environment={
+                UIA_PROCESS_ENVIRONMENT: str(process_id),
+                UIA_LABEL_ENVIRONMENT: label,
+            },
+        )
+
+    def press(self, process_id: int, label: str) -> None:
+        result = self._query(process_id, UIA_PRESS_BODY, label)
+        if result == "disabled":
+            raise AcceptanceFailed(
+                f"EB-11 App control is present but disabled, so it was not pressed: {label}"
+            )
+        if result != "pressed":
+            raise AcceptanceFailed(f"EB-11 could not press the App control: {label}")
+
+    def visible_ui_text(self, process_id: int) -> str:
+        rendered = self._query(process_id, UIA_VISIBLE_TEXT_BODY)
+        if rendered in UIA_NO_TREE:
+            raise AcceptanceFailed("EB-11 formal App window disappeared")
+        return rendered
+
+    def wait_for_window(self, process_id: int) -> None:
+        deadline = time.monotonic() + WINDOW_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            result = self._query(process_id, UIA_WINDOW_READY_BODY)
+            if result == "ready":
+                return
+            if result == "no_process":
+                raise AcceptanceFailed("EB-11 formal App process identity changed")
+            time.sleep(POLL_SECONDS)
+        raise AcceptanceFailed("EB-11 formal App did not expose its normal main window")
 
     def read_release_identity(self, app: Path) -> SignedReleaseIdentity:
         identity_path = app / PACKAGED_IDENTITY_NAME
@@ -1632,7 +1795,27 @@ def cleanup_delayed_nonce_owned_runtime(app: Path, nonce: str) -> None:
             time.sleep(POLL_SECONDS)
 
 
+def press(process_id: int, label: str) -> None:
+    """Press one named control, on whichever host this is.
+
+    The three UI instruments are dispatched rather than imported directly so the
+    lifecycle below reads the same on both platforms. What EB-11 *means* — sign
+    in, re-check, log out, prove the Profile is gone, scan again, restart and
+    prove it came back — is the part worth keeping single; only the instrument
+    differs, and it differs entirely inside the driver.
+    """
+    device_driver().press(process_id, label)
+
+
+def visible_ui_text(process_id: int) -> str:
+    return device_driver().visible_ui_text(process_id)
+
+
 def wait_for_window(process_id: int) -> None:
+    device_driver().wait_for_window(process_id)
+
+
+def macos_wait_for_window(process_id: int) -> None:
     deadline = time.monotonic() + WINDOW_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         result = apple_script(
@@ -1649,7 +1832,7 @@ def wait_for_window(process_id: int) -> None:
     raise AcceptanceFailed("EB-11 formal App did not expose its normal main window")
 
 
-def visible_ui_text(process_id: int) -> str:
+def macos_visible_ui_text(process_id: int) -> str:
     body = """
     if (count of windows) is 0 then return "__NO_WINDOW__"
     set collected to {}
@@ -1679,7 +1862,7 @@ def visible_ui_text(process_id: int) -> str:
     return rendered
 
 
-def press(process_id: int, label: str) -> None:
+def macos_press(process_id: int, label: str) -> None:
     """Press one named control, refusing to mistake a disabled one for a click.
 
     `AXPress` on a disabled element does nothing, and a disabled element still

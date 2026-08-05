@@ -103,11 +103,14 @@ class AccountPageReadinessTests(unittest.TestCase):
             self.assertIn("enabled of elementReference", source)
             return "disabled"
 
+        # 直接点名 macOS 那一支：`press` 现在按宿主分发，在 Windows 上跑这条会
+        # 走 UIA 而根本不碰 apple_script——照样抛 AcceptanceFailed，于是用例变成
+        # 「绿得毫无意义」。要验 AppleScript 的形状，就得调 AppleScript 那个实现。
         with (
             mock.patch.object(runner, "apple_script", side_effect=inspect_script),
             self.assertRaises(runner.AcceptanceFailed) as raised,
         ):
-            runner.press(42, "打开登录处理")
+            runner.macos_press(42, "打开登录处理")
         self.assertIn("打开登录处理", str(raised.exception))
 
     def test_press_binds_a_webkit_accessibility_name_before_comparing_it(self) -> None:
@@ -122,7 +125,7 @@ class AccountPageReadinessTests(unittest.TestCase):
             return "pressed"
 
         with mock.patch.object(runner, "apple_script", side_effect=inspect_script):
-            runner.press(42, "账号与平台")
+            runner.macos_press(42, "账号与平台")
 
     def test_visible_text_materializes_the_webkit_accessibility_tree(self) -> None:
         runner = load_runner()
@@ -134,7 +137,7 @@ class AccountPageReadinessTests(unittest.TestCase):
             return "登录正常"
 
         with mock.patch.object(runner, "apple_script", side_effect=inspect_script):
-            self.assertEqual(runner.visible_ui_text(42), "登录正常")
+            self.assertEqual(runner.macos_visible_ui_text(42), "登录正常")
 
     def test_navigation_retries_until_the_normal_control_is_mounted(self) -> None:
         runner = load_runner()
@@ -1751,10 +1754,15 @@ class DeviceDriverSeamTests(unittest.TestCase):
         """
         runner = load_runner()
 
-        driver = runner.WindowsDeviceDriver()
+        # The base driver, not a host one: which capabilities are still missing
+        # changes as they land, and this is about how a gap reports itself, not
+        # about which gap happens to be open today.
+        driver = runner.DeviceDriver()
 
         with self.assertRaisesRegex(runner.AcceptanceFailed, "accessibility"):
             driver.press(4321, "确认注销")
+        with self.assertRaisesRegex(runner.AcceptanceFailed, "signed release identity"):
+            driver.read_release_identity(Path("/nowhere"))
 
     def test_the_windows_driver_reads_the_release_identity_it_ships(self) -> None:
         """`build_release_package --platform windows` writes this file.
@@ -1799,6 +1807,173 @@ class DeviceDriverSeamTests(unittest.TestCase):
 
             with self.assertRaisesRegex(runner.AcceptanceFailed, "invalid"):
                 runner.WindowsDeviceDriver().read_release_identity(root)
+
+
+class WindowsAccessibilityTests(unittest.TestCase):
+    """The Windows half of "drive the App like a person would".
+
+    Feasibility is measured, not assumed. WebView2 builds no accessibility tree
+    until a client asks for one, so the runner has to launch the App with
+    `--force-renderer-accessibility` (FINDING-webview2-accessibility-on-windows.md),
+    and pressing was proven separately against the installed formal package on
+    2026-08-05: an external UIA client invoked `重新检查` and the App opened a
+    fresh connection to the control-plane origin, 1 → 2 on a counting listener.
+    A transient "checking" screen would have been a far weaker witness.
+
+    These tests hold the shape of that mechanism without needing a desktop, the
+    way the macOS ones hold the AppleScript shape without needing a Mac.
+    """
+
+    def test_press_asks_whether_the_control_is_enabled_before_invoking_it(self) -> None:
+        """The macOS lesson, re-checked on the host that answers it differently.
+
+        `AXPress` on a disabled element silently does nothing and reports the
+        same as a real press, which cost a run on 2026-08-04. UIA does not have
+        that hole — `IsEnabled` is a first-class property — but the order still
+        has to be right: read it, refuse, and only then invoke.
+        """
+        runner = load_runner()
+        seen: dict[str, object] = {}
+
+        def inspect(source: str, *, environment: dict[str, str], timeout: float = 30.0) -> str:
+            del timeout
+            seen["source"] = source
+            seen["environment"] = environment
+            self.assertLess(
+                source.index("IsEnabled"),
+                source.index("Invoke()"),
+                "the enabled check must come before the press, not after it",
+            )
+            return "disabled"
+
+        with (
+            mock.patch.object(runner, "power_shell", side_effect=inspect),
+            self.assertRaises(runner.AcceptanceFailed) as raised,
+        ):
+            runner.WindowsDeviceDriver().press(42, "打开登录处理")
+
+        self.assertIn("打开登录处理", str(raised.exception))
+        self.assertEqual(seen["environment"]["AUTOMATION_TOOL_EB11_UIA_PID"], "42")
+        self.assertEqual(
+            seen["environment"]["AUTOMATION_TOOL_EB11_UIA_LABEL"], "打开登录处理"
+        )
+
+    def test_the_label_never_becomes_part_of_the_script(self) -> None:
+        """A UI label is data. Interpolating it would make it code.
+
+        The macOS side escapes quotes into AppleScript source; PowerShell has
+        more ways to be surprised by a string than that guard covers, and every
+        one of them would run inside a script this runner wrote. The label goes
+        through the environment instead, so the script stays a constant.
+        """
+        runner = load_runner()
+        hostile = '"; Write-Output pressed; #'
+
+        def inspect(source: str, *, environment: dict[str, str], timeout: float = 30.0) -> str:
+            del timeout
+            self.assertNotIn(hostile, source)
+            self.assertEqual(environment["AUTOMATION_TOOL_EB11_UIA_LABEL"], hostile)
+            return "not_found"
+
+        with (
+            mock.patch.object(runner, "power_shell", side_effect=inspect),
+            self.assertRaises(runner.AcceptanceFailed),
+        ):
+            runner.WindowsDeviceDriver().press(42, hostile)
+
+    def test_press_accepts_only_the_word_the_script_prints_for_a_real_invoke(
+        self,
+    ) -> None:
+        runner = load_runner()
+
+        for answer in ("not_found", "no_invoke_pattern", "no_window", "no_process", ""):
+            with (
+                self.subTest(answer=answer),
+                mock.patch.object(runner, "power_shell", return_value=answer),
+                self.assertRaises(runner.AcceptanceFailed),
+            ):
+                runner.WindowsDeviceDriver().press(42, "安全注销")
+
+        with mock.patch.object(runner, "power_shell", return_value="pressed"):
+            runner.WindowsDeviceDriver().press(42, "安全注销")
+
+    def test_visible_text_reads_names_and_values_out_of_the_webview_tree(self) -> None:
+        runner = load_runner()
+
+        def inspect(source: str, *, environment: dict[str, str], timeout: float = 30.0) -> str:
+            del timeout, environment
+            self.assertIn("Descendants", source)
+            self.assertIn("ValuePattern", source)
+            return "当前状态\n登录正常"
+
+        with mock.patch.object(runner, "power_shell", side_effect=inspect):
+            rendered = runner.WindowsDeviceDriver().visible_ui_text(42)
+
+        self.assertIn("登录正常", rendered)
+
+    def test_the_lifecycle_drives_through_the_host_driver(self) -> None:
+        """The seam only counts if the flow actually goes through it.
+
+        `WindowsDeviceDriver.press` existing changes nothing while
+        `open_account_page`, `logout_current_session` and the rest still call
+        the AppleScript implementation by name — the driver would be a class
+        nobody constructs on the host that needs it.
+        """
+        runner = load_runner()
+        calls: list[tuple[object, ...]] = []
+
+        class RecordingDriver:
+            platform = "recording"
+
+            def press(self, process_id: int, label: str) -> None:
+                calls.append(("press", process_id, label))
+
+            def visible_ui_text(self, process_id: int) -> str:
+                calls.append(("text", process_id))
+                return "登录正常"
+
+            def wait_for_window(self, process_id: int) -> None:
+                calls.append(("window", process_id))
+
+        with mock.patch.object(runner, "device_driver", return_value=RecordingDriver()):
+            runner.press(7, "安全注销")
+            rendered = runner.visible_ui_text(7)
+            runner.wait_for_window(7)
+
+        self.assertEqual(rendered, "登录正常")
+        self.assertEqual(
+            calls, [("press", 7, "安全注销"), ("text", 7), ("window", 7)]
+        )
+
+    def test_waiting_for_a_window_polls_until_the_tree_is_there(self) -> None:
+        runner = load_runner()
+        answers = ["no_window", "no_window", "ready"]
+
+        with (
+            mock.patch.object(runner, "power_shell", side_effect=answers),
+            mock.patch.object(runner.time, "sleep"),
+        ):
+            runner.WindowsDeviceDriver().wait_for_window(42)
+
+    def test_a_process_that_is_gone_is_not_waited_out(self) -> None:
+        """A dead pid is an answer, not a reason to burn the whole timeout."""
+        runner = load_runner()
+
+        with (
+            mock.patch.object(runner, "power_shell", return_value="no_process"),
+            mock.patch.object(runner.time, "sleep"),
+            self.assertRaisesRegex(runner.AcceptanceFailed, "process identity"),
+        ):
+            runner.WindowsDeviceDriver().wait_for_window(42)
+
+    def test_a_vanished_window_is_reported_as_the_app_disappearing(self) -> None:
+        runner = load_runner()
+
+        with (
+            mock.patch.object(runner, "power_shell", return_value="no_window"),
+            self.assertRaisesRegex(runner.AcceptanceFailed, "disappeared"),
+        ):
+            runner.WindowsDeviceDriver().visible_ui_text(42)
 
 
 if __name__ == "__main__":
