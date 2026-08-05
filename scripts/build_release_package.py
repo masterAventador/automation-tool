@@ -895,6 +895,46 @@ def build_macos_release(
     return result
 
 
+# Measured from the path a real release actually failed to open, not estimated.
+# `makensis` is a native tool that does not understand the `\\?\` prefix, and
+# the deepest name it has to open is 229 characters below the work directory:
+#
+#   source-snapshot-XXXXXXXX\repository\frontend\src-tauri\..\..\..\..\
+#   build\payload\material-video-worker\package\_internal\streamlit\.agents\
+#   skills\developing-with-streamlit\assets\templates\apps\
+#   dashboard-companies\pyproject.toml
+#
+# — the un-normalised `..\..\..\..` counts, because NSIS passes the name through
+# as written. From `F:\automation-tool\.local\release-windows` (41) that totals
+# 270 and the bundle aborts after the whole Rust compile has already run; from
+# `C:\atrel` (8) it totals 237 and the installer is produced.
+#
+# A first attempt at this constant guessed 218 and let the 41-character path
+# through, which is worth recording: a budget that admits the exact path already
+# observed to fail is not a budget.
+WINDOWS_DEEPEST_PAYLOAD_PATH = 229
+WINDOWS_PATH_LIMIT = 260
+
+
+def require_windows_path_budget(work_directory: Path) -> None:
+    """Refuse a work directory too deep for the NSIS bundler, before building.
+
+    This has to fail here rather than where it actually breaks. `makensis` runs
+    at the very end, after the Rust release compile and the whole payload
+    assembly, so the operator otherwise waits out the entire build to be told
+    that a directory name was too long — and the message they get names one
+    `pyproject.toml` inside streamlit, which points nowhere useful.
+    """
+    budget = WINDOWS_PATH_LIMIT - WINDOWS_DEEPEST_PAYLOAD_PATH
+    length = len(os.fspath(work_directory))
+    if length > budget:
+        raise ReleaseFailed(
+            f"the Windows release work directory is {length} characters and the "
+            f"NSIS bundler leaves room for {budget}: pass a shorter --work-dir "
+            r"such as C:\atrel"
+        )
+
+
 def embed_windows_release_identity(
     *,
     payload: Path,
@@ -986,6 +1026,7 @@ def build_windows_release(
 
     work_directory = require_source_stable_work_directory(work_directory)
     target_id, architecture = require_windows_target()
+    require_windows_path_budget(work_directory)
     announce("Checking the locked read-only third-party source checkouts")
     run_checked(
         [
@@ -1070,7 +1111,13 @@ def build_windows_release(
     audited_assets = snapshot_production_assets(build_directory / AUDITED_DISTRIBUTION_NAME)
     if repository_source_facts(REPOSITORY_ROOT) != source_identity:
         raise ReleaseFailed("release sources changed while the App was being built")
-    verify_manifest_signature(payload / EXECUTOR_RESOURCE, private_key)
+    # The built bundle, not `payload / EXECUTOR_RESOURCE`. On macOS the executor
+    # is installed into the `.app` and verified where it landed; on Windows the
+    # bundler copies it out of `build/executor/` into the sealed installer, so
+    # nothing ever writes it under the payload. Measured by a real release that
+    # produced the installer and then died on the last line looking for
+    # `payload/local-executor/package/executor-manifest.v1.json`.
+    verify_manifest_signature(executor, private_key)
     result: dict[str, object] = {
         "architecture": architecture,
         "audited_assets": os.fspath(audited_assets),
