@@ -8,7 +8,12 @@ import {
   type PlatformSessionGateway,
   type PlatformSessionGatewayErrorCode,
 } from "./platform-session-gateway";
-import { PlatformSessions } from "./PlatformSessions";
+import {
+  CONTROL_PLANE_REQUESTS_PER_SECOND,
+  HEALTH_PUBLICATION_MINIMUM_INTERVAL_MILLISECONDS,
+  PlatformSessions,
+  healthPublicationDelays,
+} from "./PlatformSessions";
 
 function gateway(): PlatformSessionGateway {
   let state: "healthy" | "missing" = "missing";
@@ -206,8 +211,12 @@ describe("platform status page", () => {
       render(<PlatformSessions gateway={source} />);
 
       await user.click(await screen.findByRole("button", { name: "我已处理，重新检查" }));
+      // Advance by the schedule itself: a hard-coded number here silently stops
+      // reaching the timeout the moment the budget grows, which is exactly what
+      // happened when the polling was slowed down to stay under the rate limit.
+      const budget = healthPublicationDelays().reduce((total, delay) => total + delay, 0);
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(10_000);
+        await vi.advanceTimersByTimeAsync(budget + 1_000);
       });
 
       expect(screen.getByText(/本机已确认登录正常/u)).toBeVisible();
@@ -215,6 +224,43 @@ describe("platform status page", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  /**
+   * Waiting for the server projection must not attack the server.
+   *
+   * 2026-08-05, customer Demo deployment: every platform operation started
+   * answering `operation_unavailable`, which the page renders as "这是本产品
+   * 自身的问题". The edge access log said why — the App had sent about
+   * twenty-two request pairs inside one second and been given `429`:
+   *
+   *     POST /api/v1/device-sessions            201
+   *     GET  /api/v1/platform-sessions/douyin   200
+   *     …twenty-two times…
+   *     GET  /api/v1/platform-sessions/douyin   429
+   *
+   * The edge allows `rate=10r/s burst=20`. This loop polled every 50ms, and a
+   * fresh device session is minted for every call, so it asked for forty
+   * requests a second — four times the limit, with the burst spent in about a
+   * second. The message shown to the operator was accurate and useless: it is
+   * the product's own fault, and the product is the one attacking.
+   *
+   * So the schedule is asserted here rather than left as two bare numbers: the
+   * budget may grow, but the rate may not exceed what the deployment permits.
+   */
+  it("waits for the projection without exceeding the deployment rate limit", () => {
+    const delays = healthPublicationDelays();
+
+    expect(delays.length).toBeGreaterThan(0);
+    for (const delay of delays) {
+      expect(delay).toBeGreaterThanOrEqual(HEALTH_PUBLICATION_MINIMUM_INTERVAL_MILLISECONDS);
+    }
+    // Two requests leave the App per poll, and the edge permits ten a second.
+    const requestsPerSecond = (2 * 1000) / Math.min(...delays);
+    expect(requestsPerSecond).toBeLessThanOrEqual(CONTROL_PLANE_REQUESTS_PER_SECOND / 2);
+    // A slower schedule must not shorten how long the projection is given.
+    const budget = delays.reduce((total, delay) => total + delay, 0);
+    expect(budget).toBeGreaterThanOrEqual(10_000);
   });
 });
 
