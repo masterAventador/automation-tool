@@ -1676,49 +1676,17 @@ def _capability_writer_is_an_ancestor(process_id: int) -> bool:
 
 
 def _windows_ancestor_process_ids(*, limit: int = 16) -> set[int]:
-    """Walk this process's ancestry through a Toolhelp process snapshot."""
-    import ctypes
-    from ctypes import wintypes
+    """Walk this process's ancestry through a Toolhelp process snapshot.
 
-    class ProcessEntry(ctypes.Structure):
-        _fields_ = (
-            ("dwSize", wintypes.DWORD),
-            ("cntUsage", wintypes.DWORD),
-            ("th32ProcessID", wintypes.DWORD),
-            ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
-            ("th32ModuleID", wintypes.DWORD),
-            ("cntThreads", wintypes.DWORD),
-            ("th32ParentProcessID", wintypes.DWORD),
-            ("pcPriClassBase", ctypes.c_long),
-            ("dwFlags", wintypes.DWORD),
-            ("szExeFile", ctypes.c_char * 260),
-        )
+    The snapshot itself lives in `windows_processes`, which EB-11 also reads its
+    ownership facts from. One Toolhelp walker, not two that agree by accident.
+    """
+    from windows_processes import WindowsProcessesUnavailable, ancestor_process_ids
 
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
-    if snapshot == -1:
-        raise ReleaseFailed("release source snapshot capability is unavailable")
-    parents: dict[int, int] = {}
     try:
-        entry = ProcessEntry()
-        entry.dwSize = ctypes.sizeof(ProcessEntry)
-        if not kernel32.Process32First(snapshot, ctypes.byref(entry)):
-            raise ReleaseFailed("release source snapshot capability is unavailable")
-        while True:
-            parents[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
-            if not kernel32.Process32Next(snapshot, ctypes.byref(entry)):
-                break
-    finally:
-        kernel32.CloseHandle(snapshot)
-    ancestors: set[int] = set()
-    current = os.getpid()
-    for _ in range(limit):
-        parent = parents.get(current)
-        if not parent or parent in ancestors:
-            break
-        ancestors.add(parent)
-        current = parent
-    return ancestors
+        return ancestor_process_ids(os.getpid(), limit=limit)
+    except WindowsProcessesUnavailable as error:
+        raise ReleaseFailed("release source snapshot capability is unavailable") from error
 
 
 def require_snapshot_repository_layout(snapshot: Path, work_directory: Path) -> None:
