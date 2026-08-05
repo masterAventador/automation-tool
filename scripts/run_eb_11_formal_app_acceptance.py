@@ -406,6 +406,22 @@ class DeviceDriver:
     def verify_artifact(self, app: Path, executor_build_id: str) -> ArtifactFacts:
         raise self.unavailable("verify the installed package")
 
+    def process_snapshot(self) -> list[ProcessRecord]:
+        raise self.unavailable("take a process snapshot")
+
+    def process_has_launch_nonce(self, record: ProcessRecord, nonce: str) -> bool:
+        raise self.unavailable("read a process launch nonce")
+
+    def packaged_prefix(self, app: Path) -> str:
+        """Where a packaged process's image path starts.
+
+        macOS puts every executable under `Contents/`; a Windows install root
+        holds them directly. Getting this wrong is silent in the worst way —
+        nothing matches, every packaged process reads as foreign, and the run
+        concludes the App it just started never started.
+        """
+        raise self.unavailable("recognise a packaged process")
+
 
 class MacosDeviceDriver(DeviceDriver):
     platform = "darwin"
@@ -424,6 +440,15 @@ class MacosDeviceDriver(DeviceDriver):
 
     def verify_artifact(self, app: Path, executor_build_id: str) -> ArtifactFacts:
         return verify_formal_app(app, executor_build_id)
+
+    def process_snapshot(self) -> list[ProcessRecord]:
+        return macos_process_snapshot()
+
+    def process_has_launch_nonce(self, record: ProcessRecord, nonce: str) -> bool:
+        return macos_process_has_launch_nonce(record, nonce)
+
+    def packaged_prefix(self, app: Path) -> str:
+        return f"{app}{os.sep}Contents{os.sep}"
 
 
 AUTHENTICODE_PATH_ENVIRONMENT: Final = "AUTOMATION_TOOL_EB11_SIGNED_PATH"
@@ -501,6 +526,31 @@ UIA_WINDOW_READY_BODY: Final = """
 Write-Output 'ready'
 """
 UIA_NO_TREE: Final = frozenset({"no_process", "no_window"})
+
+
+def windows_command_arguments(command_line: str) -> str:
+    """Everything after argv[0], including the space that separates it.
+
+    Windows hands a process one string, not a vector, and argv[0] in it is
+    usually quoted. Splitting it off by the quoting rule — closing quote if it
+    opens with one, first space otherwise — is what lets the image path be put
+    back in front unquoted without losing or duplicating an argument.
+
+    Returns "" when there are no arguments, so the caller concatenates rather
+    than joins and never leaves a trailing space that `command_runs` would then
+    have to tolerate.
+    """
+    stripped = command_line.lstrip()
+    if stripped.startswith('"'):
+        closing = stripped.find('"', 1)
+        remainder = stripped[closing + 1 :] if closing != -1 else ""
+    else:
+        space = stripped.find(" ")
+        remainder = stripped[space:] if space != -1 else ""
+    remainder = remainder.rstrip()
+    if not remainder:
+        return ""
+    return remainder if remainder.startswith(" ") else f" {remainder}"
 
 
 def windows_product_binary(app: Path) -> Path:
@@ -644,6 +694,52 @@ class WindowsDeviceDriver(DeviceDriver):
             environment={AUTHENTICODE_PATH_ENVIRONMENT: os.fspath(path)},
         )
         return rendered or "Unknown"
+
+    def packaged_prefix(self, app: Path) -> str:
+        return f"{app}{os.sep}"
+
+    def process_snapshot(self) -> list[ProcessRecord]:
+        """The `ps -axo pid,ppid,lstart,command` of this host.
+
+        `command` is assembled rather than taken verbatim, because three callers
+        read it three ways and a raw Windows command line satisfies none of them
+        cleanly: it starts with a *quoted* argv[0], so a prefix match against the
+        install root fails on the opening quote. The image path is therefore put
+        back at the front unquoted, with the original arguments after it — the
+        exact shape `ps` produces and the three callers already expect.
+
+        A process nobody can open still gets a record. Most of the machine is
+        unreadable — other users, protected services — and dropping those would
+        quietly shrink the table that `instance_process_records` uses to decide
+        whether a *foreign* App instance is running. Its Toolhelp name is the
+        weakest possible `command`, and it matches no packaged prefix, which is
+        the correct answer for a process this run cannot identify.
+        """
+        import windows_processes
+
+        records: list[ProcessRecord] = []
+        for pid, process in windows_processes.process_table().items():
+            image = windows_processes.image_path(pid)
+            rendered = windows_processes.command_line(pid)
+            if image and rendered:
+                command = f"{image}{windows_command_arguments(rendered)}"
+            else:
+                command = image or process.executable_name
+            records.append(
+                ProcessRecord(
+                    pid=pid,
+                    ppid=process.ppid,
+                    command=command,
+                    started_at=windows_processes.created_at(pid),
+                )
+            )
+        return records
+
+    def process_has_launch_nonce(self, record: ProcessRecord, nonce: str) -> bool:
+        import windows_processes
+
+        values = windows_processes.environment(record.pid)
+        return bool(values) and values.get(LAUNCH_NONCE_ENVIRONMENT) == nonce
 
     def verify_artifact(self, app: Path, executor_build_id: str) -> ArtifactFacts:
         """Bind the installed package by its bytes, and claim nothing more.
@@ -1213,6 +1309,14 @@ end tell
 
 
 def process_snapshot() -> list[ProcessRecord]:
+    return device_driver().process_snapshot()
+
+
+def process_has_launch_nonce(record: ProcessRecord, nonce: str) -> bool:
+    return device_driver().process_has_launch_nonce(record, nonce)
+
+
+def macos_process_snapshot() -> list[ProcessRecord]:
     completed = run_checked(
         ["/bin/ps", "-ww", "-axo", "pid=,ppid=,lstart=,command="],
         capture=True,
@@ -1246,7 +1350,7 @@ def descendant_records(root_process_id: int, records: list[ProcessRecord]) -> li
 
 
 def packaged_process_records(app: Path, records: list[ProcessRecord]) -> list[ProcessRecord]:
-    executable_prefix = f"{app}{os.sep}Contents{os.sep}"
+    executable_prefix = device_driver().packaged_prefix(app)
     return [
         record
         for record in records
@@ -1778,7 +1882,7 @@ def require_isolated_launch(app: Path) -> None:
         )
 
 
-def process_has_launch_nonce(record: ProcessRecord, nonce: str) -> bool:
+def macos_process_has_launch_nonce(record: ProcessRecord, nonce: str) -> bool:
     try:
         rendered = run_checked(
             ["/bin/ps", "eww", "-p", str(record.pid), "-o", "command="],

@@ -2053,6 +2053,127 @@ class WindowsAccessibilityTests(unittest.TestCase):
         self.assertRegex(digest, r"^[0-9a-f]{64}$")
         self.assertEqual(total, 3)
 
+    def test_the_windows_snapshot_describes_real_processes(self) -> None:
+        """The `ps` replacement, measured against processes that exist.
+
+        Every ownership decision in this runner compares whole `ProcessRecord`s,
+        so all four fields have to be real: a missing `started_at` makes a
+        recycled pid compare equal to the process this run launched, and a
+        `command` that does not begin with the image path makes
+        `packaged_process_records` match nothing at all.
+        """
+        runner = load_runner()
+
+        records = runner.WindowsDeviceDriver().process_snapshot()
+
+        by_pid = {record.pid: record for record in records}
+        self.assertIn(os.getpid(), by_pid)
+        mine = by_pid[os.getpid()]
+        self.assertIn(mine.ppid, by_pid)
+        self.assertNotEqual(mine.started_at, "")
+        # Not compared against `sys.executable`: a uv virtualenv launches through
+        # a trampoline, so the interpreter reports the venv path while the image
+        # actually running is the base interpreter. The property under test is
+        # the shape — an unquoted absolute image path at the front, which is what
+        # `packaged_process_records` prefix-matches on.
+        self.assertFalse(
+            mine.command.startswith('"'),
+            f"a quoted argv[0] matches no install prefix: {mine.command!r}",
+        )
+        head, separator, _ = mine.command.partition(".exe")
+        self.assertEqual(separator, ".exe")
+        self.assertTrue(Path(head + separator).is_file(), mine.command)
+        self.assertTrue(
+            all(record.command for record in records),
+            "a process nobody can read still needs some command, or it vanishes "
+            "from every prefix match silently",
+        )
+
+    def test_arguments_survive_into_the_snapshot_command(self) -> None:
+        """`--user-data-dir` is read out of this string, so it has to be here."""
+        runner = load_runner()
+        marker = "--eb11-snapshot-probe"
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)", marker]
+        )
+        try:
+            rendered = ""
+            for _ in range(50):
+                found = [
+                    record
+                    for record in runner.WindowsDeviceDriver().process_snapshot()
+                    if record.pid == child.pid
+                ]
+                if found and marker in found[0].command:
+                    rendered = found[0].command
+                    break
+                time.sleep(0.1)
+        finally:
+            child.terminate()
+            child.wait(timeout=15)
+
+        self.assertIn(marker, rendered)
+        self.assertFalse(rendered.startswith('"'))
+        self.assertLess(
+            rendered.index(".exe"),
+            rendered.index(marker),
+            "the image path has to come first, or the prefix match reads an argument",
+        )
+
+    def test_the_launch_nonce_is_read_out_of_the_process_environment(self) -> None:
+        """What keeps a reparented Chromium helper ours.
+
+        macOS reads it with `ps eww`. On Windows the same fact lives in the
+        process parameters block. Without it a helper that has been reparented
+        away from the App is indistinguishable from another instance's, and the
+        run would either abandon it or refuse to start.
+        """
+        runner = load_runner()
+        nonce = "eb11-nonce-probe-7f3a"
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            env=dict(os.environ, **{runner.LAUNCH_NONCE_ENVIRONMENT: nonce}),
+        )
+        plain = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            driver = runner.WindowsDeviceDriver()
+            owned = runner.ProcessRecord(pid=child.pid, ppid=os.getpid(), command="")
+            other = runner.ProcessRecord(pid=plain.pid, ppid=os.getpid(), command="")
+            carried = False
+            for _ in range(50):
+                carried = driver.process_has_launch_nonce(owned, nonce)
+                if carried:
+                    break
+                time.sleep(0.1)
+
+            self.assertTrue(carried)
+            self.assertFalse(driver.process_has_launch_nonce(other, nonce))
+            self.assertFalse(driver.process_has_launch_nonce(owned, "a-different-nonce"))
+        finally:
+            for process in (child, plain):
+                process.terminate()
+                process.wait(timeout=15)
+
+    def test_the_packaged_prefix_is_the_install_root_not_a_bundle(self) -> None:
+        """`Contents/` is a macOS bundle path. A Windows package has no such level.
+
+        Left unchanged this matches nothing, so every packaged process reads as
+        foreign — the run would see zero of its own processes and conclude the
+        App never started.
+        """
+        runner = load_runner()
+        app = Path(r"C:\Users\someone\AppData\Local\Product")
+        bundle = Path("/Applications/P.app")
+
+        prefix = runner.WindowsDeviceDriver().packaged_prefix(app)
+
+        self.assertEqual(prefix, f"{app}{os.sep}")
+        self.assertNotIn("Contents", prefix)
+        self.assertEqual(
+            runner.MacosDeviceDriver().packaged_prefix(bundle),
+            f"{bundle}{os.sep}Contents{os.sep}",
+        )
+
     def test_a_vanished_window_is_reported_as_the_app_disappearing(self) -> None:
         runner = load_runner()
 
