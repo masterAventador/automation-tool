@@ -558,6 +558,37 @@ describe("video editing workbench", () => {
     );
   });
 
+  it("names the Control Plane when the Control Plane is what failed", async () => {
+    // 2026-08-05 实测：云端旧版对剪辑列表返回 404，界面却让用户去检查
+    // 「本机服务」。控制面失败必须说控制面的话，不能指向一个没参与的进程。
+    const gateway = {
+      async listProjects(): Promise<never> {
+        throw new VideoEditingGatewayError("control_plane_unavailable", false);
+      },
+      async createProject(): Promise<never> {
+        throw new Error("unused");
+      },
+      async getTimeline(): Promise<never> {
+        throw new Error("unused");
+      },
+      async saveTimeline(): Promise<never> {
+        throw new Error("unused");
+      },
+      async listEditingJobs(): Promise<never> {
+        throw new Error("unused");
+      },
+      async submitEditingJob(): Promise<never> {
+        throw new Error("unused");
+      },
+    };
+    render(<VideoEditingWorkbench gateway={gateway} />);
+
+    expect(
+      await screen.findByText(/控制服务暂时不可用/u),
+    ).toBeVisible();
+    expect(document.body).not.toHaveTextContent(/本机剪辑服务/u);
+  });
+
   it("fails closed when the local draft store is corrupted", async () => {
     const gateway = createLocalVideoEditingGateway({
       getItem: () => "{broken",

@@ -42,8 +42,17 @@ const createProjectInputSchema = z
   })
   .refine((input) => input.captionStyle.fontPx <= input.output.height);
 
-const SERVICE_ERROR_CODES = new Set([
+// Every command this gateway issues is a Control Plane request, so a
+// recognized Control Plane error code has to surface as one. Mapping them to
+// "editing service unavailable" sent the operator to check a local process
+// that was never involved (measured 2026-08-05: a stale cloud deployment
+// answered 404 on the editing endpoints). The names mirror
+// `ControlPlaneErrorCode` in `control_plane.rs`; `outcome_uncertain` is
+// handled first because it has its own meaning and copy.
+const CONTROL_PLANE_ERROR_CODES = new Set([
   "transport_unavailable",
+  "protocol_invalid",
+  "request_rejected",
   "credential_missing",
   "identity_unavailable",
   "storage_unavailable",
@@ -51,6 +60,10 @@ const SERVICE_ERROR_CODES = new Set([
   "installation_busy",
   "installation_conflict",
   "operation_unavailable",
+  "authentication_invalid",
+  "recovery_invalid",
+  "account_session_invalid",
+  "resource_not_found",
 ]);
 
 function unavailable(retryable = false): VideoEditingGatewayError {
@@ -62,8 +75,8 @@ function mapNativeError(value: unknown): VideoEditingGatewayError {
   if (fields?.code === "outcome_uncertain" && fields.retryable === false) {
     return new VideoEditingGatewayError("outcome_uncertain", false);
   }
-  if (fields !== undefined && SERVICE_ERROR_CODES.has(fields.code)) {
-    return unavailable(fields.retryable);
+  if (fields !== undefined && CONTROL_PLANE_ERROR_CODES.has(fields.code)) {
+    return new VideoEditingGatewayError("control_plane_unavailable", fields.retryable);
   }
   return unavailable(false);
 }

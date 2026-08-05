@@ -12,6 +12,15 @@ export type VideoEditingErrorCode =
   | "invalid_timeline"
   | "draft_storage_unavailable"
   | "editing_service_unavailable"
+  /**
+   * The Control Plane request failed — network, credentials, or a server that
+   * does not know the editing endpoints yet. Distinct from
+   * `editing_service_unavailable` because the remedies point at different
+   * machines: measured 2026-08-05, a stale cloud deployment answered 404 and
+   * the UI told the operator to go check a local process that was never
+   * involved.
+   */
+  | "control_plane_unavailable"
   | "outcome_uncertain";
 
 export class VideoEditingGatewayError extends Error {

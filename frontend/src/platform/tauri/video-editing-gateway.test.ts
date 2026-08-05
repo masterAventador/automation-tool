@@ -262,10 +262,21 @@ describe("Tauri video editing gateway", () => {
   });
 
   it("preserves retryability only for recognized native service errors", async () => {
+    // 这个网关的每条命令都打到控制服务，所以已识别的控制面错误必须以
+    // control_plane_unavailable 露出——2026-08-05 实测：云端旧版对
+    // /api/v1/editing-projects 返回 404，前端却说「本机剪辑服务不可用」，
+    // 把人指去检查一个根本没参与的进程。
     invoke.mockRejectedValueOnce({ code: "transport_unavailable", retryable: true });
     await expect(new TauriVideoEditingGateway().listProjects()).rejects.toMatchObject({
-      code: "editing_service_unavailable",
+      code: "control_plane_unavailable",
       retryable: true,
+    });
+
+    // 当晚那次真实失败的形状：列表接口 404 → request_rejected。
+    invoke.mockRejectedValueOnce({ code: "request_rejected", retryable: false });
+    await expect(new TauriVideoEditingGateway().listProjects()).rejects.toMatchObject({
+      code: "control_plane_unavailable",
+      retryable: false,
     });
 
     invoke.mockRejectedValueOnce({

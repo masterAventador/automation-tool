@@ -87,6 +87,19 @@ const JOB_STATUS_LABELS: Record<EditingJobStatus, string> = {
 
 const SERVICE_UNAVAILABLE_TEXT =
   "本机剪辑服务暂时不可用，请确认本机服务正在运行后再试。";
+const CONTROL_PLANE_UNAVAILABLE_TEXT =
+  "控制服务暂时不可用，请检查网络后再试；如果一直失败，可能需要更新服务端。";
+
+/**
+ * 失败要指向真正出事的那台机器。2026-08-05 实测：云端旧版对剪辑列表返回
+ * 404，界面却让用户去检查「本机服务」——那个进程根本没参与这次请求。
+ */
+function serviceUnavailableText(error: unknown): string {
+  return error instanceof VideoEditingGatewayError &&
+    error.code === "control_plane_unavailable"
+    ? CONTROL_PLANE_UNAVAILABLE_TEXT
+    : SERVICE_UNAVAILABLE_TEXT;
+}
 const SMART_EDIT_THINKING_PREFERENCE_KEY =
   "automation-tool.smart-edit.thinking-enabled.v1";
 
@@ -1134,9 +1147,9 @@ export function VideoEditingWorkbench({
           setTracks([]);
           setJobs([]);
         }
-      } catch {
+      } catch (error: unknown) {
         if (mountedRef.current && request === projectsRequestRef.current) {
-          setProjectMessage({ type: "error", text: SERVICE_UNAVAILABLE_TEXT });
+          setProjectMessage({ type: "error", text: serviceUnavailableText(error) });
         }
       } finally {
         if (mountedRef.current && request === projectsRequestRef.current) {
@@ -1197,7 +1210,7 @@ export function VideoEditingWorkbench({
           setTracks(timeline === null ? [newTrackForm("visual", "")] : hydrateForm(timeline));
         }
         return "loaded";
-      } catch {
+      } catch (error: unknown) {
         if (
           !mountedRef.current ||
           request !== timelineRequestRef.current ||
@@ -1206,7 +1219,7 @@ export function VideoEditingWorkbench({
           return "stale";
         }
         if (reportFailure) {
-          setSaveMessage({ type: "error", text: SERVICE_UNAVAILABLE_TEXT });
+          setSaveMessage({ type: "error", text: serviceUnavailableText(error) });
         }
         return "failed";
       } finally {
@@ -1249,7 +1262,7 @@ export function VideoEditingWorkbench({
           ...value,
         ]);
         return "loaded";
-      } catch {
+      } catch (error: unknown) {
         if (
           !mountedRef.current ||
           request !== jobsRequestRef.current ||
@@ -1258,7 +1271,7 @@ export function VideoEditingWorkbench({
           return "stale";
         }
         if (reportFailure) {
-          setSubmitMessage({ type: "error", text: SERVICE_UNAVAILABLE_TEXT });
+          setSubmitMessage({ type: "error", text: serviceUnavailableText(error) });
         }
         return "failed";
       } finally {
@@ -1349,7 +1362,7 @@ export function VideoEditingWorkbench({
           text:
             error instanceof VideoEditingGatewayError && error.code === "invalid_project"
               ? "无法创建剪辑项目：请填写有效的项目标题。"
-              : SERVICE_UNAVAILABLE_TEXT,
+              : serviceUnavailableText(error),
         });
       } finally {
         creatingRef.current = false;
@@ -1425,7 +1438,7 @@ export function VideoEditingWorkbench({
             text:
               error instanceof VideoEditingGatewayError && error.code === "invalid_timeline"
                 ? INVALID_TIMELINE_TEXT
-                : SERVICE_UNAVAILABLE_TEXT,
+                : serviceUnavailableText(error),
           });
         }
       } finally {
@@ -1497,7 +1510,7 @@ export function VideoEditingWorkbench({
           text:
             error instanceof VideoEditingGatewayError && error.code === "outcome_uncertain"
               ? OUTCOME_UNCERTAIN_TEXT
-              : SERVICE_UNAVAILABLE_TEXT,
+              : serviceUnavailableText(error),
         });
         if (error instanceof VideoEditingGatewayError && error.code === "outcome_uncertain") {
           setSubmissionNeedsConfirmation(true);
