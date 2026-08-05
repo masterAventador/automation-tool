@@ -8,6 +8,33 @@
 >
 > 提交：本文件所在提交
 
+## 先读这一段：2026-08-05 21:55 的状态快照
+
+**正在做的事**：EB-11 Windows 首次真实扫码验收。用户在旁边配合。
+
+| 项 | 状态 |
+| --- | --- |
+| 客户 Demo 材料 | `.local/customer-demo-release/` 三个文件（部署档案 + 两把 Ed25519 私钥），已断继承只当前用户可读。**action 私钥取自服务器**，与服务端天然配对 |
+| 109 服务器 | 本机公钥已加入 `authorized_keys`，`ssh root@49.233.213.109` 直接进。Demo 服务 Up |
+| 产品账号登录态 | ✅ 已有：`%APPDATA%\com.aventador.automationtool\profiles\demo-xuanbai\product-account-session-v1`，428 字节，08-05 21:51。**runner 不处理这道闸门，必须先有它** |
+| 启动脚本 | `.local/eb11-windows-20260805/run-eb11.ps1`（纯 ASCII，自动定位中文安装目录）。用户只需跑这一行 |
+| 出包 | 正在重新出包（修完 `require_running_release` 之后）。出完要**装上**再让用户跑 |
+
+**最重要的一条时序约束**：EB-11 逐位比对包里的 `sourceTreeSha256` 与当前源码树。
+**改任何 `scripts/` 下的代码 → 装着的包立刻作废 → 必须重新出包（约 11 分钟）+ 重装。**
+`docs/development/**` 不进摘要，改文档安全。
+
+**下一步**：等出包完成 → `Start-Process <installer> -ArgumentList '/S' -Wait`（**必须走
+PowerShell**，Git Bash 会把 `/S` 当路径转换掉）→ 核对装好的 `release-identity.v1.json`
++ 跑一次 `require_release_identity` → 告诉用户跑 `run-eb11.ps1`。
+
+**跑挂了怎么办**：脚本只打一行 `[EB-11] FAIL: …`。要栈就用
+`scratchpad/diag.py` 那个套路——导入模块、把 `sys.stdin/stdout` 的 `isatty` 打桩成 True、
+直接调 `run_acceptance`，异常打完整 traceback。今晚就是这么抓到 `verify_running_release_process`
+里那处漏掉的 `codesign` 的。
+
+---
+
 **这份是给上下文压缩之后的自己看的。** 只写继续干活需要的东西，不复述已完成任务的细节
 ——那些在各自的证据文件里。
 
