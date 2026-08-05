@@ -2334,14 +2334,25 @@ def require_browser_profile_boundary(
         opened_paths = read_process_open_paths(browser_tree)
         if opened_paths is None:
             return None
-        if not any(path_is_within(path, candidate) for path in opened_paths):
-            raise AcceptanceFailed("EB-11 Chromium did not open the App-owned Profile")
+        # Order matters, and so does which of these is fatal. A path inside the
+        # operator's own browser Profile is proof that the thing `CLAUDE.md` §5
+        # forbids has happened, so one sighting ends the run — and it is checked
+        # first, because otherwise a sample that saw the daily Profile but had
+        # not yet seen the App-owned one reported the wrong finding.
         if any(
             path_is_within(path, default_root)
             for path in opened_paths
             for default_root in device_driver().daily_browser_profile_roots()
         ):
             raise AcceptanceFailed("EB-11 Chromium opened a default browser Profile")
+        # Not having opened the App-owned Profile *yet* proves nothing: the
+        # browser tree changes between samples, and one that holds nothing on
+        # disk simply carries no binding — the same conclusion `opened_paths is
+        # None` already draws for a process that exited mid-audit. The guarantee
+        # is unweakened because `require_complete_runtime` still fails the run
+        # unless some sample did observe it.
+        if not any(path_is_within(path, candidate) for path in opened_paths):
+            return None
 
         for directory, first_identity in zip(
             directories,

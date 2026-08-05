@@ -861,6 +861,97 @@ class ReleaseIdentityTests(unittest.TestCase):
             )
 
 
+class ProfileBoundaryTests(unittest.TestCase):
+    """What one sample of the Profile boundary is allowed to conclude."""
+
+    def _scene(self, runner: ModuleType) -> tuple[object, object, list[object]]:
+        app = Path("/Applications/Formal Product.app")
+        profile_root = (
+            runner.app_data_root() / "profiles/demo-xuanbai/embedded-browser-profiles"
+        )
+        candidate = profile_root / "douyin" / "6d9221cb-e9dc-4359-9f6b-34f7fbc55316"
+        contract = runner.RuntimeContract(
+            app_path=app,
+            executor_path=app / "Contents/Resources/local-executor/package/executor",
+            browser_path=app / "Contents/Resources/embedded-browser/Browser",
+            profile_root=profile_root,
+            executor_identity=runner.CodeIdentity("executor", "Expected", "TEAM", "a" * 40),
+            browser_identity=runner.CodeIdentity("browser", "Expected", "TEAM", "b" * 40),
+        )
+        browser = runner.ProcessRecord(
+            12,
+            11,
+            f"{contract.browser_path} --user-data-dir={candidate}",
+            "C",
+        )
+        return contract, browser, [browser]
+
+    @staticmethod
+    def _private_directory_identity(counter: list[int]):
+        def opener(_directory: Path) -> tuple[int, tuple[int, int]]:
+            counter[0] += 1
+            return os.open(os.devnull, os.O_RDONLY), (1, 2)
+
+        return opener
+
+    def test_a_sample_that_sees_nothing_yet_is_not_a_violation(self) -> None:
+        """Absence at one instant is not proof the Profile was not used.
+
+        2026-08-05, Windows, installed release package: the QR flow opened and
+        the run then died with `Chromium did not open the App-owned Profile`.
+        It was not reproducible — polling this check directly from the moment
+        Chromium appeared bound the Profile on every one of ~60 consecutive
+        samples, and the next real run bound it on 12 of 13. So the failing
+        sample caught an instant when the browser tree held nothing on disk
+        inside the Profile, and read that instant as a finding.
+
+        A sample that observes nothing carries no binding; it is not evidence of
+        a violation, and it must not end the run. The guarantee is unchanged
+        because `require_complete_runtime` still fails unless some sample did
+        observe the App-owned Profile — the same way `read_process_open_paths`
+        returning `None` for a process that exited mid-audit already means
+        "this sample says nothing" rather than "the Profile was not used".
+        """
+        runner = load_runner()
+        contract, browser, scoped = self._scene(runner)
+        opened = [0]
+
+        with (
+            mock.patch.object(
+                runner,
+                "require_private_directory_identity",
+                side_effect=self._private_directory_identity(opened),
+            ),
+            mock.patch.object(runner, "read_process_open_paths", return_value=[]),
+        ):
+            binding = runner.require_browser_profile_boundary(contract, browser, scoped)
+
+        self.assertIsNone(binding)
+        self.assertEqual(opened[0], 3)
+
+    def test_a_sample_that_sees_the_daily_profile_is_still_fatal(self) -> None:
+        """A path inside the operator's own browser Profile is proof, so it fails.
+
+        This is the half that must survive the change above: `CLAUDE.md` §5 says
+        the packaged browser never opens the operator's day-to-day Profile, and
+        one sighting is enough to know it did.
+        """
+        runner = load_runner()
+        contract, browser, scoped = self._scene(runner)
+        daily = runner.device_driver().daily_browser_profile_roots()[0] / "Default/Cookies"
+
+        with (
+            mock.patch.object(
+                runner,
+                "require_private_directory_identity",
+                side_effect=self._private_directory_identity([0]),
+            ),
+            mock.patch.object(runner, "read_process_open_paths", return_value=[daily]),
+            self.assertRaisesRegex(runner.AcceptanceFailed, "default browser Profile"),
+        ):
+            runner.require_browser_profile_boundary(contract, browser, scoped)
+
+
 class RuntimeObservationTests(unittest.TestCase):
     def test_one_browser_with_its_own_children_is_one_browser(self) -> None:
         """Chromium's children are not additional browsers.
