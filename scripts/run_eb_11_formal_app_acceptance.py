@@ -2608,6 +2608,28 @@ def continuous_runtime_observation(
         watcher.close()
 
 
+def require_recheck_runtime(observation: RuntimeObservation) -> None:
+    """What a session recheck can be held to.
+
+    Not a complete runtime observation, because a recheck does not keep a
+    browser open to be observed: the Executor opens one, checks, and closes it
+    the moment the state reaches `healthy` — about 0.7 seconds, measured
+    2026-08-05 — before the App even publishes the result this waits for. The
+    QR-login window is the one that holds a browser open for as long as the
+    operator takes to scan, and that is where the full chain is proved.
+
+    What holds every time: the packaged Executor is running, because it is
+    long-lived and appears in every sample. And whatever the sampler did manage
+    to catch still has to be right — two Profiles at once is a finding whether
+    or not a browser was expected.
+    """
+
+    if not observation.executor_observed:
+        raise AcceptanceFailed("EB-11 did not observe the packaged Executor")
+    if len(observation.profile_directories) > 1:
+        raise AcceptanceFailed("EB-11 did not observe exactly one App-owned Profile")
+
+
 def require_complete_runtime(observation: RuntimeObservation) -> None:
     if not observation.executor_observed:
         raise AcceptanceFailed("EB-11 did not observe the packaged Executor")
@@ -3213,7 +3235,7 @@ def recheck_healthy_session(
                     if observed_time(latest) > before_time:
                         if watcher is not None:
                             observation = observation.merge(watcher.result())
-                            require_complete_runtime(observation)
+                            require_recheck_runtime(observation)
                         return before, after, observation
                 time.sleep(POLL_SECONDS)
             if watcher is not None:

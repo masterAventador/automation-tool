@@ -1055,6 +1055,50 @@ class ProfileReuseTests(unittest.TestCase):
             runner.require_same_profile_reuse(qr_open, blind, blind, root)
 
 
+class RecheckRuntimeTests(unittest.TestCase):
+    """A recheck is held to what a recheck can be held to.
+
+    The same 0.7-second window that made `require_same_profile_reuse` a coin
+    flip gates every recheck, because `recheck_healthy_session` demanded a
+    complete runtime observation too. Fixing only the reuse check would have
+    left the flake at all four recheck sites, which is exactly where the
+    operator's run died.
+
+    What a recheck can always be held to: the packaged Executor is running —
+    it is long-lived and observed in every sample — and anything the sampler
+    *did* catch has to be right.
+    """
+
+    @staticmethod
+    def _observation(runner: ModuleType, **fields: object) -> object:
+        return runner.RuntimeObservation(**fields)
+
+    def test_a_recheck_that_caught_no_browser_is_accepted(self) -> None:
+        runner = load_runner()
+        runner.require_recheck_runtime(self._observation(runner, executor_observed=True))
+
+    def test_a_recheck_without_the_packaged_executor_still_fails(self) -> None:
+        runner = load_runner()
+        with self.assertRaisesRegex(runner.AcceptanceFailed, "packaged Executor"):
+            runner.require_recheck_runtime(self._observation(runner, executor_observed=False))
+
+    def test_a_recheck_that_saw_two_profiles_still_fails(self) -> None:
+        """Catching a browser is optional; catching two Profiles is a finding."""
+        runner = load_runner()
+        first = Path("/tmp/embedded-browser-profiles/douyin/6d9221cb-e9dc-4359-9f6b-34f7fbc55316")
+        second = Path("/tmp/embedded-browser-profiles/douyin/46ea626c-fddb-49bc-9269-a50368f687ca")
+        observation = self._observation(
+            runner,
+            executor_observed=True,
+            embedded_browser_observed=True,
+            app_owned_profile_observed=True,
+            profile_directories=(first, second),
+        )
+
+        with self.assertRaisesRegex(runner.AcceptanceFailed, "exactly one App-owned Profile"):
+            runner.require_recheck_runtime(observation)
+
+
 class ProfileBoundaryTests(unittest.TestCase):
     """What one sample of the Profile boundary is allowed to conclude."""
 
