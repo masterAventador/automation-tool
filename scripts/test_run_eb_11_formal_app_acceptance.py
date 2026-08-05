@@ -2607,6 +2607,74 @@ class WindowsAccessibilityTests(unittest.TestCase):
         finally:
             os.close(descriptor)
 
+    def test_evidence_is_published_and_verified_on_this_host(self) -> None:
+        """The whole publication dance, on a host that has no `dir_fd` at all.
+
+        Five of the evidence tests are marked "POSIX evidence publication
+        contract" and skip here, so before this the Windows path was not
+        exercised anywhere: `os.stat(..., dir_fd=)`, `os.link(..., src_dir_fd=)`,
+        `os.fchmod` and `os.fsync` on a directory are each unavailable or
+        meaningless, and the first of them would have raised at the very end of
+        a run that had already driven a real login.
+        """
+        runner = load_runner()
+        directory = Path(tempfile.mkdtemp(prefix="eb11-evidence-"))
+        self.addCleanup(shutil.rmtree, directory, True)
+        evidence = directory / "eb-11.json"
+
+        target = runner.open_evidence_target(evidence)
+        self.addCleanup(target.close)
+        identity = runner.write_evidence(target, {"schema": "probe", "值": "中文"})
+        publication = runner.EvidencePublication(target=target, identity=identity)
+        publication.commit()
+        publication.finish_report()
+
+        self.assertTrue(evidence.is_file())
+        document = json.loads(evidence.read_text(encoding="utf-8"))
+        self.assertEqual(document["值"], "中文")
+        self.assertEqual(
+            (evidence.stat().st_dev, evidence.stat().st_ino),
+            identity,
+            "the published file must be the one that was written, not a copy",
+        )
+        self.assertEqual(
+            [item.name for item in directory.iterdir()],
+            [evidence.name],
+            "the temporary file must not survive publication",
+        )
+
+    def test_evidence_refuses_to_overwrite_on_this_host(self) -> None:
+        runner = load_runner()
+        directory = Path(tempfile.mkdtemp(prefix="eb11-evidence-clash-"))
+        self.addCleanup(shutil.rmtree, directory, True)
+        evidence = directory / "eb-11.json"
+        evidence.write_text("{}", encoding="utf-8")
+
+        with self.assertRaisesRegex(runner.AcceptanceFailed, "overwrite"):
+            runner.open_evidence_target(evidence)
+
+    def test_the_boundary_accepts_an_install_root_and_still_refuses_the_rest(
+        self,
+    ) -> None:
+        """The gate opens last, and only for the shape this host actually has.
+
+        `.app` is a macOS bundle suffix and `os.geteuid` does not exist here, so
+        both had to move behind the driver before this could stop refusing every
+        Windows host outright. Everything else the boundary asserts — an
+        interactive console, an absolute path, no reparse points, evidence that
+        cannot overwrite and sits outside the package — is platform-neutral and
+        stays exactly as it was.
+        """
+        runner = load_runner()
+        driver = runner.WindowsDeviceDriver()
+
+        driver.require_app_path(INSTALLED_APP)
+        with self.assertRaisesRegex(runner.AcceptanceFailed, "absolute"):
+            driver.require_app_path(Path("relative/path"))
+        with self.assertRaises(runner.AcceptanceFailed):
+            driver.require_app_path(INSTALLED_APP / "does-not-exist")
+        self.assertFalse(driver.running_as_administrator() is None)
+
     def test_a_vanished_window_is_reported_as_the_app_disappearing(self) -> None:
         runner = load_runner()
 

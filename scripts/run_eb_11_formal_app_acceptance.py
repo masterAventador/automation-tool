@@ -123,6 +123,7 @@ USER_DATA_DIRECTORY_PATTERN: Final = re.compile(
 CURRENT_DOUYIN_PROFILE_FILE: Final = "current-douyin-profile-v1"
 PROFILE_LEASE_FILE_PREFIX: Final = ".automation-tool-profile-lease-v1-"
 PRIVATE_DIRECTORY_MODE: Final = 0o700
+PRIVATE_EVIDENCE_MODE: Final = 0o600
 DEFAULT_BROWSER_PROFILE_ROOTS: Final = (
     Path.home() / "Library/Application Support/Google/Chrome",
     Path.home() / "Library/Application Support/Microsoft Edge",
@@ -330,14 +331,12 @@ class EvidencePublication:
             raise AcceptanceFailed("EB-11 evidence publication is already closed")
         try:
             require_evidence_parent_binding(self.target)
-            metadata = os.stat(
-                self.target.name,
-                dir_fd=self.target.parent_fd,
-                follow_symlinks=False,
+            metadata = device_driver().stat_in(
+                self.target.parent_fd, self.target.name
             )
             if (
                 not stat.S_ISREG(metadata.st_mode)
-                or stat.S_IMODE(metadata.st_mode) != 0o600
+                or not device_driver().require_published_evidence_mode(metadata)
                 or (metadata.st_dev, metadata.st_ino) != self.identity
             ):
                 raise AcceptanceFailed("EB-11 evidence identity changed before PASS")
@@ -446,6 +445,15 @@ class DeviceDriver:
     def read_process_open_paths(self, records: list[ProcessRecord]) -> list[Path] | None:
         raise self.unavailable("audit which files a process holds open")
 
+    def require_app_path(self, app: Path) -> Path:
+        """Accept only a path shaped like an installed package on this host."""
+        raise self.unavailable("recognise an installed package path")
+
+    def running_as_administrator(self) -> bool:
+        """Is this run elevated? EB-11 refuses to drive the App with more rights
+        than the person who will use it has."""
+        raise self.unavailable("check whether this run is elevated")
+
     def read_identity(self, app: Path) -> AppIdentity:
         raise self.unavailable("read the installed package's identity")
 
@@ -471,6 +479,45 @@ class DeviceDriver:
     def open_directory(self, path: Path) -> int:
         """A descriptor that keeps naming this directory after it is renamed."""
         raise self.unavailable("hold a directory open")
+
+    # Evidence is published relative to a directory this run holds open, so that
+    # replacing the directory between the check and the write is caught. POSIX
+    # expresses that with `dir_fd`; Windows has no such argument anywhere in
+    # `os`, so the four operations it needs are named here and each host does
+    # them its own way.
+    def stat_in(self, parent_fd: int, name: str) -> os.stat_result:
+        raise self.unavailable("inspect a file inside a held directory")
+
+    def open_in(self, parent_fd: int, name: str, flags: int, mode: int = 0o600) -> int:
+        raise self.unavailable("create a file inside a held directory")
+
+    def unlink_in(self, parent_fd: int, name: str) -> None:
+        raise self.unavailable("remove a file inside a held directory")
+
+    def replace_in(self, parent_fd: int, source: str, destination: str) -> None:
+        raise self.unavailable("rename a file inside a held directory")
+
+    def link_in(self, parent_fd: int, source: str, destination: str) -> None:
+        raise self.unavailable("publish a file inside a held directory")
+
+    def make_private_file(self, descriptor: int) -> None:
+        """Narrow a freshly created file to this user, if the host has a way to."""
+        raise self.unavailable("make a file private")
+
+    def sync_directory(self, parent_fd: int) -> None:
+        """Flush the directory entry itself, where that is a thing."""
+        raise self.unavailable("flush a directory")
+
+    def require_published_evidence_mode(self, metadata: os.stat_result) -> bool:
+        """Is this the private file this run created, by permission bits?
+
+        macOS asserts `0o600`. That assertion is part of a *substitution* check —
+        together with the inode identity it says "this is the file I wrote".
+        Windows has no such bits (`S_IMODE` is `0o777` for everything), and the
+        identity comparison beside it already discriminates far more sharply, so
+        that host answers `True` and leans on the identity.
+        """
+        raise self.unavailable("check evidence file permissions")
 
     def directory_entry_identities(self, directory_fd: int) -> list[tuple[int, int]]:
         """The identity of everything currently inside an open directory."""
@@ -573,6 +620,18 @@ class MacosDeviceDriver(DeviceDriver):
     def read_process_open_paths(self, records: list[ProcessRecord]) -> list[Path] | None:
         return macos_read_process_open_paths(records)
 
+    def require_app_path(self, app: Path) -> Path:
+        if not app.is_absolute() or app.suffix.lower() != ".app":
+            raise AcceptanceFailed("EB-11 App path must be one absolute .app")
+        require_no_symlink_components(app, include_leaf=True)
+        resolved = app.resolve(strict=True)
+        if not resolved.is_dir():
+            raise AcceptanceFailed("EB-11 App bundle is unavailable")
+        return resolved
+
+    def running_as_administrator(self) -> bool:
+        return os.geteuid() == 0
+
     def read_identity(self, app: Path) -> AppIdentity:
         return macos_read_identity(app)
 
@@ -595,6 +654,36 @@ class MacosDeviceDriver(DeviceDriver):
 
     def open_directory(self, path: Path) -> int:
         return open_absolute_directory(path)
+
+    def stat_in(self, parent_fd: int, name: str) -> os.stat_result:
+        return os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+
+    def open_in(self, parent_fd: int, name: str, flags: int, mode: int = 0o600) -> int:
+        return os.open(name, flags, mode, dir_fd=parent_fd)
+
+    def unlink_in(self, parent_fd: int, name: str) -> None:
+        os.unlink(name, dir_fd=parent_fd)
+
+    def replace_in(self, parent_fd: int, source: str, destination: str) -> None:
+        os.replace(source, destination, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+
+    def link_in(self, parent_fd: int, source: str, destination: str) -> None:
+        os.link(
+            source,
+            destination,
+            src_dir_fd=parent_fd,
+            dst_dir_fd=parent_fd,
+            follow_symlinks=False,
+        )
+
+    def make_private_file(self, descriptor: int) -> None:
+        os.fchmod(descriptor, PRIVATE_EVIDENCE_MODE)
+
+    def sync_directory(self, parent_fd: int) -> None:
+        os.fsync(parent_fd)
+
+    def require_published_evidence_mode(self, metadata: os.stat_result) -> bool:
+        return stat.S_IMODE(metadata.st_mode) == PRIVATE_EVIDENCE_MODE
 
     def directory_entry_identities(self, directory_fd: int) -> list[tuple[int, int]]:
         identities: list[tuple[int, int]] = []
@@ -1004,6 +1093,33 @@ class WindowsDeviceDriver(DeviceDriver):
         if result != "requested":
             raise AcceptanceFailed("EB-11 could not request normal App quit")
 
+    def require_app_path(self, app: Path) -> Path:
+        """An install root, not a bundle.
+
+        A Windows package is a directory holding the executable — there is no
+        `.app` suffix to demand, so what is demanded instead is that it holds
+        exactly one product executable, which `windows_product_binary` refuses
+        to guess at.
+        """
+        if not app.is_absolute():
+            raise AcceptanceFailed("EB-11 App path must be one absolute install directory")
+        require_no_symlink_components(app, include_leaf=True)
+        try:
+            resolved = app.resolve(strict=True)
+        except OSError as error:
+            # A path that is simply not there is a refusal with a reason, not a
+            # raw `FileNotFoundError` escaping from the first gate of the run.
+            raise AcceptanceFailed("EB-11 App install directory is unavailable") from error
+        if not resolved.is_dir():
+            raise AcceptanceFailed("EB-11 App install directory is unavailable")
+        windows_product_binary(resolved)
+        return resolved
+
+    def running_as_administrator(self) -> bool:
+        import ctypes
+
+        return bool(ctypes.WinDLL("shell32", use_last_error=True).IsUserAnAdmin())
+
     def read_identity(self, app: Path) -> AppIdentity:
         """The three facts `Info.plist` carries, found where Windows keeps them.
 
@@ -1092,6 +1208,54 @@ class WindowsDeviceDriver(DeviceDriver):
             return open_private_directory(path)
         except PrivateDirectoryRejected as error:
             raise AcceptanceFailed(f"EB-11 directory could not be held open: {error}") from error
+
+    def _held_directory(self, parent_fd: int) -> Path:
+        directory = self._named_path(parent_fd)
+        if directory is None:
+            raise AcceptanceFailed("EB-11 held directory no longer has a name")
+        return directory
+
+    def stat_in(self, parent_fd: int, name: str) -> os.stat_result:
+        return os.stat(self._held_directory(parent_fd) / name, follow_symlinks=False)
+
+    def open_in(self, parent_fd: int, name: str, flags: int, mode: int = 0o600) -> int:
+        return os.open(self._held_directory(parent_fd) / name, flags | os.O_BINARY, mode)
+
+    def unlink_in(self, parent_fd: int, name: str) -> None:
+        os.unlink(self._held_directory(parent_fd) / name)
+
+    def replace_in(self, parent_fd: int, source: str, destination: str) -> None:
+        directory = self._held_directory(parent_fd)
+        os.replace(directory / source, directory / destination)
+
+    def link_in(self, parent_fd: int, source: str, destination: str) -> None:
+        directory = self._held_directory(parent_fd)
+        os.link(directory / source, directory / destination)
+
+    def make_private_file(self, descriptor: int) -> None:
+        """Nothing to narrow: the file inherits the directory it was created in.
+
+        `os.fchmod` does not exist here, and the read-only attribute Windows
+        does expose is not a permission. The evidence directory is chosen by the
+        operator with `--evidence`, so who can read the file is decided by that
+        directory's ACL — stated rather than silently skipped.
+        """
+        del descriptor
+
+    def sync_directory(self, parent_fd: int) -> None:
+        """No counterpart, and none needed.
+
+        `fsync` on a directory handle is how POSIX forces a directory entry to
+        disk. NTFS journals metadata, and Windows offers no handle-level flush
+        for a directory; `FlushFileBuffers` on one fails.
+        """
+        del parent_fd
+
+    def require_published_evidence_mode(self, metadata: os.stat_result) -> bool:
+        # See the base class: the identity comparison next to this one carries
+        # the substitution check, and there are no permission bits to compare.
+        del metadata
+        return True
 
     def directory_entry_identities(self, directory_fd: int) -> list[tuple[int, int]]:
         """What is inside this open directory, by identity.
@@ -1341,22 +1505,14 @@ def require_device_boundary(arguments: Arguments) -> tuple[Path, Path]:
     # a host with a partial one now fails at the specific observation it cannot
     # make, which is where the next piece of work is.
     driver = device_driver()
-    if driver.platform != "darwin":
-        raise driver.unavailable("run the full formal-App lifecycle")
     if not arguments.interactive_device_acceptance:
         raise AcceptanceFailed("EB-11 requires --interactive-device-acceptance")
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise AcceptanceFailed("EB-11 requires an interactive console")
-    if os.geteuid() == 0:
-        raise AcceptanceFailed("EB-11 refuses to run as root")
+    if driver.running_as_administrator():
+        raise AcceptanceFailed("EB-11 refuses to run with administrator rights")
 
-    app = arguments.app
-    if not app.is_absolute() or app.suffix.lower() != ".app":
-        raise AcceptanceFailed("EB-11 App path must be one absolute .app")
-    require_no_symlink_components(app, include_leaf=True)
-    app = app.resolve(strict=True)
-    if not app.is_dir():
-        raise AcceptanceFailed("EB-11 App bundle is unavailable")
+    app = driver.require_app_path(arguments.app)
 
     evidence = arguments.evidence
     if not evidence.is_absolute() or evidence.suffix.lower() != ".json":
@@ -3011,12 +3167,12 @@ def open_evidence_target(path: Path) -> EvidenceTarget:
         raise AcceptanceFailed("EB-11 evidence target is invalid")
     resolved_path = path.parent.resolve(strict=True) / path.name
     try:
-        descriptor = open_absolute_directory(resolved_path.parent)
+        descriptor = device_driver().open_directory(resolved_path.parent)
     except OSError as error:
         raise AcceptanceFailed("EB-11 evidence directory is unavailable") from error
     try:
         try:
-            os.stat(resolved_path.name, dir_fd=descriptor, follow_symlinks=False)
+            device_driver().stat_in(descriptor, resolved_path.name)
         except FileNotFoundError:
             pass
         else:
@@ -3049,7 +3205,7 @@ def require_evidence_parent_binding(target: EvidenceTarget) -> None:
     if target.parent_fd < 0:
         raise AcceptanceFailed("EB-11 evidence directory handle is closed")
     try:
-        current_descriptor = open_absolute_directory(target.path.parent)
+        current_descriptor = device_driver().open_directory(target.path.parent)
     except OSError as error:
         raise AcceptanceFailed("EB-11 evidence directory path changed") from error
     try:
@@ -3068,14 +3224,11 @@ def unlink_owned_file(
 ) -> None:
     if identity is None:
         return
+    driver = device_driver()
     try:
-        metadata = os.stat(
-            name,
-            dir_fd=target.parent_fd,
-            follow_symlinks=False,
-        )
+        metadata = driver.stat_in(target.parent_fd, name)
         if stat.S_ISREG(metadata.st_mode) and (metadata.st_dev, metadata.st_ino) == identity:
-            os.unlink(name, dir_fd=target.parent_fd)
+            driver.unlink_in(target.parent_fd, name)
     except FileNotFoundError:
         return
 
@@ -3088,20 +3241,21 @@ def write_evidence(
         raise AcceptanceFailed("EB-11 evidence directory handle is closed")
     require_evidence_parent_binding(target)
     payload = (json.dumps(document, ensure_ascii=False, indent=2) + "\n").encode()
+    driver = device_driver()
     temporary = f".{target.name}.{secrets.token_hex(12)}.tmp"
     descriptor = -1
     identity: tuple[int, int] | None = None
     published = False
     try:
-        descriptor = os.open(
+        descriptor = driver.open_in(
+            target.parent_fd,
             temporary,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-            mode=0o600,
-            dir_fd=target.parent_fd,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | NO_FOLLOW_OPEN_FLAG,
+            PRIVATE_EVIDENCE_MODE,
         )
         opened = os.fstat(descriptor)
         identity = (opened.st_dev, opened.st_ino)
-        os.fchmod(descriptor, 0o600)
+        driver.make_private_file(descriptor)
         offset = 0
         while offset < len(payload):
             written = os.write(descriptor, payload[offset:])
@@ -3112,7 +3266,7 @@ def write_evidence(
         completed = os.fstat(descriptor)
         if (
             not stat.S_ISREG(completed.st_mode)
-            or stat.S_IMODE(completed.st_mode) != 0o600
+            or not driver.require_published_evidence_mode(completed)
             or completed.st_size != len(payload)
             or (completed.st_dev, completed.st_ino) != identity
         ):
@@ -3121,28 +3275,18 @@ def write_evidence(
         descriptor = -1
 
         require_evidence_parent_binding(target)
-        os.link(
-            temporary,
-            target.name,
-            src_dir_fd=target.parent_fd,
-            dst_dir_fd=target.parent_fd,
-            follow_symlinks=False,
-        )
+        driver.link_in(target.parent_fd, temporary, target.name)
         published = True
-        published_metadata = os.stat(
-            target.name,
-            dir_fd=target.parent_fd,
-            follow_symlinks=False,
-        )
+        published_metadata = driver.stat_in(target.parent_fd, target.name)
         if (
             not stat.S_ISREG(published_metadata.st_mode)
-            or stat.S_IMODE(published_metadata.st_mode) != 0o600
+            or not driver.require_published_evidence_mode(published_metadata)
             or published_metadata.st_size != len(payload)
             or (published_metadata.st_dev, published_metadata.st_ino) != identity
         ):
             raise AcceptanceFailed("EB-11 published evidence verification failed")
-        os.unlink(temporary, dir_fd=target.parent_fd)
-        os.fsync(target.parent_fd)
+        driver.unlink_in(target.parent_fd, temporary)
+        driver.sync_directory(target.parent_fd)
         require_evidence_parent_binding(target)
         return identity
     except BaseException:
