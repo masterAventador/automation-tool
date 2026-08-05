@@ -11,6 +11,14 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+# The file a Windows package carries its release identity in, at the install
+# root. macOS keeps the same facts under the Developer ID seal in `Info.plist`
+# and needs no name; Windows has no plist, so this name is written by the
+# release builder, declared by the bundler configuration and read back by the
+# EB-11 runner. Three modules, one definition — the three of them disagreeing
+# is exactly the shape where the package looks complete and the runner cannot
+# find the file.
+PACKAGED_IDENTITY_NAME = "release-identity.v1.json"
 POST_ACCEPTANCE_LEDGER_PREFIX = b"docs/development/"
 POST_ACCEPTANCE_LEDGER_PATHS = frozenset(
     {

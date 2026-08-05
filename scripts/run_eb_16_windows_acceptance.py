@@ -192,7 +192,12 @@ def seal_windows_payload(payload: Path) -> None:
     announce(f"Payload assembled at {payload} (no Authenticode identity on this host)")
 
 
-def write_release_configuration(directory: Path, executor: Path, payload: Path) -> Path:
+def write_release_configuration(
+    directory: Path,
+    executor: Path,
+    payload: Path,
+    release_identity: Path | None = None,
+) -> Path:
     """Declare every resource tree the NSIS bundler ships.
 
     Unlike macOS, the embedded browser *is* declared here: the Windows target
@@ -207,12 +212,18 @@ def write_release_configuration(directory: Path, executor: Path, payload: Path) 
     code resolves them from the installed resource directory, and a package
     that omits them fails on the user's machine while every acceptance run
     stays green.
+
+    `release_identity` is the one file a distributable Windows package carries
+    beside those trees. This acceptance builds a candidate package rather than
+    a release, so it has no identity to declare and passes none; the release
+    path passes its own.
     """
     return write_windows_release_configuration(
         directory=directory,
         executor=executor,
         payload=payload,
         name="tauri.eb-16-windows.generated.json",
+        release_identity=release_identity,
     )
 
 

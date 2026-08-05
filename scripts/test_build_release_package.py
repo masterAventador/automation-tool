@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import json
 import os
 import plistlib
 import subprocess
@@ -616,6 +617,44 @@ class WindowsReleaseTests(unittest.TestCase):
         )
 
         self.assertEqual("customer-demo-xuanbai", arguments.build_id)
+
+    def test_a_configuration_that_would_ship_no_release_identity_is_refused(
+        self,
+    ) -> None:
+        """Writing the identity and shipping it are two different things.
+
+        The 2026-08-05 Windows release wrote `release-identity.v1.json` into the
+        payload, announced it, passed every gate and produced an installer whose
+        install root did not contain it — because `bundle.resources` is derived
+        from the resource contract and the identity is not a resource. The EB-11
+        runner reads that file out of the *installed* package, so the whole
+        provenance claim was unreachable while every step reported success.
+
+        This is the cheapest place to catch it: the configuration is written
+        minutes before `makensis` runs, and it is the last artifact that still
+        says what the installer will contain.
+        """
+        from release_identity import PACKAGED_IDENTITY_NAME
+
+        with tempfile.TemporaryDirectory() as temporary:
+            configuration = Path(temporary) / "tauri.json"
+            resources = {"../../build/payload/embedded-browser/": "embedded-browser/"}
+            configuration.write_text(
+                json.dumps({"bundle": {"resources": dict(resources)}}),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(build_release_package.ReleaseFailed):
+                build_release_package.require_declared_release_identity(configuration)
+
+            resources["../../build/payload/release-identity.v1.json"] = (
+                PACKAGED_IDENTITY_NAME
+            )
+            configuration.write_text(
+                json.dumps({"bundle": {"resources": resources}}), encoding="utf-8"
+            )
+
+            build_release_package.require_declared_release_identity(configuration)
 
     def test_the_windows_platform_has_a_release_builder(self) -> None:
         self.assertTrue(

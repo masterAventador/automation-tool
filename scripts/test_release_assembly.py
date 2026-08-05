@@ -17,6 +17,7 @@ path, and reaching a distributable artifact has to require a verified browser.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -546,6 +547,70 @@ class ReleaseConfigurationTests(unittest.TestCase):
         self.assertIn('RMDir "$INSTDIR\\embedded-browser\\chrome-win64"', source)
         self.assertIn('RMDir "$INSTDIR\\embedded-browser"', source)
         self.assertIn('RMDir "$INSTDIR"', source)
+
+    def test_the_windows_configuration_ships_the_release_identity(self) -> None:
+        """A written identity that the bundler never carries proves nothing.
+
+        `build_release_package.py --platform windows` writes
+        `release-identity.v1.json` into the payload, and the EB-11 runner reads
+        it back out of the *installed* package to prove which source tree the
+        App came from. Between those two, nothing declared it: `bundle.resources`
+        is derived from the resource contract, the identity is not a resource,
+        so a real release produced the file, announced it, and shipped a package
+        without it. Measured on the installed package built 2026-08-05 — the
+        install root held six resource directories and no identity.
+        """
+        from release_configuration import write_windows_release_configuration
+        from release_identity import PACKAGED_IDENTITY_NAME
+
+        identity = self.payload / PACKAGED_IDENTITY_NAME
+        identity.write_text("{}", encoding="utf-8")
+
+        written = write_windows_release_configuration(
+            directory=self.base,
+            executor=self.executor,
+            payload=self.payload,
+            name="tauri.test-windows-identity.json",
+            release_identity=identity,
+        )
+
+        resources = json.loads(written.read_text(encoding="utf-8"))["bundle"]["resources"]
+        # No trailing slash: tauri-utils treats `"file": "name/"` as "write the
+        # file *as* `name`" (`resources.rs` says so in its own TODO), while a
+        # bare name lands it at the resource root, which on Windows is the
+        # install root the runner reads.
+        declared = [
+            source
+            for source, destination in resources.items()
+            if destination == PACKAGED_IDENTITY_NAME
+        ]
+        self.assertEqual(len(declared), 1, resources)
+        # Tauri resolves resource sources against its own root, so the recorded
+        # relative path has to arrive back at the file that was written.
+        self.assertEqual(
+            Path(
+                os.path.normpath(ROOT / "frontend/src-tauri" / declared[0])
+            ),
+            identity,
+        )
+
+    def test_a_release_identity_under_another_name_is_refused(self) -> None:
+        from release_configuration import (
+            ReleaseConfigurationRejected,
+            write_windows_release_configuration,
+        )
+
+        stray = self.payload / "identity.json"
+        stray.write_text("{}", encoding="utf-8")
+
+        with self.assertRaises(ReleaseConfigurationRejected):
+            write_windows_release_configuration(
+                directory=self.base,
+                executor=self.executor,
+                payload=self.payload,
+                name="tauri.test-windows-stray.json",
+                release_identity=stray,
+            )
 
     def test_a_missing_bundler_source_is_refused_rather_than_dropped(self) -> None:
         from release_configuration import (

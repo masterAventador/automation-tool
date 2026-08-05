@@ -108,6 +108,7 @@ from release_configuration import (  # noqa: E402
     write_macos_release_configuration,
 )
 from release_identity import (  # noqa: E402
+    PACKAGED_IDENTITY_NAME,
     ReleaseIdentityRejected,
     SourceFacts,
     materialize_repository_snapshot,
@@ -130,9 +131,6 @@ DEFAULT_WORK_DIRECTORY = REPOSITORY_ROOT / ".local/release"
 RELEASE_CONFIGURATION_NAME = "tauri.release.generated.json"
 EFFECTIVE_CONFIGURATION_NAME = "tauri.release.effective.json"
 RELEASE_IDENTITY_KEY = "AutomationToolReleaseIdentity"
-# The Windows carrier for the same facts. A file rather than a plist key,
-# because an NSIS package has no plist; see `embed_windows_release_identity`.
-RELEASE_IDENTITY_NAME = "release-identity.v1.json"
 RELEASE_IDENTITY_SCHEMA = "automation-tool.release-identity.v1"
 SOURCE_SNAPSHOT_ENVIRONMENT = "AUTOMATION_TOOL_RELEASE_SOURCE_SNAPSHOT"
 SOURCE_SNAPSHOT_IDENTITY_ENVIRONMENT = "AUTOMATION_TOOL_RELEASE_SOURCE_IDENTITY"
@@ -961,7 +959,7 @@ def embed_windows_release_identity(
     before the bundler runs, so the installer and its payload are signed
     together and nothing here has to change to gain that.
     """
-    identity_path = payload / RELEASE_IDENTITY_NAME
+    identity_path = payload / PACKAGED_IDENTITY_NAME
     if identity_path.exists() or identity_path.is_symlink():
         raise ReleaseFailed("the release payload identity slot is occupied")
     payload.mkdir(parents=True, exist_ok=True)
@@ -984,6 +982,36 @@ def embed_windows_release_identity(
         encoding="utf-8",
     )
     return identity_path
+
+
+def require_declared_release_identity(configuration: Path) -> None:
+    """Refuse to build an installer that would leave the identity behind.
+
+    `embed_windows_release_identity` writes the file into the payload; the
+    bundler only carries what `bundle.resources` names, and that map is derived
+    from the resource contract, which the identity is deliberately not part of.
+    Nothing connected the two, so a real release wrote the file, said so, and
+    shipped an install root without it — while the EB-11 runner's only way to
+    learn which source tree the App came from is to read it back from there.
+
+    Checked against the configuration rather than the installer because an NSIS
+    package cannot be reopened, and checked before `makensis` rather than after
+    because this is ten minutes ahead of the artifact.
+    """
+    try:
+        declared = json.loads(configuration.read_text(encoding="utf-8"))["bundle"][
+            "resources"
+        ]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+        raise ReleaseFailed(
+            f"the release configuration declares no resources: {configuration}"
+        ) from error
+    if PACKAGED_IDENTITY_NAME not in set(declared.values()):
+        raise ReleaseFailed(
+            "the release configuration would ship an installer without "
+            f"{PACKAGED_IDENTITY_NAME}, so the package could not prove which "
+            "source tree it was built from"
+        )
 
 
 def build_windows_release(
@@ -1088,7 +1116,10 @@ def build_windows_release(
     require_packaged_video_runtime(application=payload, platform="windows")
     require_packaged_motion_catalog(application=payload, platform="windows")
 
-    configuration = write_release_configuration(build_directory, executor, payload)
+    configuration = write_release_configuration(
+        build_directory, executor, payload, identity_path
+    )
+    require_declared_release_identity(configuration)
     effective = windows_effective_configuration(configuration, build_directory)
     environment = release_environment(
         cargo_target,

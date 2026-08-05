@@ -36,6 +36,7 @@ if os.fspath(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(SCRIPT_ROOT))
 
 from release_identity import (  # noqa: E402
+    PACKAGED_IDENTITY_NAME,
     SourceFacts,
     repository_source_facts,
     source_commit_is_ancestor,
@@ -72,9 +73,6 @@ SIGNING_CONTRACT: Final = (
 )
 RELEASE_IDENTITY_KEY: Final = "AutomationToolReleaseIdentity"
 RELEASE_IDENTITY_SCHEMA: Final = "automation-tool.release-identity.v1"
-# The Windows carrier for the same seven fields. An NSIS package has no
-# `Info.plist`; `build_release_package.py` writes this into the payload.
-RELEASE_IDENTITY_NAME: Final = "release-identity.v1.json"
 OBSERVED_AT_PATTERN: Final = re.compile(
     r"最近检查[：:]\s*("
     r"\d{4}(?:[/-]\d{1,2}[/-]\d{1,2}|年\d{1,2}月\d{1,2}日)"
@@ -405,7 +403,7 @@ class WindowsDeviceDriver(DeviceDriver):
     platform = "win32"
 
     def read_release_identity(self, app: Path) -> SignedReleaseIdentity:
-        identity_path = app / RELEASE_IDENTITY_NAME
+        identity_path = app / PACKAGED_IDENTITY_NAME
         try:
             record = json.loads(identity_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
