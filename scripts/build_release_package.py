@@ -274,7 +274,9 @@ def stage_browser_distribution(
     # a different file than the operator named (REVIEW-2026-08-06 L6).
     from embedded_browser_staging_cache import locked_archive
 
-    if archive != locked_archive(target_id):
+    # Resolve both sides: pc_16/le_22 hand this a `.resolve()`d default path,
+    # and a symlinked cache root must not make the same file read as foreign.
+    if archive.resolve() != locked_archive(target_id).resolve():
         raise ReleaseFailed(
             "custom --archive paths are no longer honoured: the staging cache "
             f"reads the locked archive for {target_id}; drop the flag or place "

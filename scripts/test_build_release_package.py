@@ -64,6 +64,46 @@ class PexelsKeyAssemblyGateTests(unittest.TestCase):
             ):
                 build_release_package.require_compiled_pexels_key(hollow, key)
 
+    def test_the_locked_archive_check_tolerates_resolved_spellings(self) -> None:
+        """pc_16/le_22 pass DEFAULT_ARCHIVES[...].resolve(strict=True).
+
+        The foreign-archive refusal compares against `locked_archive()`, and a
+        symlinked cache root (or just a resolved vs unresolved spelling of the
+        same file) must not read as "a different archive". Both spellings of
+        the locked path must pass; a genuinely different file must not.
+        """
+        from embedded_browser_staging_cache import LOCKED_ARCHIVES, locked_archive
+
+        target_id = sorted(LOCKED_ARCHIVES)[0]
+        locked = locked_archive(target_id)
+
+        # A genuinely different file is refused by the gate itself.
+        with tempfile.TemporaryDirectory(prefix="archive-gate-") as temporary:
+            foreign = Path(temporary) / "somewhere-else.zip"
+            foreign.write_bytes(b"not the locked archive")
+            with self.assertRaisesRegex(
+                build_release_package.ReleaseFailed, "no longer honoured"
+            ):
+                build_release_package.stage_browser_distribution(
+                    target_id, foreign, Path(temporary) / "out", mock.Mock()
+                )
+
+        if locked.is_file():
+            self.skipTest("locked archive present; the resolved-spelling half "
+                          "would stage 171 MB here")
+        # Same file, resolved spelling: must pass the gate. With the archive
+        # absent on this machine, passing the gate surfaces as the *next*
+        # check's error ("not downloaded yet") — never the refusal.
+        with self.assertRaisesRegex(
+            build_release_package.ReleaseFailed, "not downloaded yet"
+        ):
+            build_release_package.stage_browser_distribution(
+                target_id,
+                locked.resolve(),
+                Path(tempfile.gettempdir()) / "never-used-out",
+                mock.Mock(),
+            )
+
     def test_the_readback_is_wired_into_the_release_path(self) -> None:
         # A gate that exists but is never called is the emptiest kind of green.
         source = (ROOT / "scripts/build_release_package.py").read_text(encoding="utf-8")
