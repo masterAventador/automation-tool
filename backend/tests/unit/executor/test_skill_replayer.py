@@ -14,6 +14,8 @@ records the side effects it was asked to perform.
 from __future__ import annotations
 
 import pytest
+from tests.unit.executor.test_skill_trajectory_cleaner import raw
+
 from automation_tool.executor.automation_skill import parse_automation_skill
 from automation_tool.executor.skill_replayer import (
     ReplayFailed,
@@ -21,7 +23,6 @@ from automation_tool.executor.skill_replayer import (
     replay_skill,
 )
 from automation_tool.executor.skill_trajectory_cleaner import clean_trajectory
-from tests.unit.executor.test_skill_trajectory_cleaner import raw
 
 
 def skill():
@@ -223,3 +224,47 @@ class TestSafetyProperties:
         # 合规技能的报数本身也要是准的：恰好一次外部动作（发布）。
         outcome = replay_skill(skill(), FakePage(), parameters={"caption": "x"})
         assert outcome.external_side_effects == 1
+
+
+class RaisingPage(FakePage):
+    """A page whose driver dies mid-action — what a real click timeout does."""
+
+    def __init__(self, *, raising: set[str], **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.raising = raising
+
+    def act(self, kind: str, handle: object, value: str | None) -> None:
+        _role, name = handle  # type: ignore[misc]
+        if name in self.raising:
+            raise RuntimeError("driver timed out mid-action")
+        super().act(kind, handle, value)
+
+
+class TestDriverExceptions:
+    """真实适配层接入后，act() 会抛原生驱动异常（点击超时、页面被关）。
+
+    SA 真实浏览器验收（2026-08-06）发现的缺口：这些异常裸穿 replay_skill，
+    既不带 checkpoint 也不带 dispatched——上层若把外部步的点击超时按
+    「可重试」处理，就是重复投稿的形状（SA#1 的变体）。
+    """
+
+    def test_an_act_exception_on_the_external_step_is_outcome_uncertain(self) -> None:
+        page = RaisingPage(raising={"发布"})
+        with pytest.raises(ReplayFailed) as raised:
+            replay_skill(skill(), page, parameters={"caption": "x"})
+
+        # The click was *attempted*: whether the platform saw it is unknowable,
+        # so the failure must be outcome-uncertain, never safely resumable.
+        assert raised.value.dispatched is True
+        assert raised.value.failed_index == 3
+        assert raised.value.checkpoint_index == 2
+
+    def test_an_act_exception_on_an_internal_step_stays_resumable(self) -> None:
+        page = RaisingPage(raising={"上传视频"})
+        with pytest.raises(ReplayFailed) as raised:
+            replay_skill(skill(), page, parameters={"caption": "x"})
+
+        assert raised.value.dispatched is False
+        assert raised.value.failed_index == 1
+        assert raised.value.checkpoint_index == 1
+        assert page.side_effects == []

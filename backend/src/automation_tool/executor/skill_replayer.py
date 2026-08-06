@@ -160,10 +160,18 @@ def replay_skill(
             external_performed += 1
             if external_performed > skill.max_external_steps:
                 fail("replay would exceed the external side-effect boundary")
-        page.act(step.action.kind, handle, value)
-        if step.external:
-            # From here the outcome is uncertain until postconditions confirm it.
+            # The *attempt* is what makes the outcome uncertain: a driver that
+            # dies mid-click cannot say whether the platform saw it, so the
+            # flag must flip before the action, not after it returns.
             dispatched = True
+        try:
+            page.act(step.action.kind, handle, value)
+        except Exception as error:
+            # A real page adapter raises native driver errors (click timeout,
+            # page torn down). Escaping raw would strip the checkpoint and
+            # dispatched semantics SA-05 decides by — an external click timeout
+            # classified "resumable" is the duplicate-post shape again.
+            fail(f"step {step.index} action failed: {error}")
 
         for condition in step.postconditions:
             if not _condition_holds(page, condition):
