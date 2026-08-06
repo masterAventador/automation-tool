@@ -91,6 +91,18 @@ class TestCleaning:
         assert click_points[0]["x"] == 640
         assert click_points[0]["y"] == 720
 
+    def test_the_boundary_is_the_skills_own_external_count(self) -> None:
+        # REVIEW-2026-08-06 顺手记：boundary 恒等于契约全局上限时，每技能
+        # 的边界不携带任何信息——0 外部步的技能也声称自己可以做 1 次。
+        cleaned = clean_trajectory(raw())
+        assert cleaned["sideEffectBoundary"]["maxExternalSteps"] == 1
+
+        browse_only = raw()
+        for action in browse_only["actions"]:
+            action["external"] = False
+        zero = clean_trajectory(browse_only)
+        assert zero["sideEffectBoundary"]["maxExternalSteps"] == 0
+
     def test_checkpoints_mark_the_safe_point_before_each_external_step(self) -> None:
         """REVIEW-2026-08-06 SA#9：检查点曾恒为第 1 步，恢复恒为全量重跑。
 

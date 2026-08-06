@@ -268,6 +268,18 @@ def stage_browser_distribution(
     target_id: str, archive: Path, output: Path, identity: SigningIdentity
 ) -> None:
     announce(f"Staging the digest-locked {target_id} Chromium from {archive.name}")
+    # The staging below comes from the machine cache's locked archive, full
+    # stop. An `--archive` naming anything else stopped having an effect when
+    # staging moved into the shared cache — refusing it beats silently using
+    # a different file than the operator named (REVIEW-2026-08-06 L6).
+    from embedded_browser_staging_cache import locked_archive
+
+    if archive != locked_archive(target_id):
+        raise ReleaseFailed(
+            "custom --archive paths are no longer honoured: the staging cache "
+            f"reads the locked archive for {target_id}; drop the flag or place "
+            "the file at the locked location"
+        )
     if not archive.is_file():
         raise ReleaseFailed(f"locked archive is not downloaded yet: {archive}")
     # The unpacked tree comes from the machine-wide cache the desktop builds

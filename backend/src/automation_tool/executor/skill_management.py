@@ -113,9 +113,8 @@ def build_management_view(
     return view
 
 
-__all__ = ["SkillVersionKey", "build_management_view"]
-
-
 # The management view is a Callable-bearing projection; typing helper so callers
 # know the shape of `applicableVersionFor` without importing the dict soup.
 ApplicableVersionFor = Callable[[PageContext], "int | None"]
+
+__all__ = ["ApplicableVersionFor", "SkillVersionKey", "build_management_view"]

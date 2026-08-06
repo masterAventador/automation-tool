@@ -31,7 +31,6 @@ from automation_tool.executor.automation_skill import (
     contract,
 )
 
-_MAX_ACTIONS: Final = 80
 
 
 class TrajectoryRejected(ValueError):
@@ -133,7 +132,7 @@ def clean_trajectory(raw: object, *, with_metadata: bool = False) -> dict[str, o
     if not isinstance(viewport, dict):
         _reject("a trajectory must carry a viewport")
     actions = raw.get("actions")
-    if not isinstance(actions, list) or not 1 <= len(actions) <= _MAX_ACTIONS:
+    if not isinstance(actions, list) or not 1 <= len(actions) <= int(limits["maxSteps"]):
         _reject("a trajectory must carry a bounded, non-empty action list")
 
     entry_path = _path_of(raw.get("entryUrl"), domain, "entry url")
@@ -245,7 +244,10 @@ def clean_trajectory(raw: object, *, with_metadata: bool = False) -> dict[str, o
         "language": raw["language"],
         "viewport": {"width": viewport.get("width"), "height": viewport.get("height")},
         "riskLevel": "high" if external_count else "medium",
-        "sideEffectBoundary": {"maxExternalSteps": max_external},
+        # The skill's own external count, not the contract's global ceiling:
+        # a boundary that always equals the ceiling carries no information
+        # about this skill (REVIEW-2026-08-06 side-note).
+        "sideEffectBoundary": {"maxExternalSteps": external_count},
         "steps": steps,
         "successEvidence": success_evidence,
     }

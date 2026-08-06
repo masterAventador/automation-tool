@@ -612,10 +612,19 @@ test("the staged browser this machine actually has is the one these tests find",
     return;
   }
 
-  assert.equal(
-    locateRenderBrowser(),
-    staged,
-    "the machine cache holds a staged Chromium that this suite cannot see, so "
-      + "every render test above is skipping while looking green",
-  );
+  // This guard is about machine-cache visibility, and the environment
+  // override outranks the cache by design — leaving it set here made the
+  // guard falsely red on any host that exports it (REVIEW-2026-08-06 L5).
+  const override = process.env.AUTOMATION_TOOL_RENDER_BROWSER;
+  delete process.env.AUTOMATION_TOOL_RENDER_BROWSER;
+  try {
+    assert.equal(
+      locateRenderBrowser(),
+      staged,
+      "the machine cache holds a staged Chromium that this suite cannot see, so "
+        + "every render test above is skipping while looking green",
+    );
+  } finally {
+    if (override !== undefined) process.env.AUTOMATION_TOOL_RENDER_BROWSER = override;
+  }
 });

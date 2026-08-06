@@ -20,7 +20,6 @@ from __future__ import annotations
 import json
 import re
 import threading
-import types
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -133,12 +132,6 @@ def parse_montage_request(value: object) -> MontageRequest:
         stroke_color=stroke_color,
         stroke_width_px=float(stroke_width),
     )
-
-
-def _upstream_aspect(aspect: str) -> str:
-    # Upstream `VideoAspect` values, resolved by name to avoid importing the
-    # upstream package before the private runtime is prepared.
-    return {"9:16": "9:16", "16:9": "16:9", "1:1": "1:1"}[aspect]
 
 
 class MontageThread(threading.Thread):
@@ -266,7 +259,9 @@ def start_montage(
             params = params_model(
                 video_subject=request.subject,
                 video_script=request.script or "",
-                video_aspect=_upstream_aspect(request.aspect),
+                # ASPECTS already validated membership; upstream VideoAspect
+                # uses the same literal strings.
+                video_aspect=request.aspect,
                 video_clip_duration=request.clip_duration_seconds,
                 video_count=1,
                 video_source="pexels",
@@ -311,8 +306,3 @@ __all__ = [
     "parse_montage_request",
     "start_montage",
 ]
-
-
-# `types` is imported for parity with webui_runtime's module-injection helpers
-# used through `_preload_private_config`; keep the linter honest about it.
-_ = types

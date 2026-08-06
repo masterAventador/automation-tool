@@ -2841,12 +2841,13 @@ struct VideoWorkerBootstrapDocument<'a> {
     local_session_token: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     media_tools: Option<VideoWorkerMediaToolsBootstrap<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    montage_request: Option<&'a VideoWorkerMontageRequest>,
     /// Always serialized (null when the build carries no key): both worker
     /// readers verify the exact document shape, so an optional field would
     /// make "packaged with a key" and "packaged without" two different
-    /// protocols.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    montage_request: Option<&'a VideoWorkerMontageRequest>,
+    /// protocols. (REVIEW-2026-08-06 L1: this comment had drifted onto the
+    /// field above — which skips serialization, the exact opposite claim.)
     pexels_api_key: Option<&'static str>,
     protocol_version: &'static str,
     render_browser: Option<VideoWorkerRenderBrowserBootstrap<'a>>,

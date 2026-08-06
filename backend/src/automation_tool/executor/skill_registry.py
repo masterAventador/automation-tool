@@ -110,7 +110,8 @@ def sign_candidate(
     if len(seed) != 32:
         _reject("the signing seed must be 32 bytes")
     private_key = Ed25519PrivateKey.from_private_bytes(seed)
-    assert isinstance(candidate, dict)
+    if not isinstance(candidate, dict):  # _schema_ok guarantees this; -O safe
+        _reject("the candidate is not a document")
     payload = _SIGNATURE_DOMAIN + _canonical(
         {"skill": candidate, "approval": review}
     )
@@ -211,6 +212,12 @@ class SkillRegistry:
             _reject("no such published skill version")
 
     def live(self, skill_id: str) -> SignedSkill:
+        """The newest published version — a registry fact, not a routing one.
+
+        This deliberately knows nothing about disabled/rolled-back state:
+        picking the version to *run* is SA-06's job (`route_skill`), which
+        does honour rollback. Routing through `live()` would bypass it.
+        """
         versions = [
             record for (identifier, _), record in self._records.items() if identifier == skill_id
         ]
