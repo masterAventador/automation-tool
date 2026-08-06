@@ -198,9 +198,19 @@ def _action_payload(
 
 
 def _success_evidence_holds(skill: AutomationSkill, page: ReplayPage) -> bool:
+    # Multiple url_matches entries are alternative exits and ANY one proves
+    # the outcome: current_path() has a single value, so all-of semantics made
+    # two different patterns mutually exclusive — such a skill could never
+    # replay, and because publishing requires a passing replay, never publish
+    # (REVIEW-2026-08-06 SA#11). Element evidence stays all-of.
+    url_patterns = [
+        evidence.pattern
+        for evidence in skill.success_evidence
+        if evidence.kind == "url_matches"
+    ]
+    if url_patterns and page.current_path() not in url_patterns:
+        return False
     for evidence in skill.success_evidence:
-        if evidence.kind == "url_matches" and page.current_path() != evidence.pattern:
-            return False
         if evidence.kind == "element_visible" and not page.holds(
             "element_visible", role=evidence.role, name=evidence.name
         ):

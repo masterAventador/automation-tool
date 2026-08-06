@@ -78,9 +78,16 @@ def skill_with_a_step_after_the_external_one():
 class FakePage:
     """A scripted page: every anchor is findable and every condition holds."""
 
-    def __init__(self, *, missing: set[str] | None = None, failing: set[str] | None = None):
+    def __init__(
+        self,
+        *,
+        missing: set[str] | None = None,
+        failing: set[str] | None = None,
+        path: str = "/creator-micro/content/manage",
+    ):
         self.missing = missing or set()
         self.failing = failing or set()
+        self.path = path
         self.side_effects: list[tuple[str, str]] = []
         self.visited: list[str] = []
 
@@ -96,7 +103,7 @@ class FakePage:
         self.side_effects.append((kind, name, value))
 
     def current_path(self) -> str:
-        return "/creator-micro/content/manage"
+        return self.path
 
 
 class TestDeterministicReplay:
@@ -137,6 +144,37 @@ class TestSafetyProperties:
         page = FakePage(failing={"/creator-micro/content/manage"})
         with pytest.raises(ReplayFailed, match="postcondition"):
             replay_skill(skill(), page, parameters={"caption": "x"})
+
+    def test_either_of_two_success_urls_is_enough(self) -> None:
+        """REVIEW-2026-08-06 SA#11：多条成功 URL 的语义是「任一成立」。
+
+        current_path 只有一个值，逐条相等的旧语义让两条不同 pattern 必然
+        互斥——这样的技能永远回放不过，又因为发布门要求回放通过，它也
+        永远发布不了。
+        """
+        document = raw()
+        document["successEvidence"] = [
+            {
+                "kind": "url_matches",
+                "url": "https://creator.douyin.com/creator-micro/content/manage",
+            },
+            {
+                "kind": "url_matches",
+                "url": "https://creator.douyin.com/creator-micro/content/published",
+            },
+        ]
+        two_exits = parse_automation_skill(clean_trajectory(document))
+
+        outcome = replay_skill(two_exits, FakePage(), parameters={"caption": "x"})
+        assert outcome.passed is True
+
+        # 否定端点：两条都不匹配仍然必须失败——「任一」不是「永真」。
+        with pytest.raises(ReplayFailed, match="success evidence"):
+            replay_skill(
+                two_exits,
+                FakePage(path="/somewhere/else"),
+                parameters={"caption": "x"},
+            )
 
     def test_press_key_and_scroll_payloads_reach_the_page(self) -> None:
         page = FakePage()
