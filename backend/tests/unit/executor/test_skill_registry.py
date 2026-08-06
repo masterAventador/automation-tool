@@ -21,9 +21,17 @@ from automation_tool.executor.skill_registry import (
 )
 from automation_tool.executor.skill_replayer import ReplayOutcome
 from automation_tool.executor.skill_trajectory_cleaner import clean_trajectory
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from tests.unit.executor.test_skill_trajectory_cleaner import raw
 
 _SEED = bytes(range(32))
+# The pinned publisher key: what a deployment provisions out of band. Records
+# are verified against THIS, never against whatever key they carry themselves.
+_PUBLIC_KEY = Ed25519PrivateKey.from_private_bytes(_SEED).public_key().public_bytes_raw()
+
+
+def _registry() -> SkillRegistry:
+    return SkillRegistry(trusted_public_key=_PUBLIC_KEY)
 
 
 def _candidate() -> dict[str, object]:
@@ -46,11 +54,44 @@ def _sign(candidate: dict[str, object]) -> dict[str, object]:
     )
 
 
+class TestTrustAnchor:
+    """REVIEW-2026-08-06 SA#6: a signature without a pinned key is a checksum.
+
+    The old verifier read the public key out of the record it was verifying —
+    measured in review: a skill signed with a fresh os.urandom key passed
+    verification and entered the registry. Same lesson the repository already
+    encoded in Ed25519ActionAuthorizationVerifier: verify against a
+    provisioned key, never against material the attacker controls.
+    """
+
+    def test_a_record_signed_with_a_foreign_key_is_refused(self) -> None:
+        registry = _registry()
+        candidate = _candidate()
+        foreign = sign_candidate(
+            candidate, approval=_approval(), seed=b"\x99" * 32, replay=_replay(candidate)
+        )
+        with pytest.raises(SkillPublicationRejected, match="pinned"):
+            registry.publish(foreign)
+
+    def test_verification_is_against_the_pinned_key_not_the_records_own(self) -> None:
+        signed = _sign(_candidate())
+
+        record = verify_signed_skill(signed, trusted_public_key=_PUBLIC_KEY)
+        assert record.public_key == _PUBLIC_KEY
+
+        with pytest.raises(SkillPublicationRejected, match="pinned"):
+            verify_signed_skill(signed, trusted_public_key=b"\x01" * 32)
+
+    def test_a_registry_needs_a_plausible_anchor_to_exist_at_all(self) -> None:
+        with pytest.raises(SkillPublicationRejected, match="pinned"):
+            SkillRegistry(trusted_public_key=b"short")
+
+
 class TestSignAndVerify:
     def test_a_reviewed_candidate_signs_and_verifies(self) -> None:
         signed = _sign(_candidate())
 
-        record = verify_signed_skill(signed)
+        record = verify_signed_skill(signed, trusted_public_key=_PUBLIC_KEY)
         assert record.version == 1
         assert record.skill.platform == "douyin"
         assert record.approval["decision"] == "approved"
@@ -61,7 +102,7 @@ class TestSignAndVerify:
         tampered["skill"]["domain"] = "evil.example.com"
 
         with pytest.raises(SkillPublicationRejected, match="signature"):
-            verify_signed_skill(tampered)
+            verify_signed_skill(tampered, trusted_public_key=_PUBLIC_KEY)
 
     def test_signing_without_an_approval_is_refused(self) -> None:
         candidate = _candidate()
@@ -98,7 +139,7 @@ class TestSignAndVerify:
 
 class TestImmutableRegistry:
     def test_first_publish_creates_version_one(self) -> None:
-        registry = SkillRegistry()
+        registry = _registry()
         signed = _sign(_candidate())
 
         stored = registry.publish(signed)
@@ -107,7 +148,7 @@ class TestImmutableRegistry:
         assert registry.live(stored.skill.skill_id).version == 1
 
     def test_publishing_the_same_version_twice_is_refused(self) -> None:
-        registry = SkillRegistry()
+        registry = _registry()
         signed = _sign(_candidate())
         registry.publish(signed)
 
@@ -115,7 +156,7 @@ class TestImmutableRegistry:
             registry.publish(signed)
 
     def test_a_second_version_needs_the_first_as_parent(self) -> None:
-        registry = SkillRegistry()
+        registry = _registry()
         registry.publish(_sign(_candidate()))
 
         orphan = _candidate()

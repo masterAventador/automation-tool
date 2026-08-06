@@ -14,6 +14,14 @@ Two escalation paths are closed by construction:
 * the model cannot overwrite a live version — ``SkillRegistry`` is append-only
   per ``(skillId, version)``, and a new version must name the previous one as
   ``parentVersion``. v1 is never deleted.
+
+Verification is anchored to a *pinned* publisher key that the deployment
+provisions out of band — the same discipline as
+``Ed25519ActionAuthorizationVerifier``. The record still carries ``publicKey``
+as self-description, but the verifier compares it to the anchor and signs off
+against the anchor only: a key that arrives inside the record it vouches for
+authenticates nobody (REVIEW-2026-08-06 SA#6 — a fresh random key self-signed
+a record and the old verifier accepted it).
 """
 
 from __future__ import annotations
@@ -125,7 +133,14 @@ class SignedSkill:
     document: dict[str, object]
 
 
-def verify_signed_skill(signed: object) -> SignedSkill:
+def _valid_anchor(trusted_public_key: object) -> bytes:
+    if type(trusted_public_key) is not bytes or len(trusted_public_key) != 32:
+        _reject("verification needs a 32-byte pinned publisher key")
+    return trusted_public_key
+
+
+def verify_signed_skill(signed: object, *, trusted_public_key: bytes) -> SignedSkill:
+    anchor = _valid_anchor(trusted_public_key)
     if not isinstance(signed, dict) or set(signed) != {
         "skill",
         "approval",
@@ -140,11 +155,13 @@ def verify_signed_skill(signed: object) -> SignedSkill:
         signature = bytes.fromhex(str(signed["signature"]))
     except ValueError as error:
         raise SkillPublicationRejected("signature material is malformed") from error
+    if public_key_bytes != anchor:
+        _reject("the record is not signed by the pinned publisher key")
     payload = _SIGNATURE_DOMAIN + _canonical(
         {"skill": signed["skill"], "approval": review}
     )
     try:
-        Ed25519PublicKey.from_public_bytes(public_key_bytes).verify(signature, payload)
+        Ed25519PublicKey.from_public_bytes(anchor).verify(signature, payload)
     except (InvalidSignature, ValueError) as error:
         raise SkillPublicationRejected("signature does not verify") from error
     return SignedSkill(
@@ -157,13 +174,20 @@ def verify_signed_skill(signed: object) -> SignedSkill:
 
 
 class SkillRegistry:
-    """An append-only store: one immutable record per (skillId, version)."""
+    """An append-only store: one immutable record per (skillId, version).
 
-    def __init__(self) -> None:
+    The registry is constructed around its trust anchor — there is no way to
+    have one that accepts records from arbitrary signers.
+    """
+
+    def __init__(self, *, trusted_public_key: bytes) -> None:
+        self._trusted_public_key = _valid_anchor(trusted_public_key)
         self._records: dict[tuple[str, int], SignedSkill] = {}
 
     def publish(self, signed: object) -> SignedSkill:
-        record = verify_signed_skill(signed)
+        record = verify_signed_skill(
+            signed, trusted_public_key=self._trusted_public_key
+        )
         key = (record.skill.skill_id, record.version)
         if key in self._records:
             _reject("this version is already published and records are immutable")

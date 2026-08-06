@@ -27,9 +27,15 @@ from automation_tool.executor.skill_trajectory_cleaner import (
     TrajectoryRejected,
     clean_trajectory,
 )
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from tests.unit.executor.test_skill_trajectory_cleaner import raw
 
 _SEED = bytes(range(32))
+_PUBLIC_KEY = Ed25519PrivateKey.from_private_bytes(_SEED).public_key().public_bytes_raw()
+
+
+def _registry() -> SkillRegistry:
+    return SkillRegistry(trusted_public_key=_PUBLIC_KEY)
 
 
 def _skill_id() -> str:
@@ -38,7 +44,7 @@ def _skill_id() -> str:
 
 
 def _publish_two_versions() -> SkillRegistry:
-    registry = SkillRegistry()
+    registry = _registry()
     v1 = clean_trajectory(raw())
     registry.publish(_sign(v1))
     v2 = clean_trajectory(raw())
@@ -103,7 +109,7 @@ class TestManagementView:
         所有技能的 v1 一起停掉；applicableVersionFor 走同一份 stats，路由
         跟着错。键必须是 (skillId, version)。
         """
-        registry = SkillRegistry()
+        registry = _registry()
         first = clean_trajectory(raw())
         registry.publish(_sign(first))
         other_page = raw()
