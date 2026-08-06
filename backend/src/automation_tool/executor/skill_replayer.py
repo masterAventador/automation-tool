@@ -48,7 +48,13 @@ class ReplayPage(Protocol):
         pattern: str | None = None,
     ) -> bool: ...
 
-    def act(self, kind: str, handle: object, value: str | None) -> None: ...
+    def act(self, kind: str, handle: object, value: str | None) -> None:
+        """Perform one action. `value` is the action's payload by kind:
+        fill → the resolved runtime parameter, press_key → the key name,
+        scroll → the direction, click/wait → None. Dropping the last two was
+        how a replay pressed "some key" and scrolled "somewhere"
+        (REVIEW-2026-08-06 SA#4)."""
+        ...
 
     def current_path(self) -> str: ...
 
@@ -139,7 +145,7 @@ def replay_skill(
         if step.checkpoint:
             last_checkpoint = step.index
 
-        value = _resolve_fill(step, parameters, fail)
+        value = _action_payload(step, parameters, fail)
 
         for condition in step.preconditions:
             if not _condition_holds(page, condition):
@@ -173,16 +179,22 @@ def replay_skill(
     )
 
 
-def _resolve_fill(
+def _action_payload(
     step: SkillStep, parameters: dict[str, str], fail: Callable[[str], NoReturn]
 ) -> str | None:
-    if step.action.kind != "fill":
-        return None
-    name = step.action.parameter
-    if name is None or name not in parameters:
-        fail(f"step {step.index} needs runtime parameter {name!r}")
-        raise AssertionError("unreachable")  # pragma: no cover
-    return parameters[name]
+    """What `act` must carry for this step — see `ReplayPage.act`."""
+    action = step.action
+    if action.kind == "fill":
+        name = action.parameter
+        if name is None or name not in parameters:
+            fail(f"step {step.index} needs runtime parameter {name!r}")
+            raise AssertionError("unreachable")  # pragma: no cover
+        return parameters[name]
+    if action.kind == "press_key":
+        return action.key
+    if action.kind == "scroll":
+        return action.direction
+    return None
 
 
 def _success_evidence_holds(skill: AutomationSkill, page: ReplayPage) -> bool:

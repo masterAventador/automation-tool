@@ -28,6 +28,34 @@ def skill():
     return parse_automation_skill(clean_trajectory(raw()))
 
 
+def skill_with_key_and_scroll():
+    """滚动找到入口、按 Escape 关掉活动弹窗，再走原来的三步。
+
+    REVIEW-2026-08-06 SA#4：契约与清洗器都承载按哪个键、往哪滚，但
+    act() 只在 fill 时携带载荷——页面适配层收到 press_key/scroll 时
+    无从知道键名与方向，接上真实浏览器会静默做错而不是报错。
+    """
+    document = raw()
+    document["actions"] = [
+        {
+            "kind": "scroll",
+            "direction": "down",
+            "target": {"role": "listitem", "name": "更多作品", "x": 100, "y": 300},
+            "external": False,
+            "resultingVisible": None,
+        },
+        {
+            "kind": "press_key",
+            "key": "Escape",
+            "target": {"role": "dialog", "name": "活动弹窗", "x": 200, "y": 200},
+            "external": False,
+            "resultingVisible": None,
+        },
+        *document["actions"],
+    ]
+    return parse_automation_skill(clean_trajectory(document))
+
+
 def skill_with_a_step_after_the_external_one():
     """发布，然后关确认弹窗——外部步之后还有内部步的最常见真实形态。
 
@@ -65,7 +93,7 @@ class FakePage:
 
     def act(self, kind: str, handle: object, value: str | None) -> None:
         _role, name = handle  # type: ignore[misc]
-        self.side_effects.append((kind, name))
+        self.side_effects.append((kind, name, value))
 
     def current_path(self) -> str:
         return "/creator-micro/content/manage"
@@ -87,7 +115,7 @@ class TestDeterministicReplay:
         replay_skill(skill(), page, parameters={"caption": "用户提供的标题"})
 
         fills = [effect for effect in page.side_effects if effect[0] == "fill"]
-        assert fills == [("fill", "作品标题")]
+        assert fills == [("fill", "作品标题", "用户提供的标题")]
 
     def test_a_missing_parameter_fails_before_any_side_effect(self) -> None:
         page = FakePage()
@@ -110,6 +138,13 @@ class TestSafetyProperties:
         with pytest.raises(ReplayFailed, match="postcondition"):
             replay_skill(skill(), page, parameters={"caption": "x"})
 
+    def test_press_key_and_scroll_payloads_reach_the_page(self) -> None:
+        page = FakePage()
+        replay_skill(skill_with_key_and_scroll(), page, parameters={"caption": "x"})
+
+        assert ("scroll", "更多作品", "down") in page.side_effects
+        assert ("press_key", "活动弹窗", "Escape") in page.side_effects
+
     def test_dispatched_survives_a_failure_in_a_later_step(self) -> None:
         """发布已经点了，之后无论哪一步失败，dispatched 都必须还是 True。
 
@@ -126,7 +161,7 @@ class TestSafetyProperties:
                 parameters={"caption": "x"},
             )
 
-        assert ("click", "发布") in page.side_effects, "the external step ran"
+        assert ("click", "发布", None) in page.side_effects, "the external step ran"
         assert raised.value.dispatched is True
 
     def test_replay_never_exceeds_the_external_side_effect_boundary(self) -> None:
