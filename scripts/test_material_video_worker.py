@@ -1994,6 +1994,140 @@ class MaterialMontageRequestTest(unittest.TestCase):
                 "reach task.start — before the fix it died on FileNotFoundError",
             )
 
+    def test_a_failing_montage_thread_reports_failure_not_success(self) -> None:
+        """REVIEW-2026-08-06 C2: every failure used to exit 0 with no trace.
+
+        run() had no try at all and the watchdog called os._exit(0)
+        unconditionally, so a dead pipeline looked exactly like a finished
+        one. A failure must leave a terminal "failed" observation for the
+        App-owned ledger and mark the thread so the watchdog exits nonzero.
+        """
+        from montage_runtime import parse_montage_request, start_montage
+
+        request = parse_montage_request(self._request())
+        with tempfile.TemporaryDirectory(
+            prefix="material-montage-failure-", dir=ROOT / ".local"
+        ) as directory:
+            workspace = Path(directory) / str(uuid4())
+            asset_root = workspace / "assets"
+            asset_root.mkdir(parents=True)
+            (workspace / "outputs").mkdir()
+            observed: dict[str, object] = {}
+
+            def fake_preload(runtime_root: Path, pexels_api_key: object = None) -> None:
+                observed["runtime_root"] = runtime_root
+
+            def dying_pipeline(task_id: str, params: object, stop_at: str) -> None:
+                raise RuntimeError("upstream pipeline dependency unavailable")
+
+            with mock.patch(
+                "webui_runtime._preload_private_config", fake_preload
+            ), mock.patch(
+                "webui_runtime._upstream_paths",
+                lambda: self._tiny_upstream(Path(directory)),
+            ):
+                runtime = start_montage(
+                    asset_root, None, None, request, pipeline=dying_pipeline
+                )
+                runtime.join(timeout=30)
+
+            self.assertIs(
+                getattr(runtime, "failed", None),
+                True,
+                "the watchdog reads this flag to pick the process exit code",
+            )
+            runtime_root = observed["runtime_root"]
+            assert isinstance(runtime_root, Path)
+            observation_path = runtime_root / OBSERVATION_FILE
+            self.assertTrue(
+                observation_path.is_file(),
+                "a failure must leave a terminal observation for the App ledger",
+            )
+            document = json.loads(observation_path.read_text(encoding="utf-8"))
+            self.assertEqual(document["status"], "failed")
+            self.assertEqual(document["failureCode"], "generation_failed")
+            self.assertIsNone(document["outputFile"])
+            self.assertEqual(document["renderJobId"], workspace.name)
+            self.assertGreater(document["revision"], 0)
+
+    def test_a_bridge_written_terminal_observation_is_never_overwritten(self) -> None:
+        """When the genuine bridge already recorded the outcome, keep it.
+
+        JobCancelled propagates out of the pipeline after the bridge wrote
+        "cancelled"; rewriting that to "failed" would misreport a user action
+        as a defect. Cooperative cancellation is also not a process failure.
+        """
+        from job_observation_bridge import JobCancelled as CancelSignal
+        from montage_runtime import parse_montage_request, start_montage
+
+        request = parse_montage_request(self._request())
+        with tempfile.TemporaryDirectory(
+            prefix="material-montage-cancel-", dir=ROOT / ".local"
+        ) as directory:
+            workspace = Path(directory) / str(uuid4())
+            asset_root = workspace / "assets"
+            asset_root.mkdir(parents=True)
+            (workspace / "outputs").mkdir()
+            observed: dict[str, object] = {}
+
+            def fake_preload(runtime_root: Path, pexels_api_key: object = None) -> None:
+                observed["runtime_root"] = runtime_root
+
+            def cancelled_pipeline(task_id: str, params: object, stop_at: str) -> None:
+                runtime_root = observed["runtime_root"]
+                assert isinstance(runtime_root, Path)
+                (runtime_root / OBSERVATION_FILE).write_text(
+                    json.dumps(
+                        {
+                            "schemaVersion": 1,
+                            "renderJobId": workspace.name,
+                            "workerTaskId": str(uuid4()),
+                            "revision": 3,
+                            "status": "cancelled",
+                            "progressPercent": 40,
+                            "subject": "护肤知识三条",
+                            "outputFile": None,
+                            "failureCode": None,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                raise CancelSignal("render cancelled")
+
+            with mock.patch(
+                "webui_runtime._preload_private_config", fake_preload
+            ), mock.patch(
+                "webui_runtime._upstream_paths",
+                lambda: self._tiny_upstream(Path(directory)),
+            ):
+                runtime = start_montage(
+                    asset_root, None, None, request, pipeline=cancelled_pipeline
+                )
+                runtime.join(timeout=30)
+
+            self.assertIs(
+                getattr(runtime, "failed", None),
+                False,
+                "cooperative cancellation is a user action, not a worker failure",
+            )
+            runtime_root = observed["runtime_root"]
+            assert isinstance(runtime_root, Path)
+            document = json.loads(
+                (runtime_root / OBSERVATION_FILE).read_text(encoding="utf-8")
+            )
+            self.assertEqual(document["status"], "cancelled", "terminal states stay")
+            self.assertEqual(document["revision"], 3)
+
+    def test_montage_exit_code_maps_the_thread_flag_to_the_process_result(self) -> None:
+        from worker_main import montage_exit_code
+
+        healthy = threading.Thread(target=lambda: None)
+        self.assertEqual(montage_exit_code(healthy), 0)
+        healthy.failed = False  # type: ignore[attr-defined]
+        self.assertEqual(montage_exit_code(healthy), 0)
+        healthy.failed = True  # type: ignore[attr-defined]
+        self.assertEqual(montage_exit_code(healthy), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

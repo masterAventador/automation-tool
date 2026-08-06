@@ -17,6 +17,7 @@ plain Python library; this module calls them directly.
 
 from __future__ import annotations
 
+import json
 import re
 import threading
 import types
@@ -25,6 +26,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from job_observation_bridge import (
+    MAX_SUBJECT_CHARACTERS as OBSERVATION_SUBJECT_LIMIT,
+    OBSERVATION_FILE,
+    SCHEMA_VERSION,
+    JobCancelled,
+    _atomic_json,
+)
 from model_service_adapter import ScriptModelConfiguration, install_script_model
 
 MAX_SUBJECT_CHARACTERS: Final = 240
@@ -133,6 +141,58 @@ def _upstream_aspect(aspect: str) -> str:
     return {"9:16": "9:16", "16:9": "16:9", "1:1": "1:1"}[aspect]
 
 
+class MontageThread(threading.Thread):
+    """The montage job thread, carrying its outcome for the exit watchdog.
+
+    `failed` is what worker_main's watchdog reads to pick the process exit
+    code — before it existed, every dead pipeline exited 0 and was
+    indistinguishable from a finished one (REVIEW-2026-08-06 C2).
+    """
+
+    failed: bool = False
+
+
+_TERMINAL_STATUSES: Final = frozenset({"succeeded", "failed", "cancelled"})
+
+
+def _write_failure_observation(runtime_root: Path, subject: str) -> None:
+    """Leave a terminal observation when the pipeline died outside the bridge.
+
+    The bridge writes the observation only through upstream `update_task`; a
+    crash before or between those calls leaves the file absent or "running",
+    and the App ledger would wait forever. A terminal state the bridge already
+    wrote (success, failure, cancellation) is authoritative and stays.
+    """
+    path = runtime_root / OBSERVATION_FILE
+    revision = 1
+    if path.is_file():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            existing = {}
+        if existing.get("status") in _TERMINAL_STATUSES:
+            return
+        recorded = existing.get("revision")
+        if isinstance(recorded, int) and not isinstance(recorded, bool):
+            revision = max(revision, recorded + 1)
+    import uuid
+
+    _atomic_json(
+        path,
+        {
+            "schemaVersion": SCHEMA_VERSION,
+            "renderJobId": runtime_root.parents[2].name,
+            "workerTaskId": str(uuid.uuid4()),
+            "revision": revision,
+            "status": "failed",
+            "progressPercent": 0,
+            "subject": subject[:OBSERVATION_SUBJECT_LIMIT],
+            "outputFile": None,
+            "failureCode": "generation_failed",
+        },
+    )
+
+
 def start_montage(
     asset_root: Path,
     configuration: ScriptModelConfiguration | None,
@@ -140,7 +200,7 @@ def start_montage(
     request: MontageRequest,
     *,
     pipeline: Callable[[str, object, str], object] | None = None,
-) -> threading.Thread:
+) -> MontageThread:
     """Run one montage job on a daemon thread and return that thread.
 
     The private runtime layout is the WebUI's exactly — the observation bridge
@@ -198,29 +258,38 @@ def start_montage(
     def run() -> None:
         import uuid
 
-        if pipeline is None:
-            engine, params_model = upstream_engine()
-        else:
-            engine, params_model = pipeline, _CapturedParams
-        params = params_model(
-            video_subject=request.subject,
-            video_script=request.script or "",
-            video_aspect=_upstream_aspect(request.aspect),
-            video_clip_duration=request.clip_duration_seconds,
-            video_count=1,
-            video_source="pexels",
-            voice_name=request.voice_name,
-            # 本次发行不随包提供任何背景音乐素材（与 WebUI 侧的移除一致）。
-            bgm_type="",
-            subtitle_enabled=request.subtitle_enabled,
-            font_size=request.font_size_px,
-            text_color=request.text_color,
-            stroke_color=request.stroke_color,
-            stroke_width=request.stroke_width_px,
-        )
-        engine(str(uuid.uuid4()), params, "video")
+        try:
+            if pipeline is None:
+                engine, params_model = upstream_engine()
+            else:
+                engine, params_model = pipeline, _CapturedParams
+            params = params_model(
+                video_subject=request.subject,
+                video_script=request.script or "",
+                video_aspect=_upstream_aspect(request.aspect),
+                video_clip_duration=request.clip_duration_seconds,
+                video_count=1,
+                video_source="pexels",
+                voice_name=request.voice_name,
+                # 本次发行不随包提供任何背景音乐素材（与 WebUI 侧的移除一致）。
+                bgm_type="",
+                subtitle_enabled=request.subtitle_enabled,
+                font_size=request.font_size_px,
+                text_color=request.text_color,
+                stroke_color=request.stroke_color,
+                stroke_width=request.stroke_width_px,
+            )
+            engine(str(uuid.uuid4()), params, "video")
+        except JobCancelled:
+            # The bridge already wrote "cancelled" before raising; a user
+            # action is a clean process exit, not a worker failure.
+            raise
+        except BaseException:
+            thread.failed = True
+            _write_failure_observation(runtime_root, request.subject)
+            raise  # threading's excepthook prints the traceback for diagnosis
 
-    thread = threading.Thread(target=run, name="material-montage", daemon=True)
+    thread = MontageThread(target=run, name="material-montage", daemon=True)
     thread.start()
     return thread
 
@@ -238,6 +307,7 @@ __all__ = [
     "MAX_SUBJECT_CHARACTERS",
     "MontageRejected",
     "MontageRequest",
+    "MontageThread",
     "parse_montage_request",
     "start_montage",
 ]

@@ -153,6 +153,16 @@ def _report_local_material_rejection(
     )
 
 
+def montage_exit_code(thread: threading.Thread) -> int:
+    """The process result for a finished montage thread.
+
+    `join()` returns the same way for a finished and a crashed thread; the
+    outcome lives on the thread itself (`MontageThread.failed`). getattr keeps
+    this total for plain threads so the watchdog can never crash over it.
+    """
+    return 1 if getattr(thread, "failed", False) else 0
+
+
 def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
     sink = sys.stdout if output is None else output
     line = stream.readline(MAX_BOOTSTRAP_BYTES + 1)
@@ -308,16 +318,18 @@ def _gateway_process(stream: TextIO, output: TextIO | None = None) -> int:
 
     emit(ready)
     if montage_thread is not None:
-        # Headless montage owns this process: when the pipeline thread ends
-        # (success or failure — the observation bridge has already written the
-        # terminal state atomically), the process exits so the orchestrator
-        # slot frees without anyone having to "close a studio" that has no UI.
+        # Headless montage owns this process: when the pipeline thread ends the
+        # process exits so the orchestrator slot frees without anyone having to
+        # "close a studio" that has no UI. The exit code comes from the thread's
+        # own outcome — join() looks identical for a finished and a crashed
+        # thread, and assuming "the bridge already wrote the terminal state"
+        # is exactly how every failure used to exit 0 (REVIEW-2026-08-06 C2).
         def _exit_after_montage(finished: threading.Thread = montage_thread) -> None:
             finished.join()
             with suppress(Exception):
                 server.shutdown()
                 server.server_close()
-            os._exit(0)
+            os._exit(montage_exit_code(finished))
 
         threading.Thread(
             target=_exit_after_montage, name="montage-exit-watcher", daemon=True
