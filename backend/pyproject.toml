@@ -83,6 +83,10 @@ default-groups = ["catalog-build", "dev", "executor"]
 [tool.pytest.ini_options]
 addopts = ["--strict-config", "--strict-markers", "-ra"]
 asyncio_mode = "strict"
+# Cross-test imports (`from tests.unit...`) must resolve identically under
+# `python -m pytest` (CWD on sys.path) and `uv run pytest` (script entry, CWD
+# absent) — without this, the uv form cannot even collect four skill suites.
+pythonpath = ["."]
 testpaths = ["tests"]
 xfail_strict = true
 
