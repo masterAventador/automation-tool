@@ -241,6 +241,10 @@ pub enum MaterialVideoStudioErrorCode {
     StorageUnavailable,
     ViewUnavailable,
     JobUnavailable,
+    // A submission whose fields failed validation: retrying without changing
+    // the input is useless, which is exactly what JobUnavailable (its former
+    // disguise) invites the user to do (REVIEW-2026-08-06 M2).
+    ProtocolMismatch,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1044,7 +1048,7 @@ const fn job_unavailable() -> MaterialVideoStudioError {
 /// A montage submission whose fields the product form should never produce.
 pub(crate) const fn invalid_montage_request() -> MaterialVideoStudioError {
     MaterialVideoStudioError {
-        code: MaterialVideoStudioErrorCode::JobUnavailable,
+        code: MaterialVideoStudioErrorCode::ProtocolMismatch,
         retryable: false,
     }
 }
@@ -1085,6 +1089,22 @@ mod theme_tests {
             );
         }
         assert!(!INIT_SCRIPT.contains(".st-key-open_settings_dialog_button,\n"));
+    }
+}
+
+#[cfg(test)]
+mod montage_error_tests {
+    use super::*;
+
+    #[test]
+    fn an_invalid_montage_request_reports_protocol_mismatch_not_job_state() {
+        // REVIEW-2026-08-06 M2: parameter validation failure shared
+        // JobUnavailable with "the job state cannot be read" — the front end
+        // could not tell "fix your input" apart from "try again later".
+        assert_eq!(
+            invalid_montage_request().code(),
+            MaterialVideoStudioErrorCode::ProtocolMismatch,
+        );
     }
 }
 

@@ -2118,6 +2118,21 @@ class MaterialMontageRequestTest(unittest.TestCase):
             self.assertEqual(document["status"], "cancelled", "terminal states stay")
             self.assertEqual(document["revision"], 3)
 
+    def test_a_unicode_alnum_pexels_key_is_refused_at_the_config_gate(self) -> None:
+        """REVIEW-2026-08-06 M5：str.isalnum() 对全角数字、CJK 都返回 True。
+
+        网关钉的是 ^[A-Za-z0-9]{20,120}$，config 预载却用 isalnum() 把关——
+        两个读者不同意什么算合法值，网关侧「CJK 被拒绝」的注释只对网关
+        成立。预载必须复用网关同一份模式，不许有第二份更松的定义。
+        """
+        from webui_runtime import WebUiRejected, _preload_private_config
+
+        with tempfile.TemporaryDirectory(
+            prefix="material-preload-key-", dir=ROOT / ".local"
+        ) as directory:
+            with self.assertRaises(WebUiRejected):
+                _preload_private_config(Path(directory), "Ｐ" * 40)  # 全角字母
+
     def test_montage_exit_code_maps_the_thread_flag_to_the_process_result(self) -> None:
         from worker_main import montage_exit_code
 

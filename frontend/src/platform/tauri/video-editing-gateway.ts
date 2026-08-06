@@ -60,10 +60,16 @@ const CONTROL_PLANE_ERROR_CODES = new Set([
   "installation_busy",
   "installation_conflict",
   "operation_unavailable",
+  "resource_not_found",
+]);
+
+// Session failures get their own bucket: their remedy is signing in again,
+// and "please check your network" would be a ready-made misdirection the day
+// the U9 product account ships (REVIEW-2026-08-06 M3).
+const ACCOUNT_SESSION_ERROR_CODES = new Set([
   "authentication_invalid",
   "recovery_invalid",
   "account_session_invalid",
-  "resource_not_found",
 ]);
 
 function unavailable(retryable = false): VideoEditingGatewayError {
@@ -75,10 +81,17 @@ function mapNativeError(value: unknown): VideoEditingGatewayError {
   if (fields?.code === "outcome_uncertain" && fields.retryable === false) {
     return new VideoEditingGatewayError("outcome_uncertain", false);
   }
+  if (fields !== undefined && ACCOUNT_SESSION_ERROR_CODES.has(fields.code)) {
+    return new VideoEditingGatewayError("account_session_expired", false);
+  }
   if (fields !== undefined && CONTROL_PLANE_ERROR_CODES.has(fields.code)) {
     return new VideoEditingGatewayError("control_plane_unavailable", fields.retryable);
   }
-  return unavailable(false);
+  // Every command this gateway issues is a Control Plane request, so a shape
+  // we do not recognize is still a failed Control Plane request; pointing at
+  // the local editing process here was the same misdirection this file was
+  // rewritten to remove, only narrower (REVIEW-2026-08-06 M4).
+  return new VideoEditingGatewayError("control_plane_unavailable", false);
 }
 
 async function safeInvoke(command: string, args: Record<string, unknown>): Promise<unknown> {

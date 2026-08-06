@@ -21,6 +21,12 @@ export type VideoEditingErrorCode =
    * involved.
    */
   | "control_plane_unavailable"
+  /**
+   * The product account session is no longer valid. Its remedy is signing in
+   * again — nothing to do with the network, so it must not share the
+   * "check your connection" bucket (REVIEW-2026-08-06 M3).
+   */
+  | "account_session_expired"
   | "outcome_uncertain";
 
 export class VideoEditingGatewayError extends Error {

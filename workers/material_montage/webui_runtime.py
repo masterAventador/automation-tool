@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, TextIO
 
+from gateway import PEXELS_API_KEY_PATTERN
 from job_observation_bridge import install_job_observation_bridge
 from model_service_adapter import (
     ScriptModelConfiguration,
@@ -163,7 +164,10 @@ def _private_config_document(
         or any(character in font_name for character in '"\\\n\r\t')
     ):
         raise WebUiRejected("invalid subtitle font name")
-    if pexels_api_key is not None and not pexels_api_key.isalnum():
+    # The gateway's pattern, not str.isalnum(): the latter accepts fullwidth
+    # digits and CJK, so the two readers disagreed about what a legal key is
+    # (REVIEW-2026-08-06 M5). One pattern, one definition.
+    if pexels_api_key is not None and PEXELS_API_KEY_PATTERN.fullmatch(pexels_api_key) is None:
         raise WebUiRejected("invalid material site key")
     lines = example.splitlines(keepends=True)
     ui_index: int | None = None
@@ -412,7 +416,8 @@ def serve_webui(
         configuration = parse_script_model(document["scriptModel"])
         pexels_api_key = document["pexelsApiKey"]
         if pexels_api_key is not None and not (
-            isinstance(pexels_api_key, str) and pexels_api_key.isalnum()
+            isinstance(pexels_api_key, str)
+            and PEXELS_API_KEY_PATTERN.fullmatch(pexels_api_key) is not None
         ):
             raise ValueError("invalid material site key")
     except (json.JSONDecodeError, UnicodeError, ValueError, TypeError):

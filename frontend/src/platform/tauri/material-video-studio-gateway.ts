@@ -432,7 +432,10 @@ export class TauriMaterialVideoStudioGateway implements MaterialVideoStudioGatew
       !Number.isInteger(request.clipDurationSeconds) ||
       request.clipDurationSeconds < 2 ||
       request.clipDurationSeconds > 10 ||
-      !/^[A-Za-z0-9-]{2,80}$/u.test(request.voiceName) ||
+      // montage_runtime.VOICE_PATTERN, character for character — the looser
+      // "alnum-or-dash" here let "abc" through to die at the worker's
+      // bootstrap line twenty seconds later (REVIEW-2026-08-06 M1).
+      !/^[A-Za-z]{2}-[A-Za-z]{2,8}-[A-Za-z0-9-]{2,64}$/u.test(request.voiceName) ||
       !Number.isInteger(request.fontSizePx) ||
       request.fontSizePx < 24 ||
       request.fontSizePx > 120 ||

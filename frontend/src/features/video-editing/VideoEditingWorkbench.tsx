@@ -89,16 +89,19 @@ const SERVICE_UNAVAILABLE_TEXT =
   "本机剪辑服务暂时不可用，请确认本机服务正在运行后再试。";
 const CONTROL_PLANE_UNAVAILABLE_TEXT =
   "控制服务暂时不可用，请检查网络后再试；如果一直失败，可能需要更新服务端。";
+const ACCOUNT_SESSION_EXPIRED_TEXT =
+  "登录状态已失效，请重新登录产品账号后再试。";
 
 /**
  * 失败要指向真正出事的那台机器。2026-08-05 实测：云端旧版对剪辑列表返回
  * 404，界面却让用户去检查「本机服务」——那个进程根本没参与这次请求。
+ * 会话失效同理：补救是重新登录，让用户查网络是另一种指错方向。
  */
 function serviceUnavailableText(error: unknown): string {
-  return error instanceof VideoEditingGatewayError &&
-    error.code === "control_plane_unavailable"
-    ? CONTROL_PLANE_UNAVAILABLE_TEXT
-    : SERVICE_UNAVAILABLE_TEXT;
+  if (!(error instanceof VideoEditingGatewayError)) return SERVICE_UNAVAILABLE_TEXT;
+  if (error.code === "account_session_expired") return ACCOUNT_SESSION_EXPIRED_TEXT;
+  if (error.code === "control_plane_unavailable") return CONTROL_PLANE_UNAVAILABLE_TEXT;
+  return SERVICE_UNAVAILABLE_TEXT;
 }
 const SMART_EDIT_THINKING_PREFERENCE_KEY =
   "automation-tool.smart-edit.thinking-enabled.v1";

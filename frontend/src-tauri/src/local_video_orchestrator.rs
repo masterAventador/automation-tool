@@ -2908,10 +2908,24 @@ impl VideoWorkerMontageRequest {
                 && value.starts_with('#')
                 && value.bytes().skip(1).all(|byte| byte.is_ascii_hexdigit())
         };
-        let voice_is_sane = voice_name.len() <= 80
-            && voice_name
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-');
+        // Mirrors montage_runtime.VOICE_PATTERN character for character:
+        // ^[A-Za-z]{2}-[A-Za-z]{2,8}-[A-Za-z0-9-]{2,64}$ — the looser
+        // "alnum-or-dash, at most 80" accepted "" and "abc", which the worker
+        // then rejected at its bootstrap line (REVIEW-2026-08-06 M1).
+        let voice_is_sane = {
+            let mut parts = voice_name.splitn(3, '-');
+            let locale = parts.next().unwrap_or("");
+            let region = parts.next().unwrap_or("");
+            let voice = parts.next().unwrap_or("");
+            locale.len() == 2
+                && locale.bytes().all(|byte| byte.is_ascii_alphabetic())
+                && (2..=8).contains(&region.len())
+                && region.bytes().all(|byte| byte.is_ascii_alphabetic())
+                && (2..=64).contains(&voice.len())
+                && voice
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        };
         let subject_characters = subject.trim().chars().count();
         if subject_characters == 0
             || subject_characters > 240
@@ -4862,6 +4876,24 @@ mod tests {
             )
             .is_err(),
             "a voice name that could not be a voice must be refused"
+        );
+        // REVIEW-2026-08-06 M1: the doc comment claims these bounds mirror the
+        // worker's exactly, but `len <= 80 && alnum-or-dash` accepted the empty
+        // string and "abc" — both of which the worker rejects at its bootstrap
+        // line, twenty seconds after this gate waved them through.
+        assert!(
+            super::VideoWorkerMontageRequest::new(
+                "主题", None, "9:16", 4, "", true, 60, "#FFFFFF", "#000000", 1.5
+            )
+            .is_err(),
+            "an empty voice name must be refused here, not at the bootstrap line"
+        );
+        assert!(
+            super::VideoWorkerMontageRequest::new(
+                "主题", None, "9:16", 4, "abc", true, 60, "#FFFFFF", "#000000", 1.5
+            )
+            .is_err(),
+            "a voice name without the locale-region-voice shape must be refused"
         );
     }
 
