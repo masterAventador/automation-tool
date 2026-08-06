@@ -79,6 +79,11 @@ def bootstrap_document(asset_root: str, render_browser: object) -> dict[str, obj
         "bootstrapVersion": "1",
         "enableWebUi": False,
         "localSessionToken": TOKEN,
+        # Always present on the shared protocol (null without a packaged key);
+        # a test document without it is a different protocol from the one the
+        # App speaks — exactly how BM-08 regressed while every gate stayed
+        # green (2026-08-06).
+        "pexelsApiKey": None,
         "protocolVersion": PROTOCOL_VERSION,
         "renderBrowser": render_browser,
         "scriptModel": None,

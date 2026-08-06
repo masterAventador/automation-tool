@@ -63,6 +63,35 @@ def main() -> int:
         assert rejected.returncode == 65
         assert "must-not-leak" not in rejected.stderr
         assert directory not in rejected.stderr
+    # App 的共享引导文档自 2026-08-05 起始终携带 pexelsApiKey（无密钥构建为
+    # null，带密钥构建为字符串）。三个读者里 material 侧两个当晚就统一了，
+    # 这个 Node worker 漏了：9 键真实文档被 hasExactKeys 拒绝、worker 报拒后
+    # App 还在等 ready——BM-08 真实 App 提交卡死（2026-08-06 采样实锤双向
+    # 空等）。测试此前构造的 8 键文档与真实 App 是两种协议。
+    with tempfile.TemporaryDirectory(prefix="bm02-assets-") as directory:
+        real_app_document = {
+            "assetRoot": directory,
+            "bootstrapVersion": "1",
+            "enableWebUi": False,
+            "localSessionToken": "a" * 64,
+            "pexelsApiKey": None,
+            "protocolVersion": "1.0",
+            "renderBrowser": None,
+            "scriptModel": None,
+            "workerKind": "node",
+        }
+        accepted = run_worker(json.dumps(real_app_document) + "\n")
+        assert "worker.ready" in accepted.stdout, (
+            "the exact document the App sends (pexelsApiKey always present, "
+            f"null without a packaged key) must reach ready: {accepted.stderr!r}"
+        )
+        keyed = dict(real_app_document, pexelsApiKey="P" * 56)
+        assert "worker.ready" in run_worker(json.dumps(keyed) + "\n").stdout, (
+            "a packaged-key build sends the key as a string; this worker does "
+            "not use it but must still recognise the shared protocol"
+        )
+        hostile = dict(real_app_document, pexelsApiKey="not a key !!")
+        assert run_worker(json.dumps(hostile) + "\n").returncode == 65
     # A headless Chromium with the GPU disabled has no WebGL at all unless the
     # software rasterizer is explicitly allowed: Chromium 149 refuses the
     # SwiftShader fallback without `--enable-unsafe-swiftshader`, every shader
@@ -95,7 +124,7 @@ def main() -> int:
     assert "face.status === \"loaded\"" in source
     assert "finish({ status: \"font\" })" in source
     print("BM-02 Node Worker rejection tests passed")
-    print("executed checks: 7")
+    print("executed checks: 8")
     return 0
 
 

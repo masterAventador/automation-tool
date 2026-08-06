@@ -178,6 +178,9 @@ function bootstrapLine(assetRoot, executable, major) {
     bootstrapVersion: "1",
     enableWebUi: false,
     localSessionToken: TOKEN,
+    // Always present on the shared protocol; see bootstrap_document in
+    // scripts/test_motion_video_render_adapter.py for the incident record.
+    pexelsApiKey: null,
     protocolVersion: PROTOCOL_VERSION,
     renderBrowser: {
       chromiumMajor: major,
