@@ -373,3 +373,43 @@ async def test_begin_logout_rejects_invalid_scope_and_system_clock_is_utc() -> N
             platform="private",
         )
     assert SystemPlatformSessionHealthClock().now().utcoffset() == UTC.utcoffset(NOW)
+
+
+@pytest.mark.asyncio
+async def test_each_rejection_names_the_rule_that_refused_it() -> None:
+    """A refusal has to say which rule refused, or nobody can act on it.
+
+    2026-08-06: a Windows Executor was closed by this service with
+    `Executor protocol is rejected` and no log line at all. Finding out why took
+    a loopback packet capture on the deployment host, unmasking the WebSocket
+    client frames by hand, and replaying the captured message against these
+    models locally — and the answer was still not in reach, because every branch
+    here raises the same bare exception.
+
+    The reason is a fixed vocabulary, never message content: these lines go to a
+    server log, and `CLAUDE.md` §7 keeps platform facts out of ordinary logs.
+    """
+    service = PlatformSessionHealthService(repository=Repository(), clock=FixedClock())
+
+    with pytest.raises(PlatformSessionHealthRejected) as sent_in_future:
+        await service.receive(message(sent_at=NOW + timedelta(seconds=5)))
+    assert sent_in_future.value.reason == "sent_at_is_in_the_future"
+
+    with pytest.raises(PlatformSessionHealthRejected) as expired:
+        await service.receive(
+            message(sent_at=NOW - timedelta(seconds=60), deadline_at=NOW - timedelta(seconds=30))
+        )
+    assert expired.value.reason == "deadline_has_passed"
+
+    with pytest.raises(PlatformSessionHealthRejected) as observed_after_sent:
+        await service.receive(
+            message(observed_at=NOW + timedelta(seconds=1), sent_at=NOW)
+        )
+    assert observed_after_sent.value.reason == "observed_after_sent"
+
+    with pytest.raises(PlatformSessionHealthRejected) as wrong_type:
+        await service.receive(object())  # type: ignore[arg-type]
+    assert wrong_type.value.reason == "not_a_session_health_envelope"
+
+    # The default stays usable for the raise sites that have nothing to add.
+    assert PlatformSessionHealthRejected().reason == "unspecified"

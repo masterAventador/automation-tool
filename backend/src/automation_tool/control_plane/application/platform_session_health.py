@@ -11,8 +11,22 @@ from automation_tool.protocol import PlatformSessionHealthEnvelope, PlatformSess
 
 
 class PlatformSessionHealthRejected(ValueError):
-    def __init__(self) -> None:
+    """Refused, and able to say which rule refused it.
+
+    The Executor is told only that its protocol was rejected — deliberately, so
+    a closed connection leaks nothing about server state. That leaves the server
+    log as the one place the reason can exist, and until 2026-08-06 it did not
+    exist there either: every branch raised the same bare exception and the
+    WebSocket handler logged nothing. Diagnosing one refusal then cost a packet
+    capture on the deployment host and a hand-unmasking of WebSocket frames.
+
+    `reason` is a fixed vocabulary chosen at the raise site — never message
+    content, never platform data — so it can be logged under `CLAUDE.md` §7.
+    """
+
+    def __init__(self, reason: str = "unspecified") -> None:
         super().__init__("Platform Session health is rejected")
+        self.reason = reason
 
 
 class PlatformSessionHealthUnavailable(RuntimeError):
@@ -160,14 +174,14 @@ class PlatformSessionHealthService:
         message: PlatformSessionHealthEnvelope,
     ) -> PlatformSessionHealthConvergenceResult:
         if not isinstance(message, PlatformSessionHealthEnvelope):
-            raise PlatformSessionHealthRejected
+            raise PlatformSessionHealthRejected("not_a_session_health_envelope")
         received_at = self._now()
-        if (
-            received_at < message.sent_at
-            or received_at >= message.deadline_at
-            or message.payload.observed_at > message.sent_at
-        ):
-            raise PlatformSessionHealthRejected
+        if received_at < message.sent_at:
+            raise PlatformSessionHealthRejected("sent_at_is_in_the_future")
+        if received_at >= message.deadline_at:
+            raise PlatformSessionHealthRejected("deadline_has_passed")
+        if message.payload.observed_at > message.sent_at:
+            raise PlatformSessionHealthRejected("observed_after_sent")
         pending = PendingPlatformSessionHealth(
             installation_id=InstallationId.parse(str(message.installation_id)),
             platform=message.payload.platform,
