@@ -1719,10 +1719,6 @@ class MaterialVideoWorkerBackgroundMusicTest(unittest.TestCase):
         self.assertTrue(self.stylesheet.startswith(upstream))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class MaterialMontageRequestTest(unittest.TestCase):
     """The headless montage path: React collects the parameters, no Streamlit.
 
@@ -1862,3 +1858,7 @@ class MaterialMontageRequestTest(unittest.TestCase):
             self.assertEqual(params.video_source, "pexels")
             self.assertEqual(params.video_count, 1)
             self.assertEqual(params.bgm_type, "")
+
+
+if __name__ == "__main__":
+    unittest.main()
