@@ -4,9 +4,11 @@ Self-healing compiles one successful Browser Use trajectory into this
 restricted, auditable JSON — never into code. What the roadmap forbids is made
 structurally impossible rather than discouraged:
 
-* no field anywhere accepts a CSS selector, JavaScript, shell text or a
-  screenshot — every free-text field is bounded and scanned, and there is no
-  base64/image field to smuggle one into;
+* no field is ever *executed* as a selector, JavaScript or shell — the replay
+  protocol only exposes semantic lookup (role + name), so there is nowhere
+  for such text to run; the bounded free-text scan on top of that is defence
+  in depth, not the boundary itself (REVIEW-2026-08-06 SA#10), and there is
+  no base64/image field to smuggle a screenshot into;
 * raw coordinates exist only under ``successEvidence`` (``click_point_v1``);
   goals are semantic (role / name / near-text / relative position) only;
 * ``fill`` values may only reference runtime parameters — a literal would put
@@ -41,7 +43,11 @@ _PARAMETER_NAME: Final = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 # 语义目标与附近文字里绝不该出现的东西：CSS 选择器、JS、Shell、密钥词。
 # 判据 fail-closed：真实页面的按钮名不含这些字符与词；含了就不收。
 # 公开导出：SA-02 清洗器复用同一套禁止集，避免两份定义各自漂移。
-FORBIDDEN_TEXT_CHARACTERS: Final = frozenset('<>{}$`;|&\\#"')
+# 这层扫描是纵深防御，不是结构保证——结构保证来自 ReplayPage 协议根本
+# 没有选择器/代码入口。旧集合只挡得住带 #、> 的选择器写法，属性选择器、
+# 伪类、事件属性全放行（REVIEW-2026-08-06 SA#10）；纯词形态（.btn.primary）
+# 字符黑名单挡不住也不去挡——英文句点在正常文案里太常见。
+FORBIDDEN_TEXT_CHARACTERS: Final = frozenset("<>{}$`;|&\\#\"[]()'=*:")
 FORBIDDEN_TEXT_WORDS: Final = (
     "javascript:",
     "data:",

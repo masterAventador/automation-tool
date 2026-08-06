@@ -202,10 +202,24 @@ class TestSafetyProperties:
         assert ("click", "发布", None) in page.side_effects, "the external step ran"
         assert raised.value.dispatched is True
 
-    def test_replay_never_exceeds_the_external_side_effect_boundary(self) -> None:
-        # The skill declares maxExternalSteps=1; a page that reports two external
-        # actions would be a defect, but the replayer counts from the skill, not
-        # the page, so the boundary is a property of what it will *perform*.
+    def test_replay_refuses_a_skill_whose_boundary_lies(self) -> None:
+        """真正触发边界分支，而不是对成功回放断言一个恒真式。
+
+        这条用例的前身名为 never_exceeds_the_external_side_effect_boundary，
+        断言 external_side_effects <= boundary——对成功返回恒真（失败走
+        异常），真正的边界代码一次都没红过（REVIEW-2026-08-06 SA#7）。
+        parse 层会拒掉声明超界的文档，但 replayer 的 docstring 承诺自己
+        不信任这一点；那就绕过 parse 直接构造一个撒谎的技能来验证。
+        """
+        import dataclasses
+
+        liar = dataclasses.replace(skill(), max_external_steps=0)
         page = FakePage()
-        outcome = replay_skill(skill(), page, parameters={"caption": "x"})
-        assert outcome.external_side_effects <= skill().max_external_steps
+
+        with pytest.raises(ReplayFailed, match="boundary"):
+            replay_skill(liar, page, parameters={"caption": "x"})
+        assert page.side_effects == [], "the boundary must hold before any side effect"
+
+        # 合规技能的报数本身也要是准的：恰好一次外部动作（发布）。
+        outcome = replay_skill(skill(), FakePage(), parameters={"caption": "x"})
+        assert outcome.external_side_effects == 1

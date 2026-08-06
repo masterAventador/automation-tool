@@ -180,6 +180,27 @@ class TestRejectionMatrix:
             "forbidden",
         )
 
+    def test_selector_shapes_the_old_blocklist_let_through_are_refused(self) -> None:
+        """REVIEW-2026-08-06 SA#10：旧黑名单只挡得住带 #、> 的那一种写法。
+
+        审查实跑放行了这些全部：属性选择器、伪类、类链、事件属性。真正的
+        结构性保护是 ReplayPage 协议没有选择器入口，但既然声称「文本扫描
+        拒绝选择器」，扫描就得真的拒得住常见形态。
+        """
+        # 纯词形态（如 .btn.primary）字符黑名单挡不住也不该挡——英文句点在
+        # 正常文案里太常见；那一类由「协议没有选择器入口」这层结构保护兜底。
+        for shape in (
+            "div[data-e2e=publish]",
+            "input[name='caption']",
+            "a:nth-child(2)",
+            "onclick=alert(1)",
+            "li.item*3",
+        ):
+            self._reject(
+                lambda d, shape=shape: d["steps"][0]["goal"].update({"name": shape}),
+                "forbidden",
+            )
+
     def test_shell_and_secret_material_are_refused(self) -> None:
         self._reject(
             lambda d: d["steps"][0]["goal"].update({"name": "$(rm -rf /)"}),
