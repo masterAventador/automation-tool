@@ -78,6 +78,7 @@ from customer_demo_release import (  # noqa: E402
     customer_demo_material,
     describe_deployment,
     require_compiled_deployment,
+    windows_private_key_file_refusal,
 )
 from embedded_browser_archives import (  # noqa: E402
     MACOS_ARM64_ARCHIVE,
@@ -194,7 +195,15 @@ def read_pexels_api_key(path: Path) -> str:
         raise ReleaseFailed(f"pexels api key file is unavailable: {path}") from error
     if not stat.S_ISREG(stats.st_mode):
         raise ReleaseFailed("pexels api key file must be a regular file")
-    if stat.S_IMODE(stats.st_mode) & 0o077:
+    if os.name == "nt":
+        # The permission-bit comparison below can never pass on Windows, which
+        # would make `--pexels-api-key` unusable there and, with the gate in
+        # `build_windows_release`, the platform unbuildable. Same rule, read off
+        # the security descriptor — shared with the deployment signing seeds.
+        refusal = windows_private_key_file_refusal(path)
+        if refusal is not None:
+            raise ReleaseFailed(f"pexels api key file {refusal}")
+    elif stat.S_IMODE(stats.st_mode) & 0o077:
         raise ReleaseFailed("pexels api key file must not be group or world accessible")
     if stats.st_size > 4096:
         raise ReleaseFailed("pexels api key file is implausibly large")
@@ -1120,6 +1129,7 @@ def build_windows_release(
     deployment: CustomerDemoMaterial | None = None,
     update_endpoint: str | None = None,
     update_public_key: str | None = None,
+    pexels_api_key: str | None = None,
 ) -> dict[str, object]:
     """Produce one distributable Windows package and pass every release gate.
 
@@ -1150,6 +1160,17 @@ def build_windows_release(
         write_release_configuration,
     )
 
+    if pexels_api_key is None:
+        # Refused here, before anything is built, for the reason the macOS path
+        # refuses it: a distributable package without the key asks the user to
+        # type one by hand, and nothing between the omitted flag and the
+        # installed App would say a word. `main()` reaches both builders through
+        # one call site, so a platform that merely ignored the keyword would
+        # ship exactly that (REVIEW-2026-08-06 I5).
+        raise ReleaseFailed(
+            "a distributable release needs --pexels-api-key; a build without "
+            "one ships the ask-the-user behaviour"
+        )
     work_directory = require_source_stable_work_directory(work_directory)
     target_id, architecture = require_windows_target()
     require_windows_path_budget(work_directory)
@@ -1229,6 +1250,7 @@ def build_windows_release(
         ),
         update_endpoint=update_endpoint,
         update_public_key=update_public_key,
+        pexels_api_key=pexels_api_key,
     )
     if deployment is not None:
         announce(f"Building for the deployment at {deployment.base_url}")
@@ -1238,6 +1260,10 @@ def build_windows_release(
     if deployment is not None:
         require_compiled_deployment(binary, deployment)
         announce(f"Binary carries the deployment profile for {deployment.base_url}")
+    # Read back out of the finished binary, as on macOS: everything before this
+    # was an instruction to a compiler that a stale cache may decline to follow.
+    require_compiled_pexels_key(binary, pexels_api_key)
+    announce("Binary carries the packaged stock-footage key")
     audited_assets = snapshot_production_assets(build_directory / AUDITED_DISTRIBUTION_NAME)
     if repository_source_facts(REPOSITORY_ROOT) != source_identity:
         raise ReleaseFailed("release sources changed while the App was being built")

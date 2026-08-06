@@ -31,6 +31,21 @@ from build_release_package import (  # noqa: E402
 from release_identity import SourceFacts  # noqa: E402
 
 
+def make_private(path: Path) -> None:
+    """Give the file the shape its reader actually requires on this host.
+
+    `chmod(0o600)` only toggles the read-only attribute on Windows — `S_IMODE`
+    stays `0o666` for every writable file — so a fixture that stops there tests
+    the rejection path on one platform and the acceptance path on the other.
+    The property is the same either way: this user and nobody else.
+    """
+    path.chmod(0o600)
+    if os.name == "nt":
+        from test_customer_demo_release import make_windows_private
+
+        make_windows_private(path)
+
+
 def rendered_capability_reference(read_descriptor: int) -> str:
     """What this platform's spawner would actually put in the environment.
 
@@ -131,6 +146,39 @@ class PexelsKeyAssemblyGateTests(unittest.TestCase):
             "require_compiled_pexels_key(",
             body,
             "build_macos_release must read the key back out of the finished binary",
+        )
+
+    def test_a_windows_release_without_a_stock_footage_key_is_refused(self) -> None:
+        """The refusal has to hold on both containers, not just the `.app`.
+
+        `main()` reaches one call site through
+        `build_windows_release if platform == "windows" else build_macos_release`,
+        so a keyword only one of them accepts is a `TypeError` on the other —
+        and a Windows package that somehow got built without the key would ship
+        the ask-the-user behaviour this gate exists to remove.
+        """
+        with tempfile.TemporaryDirectory(prefix="windows-release-gate-") as temporary:
+            with self.assertRaisesRegex(
+                build_release_package.ReleaseFailed, "pexels"
+            ):
+                build_release_package.build_windows_release(
+                    work_directory=Path(temporary),
+                    archive=None,
+                    build_id="gate-check",
+                )
+
+    def test_the_readback_is_wired_into_the_windows_release_path(self) -> None:
+        source = (ROOT / "scripts/build_release_package.py").read_text(encoding="utf-8")
+        body = source.split("def build_windows_release", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn(
+            "require_compiled_pexels_key(",
+            body,
+            "build_windows_release must read the key back out of the finished binary",
+        )
+        self.assertIn(
+            "pexels_api_key=pexels_api_key",
+            body,
+            "build_windows_release must hand the key to the compile environment",
         )
 
 
@@ -925,7 +973,7 @@ class ThePexelsKeyRidesTheBuildNotTheRepository(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             key_file = Path(directory) / "pexels-api-key"
             key_file.write_text("C" * 56 + "\n", encoding="utf-8")
-            key_file.chmod(0o600)
+            make_private(key_file)
 
             value = build_release_package.read_pexels_api_key(key_file)
 

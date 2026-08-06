@@ -101,26 +101,37 @@ def _decode_canonical(value: str) -> bytes:
     return decoded
 
 
-def _require_windows_private_key_file(path: Path) -> None:
-    """Refuse a key file any other principal can read.
+def windows_private_key_file_refusal(path: Path) -> str | None:
+    """Why this key file is not this user's alone — or `None` if it is.
+
+    Windows has no permission bits to compare: `S_IMODE` is `0o666` for every
+    writable file here, so any `0o600`-shaped check can never pass and would
+    make the whole platform's release unbuildable. The property does have a
+    Windows form, and the product already uses it for Profile directories — a
+    DACL granting this user and nobody else.
+
+    Returns the reason rather than raising because there are two callers with
+    two failure types: the customer-Demo signing seed here, and the release
+    command's stock-footage key. Neither should have to import the other's
+    exception to reuse one platform rule.
 
     Opened rather than queried by name so the descriptor that is checked is the
     one that will be read, and closed immediately: this only inspects the
-    security descriptor, the seed is read afterwards through the ordinary path.
+    security descriptor.
     """
     from windows_private_directory import PrivateDirectoryRejected, require_private_dacl
 
     try:
         descriptor = os.open(path, os.O_RDONLY | os.O_BINARY)
     except OSError as error:
-        _reject(f"key file could not be opened: {path}")
-        raise AssertionError("unreachable") from error
+        return f"could not be opened: {path} ({error})"
     try:
         require_private_dacl(descriptor)
     except PrivateDirectoryRejected as error:
-        _reject(f"key file must be readable only by this user: {path} ({error})")
+        return f"must be readable only by this user: {path} ({error})"
     finally:
         os.close(descriptor)
+    return None
 
 
 def load_signing_seed(path: Path) -> bytes:
@@ -133,12 +144,9 @@ def load_signing_seed(path: Path) -> bytes:
     if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
         _reject(f"key file must be a regular file: {path}")
     if os.name == "nt":
-        # `0o600` has no Windows form: `S_IMODE` is `0o666` for every writable
-        # file here, so the comparison below could never pass and no Windows
-        # release could be built at all. The property it protects does have a
-        # Windows form, and the product already uses it for Profile
-        # directories — a DACL granting this user and nobody else.
-        _require_windows_private_key_file(path)
+        refusal = windows_private_key_file_refusal(path)
+        if refusal is not None:
+            _reject(f"key file {refusal}")
     elif stat.S_IMODE(metadata.st_mode) != REQUIRED_KEY_MODE:
         _reject(
             f"key file must be mode {REQUIRED_KEY_MODE:04o}, not "
