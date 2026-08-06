@@ -129,9 +129,13 @@ def replay_skill(
             if name is None or name not in parameters:
                 fail(f"step {step.index} needs runtime parameter {name!r}")
 
+    # `dispatched` is monotone for the whole run: once any external action has
+    # been performed, every later failure is outcome-uncertain, no matter how
+    # many internal steps sit in between. Resetting it per step was how a
+    # failure right after 发布 got classified as safely resumable — the shape
+    # of a duplicate post (REVIEW-2026-08-06 SA#1).
     for step in skill.steps:
         current_index = step.index
-        dispatched = False
         if step.checkpoint:
             last_checkpoint = step.index
 

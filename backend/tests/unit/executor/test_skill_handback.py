@@ -62,6 +62,36 @@ class TestHandback:
         assert decision.resume_from_checkpoint == 1
         assert decision.remaining_step_indexes == [1, 2, 3]
 
+    def test_a_failure_after_the_external_step_still_reconciles_only(self) -> None:
+        """发布成功 → 关确认弹窗失败：只对账，绝不继续、绝不重发。
+
+        这是「外部步之后还有内部步」的端点（REVIEW-2026-08-06 SA#1/SA#8）：
+        dispatched 被逐步重置的年代，这个形态会被判成 resume_browser_use，
+        remaining 里还列着那个已经点过的发布步——重复投稿的入口。
+        """
+        from tests.unit.executor.test_skill_replayer import (
+            skill_with_a_step_after_the_external_one,
+        )
+
+        publish_then_confirm = skill_with_a_step_after_the_external_one()
+        try:
+            replay_skill(
+                publish_then_confirm,
+                FakePage(failing={"已发布"}),
+                parameters={"caption": "x"},
+            )
+            raise AssertionError("expected the replay to fail")
+        except ReplayFailed as error:
+            failure = error
+        assert failure.dispatched is True
+
+        decision = decide_handback(publish_then_confirm, failure)
+
+        assert decision.action == "reconcile_only"
+        assert decision.may_continue is False
+        assert decision.may_resend is False
+        assert decision.remaining_step_indexes == []
+
     def test_a_post_dispatch_failure_reconciles_and_forbids_continue(self) -> None:
         # 发布 is the external step; its postcondition fails after the click, so
         # the outcome is uncertain — the platform may already have published.

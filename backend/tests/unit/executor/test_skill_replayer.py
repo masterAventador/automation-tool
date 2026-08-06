@@ -28,6 +28,25 @@ def skill():
     return parse_automation_skill(clean_trajectory(raw()))
 
 
+def skill_with_a_step_after_the_external_one():
+    """发布，然后关确认弹窗——外部步之后还有内部步的最常见真实形态。
+
+    REVIEW-2026-08-06 SA#1/SA#8：三步 fixture 的外部步恰好是最后一步，
+    「外部步成功之后再失败」这一端点因此从未被任何用例踩到过。
+    """
+    document = raw()
+    document["actions"] = [
+        *document["actions"],
+        {
+            "kind": "click",
+            "target": {"role": "button", "name": "知道了", "x": 420, "y": 480},
+            "external": False,
+            "resultingVisible": {"role": "listitem", "name": "已发布"},
+        },
+    ]
+    return parse_automation_skill(clean_trajectory(document))
+
+
 class FakePage:
     """A scripted page: every anchor is findable and every condition holds."""
 
@@ -90,6 +109,25 @@ class TestSafetyProperties:
         page = FakePage(failing={"/creator-micro/content/manage"})
         with pytest.raises(ReplayFailed, match="postcondition"):
             replay_skill(skill(), page, parameters={"caption": "x"})
+
+    def test_dispatched_survives_a_failure_in_a_later_step(self) -> None:
+        """发布已经点了，之后无论哪一步失败，dispatched 都必须还是 True。
+
+        这个标志曾在每步循环开头被重置：外部步做完、下一步（关确认弹窗）
+        后置条件失败，失败对象却报 dispatched=False——SA-05 于是判成可以
+        交回 Browser Use 从头重跑，剩余步骤里还列着那个已经发生的发布。
+        真实平台上这就是重复投稿（REVIEW-2026-08-06 SA#1）。
+        """
+        page = FakePage(failing={"已发布"})
+        with pytest.raises(ReplayFailed) as raised:
+            replay_skill(
+                skill_with_a_step_after_the_external_one(),
+                page,
+                parameters={"caption": "x"},
+            )
+
+        assert ("click", "发布") in page.side_effects, "the external step ran"
+        assert raised.value.dispatched is True
 
     def test_replay_never_exceeds_the_external_side_effect_boundary(self) -> None:
         # The skill declares maxExternalSteps=1; a page that reports two external
