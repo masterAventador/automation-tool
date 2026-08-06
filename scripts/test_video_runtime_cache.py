@@ -270,6 +270,80 @@ class EnsureCachedTests(unittest.TestCase):
         self.assertEqual(stamp["fingerprint"], contract_fingerprint([self.contract]))
 
 
+class ConcurrentConsumerTests(unittest.TestCase):
+    """REVIEW-2026-08-06 I1: the cache is shared, and it had no lock at all.
+
+    The shared-staging change turned this cache from "a release touches it
+    occasionally" into "every desktop-E2E prerequisite run hits it", across
+    parallel worktrees (§8.2 encourages those). Two consumers racing meant:
+    B could rmtree the tree A was mid-way through building, both builds could
+    interleave in the same directory, and the loser's stamp could describe
+    the winner's half-written bytes.
+    """
+
+    def test_a_second_consumer_waits_instead_of_wrecking_the_build(self) -> None:
+        import threading
+
+        with tempfile.TemporaryDirectory(prefix="runtime-cache-race-") as temporary:
+            root = Path(temporary)
+            contract = root / "pin.json"
+            contract.write_text('{"version": 1}', encoding="utf-8")
+            build_started = threading.Event()
+            release_build = threading.Event()
+            build_calls: list[str] = []
+
+            def slow_build(destination: Path) -> None:
+                build_calls.append("first")
+                destination.mkdir()
+                (destination / "half").write_text("partial", encoding="utf-8")
+                build_started.set()
+                assert release_build.wait(timeout=10), "the test never released the build"
+                (destination / "whole").write_text("complete", encoding="utf-8")
+
+            def second_build(destination: Path) -> None:
+                # Must never run: by the time the second consumer gets in, the
+                # first build has finished and its stamp is valid.
+                build_calls.append("second")
+                destination.mkdir()
+
+            outcomes: dict[str, Path] = {}
+
+            def first_consumer() -> None:
+                outcomes["first"] = ensure_cached(
+                    name="artifact", contracts=[contract], build=slow_build, root=root
+                )
+
+            def second_consumer() -> None:
+                outcomes["second"] = ensure_cached(
+                    name="artifact", contracts=[contract], build=second_build, root=root
+                )
+
+            first = threading.Thread(target=first_consumer)
+            first.start()
+            self.assertTrue(build_started.wait(timeout=10))
+            second = threading.Thread(target=second_consumer)
+            second.start()
+            # Give the second consumer every chance to misbehave while the
+            # first build is still in flight, then let the build finish.
+            second.join(timeout=0.3)
+            release_build.set()
+            first.join(timeout=10)
+            second.join(timeout=10)
+            self.assertFalse(first.is_alive() or second.is_alive())
+
+            self.assertEqual(
+                build_calls,
+                ["first"],
+                "the second consumer must wait for the lock and reuse the "
+                "finished tree, not tear down or rebuild a build in flight",
+            )
+            self.assertEqual(outcomes["first"], outcomes["second"])
+            self.assertTrue(
+                (outcomes["second"] / "whole").is_file(),
+                "the second consumer saw a half-built tree",
+            )
+
+
 class CacheRootTests(unittest.TestCase):
     def test_the_cache_root_is_project_scoped_and_outside_the_repository(self) -> None:
         root = cache_root()
