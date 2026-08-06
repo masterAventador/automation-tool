@@ -202,6 +202,22 @@ def read_pexels_api_key(path: Path) -> str:
     return value
 
 
+def require_compiled_pexels_key(binary: Path, key: str) -> None:
+    """Refuse a package whose binary does not carry the stock-footage key.
+
+    Same posture as `require_compiled_deployment`: `option_env!` is an
+    instruction to a compiler, and a stale cargo cache is entitled to ignore
+    an instruction. The key is ASCII-alphanumeric and compiled in verbatim,
+    so the finished binary either contains those bytes or was built without
+    them (REVIEW-2026-08-06 I5).
+    """
+    if key.encode("utf-8") not in binary.read_bytes():
+        raise ReleaseFailed(
+            "the finished binary does not carry the pexels api key it was "
+            "built with — a stale build cache shipped the pre-key behaviour"
+        )
+
+
 def require_macos_target() -> tuple[str, str]:
     if platform_module.system() != "Darwin":
         raise ReleaseFailed("the macOS release package must be built on macOS")
@@ -789,6 +805,15 @@ def build_macos_release(
     deployment's action authorization key. Without it the package is the
     ordinary local-profile release. One path, one set of gates, either way.
     """
+    if pexels_api_key is None:
+        # A distributable package without the key is the original defect the
+        # flag was added to remove: the user is asked to type one by hand.
+        # Nothing between "--pexels-api-key omitted" and the installed App
+        # would have said a word (REVIEW-2026-08-06 I5).
+        raise ReleaseFailed(
+            "a distributable release needs --pexels-api-key; a build without "
+            "one ships the ask-the-user behaviour"
+        )
     work_directory = require_source_stable_work_directory(work_directory)
     target_id, architecture = require_macos_target()
     # Resolved before anything is built. There is one identity and one reader
@@ -852,6 +877,8 @@ def build_macos_release(
         # instruction to a compiler that a stale cache may decline to follow.
         require_compiled_deployment(app_binary(application), deployment)
         announce(f"Binary carries the deployment profile for {deployment.base_url}")
+    require_compiled_pexels_key(app_binary(application), pexels_api_key)
+    announce("Binary carries the packaged stock-footage key")
     # Frozen next to the artifact it belongs to: the shared `frontend/dist` can
     # be rewritten by any concurrent build while the audits are still running.
     audited_assets = snapshot_production_assets(

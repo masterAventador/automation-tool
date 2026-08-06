@@ -2957,7 +2957,13 @@ fn configured_pexels_api_key(configured: Option<&'static str>) -> Option<&'stati
         && value.bytes().all(|byte| byte.is_ascii_alphanumeric());
     // A malformed value is dropped rather than shipped: the worker rejects it
     // at the bootstrap boundary anyway, and a package that cannot search stock
-    // footage beats one that dies on its first bootstrap line.
+    // footage beats one that dies on its first bootstrap line. Dropped, but
+    // never silently — the fact (only ever the fact, not the value) is what
+    // makes "the release baked in a mangled key" diagnosable instead of
+    // indistinguishable from a keyless build (REVIEW-2026-08-06 I5).
+    if !shape_is_sane {
+        eprintln!("the compiled stock-footage key failed its shape check and was dropped");
+    }
     shape_is_sane.then_some(value)
 }
 
