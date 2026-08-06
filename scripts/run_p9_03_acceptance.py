@@ -128,6 +128,7 @@ def release_environment(
     action_authorization_public_key: str | None = None,
     update_endpoint: str | None = None,
     update_public_key: str | None = None,
+    pexels_api_key: str | None = None,
 ) -> dict[str, str]:
     """The environment one release build compiles under.
 
@@ -162,6 +163,11 @@ def release_environment(
             "CI": "true",
         }
     )
+    if pexels_api_key is not None:
+        # Compile-time like the deployment profile: the key ships inside the
+        # binary. This mapping is the cargo build's whole environment, so the
+        # value never reaches a log line or a child process of the built App.
+        environment["AUTOMATION_TOOL_PEXELS_API_KEY"] = pexels_api_key
     if update_endpoint is None and update_public_key is None:
         environment["AUTOMATION_TOOL_UPDATE_DISABLED"] = "1"
     elif update_endpoint is not None and update_public_key is not None:

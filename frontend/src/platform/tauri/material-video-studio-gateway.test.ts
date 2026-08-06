@@ -99,6 +99,49 @@ describe("Tauri material video studio gateway", () => {
     expect(JSON.stringify(reworded)).not.toContain("never-reflect");
   });
 
+  it("refuses a montage request the worker would refuse, before spawning anything", async () => {
+    // REVIEW-2026-08-06 I6/M1：这 13 个校验条件此前零测试覆盖，三层
+    // voiceName 边界互不一致也因此漏网——TS 的宽松正则放行 "abc"，
+    // worker 在二十秒后的 bootstrap 行才拒绝。
+    const gateway = new TauriMaterialVideoStudioGateway();
+    const wellFormed = {
+      subject: "护肤知识三条",
+      script: null,
+      aspect: "9:16",
+      clipDurationSeconds: 4,
+      voiceName: "zh-CN-XiaoxiaoNeural-Female",
+      subtitleEnabled: true,
+      fontSizePx: 60,
+      textColor: "#FFFFFF",
+      strokeColor: "#000000",
+      strokeWidthPx: 1.5,
+    } as const;
+
+    for (const broken of [
+      { ...wellFormed, subject: "   " },
+      { ...wellFormed, voiceName: "" },
+      { ...wellFormed, voiceName: "abc" },
+      { ...wellFormed, clipDurationSeconds: 1 },
+      { ...wellFormed, fontSizePx: 23 },
+      { ...wellFormed, textColor: "red" },
+      { ...wellFormed, strokeWidthPx: 5.5 },
+    ]) {
+      await expect(gateway.submitMaterialMontage(broken)).rejects.toMatchObject({
+        code: "protocol_mismatch",
+        retryable: false,
+      });
+    }
+    expect(invoke).not.toHaveBeenCalled();
+
+    invoke.mockResolvedValueOnce("3d594650-b5f4-4498-8e38-0cf85d6dfa72");
+    await expect(gateway.submitMaterialMontage(wellFormed)).resolves.toBe(
+      "3d594650-b5f4-4498-8e38-0cf85d6dfa72",
+    );
+    expect(invoke).toHaveBeenCalledWith("submit_material_montage", {
+      request: wellFormed,
+    });
+  });
+
   it("strictly reconciles jobs and sends only opaque identifiers for mutations", async () => {
     const gateway = new TauriMaterialVideoStudioGateway();
     const renderJobId = "3d594650-b5f4-4498-8e38-0cf85d6dfa72";

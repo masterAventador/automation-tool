@@ -462,6 +462,9 @@ const shellMaterialVideoStudioGateway: MaterialVideoStudioGateway = {
   async readMaterialArtifact() {
     throw new Error("Material video studio is unavailable");
   },
+  async submitMaterialMontage() {
+    throw new Error("Material video studio is unavailable");
+  },
 };
 
 interface WorkbenchShellProps {

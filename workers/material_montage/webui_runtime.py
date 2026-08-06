@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, TextIO
 
+from gateway import PEXELS_API_KEY_PATTERN
 from job_observation_bridge import install_job_observation_bridge
 from model_service_adapter import (
     ScriptModelConfiguration,
@@ -37,6 +38,7 @@ STOP_TIMEOUT_SECONDS: Final = 5
 # configuration, whose value comes from the release contract rather than from a
 # second copy of the font name.
 UI_SECTION_HEADER: Final = "[ui]"
+APP_SECTION_HEADER: Final = "[app]"
 CONFIG_FILE_NAME: Final = "config.toml"
 EXAMPLE_CONFIG_FILE_NAME: Final = "config.example.toml"
 STYLESHEET_FILE_NAME: Final = "styles.css"
@@ -141,13 +143,20 @@ def default_subtitle_font_name() -> str:
     return name
 
 
-def _private_config_document(example: str, font_name: str) -> str:
-    """Return the upstream example configuration with the subtitle font pinned.
+def _private_config_document(
+    example: str, font_name: str, pexels_api_key: str | None = None
+) -> str:
+    """Return the upstream example configuration with our values pinned.
 
-    The value is inserted immediately after the `[ui]` table header rather than
-    by rewriting the document, so every other upstream default, comment and
+    Each value is inserted immediately after its section's table header rather
+    than by rewriting the document, so every other upstream default, comment and
     ordering survives verbatim and a future upstream option cannot be dropped by
     a round trip through a TOML serializer.
+
+    The subtitle font goes under `[ui]`; the packaged Pexels key goes under
+    `[app]` as `pexels_api_keys` — the field upstream itself reads. Until now
+    nothing ever supplied that field, so a packaged App demanded a key from the
+    operator that the product was supposed to carry (measured 2026-08-05).
     """
     if (
         not font_name
@@ -155,13 +164,42 @@ def _private_config_document(example: str, font_name: str) -> str:
         or any(character in font_name for character in '"\\\n\r\t')
     ):
         raise WebUiRejected("invalid subtitle font name")
+    # The gateway's pattern, not str.isalnum(): the latter accepts fullwidth
+    # digits and CJK, so the two readers disagreed about what a legal key is
+    # (REVIEW-2026-08-06 M5). One pattern, one definition.
+    if pexels_api_key is not None and PEXELS_API_KEY_PATTERN.fullmatch(pexels_api_key) is None:
+        raise WebUiRejected("invalid material site key")
     lines = example.splitlines(keepends=True)
+    ui_index: int | None = None
+    app_index: int | None = None
     for index, line in enumerate(lines):
-        if line.strip() != UI_SECTION_HEADER:
+        if line.strip() == UI_SECTION_HEADER and ui_index is None:
+            ui_index = index
+        if line.strip() == APP_SECTION_HEADER and app_index is None:
+            app_index = index
+    if ui_index is None:
+        raise WebUiRejected("upstream configuration has no WebUI section")
+    if pexels_api_key is not None and app_index is None:
+        raise WebUiRejected("upstream configuration has no app section")
+    insertions: dict[int, str] = {ui_index: f'font_name = "{font_name}"\n'}
+    replaced_keys: set[str] = set()
+    if pexels_api_key is not None and app_index is not None:
+        insertions[app_index] = f'pexels_api_keys = ["{pexels_api_key}"]\n'
+        # The upstream template already declares `pexels_api_keys = []` in
+        # [app]; inserting without dropping that line produced a duplicate
+        # TOML key, and upstream's config load died on it — measured on the
+        # frozen worker the first time a key ever rode this path (2026-08-06).
+        # Any pinned key replaces the upstream default rather than joining it.
+        replaced_keys.add("pexels_api_keys")
+    document: list[str] = []
+    for index, line in enumerate(lines):
+        bare = line.split("=", 1)[0].strip()
+        if bare in replaced_keys and not line.lstrip().startswith("#"):
             continue
-        pinned = f'font_name = "{font_name}"\n'
-        return "".join(lines[: index + 1]) + pinned + "".join(lines[index + 1 :])
-    raise WebUiRejected("upstream configuration has no WebUI section")
+        document.append(line)
+        if index in insertions:
+            document.append(insertions[index])
+    return "".join(document)
 
 
 def _private_stylesheet_document(upstream: str) -> str:
@@ -238,7 +276,9 @@ def _native_path_for_upstream(path: Path) -> Path:
 
 
 def start_webui(
-    asset_root: Path, configuration: ScriptModelConfiguration | None
+    asset_root: Path,
+    configuration: ScriptModelConfiguration | None,
+    pexels_api_key: str | None = None,
 ) -> WebUiRuntime:
     runtime_parent = asset_root / ".automation-tool-webui"
     runtime_parent.mkdir(mode=0o700, exist_ok=True)
@@ -263,7 +303,11 @@ def start_webui(
     try:
         assert process.stdin is not None
         payload = json.dumps(
-            _script_model_document(configuration), separators=(",", ":")
+            {
+                "pexelsApiKey": pexels_api_key,
+                "scriptModel": _script_model_document(configuration),
+            },
+            separators=(",", ":"),
         ).encode()
         process.stdin.write(payload + b"\n")
         process.stdin.close()
@@ -287,7 +331,9 @@ def start_webui(
         raise
 
 
-def _preload_private_config(runtime_root: Path) -> None:
+def _preload_private_config(
+    runtime_root: Path, pexels_api_key: str | None = None
+) -> None:
     app_path, _, example, _ = _upstream_paths()
     if not app_path.is_dir() or not example.is_file():
         raise WebUiRejected("upstream package unavailable")
@@ -299,8 +345,12 @@ def _preload_private_config(runtime_root: Path) -> None:
     # Upstream copies the example over only when config.toml is missing, so
     # writing it here is what makes the pinned subtitle font the effective
     # default instead of the proprietary face this release no longer ships.
+    # The packaged Pexels key rides the same document; it only ever exists in
+    # this 0o700 private runtime directory, never in argv or the environment.
     (runtime_root / CONFIG_FILE_NAME).write_text(
-        _private_config_document(example_document, default_subtitle_font_name()),
+        _private_config_document(
+            example_document, default_subtitle_font_name(), pexels_api_key
+        ),
         encoding="utf-8",
     )
     app_package = types.ModuleType("app")
@@ -320,15 +370,29 @@ def _preload_private_config(runtime_root: Path) -> None:
     config_package.config = config_module
 
 
+def _prepare_shared_runtime(runtime_root: Path) -> None:
+    """The private-runtime layout every surface needs before upstream code runs.
+
+    The observation bridge resolves `storage/tasks` with strict=True at
+    install time, and upstream `resource_dir()` is the subtitle-font root —
+    so the WebUI *and* the headless montage path must both build these before
+    wiring the upstream engine. The montage path skipping this is exactly how
+    every montage job died on FileNotFoundError (REVIEW-2026-08-06 C1).
+    """
+    _, _, _, upstream_resource = _upstream_paths()
+    if not upstream_resource.is_dir():
+        raise WebUiRejected("upstream WebUI assets unavailable")
+    shutil.copytree(upstream_resource, runtime_root / "resource")
+    (runtime_root / "storage/tasks").mkdir(parents=True)
+
+
 def _prepare_private_project(runtime_root: Path) -> Path:
-    _, upstream_main, _, upstream_resource = _upstream_paths()
+    _, upstream_main, _, _ = _upstream_paths()
     upstream_webui = upstream_main.parent
-    if not upstream_webui.is_dir() or not upstream_resource.is_dir():
+    if not upstream_webui.is_dir():
         raise WebUiRejected("upstream WebUI assets unavailable")
     private_webui = runtime_root / "webui"
-    private_resource = runtime_root / "resource"
     shutil.copytree(upstream_webui, private_webui)
-    shutil.copytree(upstream_resource, private_resource)
     stylesheet = private_webui / STYLESHEET_FILE_NAME
     if not stylesheet.is_file():
         raise WebUiRejected("upstream WebUI stylesheet unavailable")
@@ -336,7 +400,7 @@ def _prepare_private_project(runtime_root: Path) -> Path:
         _private_stylesheet_document(stylesheet.read_text(encoding="utf-8")),
         encoding="utf-8",
     )
-    (runtime_root / "storage/tasks").mkdir(parents=True)
+    _prepare_shared_runtime(runtime_root)
     return private_webui / "Main.py"
 
 
@@ -353,10 +417,22 @@ def serve_webui(
     if not line or len(line.encode()) > 16 * 1024:
         raise WebUiRejected("invalid model bootstrap")
     try:
-        configuration = parse_script_model(json.loads(line))
+        document = json.loads(line)
+        if not isinstance(document, dict) or set(document) != {
+            "pexelsApiKey",
+            "scriptModel",
+        }:
+            raise ValueError("invalid bootstrap shape")
+        configuration = parse_script_model(document["scriptModel"])
+        pexels_api_key = document["pexelsApiKey"]
+        if pexels_api_key is not None and not (
+            isinstance(pexels_api_key, str)
+            and PEXELS_API_KEY_PATTERN.fullmatch(pexels_api_key) is not None
+        ):
+            raise ValueError("invalid material site key")
     except (json.JSONDecodeError, UnicodeError, ValueError, TypeError):
         raise WebUiRejected("invalid model bootstrap") from None
-    _preload_private_config(runtime_root)
+    _preload_private_config(runtime_root, pexels_api_key)
     if configuration is not None:
         install_script_model(configuration)
     from app.services import llm

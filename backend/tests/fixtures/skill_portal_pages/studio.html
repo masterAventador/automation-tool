@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>创作中心 - 发布内容</title>
+<style>
+  body { margin: 0; font-family: sans-serif; }
+  header { padding: 10px 24px; background: #16213e; color: #fff; display: flex; gap: 16px; }
+  header a { color: #dfe6f3; text-decoration: none; font-size: 13px; }
+  form { max-width: 720px; margin: 24px auto; display: grid; gap: 12px; }
+  label { font-size: 13px; color: #444; display: grid; gap: 4px; }
+  input, textarea { padding: 8px; border: 1px solid #ccc; font-size: 14px; }
+  .actions { display: flex; gap: 10px; }
+  .modal { display: none; }
+  .tags { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <strong>创作中心</strong>
+  <a href="/automation-tool-sa-portal">返回首页</a>
+  <a href="/automation-tool-sa-portal">草稿箱</a>
+  <a href="/automation-tool-sa-portal">数据看板</a>
+</header>
+
+<form onsubmit="return false">
+  <label>标题
+    <input type="text" aria-label="标题内容" placeholder="请输入作品标题">
+  </label>
+  <label>简介
+    <textarea aria-label="简介内容" rows="4" placeholder="请输入作品简介"></textarea>
+  </label>
+  <fieldset class="tags" aria-label="话题标签">
+    <legend>话题标签</legend>
+    <label><input type="checkbox">行业观察</label>
+    <label><input type="checkbox">深度解读</label>
+    <label><input type="checkbox">今日热点</label>
+    <label><input type="checkbox">经验分享</label>
+  </fieldset>
+  <div class="actions">
+    <button type="button" onclick="location.href='/automation-tool-sa-portal/studio/done'">发布内容</button>
+    <button type="button">存草稿</button>
+    <button type="button" onclick="location.href='/automation-tool-sa-portal'">取消</button>
+  </div>
+</form>
+
+<!-- 未弹出的确认弹层：含同名隐藏按钮，验证适配层只认可见锚点 -->
+<div class="modal" role="dialog" aria-label="发布确认">
+  <p>确认要发布这条内容吗？</p>
+  <button type="button">发布内容</button>
+  <button type="button">再想想</button>
+</div>
+</body>
+</html>

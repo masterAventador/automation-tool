@@ -163,6 +163,8 @@ def require_real_major_rejection(executable: Path, major: int) -> None:
             "bootstrapVersion": "1",
             "enableWebUi": False,
             "localSessionToken": token,
+            # 共享协议自 2026-08-05 起该键始终在场（无密钥构建为 null）。
+            "pexelsApiKey": None,
             "protocolVersion": "1.0",
             "renderBrowser": {
                 "chromiumMajor": wrong_major,

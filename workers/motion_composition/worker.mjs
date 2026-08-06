@@ -274,15 +274,24 @@ async function parseBootstrap(line) {
   } catch {
     throw new Error("rejected");
   }
+  // `pexelsApiKey` rides the shared bootstrap since 2026-08-05 — always
+  // present, null when the build carries no packaged key. This worker never
+  // uses it, but it must recognise the shared protocol: rejecting the ninth
+  // key made the App wait forever for a ready that never came (BM-08,
+  // measured 2026-08-06 as both sides idle-parked).
   if (!hasExactKeys(value, [
     "assetRoot", "bootstrapVersion", "enableWebUi", "localSessionToken",
-    "protocolVersion", "renderBrowser", "scriptModel", "workerKind",
+    "pexelsApiKey", "protocolVersion", "renderBrowser", "scriptModel",
+    "workerKind",
   ])) throw new Error("rejected");
   if (value.bootstrapVersion !== BOOTSTRAP_VERSION
       || value.protocolVersion !== PROTOCOL_VERSION
       || value.workerKind !== "node"
       || value.enableWebUi !== false
       || value.scriptModel !== null
+      || !(value.pexelsApiKey === null
+        || (typeof value.pexelsApiKey === "string"
+          && /^[A-Za-z0-9]{20,120}$/.test(value.pexelsApiKey)))
       || typeof value.assetRoot !== "string"
       || !isAbsolute(value.assetRoot)
       || typeof value.localSessionToken !== "string"

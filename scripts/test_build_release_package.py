@@ -46,6 +46,94 @@ def rendered_capability_reference(read_descriptor: int) -> str:
     return str(read_descriptor)
 
 
+class PexelsKeyAssemblyGateTests(unittest.TestCase):
+    """REVIEW-2026-08-06 I5: the key had no owner between the flag and the user.
+
+    `--pexels-api-key` was optional with no gate, and nothing read the finished
+    binary back — so a release built without the flag (or after someone
+    "fixed" a key-file error by dropping the argument) shipped, notarised,
+    with zero signals, and the user was back to typing a key by hand: the
+    exact defect the flag was added to remove. Same discipline as
+    `require_compiled_deployment`: everything before the read-back is an
+    instruction to a compiler that a stale cache may decline to follow.
+    """
+
+    def test_a_release_without_a_stock_footage_key_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="release-gate-") as temporary:
+            with self.assertRaisesRegex(
+                build_release_package.ReleaseFailed, "pexels"
+            ):
+                build_release_package.build_macos_release(
+                    work_directory=Path(temporary),
+                    archive=None,
+                    build_id="gate-check",
+                )
+
+    def test_the_finished_binary_must_carry_the_compiled_key(self) -> None:
+        key = "K" * 40
+        with tempfile.TemporaryDirectory(prefix="release-readback-") as temporary:
+            carrying = Path(temporary) / "with-key"
+            carrying.write_bytes(b"prefix" + key.encode() + b"suffix")
+            build_release_package.require_compiled_pexels_key(carrying, key)
+
+            hollow = Path(temporary) / "without-key"
+            hollow.write_bytes(b"a binary the compiler built from a stale cache")
+            with self.assertRaisesRegex(
+                build_release_package.ReleaseFailed, "pexels"
+            ):
+                build_release_package.require_compiled_pexels_key(hollow, key)
+
+    def test_the_locked_archive_check_tolerates_resolved_spellings(self) -> None:
+        """pc_16/le_22 pass DEFAULT_ARCHIVES[...].resolve(strict=True).
+
+        The foreign-archive refusal compares against `locked_archive()`, and a
+        symlinked cache root (or just a resolved vs unresolved spelling of the
+        same file) must not read as "a different archive". Both spellings of
+        the locked path must pass; a genuinely different file must not.
+        """
+        from embedded_browser_staging_cache import LOCKED_ARCHIVES, locked_archive
+
+        target_id = sorted(LOCKED_ARCHIVES)[0]
+        locked = locked_archive(target_id)
+
+        # A genuinely different file is refused by the gate itself.
+        with tempfile.TemporaryDirectory(prefix="archive-gate-") as temporary:
+            foreign = Path(temporary) / "somewhere-else.zip"
+            foreign.write_bytes(b"not the locked archive")
+            with self.assertRaisesRegex(
+                build_release_package.ReleaseFailed, "no longer honoured"
+            ):
+                build_release_package.stage_browser_distribution(
+                    target_id, foreign, Path(temporary) / "out", mock.Mock()
+                )
+
+        if locked.is_file():
+            self.skipTest("locked archive present; the resolved-spelling half "
+                          "would stage 171 MB here")
+        # Same file, resolved spelling: must pass the gate. With the archive
+        # absent on this machine, passing the gate surfaces as the *next*
+        # check's error ("not downloaded yet") — never the refusal.
+        with self.assertRaisesRegex(
+            build_release_package.ReleaseFailed, "not downloaded yet"
+        ):
+            build_release_package.stage_browser_distribution(
+                target_id,
+                locked.resolve(),
+                Path(tempfile.gettempdir()) / "never-used-out",
+                mock.Mock(),
+            )
+
+    def test_the_readback_is_wired_into_the_release_path(self) -> None:
+        # A gate that exists but is never called is the emptiest kind of green.
+        source = (ROOT / "scripts/build_release_package.py").read_text(encoding="utf-8")
+        body = source.split("def build_macos_release", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn(
+            "require_compiled_pexels_key(",
+            body,
+            "build_macos_release must read the key back out of the finished binary",
+        )
+
+
 class SnapshotBuildDependencyTests(unittest.TestCase):
     def test_node_modules_reaches_the_snapshot_without_exposing_the_operators_copy(
         self,
@@ -580,6 +668,7 @@ class TheOutputDirectoryIsCreatedBeforeItIsUsed(unittest.TestCase):
             "anything creates it",
         )
 
+
 class WindowsReleaseTests(unittest.TestCase):
     """EB-18. `--platform windows` must build, not refuse.
 
@@ -820,6 +909,45 @@ class WindowsReleaseTests(unittest.TestCase):
             # reports that the directory was cleaned up.
             self.assertEqual(returncode, 0)
             self.assertEqual(echoed.read_bytes(), payload)
+
+
+class ThePexelsKeyRidesTheBuildNotTheRepository(unittest.TestCase):
+    """The stock-footage key is baked in at compile time, from an operator file.
+
+    Measured 2026-08-05: the packaged App demanded a Pexels key from the
+    operator because nothing on the release path ever carried one. The key
+    file lives outside the repository (like the deployment signing keys) and
+    its value must reach the compile environment — and argv, logs and the
+    repository never.
+    """
+
+    def test_a_wellformed_key_file_reaches_the_compile_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            key_file = Path(directory) / "pexels-api-key"
+            key_file.write_text("C" * 56 + "\n", encoding="utf-8")
+            key_file.chmod(0o600)
+
+            value = build_release_package.read_pexels_api_key(key_file)
+
+            self.assertEqual(value, "C" * 56)
+
+    def test_malformed_or_worldreadable_key_files_are_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "absent"
+            with self.assertRaises(build_release_package.ReleaseFailed):
+                build_release_package.read_pexels_api_key(missing)
+
+            wide_open = Path(directory) / "wide-open"
+            wide_open.write_text("D" * 56, encoding="utf-8")
+            wide_open.chmod(0o644)
+            with self.assertRaises(build_release_package.ReleaseFailed):
+                build_release_package.read_pexels_api_key(wide_open)
+
+            garbage = Path(directory) / "garbage"
+            garbage.write_text("not a key at all!!", encoding="utf-8")
+            garbage.chmod(0o600)
+            with self.assertRaises(build_release_package.ReleaseFailed):
+                build_release_package.read_pexels_api_key(garbage)
 
 
 if __name__ == "__main__":

@@ -180,6 +180,46 @@ DEFAULT_ARCHIVES = {
 }
 
 
+def read_pexels_api_key(path: Path) -> str:
+    """Read the operator's stock-footage key file for compile-time baking.
+
+    Same posture as the deployment key files: a path on argv, never a value;
+    the file must be a private regular file. The shape check mirrors the
+    worker's bootstrap gate so a bad key fails the build here, not the first
+    video twenty minutes after installation.
+    """
+    try:
+        stats = path.lstat()
+    except OSError as error:
+        raise ReleaseFailed(f"pexels api key file is unavailable: {path}") from error
+    if not stat.S_ISREG(stats.st_mode):
+        raise ReleaseFailed("pexels api key file must be a regular file")
+    if stat.S_IMODE(stats.st_mode) & 0o077:
+        raise ReleaseFailed("pexels api key file must not be group or world accessible")
+    if stats.st_size > 4096:
+        raise ReleaseFailed("pexels api key file is implausibly large")
+    value = path.read_text(encoding="utf-8").strip()
+    if not (20 <= len(value) <= 120) or not value.isalnum() or not value.isascii():
+        raise ReleaseFailed("pexels api key file does not hold a plausible key")
+    return value
+
+
+def require_compiled_pexels_key(binary: Path, key: str) -> None:
+    """Refuse a package whose binary does not carry the stock-footage key.
+
+    Same posture as `require_compiled_deployment`: `option_env!` is an
+    instruction to a compiler, and a stale cargo cache is entitled to ignore
+    an instruction. The key is ASCII-alphanumeric and compiled in verbatim,
+    so the finished binary either contains those bytes or was built without
+    them (REVIEW-2026-08-06 I5).
+    """
+    if key.encode("utf-8") not in binary.read_bytes():
+        raise ReleaseFailed(
+            "the finished binary does not carry the pexels api key it was "
+            "built with — a stale build cache shipped the pre-key behaviour"
+        )
+
+
 def require_macos_target() -> tuple[str, str]:
     if platform_module.system() != "Darwin":
         raise ReleaseFailed("the macOS release package must be built on macOS")
@@ -239,6 +279,20 @@ def stage_browser_distribution(
     target_id: str, archive: Path, output: Path, identity: SigningIdentity
 ) -> None:
     announce(f"Staging the digest-locked {target_id} Chromium from {archive.name}")
+    # The staging below comes from the machine cache's locked archive, full
+    # stop. An `--archive` naming anything else stopped having an effect when
+    # staging moved into the shared cache — refusing it beats silently using
+    # a different file than the operator named (REVIEW-2026-08-06 L6).
+    from embedded_browser_staging_cache import locked_archive
+
+    # Resolve both sides: pc_16/le_22 hand this a `.resolve()`d default path,
+    # and a symlinked cache root must not make the same file read as foreign.
+    if archive.resolve() != locked_archive(target_id).resolve():
+        raise ReleaseFailed(
+            "custom --archive paths are no longer honoured: the staging cache "
+            f"reads the locked archive for {target_id}; drop the flag or place "
+            "the file at the locked location"
+        )
     if not archive.is_file():
         raise ReleaseFailed(f"locked archive is not downloaded yet: {archive}")
     # The unpacked tree comes from the machine-wide cache the desktop builds
@@ -766,6 +820,7 @@ def build_macos_release(
     deployment: CustomerDemoMaterial | None = None,
     update_endpoint: str | None = None,
     update_public_key: str | None = None,
+    pexels_api_key: str | None = None,
 ) -> dict[str, object]:
     """Produce one distributable macOS package and pass every release gate.
 
@@ -775,6 +830,15 @@ def build_macos_release(
     deployment's action authorization key. Without it the package is the
     ordinary local-profile release. One path, one set of gates, either way.
     """
+    if pexels_api_key is None:
+        # A distributable package without the key is the original defect the
+        # flag was added to remove: the user is asked to type one by hand.
+        # Nothing between "--pexels-api-key omitted" and the installed App
+        # would have said a word (REVIEW-2026-08-06 I5).
+        raise ReleaseFailed(
+            "a distributable release needs --pexels-api-key; a build without "
+            "one ships the ask-the-user behaviour"
+        )
     work_directory = require_source_stable_work_directory(work_directory)
     target_id, architecture = require_macos_target()
     # Resolved before anything is built. There is one identity and one reader
@@ -826,6 +890,7 @@ def build_macos_release(
         ),
         update_endpoint=update_endpoint,
         update_public_key=update_public_key,
+        pexels_api_key=pexels_api_key,
     )
     if deployment is not None:
         announce(f"Building for the deployment at {deployment.base_url}")
@@ -837,6 +902,8 @@ def build_macos_release(
         # instruction to a compiler that a stale cache may decline to follow.
         require_compiled_deployment(app_binary(application), deployment)
         announce(f"Binary carries the deployment profile for {deployment.base_url}")
+    require_compiled_pexels_key(app_binary(application), pexels_api_key)
+    announce("Binary carries the packaged stock-footage key")
     # Frozen next to the artifact it belongs to: the shared `frontend/dist` can
     # be rewritten by any concurrent build while the audits are still running.
     audited_assets = snapshot_production_assets(
@@ -1260,6 +1327,14 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
             "action-authorization-private-key Secret (mode 0600)"
         ),
     )
+    parser.add_argument(
+        "--pexels-api-key",
+        type=Path,
+        help=(
+            "path to a private file (mode 0600) holding the stock-footage key "
+            "to bake into the binary; omit to build without one"
+        ),
+    )
     arguments = parser.parse_args(argv)
     if arguments.build_id is None:
         arguments.build_id = f"{arguments.platform}-release"
@@ -1273,6 +1348,7 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         "work_dir",
         "archive",
         "update_public_key_file",
+        "pexels_api_key",
         *DEPLOYMENT_ARGUMENTS,
     ):
         path = getattr(arguments, name)
@@ -1916,6 +1992,13 @@ def main() -> int:
         deployment=deployment,
         update_endpoint=update_endpoint,
         update_public_key=update_public_key,
+        # Read now, inside the reviewed snapshot's parent: a bad key file
+        # fails the build before a compiler runs.
+        pexels_api_key=(
+            None
+            if arguments.pexels_api_key is None
+            else read_pexels_api_key(arguments.pexels_api_key)
+        ),
     )
     (arguments.work_dir / "release-package.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=1, sort_keys=True) + "\n",

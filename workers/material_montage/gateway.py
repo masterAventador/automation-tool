@@ -29,6 +29,10 @@ MAX_RANGE_HEADER_BYTES: Final = 128
 REQUEST_TIMEOUT_SECONDS: Final = 10
 TOKEN_PATTERN: Final = re.compile(r"^[0-9a-f]{64}$")
 REQUEST_ID_PATTERN: Final = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+# Pexels issues opaque alphanumeric keys around 56 characters; the bounds are
+# generous so a rotated key still fits, while whitespace, quoting and CJK are
+# rejected before the value can reach a TOML document.
+PEXELS_API_KEY_PATTERN: Final = re.compile(r"^[A-Za-z0-9]{20,120}$")
 ALLOWED_ORIGINS: Final = frozenset(
     {"http://tauri.localhost", "https://tauri.localhost", "tauri://localhost"}
 )
@@ -81,6 +85,8 @@ class GatewayBootstrap:
     script_model: ScriptModelConfiguration | None = None
     web_ui: bool = False
     local_editing: bool = False
+    pexels_api_key: str | None = None
+    montage_request: object | None = None
 
     def __repr__(self) -> str:
         return "GatewayBootstrap(<redacted>)"
@@ -157,9 +163,32 @@ def parse_bootstrap(line: bytes) -> GatewayBootstrap:
         "scriptModel",
         "workerKind",
     }
-    keys = set(value)
+    # Always present, null when the build carries no key: an optional field
+    # would make "packaged with a key" and "packaged without" two different
+    # protocols, and the two workers reading this document would drift.
+    base_keys.add("pexelsApiKey")
+    keys = set(value) - {"montageRequest"}
     local_editing = keys == base_keys | {"mediaTools"}
     if keys != base_keys and not local_editing:
+        raise GatewayRejected("invalid bootstrap")
+    montage_request = None
+    if "montageRequest" in value and value.get("montageRequest") is not None:
+        # One process, one surface: the montage pipeline and the WebUI both
+        # own the worker's private runtime, so a bootstrap asking for both is
+        # a caller bug rather than a combination to support.
+        if value.get("enableWebUi") is not False or local_editing:
+            raise GatewayRejected("invalid bootstrap")
+        try:
+            from montage_runtime import parse_montage_request
+
+            montage_request = parse_montage_request(value.get("montageRequest"))
+        except ValueError as error:
+            raise GatewayRejected("invalid bootstrap") from error
+    pexels_api_key = value.get("pexelsApiKey")
+    if pexels_api_key is not None and (
+        not isinstance(pexels_api_key, str)
+        or PEXELS_API_KEY_PATTERN.fullmatch(pexels_api_key) is None
+    ):
         raise GatewayRejected("invalid bootstrap")
     if local_editing:
         media_tools = value.get("mediaTools")
@@ -196,6 +225,8 @@ def parse_bootstrap(line: bytes) -> GatewayBootstrap:
         script_model=parse_script_model(value.get("scriptModel")),
         web_ui=value["enableWebUi"],
         local_editing=local_editing,
+        pexels_api_key=pexels_api_key,
+        montage_request=montage_request,
     )
 
 

@@ -241,6 +241,10 @@ pub enum MaterialVideoStudioErrorCode {
     StorageUnavailable,
     ViewUnavailable,
     JobUnavailable,
+    // A submission whose fields failed validation: retrying without changing
+    // the input is useless, which is exactly what JobUnavailable (its former
+    // disguise) invites the user to do (REVIEW-2026-08-06 M2).
+    ProtocolMismatch,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -612,6 +616,47 @@ pub(crate) fn cleanup_snapshot_for_acceptance(
     })
 }
 
+/// Start one headless montage job: the React form's parameters, the packaged
+/// worker, no WebView. The workspace lifecycle, the observation projection,
+/// cancel and artifact reads are exactly the interactive studio's — the only
+/// thing removed is the Streamlit surface.
+pub(crate) fn submit_montage(
+    app: &tauri::AppHandle,
+    orchestrator: &LocalVideoOrchestrator,
+    settings: &ProductionModelServiceSettings,
+    workspaces: &VideoJobWorkspaceStore,
+    request: crate::local_video_orchestrator::VideoWorkerMontageRequest,
+) -> Result<uuid::Uuid, MaterialVideoStudioError> {
+    let script_model = settings
+        .material_video_script_model()
+        .map_err(|_| configuration_required())?;
+    let executable = worker_executable(app)?;
+    let toolchain = media_toolchain(app)?;
+    let workspace = workspaces.create_new().map_err(map_workspace_error)?;
+    let asset_root = workspaces
+        .worker_asset_directory(&workspace)
+        .map_err(map_workspace_error)?;
+    let launch = match material_worker_launch(executable, asset_root, &toolchain) {
+        Ok(launch) => launch
+            .with_script_model(script_model)
+            .with_montage_request(request),
+        Err(error) => {
+            cleanup_workspace(workspaces, &workspace);
+            return Err(error);
+        }
+    };
+    if set_active_workspace(Some(workspace.job_id())).is_err() {
+        cleanup_workspace(workspaces, &workspace);
+        return Err(job_unavailable());
+    }
+    if orchestrator.start(launch).is_err() {
+        let _ = set_active_workspace(None);
+        cleanup_workspace(workspaces, &workspace);
+        return Err(process_unavailable());
+    }
+    Ok(workspace.job_id())
+}
+
 pub(crate) fn jobs(
     workspaces: &VideoJobWorkspaceStore,
 ) -> Result<Vec<MaterialRenderJobSnapshot>, MaterialVideoStudioError> {
@@ -877,23 +922,28 @@ fn runtime_directory(
     workspaces: &VideoJobWorkspaceStore,
     workspace: &crate::video_job_workspace::VideoJobWorkspace,
 ) -> Result<Option<PathBuf>, MaterialVideoStudioError> {
-    let parent = workspaces
+    // Two runtime parents, one occupant: the interactive WebUI session and the
+    // headless montage pipeline are mutually exclusive per workspace (the
+    // worker bootstrap refuses both at once), so across both directories at
+    // most one runtime may exist.
+    let asset_root = workspaces
         .worker_asset_directory(workspace)
-        .map_err(map_workspace_error)?
-        .join(".automation-tool-webui");
-    let entries = match fs::read_dir(parent) {
-        Ok(value) => value,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err(job_unavailable()),
-    };
+        .map_err(map_workspace_error)?;
     let mut directories = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|_| job_unavailable())?;
-        let metadata = fs::symlink_metadata(entry.path()).map_err(|_| job_unavailable())?;
-        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
-            return Err(job_unavailable());
+    for parent_name in [".automation-tool-webui", ".automation-tool-montage"] {
+        let entries = match fs::read_dir(asset_root.join(parent_name)) {
+            Ok(value) => value,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return Err(job_unavailable()),
+        };
+        for entry in entries {
+            let entry = entry.map_err(|_| job_unavailable())?;
+            let metadata = fs::symlink_metadata(entry.path()).map_err(|_| job_unavailable())?;
+            if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+                return Err(job_unavailable());
+            }
+            directories.push(entry.path());
         }
-        directories.push(entry.path());
     }
     if directories.len() > 1 {
         return Err(job_unavailable());
@@ -995,6 +1045,14 @@ const fn job_unavailable() -> MaterialVideoStudioError {
     }
 }
 
+/// A montage submission whose fields the product form should never produce.
+pub(crate) const fn invalid_montage_request() -> MaterialVideoStudioError {
+    MaterialVideoStudioError {
+        code: MaterialVideoStudioErrorCode::ProtocolMismatch,
+        retryable: false,
+    }
+}
+
 #[cfg(test)]
 mod theme_tests {
     use super::INIT_SCRIPT;
@@ -1031,6 +1089,22 @@ mod theme_tests {
             );
         }
         assert!(!INIT_SCRIPT.contains(".st-key-open_settings_dialog_button,\n"));
+    }
+}
+
+#[cfg(test)]
+mod montage_error_tests {
+    use super::*;
+
+    #[test]
+    fn an_invalid_montage_request_reports_protocol_mismatch_not_job_state() {
+        // REVIEW-2026-08-06 M2: parameter validation failure shared
+        // JobUnavailable with "the job state cannot be read" — the front end
+        // could not tell "fix your input" apart from "try again later".
+        assert_eq!(
+            invalid_montage_request().code(),
+            MaterialVideoStudioErrorCode::ProtocolMismatch,
+        );
     }
 }
 

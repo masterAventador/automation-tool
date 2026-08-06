@@ -7,6 +7,7 @@ import {
   type MaterialVideoStudioGateway,
   type MaterialVideoStudioSnapshot,
   type MaterialVideoStudioView,
+  type MaterialMontageRequest,
   type MaterialRenderJobSnapshot,
   type MotionRenderJobSnapshot,
   type RenderedVideoArtifactPayload,
@@ -417,6 +418,44 @@ export class TauriMaterialVideoStudioGateway implements MaterialVideoStudioGatew
 
   async readMaterialArtifact(artifactId: string): Promise<RenderedVideoArtifactPayload> {
     return this.readRenderedVideo("read_material_video_artifact", artifactId);
+  }
+
+  async submitMaterialMontage(request: MaterialMontageRequest): Promise<string> {
+    // Mirror the native bounds so a value the worker would refuse never
+    // becomes a spawned process the user has to watch die.
+    const colorIsSane = (value: string) => /^#[0-9A-Fa-f]{6}$/u.test(value);
+    if (
+      request.subject.trim().length === 0 ||
+      request.subject.trim().length > 240 ||
+      (request.script !== null && request.script.length > 5000) ||
+      !["9:16", "16:9", "1:1"].includes(request.aspect) ||
+      !Number.isInteger(request.clipDurationSeconds) ||
+      request.clipDurationSeconds < 2 ||
+      request.clipDurationSeconds > 10 ||
+      // montage_runtime.VOICE_PATTERN, character for character — the looser
+      // "alnum-or-dash" here let "abc" through to die at the worker's
+      // bootstrap line twenty seconds later (REVIEW-2026-08-06 M1).
+      !/^[A-Za-z]{2}-[A-Za-z]{2,8}-[A-Za-z0-9-]{2,64}$/u.test(request.voiceName) ||
+      !Number.isInteger(request.fontSizePx) ||
+      request.fontSizePx < 24 ||
+      request.fontSizePx > 120 ||
+      !colorIsSane(request.textColor) ||
+      !colorIsSane(request.strokeColor) ||
+      request.strokeWidthPx < 0 ||
+      request.strokeWidthPx > 5
+    ) {
+      throw new MaterialVideoStudioGatewayError("protocol_mismatch", false);
+    }
+    try {
+      const value = await invoke("submit_material_montage", { request });
+      if (typeof value !== "string" || !UUID_V4.test(value)) {
+        throw new MaterialVideoStudioGatewayError("protocol_mismatch", false);
+      }
+      return value;
+    } catch (error) {
+      if (error instanceof MaterialVideoStudioGatewayError) throw error;
+      throw mapError(error);
+    }
   }
 
   /**

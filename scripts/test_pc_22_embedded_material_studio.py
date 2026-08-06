@@ -84,7 +84,9 @@ def main() -> int:
         forbid(studio, dead_branch, STUDIO)
         executed_checks += 1
 
-    require(studio, 'aria-label="智能素材成片完整制作界面"', STUDIO)
+    # 2026-08-05 的 React 重写把 WebView 完整界面换成了页面内表单；WebView
+    # 机器的删除是登记在案的独立遗留任务，其余断言在删除前继续成立。
+    require(studio, 'aria-label="智能素材成片制作表单"', STUDIO)
     require(spec, "openMaterialVideoStudio", SPEC)
     require(spec, "browser.tauri.listWindows()", SPEC)
     executed_checks += 3

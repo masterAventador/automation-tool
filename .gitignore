@@ -27,7 +27,9 @@ Desktop.ini
 
 # Frontend / Tauri
 /.pnpm-store/
-frontend/node_modules/
+# 任何层级的 node_modules 都不入库：2026-08-05 根目录冒出的
+# node_modules/.vite 曾把 vitest 缓存带进仓库（REVIEW-2026-08-06 I4）。
+node_modules/
 frontend/dist/
 frontend/dist-h821/
 frontend/dist-h822-mac/
@@ -44,8 +46,6 @@ frontend/src-tauri/target/
 frontend/src-tauri/gen/schemas/
 frontend/src-tauri/binaries/
 frontend/src-tauri/resources/media-toolchain/
-tools/shared-browser-validation/node_modules/
-
 # Python
 backend/.venv/
 backend/.pytest_cache/

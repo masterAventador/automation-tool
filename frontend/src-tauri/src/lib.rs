@@ -350,6 +350,51 @@ async fn open_material_video_studio(
     material_video_studio::open(&app, &orchestrator, &settings, &workspaces, view)
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MaterialMontageSubmission {
+    subject: String,
+    script: Option<String>,
+    aspect: String,
+    clip_duration_seconds: u8,
+    voice_name: String,
+    subtitle_enabled: bool,
+    font_size_px: u16,
+    text_color: String,
+    stroke_color: String,
+    stroke_width_px: f32,
+}
+
+#[tauri::command]
+async fn submit_material_montage(
+    app: tauri::AppHandle,
+    orchestrator: tauri::State<'_, local_video_orchestrator::LocalVideoOrchestrator>,
+    settings: tauri::State<'_, model_service_settings::ProductionModelServiceSettings>,
+    workspaces: tauri::State<'_, video_job_workspace::VideoJobWorkspaceStore>,
+    request: MaterialMontageSubmission,
+) -> Result<uuid::Uuid, material_video_studio::MaterialVideoStudioError> {
+    let validated = local_video_orchestrator::VideoWorkerMontageRequest::new(
+        request.subject,
+        request.script,
+        request.aspect,
+        request.clip_duration_seconds,
+        request.voice_name,
+        request.subtitle_enabled,
+        request.font_size_px,
+        request.text_color,
+        request.stroke_color,
+        request.stroke_width_px,
+    )
+    .map_err(|_| material_video_studio::invalid_montage_request())?;
+    material_video_studio::submit_montage(
+        &app,
+        &orchestrator,
+        &settings,
+        &workspaces,
+        validated,
+    )
+}
+
 #[tauri::command]
 fn update_material_video_studio_view(
     app: tauri::AppHandle,
@@ -5699,6 +5744,7 @@ pub fn run() {
         configure_bilibili_service,
         clear_bilibili_service,
         open_material_video_studio,
+        submit_material_montage,
         update_material_video_studio_view,
         close_material_video_studio,
         get_material_render_jobs,
@@ -5782,6 +5828,7 @@ pub fn run() {
         configure_bilibili_service,
         clear_bilibili_service,
         open_material_video_studio,
+        submit_material_montage,
         update_material_video_studio_view,
         close_material_video_studio,
         get_material_render_jobs,
@@ -5899,6 +5946,7 @@ pub fn run() {
         configure_bilibili_service,
         clear_bilibili_service,
         open_material_video_studio,
+        submit_material_montage,
         update_material_video_studio_view,
         close_material_video_studio,
         exercise_material_video_studio_for_acceptance,

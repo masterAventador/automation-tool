@@ -32,6 +32,7 @@ def _document(tmp_path: Path) -> dict[str, object]:
             "ffmpegPath": str(_executable(tmp_path, "ffmpeg")),
             "ffprobePath": str(_executable(tmp_path, "ffprobe")),
         },
+        "pexelsApiKey": None,
         "protocolVersion": "1.0",
         "renderBrowser": None,
         "scriptModel": None,

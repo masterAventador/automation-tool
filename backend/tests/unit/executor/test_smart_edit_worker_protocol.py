@@ -105,6 +105,7 @@ def _bootstrap_line(tmp_path: Path, script_model: object) -> bytes:
                 "ffmpegPath": str(ffmpeg),
                 "ffprobePath": str(ffprobe),
             },
+            "pexelsApiKey": None,
             "protocolVersion": "1.0",
             "renderBrowser": None,
             "scriptModel": script_model,

@@ -355,6 +355,9 @@ def main() -> int:
                 "ffmpegPath": str(ffmpeg.resolve()),
                 "ffprobePath": str(ffprobe.resolve()),
             },
+            # 共享协议自 2026-08-05 起该键始终在场（无密钥构建为 null）；
+            # 材料网关做精确形状校验，缺键的引导会被直接拒绝。
+            "pexelsApiKey": None,
             "protocolVersion": "1.0",
             "renderBrowser": None,
             "scriptModel": None,

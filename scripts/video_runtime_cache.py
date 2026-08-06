@@ -168,6 +168,25 @@ def _stamped_fingerprint(stamp: Path) -> str | None:
     return fingerprint if isinstance(fingerprint, str) else None
 
 
+if os.name == "nt":
+    import msvcrt
+
+    def _hold_exclusively(handle) -> None:
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+
+    def _release(handle) -> None:
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+
+else:
+    import fcntl
+
+    def _hold_exclusively(handle) -> None:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+
+    def _release(handle) -> None:
+        fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 def ensure_cached(
     *,
     name: str,
@@ -180,6 +199,14 @@ def ensure_cached(
     `build` receives a destination that does not yet exist and must populate
     it. If it raises, both the partial tree and the stamp are removed, so the
     next call rebuilds rather than shipping half an artifact.
+
+    One writer at a time, machine-wide: the cache is shared across parallel
+    worktrees and every desktop-E2E prerequisite run, and without the lock a
+    second consumer would rmtree the tree the first was mid-way through
+    building (REVIEW-2026-08-06 I1). The lock is an OS file lock, so a killed
+    process releases it; the lock-free fast path below is safe because the
+    writer invalidates the stamp *before* touching the tree — a reader that
+    sees a valid stamp is looking at a finished artifact.
     """
     destination_root = cache_root() if root is None else Path(root)
     destination = destination_root / name
@@ -189,29 +216,40 @@ def ensure_cached(
     if destination.is_dir() and _stamped_fingerprint(stamp) == fingerprint:
         return destination
 
-    shutil.rmtree(destination, ignore_errors=True)
-    stamp.unlink(missing_ok=True)
     destination_root.mkdir(parents=True, exist_ok=True)
-    try:
-        build(destination)
-    except BaseException:
-        shutil.rmtree(destination, ignore_errors=True)
-        raise
-    if not destination.is_dir():
-        raise VideoRuntimeCacheRejected(
-            f"the build for {name} reported success without producing {destination}"
-        )
-    stamp.write_text(
-        json.dumps(
-            {"version": STAMP_VERSION, "name": name, "fingerprint": fingerprint},
-            ensure_ascii=False,
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    return destination
+    with (destination_root / f"{name}.lock").open("a+b") as lock_handle:
+        _hold_exclusively(lock_handle)
+        try:
+            # Re-check under the lock: whoever held it before us may have
+            # built exactly the artifact we came for.
+            if destination.is_dir() and _stamped_fingerprint(stamp) == fingerprint:
+                return destination
+
+            # Stamp first, tree second — the fast path's safety depends on it.
+            stamp.unlink(missing_ok=True)
+            shutil.rmtree(destination, ignore_errors=True)
+            try:
+                build(destination)
+            except BaseException:
+                shutil.rmtree(destination, ignore_errors=True)
+                raise
+            if not destination.is_dir():
+                raise VideoRuntimeCacheRejected(
+                    f"the build for {name} reported success without producing {destination}"
+                )
+            stamp.write_text(
+                json.dumps(
+                    {"version": STAMP_VERSION, "name": name, "fingerprint": fingerprint},
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            return destination
+        finally:
+            _release(lock_handle)
 
 
 __all__ = [

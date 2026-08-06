@@ -147,6 +147,35 @@ def _spec_packaged_basenames() -> set[str]:
     return {Path(entry).name for entry in SPEC_RESOURCE.findall(spec)}
 
 
+def test_the_spec_packages_the_automation_skill_contract() -> None:
+    """SA-01 reads its vocabulary contract at validation time.
+
+    REVIEW-2026-08-06 SA#5: `automation_skill.py` computed its own repository
+    root and `contracts/browser-use/` was in nobody's datas — green from a
+    checkout, FileNotFoundError from the frozen Executor the moment anything
+    imports the SA modules.
+    """
+    source = SPEC_PATH.read_text(encoding="utf-8")
+    assert '"contracts/browser-use/automation-skill.v1.json"' in source
+
+
+def test_automation_skill_resolves_its_contract_through_the_shared_root() -> None:
+    """One 'where are our files', not two.
+
+    `motion_authoring/resources.py` exists precisely so that the frozen build
+    and a checkout read the same files through the same code; a module that
+    computes its own root re-opens the split that has already cost a release.
+    """
+    module_source = (
+        BACKEND_ROOT / "src/automation_tool/executor/automation_skill.py"
+    ).read_text(encoding="utf-8")
+    assert "CONTRACTS_ROOT" in module_source, "must derive from the shared resource root"
+    assert "parents[" not in module_source, (
+        "a second copy of 'where our files are' is how a packaged build and a "
+        "checkout start disagreeing about what exists"
+    )
+
+
 def test_the_spec_packages_every_contract_the_authoring_agent_reads() -> None:
     """The spec's resource list is hand-written; this makes forgetting it loud.
 

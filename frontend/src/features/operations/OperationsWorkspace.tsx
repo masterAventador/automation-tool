@@ -1,4 +1,5 @@
 import {
+  ArrowLeftOutlined,
   BellOutlined,
   CalendarOutlined,
   CheckCircleFilled,
@@ -33,7 +34,6 @@ import {
   Flex,
   Input,
   Modal,
-  Progress,
   Segmented,
   Space,
   Switch,
@@ -51,6 +51,7 @@ import type { MaterialLibraryGateway } from "../video-editing/material-library-g
 import type { SmartEditGateway } from "../video-editing/smart-edit-gateway";
 import { VideoStudio } from "../video-studio/VideoStudio";
 import type { MaterialVideoStudioGateway } from "../video-studio/material-video-studio-gateway";
+import { setMotionMethod } from "../video-studio/motion-run-store";
 
 const { Text, Title, Paragraph } = Typography;
 
@@ -455,22 +456,7 @@ function CreationMethodPanel({
               <Button type="primary" size="large" onClick={onOpenStudio}>
                 打开完整制作面板
               </Button>
-              <Button size="large">从热点导入</Button>
             </Space>
-          </div>
-          <div className="creation-method__preview" aria-label="创作流程预览">
-            <div className="creation-preview__stage">
-              <PlayCircleFilled />
-              <span>{material ? "素材与字幕预览" : "品牌动效预览"}</span>
-            </div>
-            <div className="creation-preview__timeline">
-              <Progress percent={72} showInfo={false} />
-              <Space wrap size={6}>
-                <Tag>片头</Tag>
-                <Tag color={material ? "cyan" : "purple"}>核心内容</Tag>
-                <Tag>行动引导</Tag>
-              </Space>
-            </div>
           </div>
         </Flex>
       </Card>
@@ -490,14 +476,6 @@ function CreationMethodPanel({
         ))}
       </div>
 
-      {material ? (
-        <Alert
-          type="info"
-          showIcon
-          title="制作界面会嵌入当前 App"
-          description="不会再打开第二个 App 窗口。服务接通前，这个入口只展示设计状态，不会声称已经生成视频。"
-        />
-      ) : null}
     </div>
   );
 }
@@ -602,13 +580,32 @@ export function CreationHub({
         </div>
       ) : studioOpen ? (
         <div className="embedded-workbench embedded-workbench--focused">
+          <Button
+            className="embedded-workbench__back"
+            icon={<ArrowLeftOutlined />}
+            onClick={() => setStudioOpen(false)}
+          >
+            返回创作方式
+          </Button>
           <VideoStudio
             gateway={gateway}
             onPublishArtifact={onPublishArtifact}
           />
         </div>
       ) : (
-        <CreationMethodPanel kind={section} onOpenStudio={() => setStudioOpen(true)} />
+        <CreationMethodPanel
+          kind={section}
+          onOpenStudio={() => {
+            // The studio keeps its method in motion-run-store (it outlives this
+            // component). Opening from a card means the operator already chose:
+            // the card *is* the choice, so the studio must open preselected —
+            // both cards opening onto 智能素材成片 was a reported defect.
+            setMotionMethod(
+              section === "motion" ? "motion_composition_v1" : "material_montage_v1",
+            );
+            setStudioOpen(true);
+          }}
+        />
       )}
     </section>
   );

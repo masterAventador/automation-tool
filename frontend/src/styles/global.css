@@ -246,19 +246,6 @@ body {
   width: 100%;
 }
 
-.material-video-studio-embedded {
-  display: grid;
-  width: 100%;
-  height: 680px;
-  min-width: 320px;
-  min-height: 240px;
-  padding: 24px;
-  overflow: hidden;
-  background: var(--ant-color-bg-layout);
-  border: 1px solid var(--ant-color-border);
-  border-radius: 12px;
-  place-items: center;
-}
 
 /* 一句话卡片上的每个小控件：标签和控件之间要有间距，否则读成一体。 */
 .motion-brief-control {
@@ -1835,45 +1822,6 @@ body {
   line-height: 1.75;
 }
 
-.creation-method__preview {
-  width: 330px;
-  min-width: 330px;
-  padding: 12px;
-  background: #0d2029;
-  border-radius: 13px;
-}
-
-.creation-preview__stage {
-  display: grid;
-  min-height: 180px;
-  color: #bceff0;
-  background: #132c35;
-  border-radius: 9px;
-  place-items: center;
-  align-content: center;
-  gap: 10px;
-}
-
-.creation-preview__stage .anticon {
-  font-size: 38px;
-}
-
-.creation-preview__timeline {
-  display: grid;
-  padding: 12px 5px 3px;
-  gap: 8px;
-}
-
-.creation-preview__timeline .ant-progress-bg {
-  background: #44c5c6;
-}
-
-.creation-preview__timeline .ant-tag {
-  color: #b8c7cc;
-  background: #162f38;
-  border-color: #284852;
-}
-
 .creation-steps {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1923,6 +1871,10 @@ body {
   padding: 0;
   background: transparent;
   border: 0;
+}
+
+.embedded-workbench__back {
+  margin-bottom: 12px;
 }
 
 .embedded-workbench__note {
@@ -2318,9 +2270,15 @@ body {
   .account-platform-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+}
 
-  .creation-method__preview {
-    width: 290px;
-    min-width: 290px;
-  }
+.material-montage-form__field {
+  display: grid;
+  gap: 6px;
+}
+
+.material-montage-form__field--inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }

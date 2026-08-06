@@ -214,6 +214,7 @@ pub struct VideoWorkerLaunch {
     script_model: Option<VideoWorkerScriptModelConfiguration>,
     render_browser: Option<VideoWorkerRenderBrowserConfiguration>,
     web_ui: bool,
+    montage_request: Option<VideoWorkerMontageRequest>,
 }
 
 /// The exact packaged FFmpeg pair a local-editing Worker may use.
@@ -1324,6 +1325,7 @@ impl VideoWorkerLaunch {
             expected_version,
             restart_policy,
             script_model: None,
+            montage_request: None,
             render_browser: None,
             web_ui: false,
         })
@@ -1409,6 +1411,11 @@ impl VideoWorkerLaunch {
 
     pub fn with_script_model(mut self, configuration: VideoWorkerScriptModelConfiguration) -> Self {
         self.script_model = Some(configuration);
+        self
+    }
+
+    pub fn with_montage_request(mut self, request: VideoWorkerMontageRequest) -> Self {
+        self.montage_request = Some(request);
         self
     }
 
@@ -2834,10 +2841,145 @@ struct VideoWorkerBootstrapDocument<'a> {
     local_session_token: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     media_tools: Option<VideoWorkerMediaToolsBootstrap<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    montage_request: Option<&'a VideoWorkerMontageRequest>,
+    /// Always serialized (null when the build carries no key): both worker
+    /// readers verify the exact document shape, so an optional field would
+    /// make "packaged with a key" and "packaged without" two different
+    /// protocols. (REVIEW-2026-08-06 L1: this comment had drifted onto the
+    /// field above — which skips serialization, the exact opposite claim.)
+    pexels_api_key: Option<&'static str>,
     protocol_version: &'static str,
     render_browser: Option<VideoWorkerRenderBrowserBootstrap<'a>>,
     script_model: Option<VideoWorkerScriptModelBootstrap<'a>>,
     worker_kind: &'static str,
+}
+
+/// One validated headless montage job, as the product form submitted it.
+///
+/// Field bounds mirror `montage_runtime.parse_montage_request` exactly — the
+/// worker re-validates, so a mismatch here fails the job at spawn instead of
+/// at the bootstrap line twenty seconds later.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoWorkerMontageRequest {
+    subject: String,
+    script: Option<String>,
+    aspect: String,
+    clip_duration_seconds: u8,
+    voice_name: String,
+    subtitle_enabled: bool,
+    font_size_px: u16,
+    text_color: String,
+    stroke_color: String,
+    stroke_width_px: f32,
+}
+
+impl fmt::Debug for VideoWorkerMontageRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The subject and script are operator content; keep them out of logs.
+        formatter
+            .debug_struct("VideoWorkerMontageRequest")
+            .field("aspect", &self.aspect)
+            .finish_non_exhaustive()
+    }
+}
+
+impl VideoWorkerMontageRequest {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        subject: impl Into<String>,
+        script: Option<String>,
+        aspect: impl Into<String>,
+        clip_duration_seconds: u8,
+        voice_name: impl Into<String>,
+        subtitle_enabled: bool,
+        font_size_px: u16,
+        text_color: impl Into<String>,
+        stroke_color: impl Into<String>,
+        stroke_width_px: f32,
+    ) -> Result<Self, VideoWorkerError> {
+        let subject = subject.into();
+        let aspect = aspect.into();
+        let voice_name = voice_name.into();
+        let text_color = text_color.into();
+        let stroke_color = stroke_color.into();
+        let color_is_sane = |value: &str| {
+            value.len() == 7
+                && value.starts_with('#')
+                && value.bytes().skip(1).all(|byte| byte.is_ascii_hexdigit())
+        };
+        // Mirrors montage_runtime.VOICE_PATTERN character for character:
+        // ^[A-Za-z]{2}-[A-Za-z]{2,8}-[A-Za-z0-9-]{2,64}$ — the looser
+        // "alnum-or-dash, at most 80" accepted "" and "abc", which the worker
+        // then rejected at its bootstrap line (REVIEW-2026-08-06 M1).
+        let voice_is_sane = {
+            let mut parts = voice_name.splitn(3, '-');
+            let locale = parts.next().unwrap_or("");
+            let region = parts.next().unwrap_or("");
+            let voice = parts.next().unwrap_or("");
+            locale.len() == 2
+                && locale.bytes().all(|byte| byte.is_ascii_alphabetic())
+                && (2..=8).contains(&region.len())
+                && region.bytes().all(|byte| byte.is_ascii_alphabetic())
+                && (2..=64).contains(&voice.len())
+                && voice
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        };
+        let subject_characters = subject.trim().chars().count();
+        if subject_characters == 0
+            || subject_characters > 240
+            || script.as_ref().is_some_and(|value| value.chars().count() > 5000)
+            || !matches!(aspect.as_str(), "9:16" | "16:9" | "1:1")
+            || !(2..=10).contains(&clip_duration_seconds)
+            || !voice_is_sane
+            || !(24..=120).contains(&font_size_px)
+            || !color_is_sane(&text_color)
+            || !color_is_sane(&stroke_color)
+            || !(0.0..=5.0).contains(&stroke_width_px)
+        {
+            return Err(configuration_invalid());
+        }
+        Ok(Self {
+            subject,
+            script,
+            aspect,
+            clip_duration_seconds,
+            voice_name,
+            subtitle_enabled,
+            font_size_px,
+            text_color,
+            stroke_color,
+            stroke_width_px,
+        })
+    }
+}
+
+/// The stock-footage key the release pipeline baked in, if any.
+///
+/// Compile-time like the deployment profile: the key ships inside the binary
+/// and never appears in argv, the environment of a child process, or a log
+/// line. A build without the variable simply sends null and the WebUI asks
+/// the operator, which is exactly the pre-key behaviour.
+fn compiled_pexels_api_key() -> Option<&'static str> {
+    configured_pexels_api_key(option_env!("AUTOMATION_TOOL_PEXELS_API_KEY"))
+}
+
+fn configured_pexels_api_key(configured: Option<&'static str>) -> Option<&'static str> {
+    let value = configured?;
+    let shape_is_sane = (20..=120).contains(&value.len())
+        && value.bytes().all(|byte| byte.is_ascii_alphanumeric());
+    // A malformed value is dropped rather than shipped: the worker rejects it
+    // at the bootstrap boundary anyway, and a package that cannot search stock
+    // footage beats one that dies on its first bootstrap line. Dropped, but
+    // never silently — the fact (only ever the fact, not the value) is what
+    // makes "the release baked in a mangled key" diagnosable instead of
+    // indistinguishable from a keyless build (REVIEW-2026-08-06 I5).
+    if !shape_is_sane {
+        eprintln!("the compiled stock-footage key failed its shape check and was dropped");
+    }
+    shape_is_sane.then_some(value)
 }
 
 #[derive(Serialize)]
@@ -4018,6 +4160,8 @@ fn write_bootstrap(
         enable_web_ui: launch.web_ui,
         local_session_token: &encoded,
         media_tools,
+        montage_request: launch.montage_request.as_ref(),
+        pexels_api_key: compiled_pexels_api_key(),
         protocol_version: WORKER_PROTOCOL_VERSION,
         render_browser,
         script_model: launch.script_model.as_ref().map(|configuration| {
@@ -4679,10 +4823,101 @@ const fn timed_out() -> VideoWorkerError {
 
 #[cfg(test)]
 mod tests {
-    use super::{unsafe_path_component, VideoWorkerSmartEditResult};
+    use super::{
+        configured_pexels_api_key, unsafe_path_component, VideoWorkerSmartEditResult,
+    };
 
     #[cfg(windows)]
     use super::remove_windows_regular_file_by_handle;
+
+    fn montage_request(
+        aspect: &str,
+        clip: u8,
+        font: u16,
+        color: &str,
+    ) -> Result<super::VideoWorkerMontageRequest, super::VideoWorkerError> {
+        super::VideoWorkerMontageRequest::new(
+            "护肤知识三条",
+            None,
+            aspect,
+            clip,
+            "zh-CN-XiaoxiaoNeural-Female",
+            true,
+            font,
+            color,
+            "#000000",
+            1.5,
+        )
+    }
+
+    #[test]
+    fn a_wellformed_montage_request_is_accepted() {
+        assert!(montage_request("9:16", 4, 60, "#FFFFFF").is_ok());
+    }
+
+    #[test]
+    fn montage_bounds_mirror_the_worker_gate() {
+        assert!(montage_request("21:9", 4, 60, "#FFFFFF").is_err());
+        assert!(montage_request("9:16", 1, 60, "#FFFFFF").is_err());
+        assert!(montage_request("9:16", 11, 60, "#FFFFFF").is_err());
+        assert!(montage_request("9:16", 4, 23, "#FFFFFF").is_err());
+        assert!(montage_request("9:16", 4, 121, "#FFFFFF").is_err());
+        assert!(montage_request("9:16", 4, 60, "red").is_err());
+        assert!(montage_request("9:16", 4, 60, "#GGGGGG").is_err());
+        assert!(
+            super::VideoWorkerMontageRequest::new(
+                "", None, "9:16", 4, "zh-CN-Xiaoxiao", true, 60, "#FFFFFF", "#000000", 1.5
+            )
+            .is_err(),
+            "an empty subject must be refused"
+        );
+        assert!(
+            super::VideoWorkerMontageRequest::new(
+                "主题", None, "9:16", 4, "../evil", true, 60, "#FFFFFF", "#000000", 1.5
+            )
+            .is_err(),
+            "a voice name that could not be a voice must be refused"
+        );
+        // REVIEW-2026-08-06 M1: the doc comment claims these bounds mirror the
+        // worker's exactly, but `len <= 80 && alnum-or-dash` accepted the empty
+        // string and "abc" — both of which the worker rejects at its bootstrap
+        // line, twenty seconds after this gate waved them through.
+        assert!(
+            super::VideoWorkerMontageRequest::new(
+                "主题", None, "9:16", 4, "", true, 60, "#FFFFFF", "#000000", 1.5
+            )
+            .is_err(),
+            "an empty voice name must be refused here, not at the bootstrap line"
+        );
+        assert!(
+            super::VideoWorkerMontageRequest::new(
+                "主题", None, "9:16", 4, "abc", true, 60, "#FFFFFF", "#000000", 1.5
+            )
+            .is_err(),
+            "a voice name without the locale-region-voice shape must be refused"
+        );
+    }
+
+    #[test]
+    fn packaged_pexels_key_of_the_real_shape_is_forwarded() {
+        // 56 alphanumeric characters — the shape Pexels actually issues.
+        let key: &'static str =
+            "HOD4Nyf1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        assert_eq!(configured_pexels_api_key(Some(key)), Some(key));
+    }
+
+    #[test]
+    fn absent_or_malformed_pexels_keys_are_dropped_not_shipped() {
+        assert_eq!(configured_pexels_api_key(None), None);
+        assert_eq!(configured_pexels_api_key(Some("")), None);
+        assert_eq!(configured_pexels_api_key(Some("short")), None);
+        assert_eq!(
+            configured_pexels_api_key(Some(
+                "has spaces AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            )),
+            None
+        );
+    }
 
     #[test]
     fn smart_edit_result_accepts_one_static_image_in_multiple_paragraphs() {

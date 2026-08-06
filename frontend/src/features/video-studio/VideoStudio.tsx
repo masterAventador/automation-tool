@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   Alert,
@@ -10,6 +10,8 @@ import {
   InputNumber,
   Popconfirm,
   Progress,
+  Segmented,
+  Select,
   Space,
   Switch,
   Tabs,
@@ -23,7 +25,6 @@ import {
   type MaterialRenderJobSnapshot,
   type MaterialVideoStudioErrorCode,
   type MaterialVideoStudioGateway,
-  type MaterialVideoStudioView,
   type MotionRenderJobSnapshot,
   type MotionRenderJobStatus,
   type MotionVideoBeatDraft,
@@ -415,148 +416,202 @@ const AUTHORING_ERRORS = {
     "自动编排要用的程序文件没有通过完整性校验，视频没有开始制作。这不是描述的问题，也不是重试能解决的：请重新安装 App；重装之后仍然这样的话，请反馈给我们。",
 } as const satisfies Partial<Record<MaterialVideoStudioErrorCode, string>>;
 
-const MATERIAL_STUDIO_ERRORS: Record<MaterialVideoStudioErrorCode, string> = {
-  configuration_required: "请先到“设置与诊断”配置并测试文案模型服务。",
-  ...AUTHORING_ERRORS,
-  process_unavailable: "本机视频制作服务暂时无法启动，请稍后重试。",
-  storage_unavailable: "无法创建本机视频工作区，请检查磁盘空间和目录权限。",
-  view_unavailable: "完整制作界面暂时无法打开，请稍后重试。",
-  job_unavailable: "制作任务状态暂时不可用，请稍后重试。",
-  draft_invalid: "草稿内容不符合要求，请检查后重试。",
-  render_unavailable: "本机渲染组件暂时不可用，请到设置与诊断检查组件。",
-  protocol_mismatch: "视频制作服务版本不匹配，请更新 App 后重试。",
-  operation_unavailable: "视频制作暂时不可用，请稍后重试。",
-};
 
 /**
- * What the one-sentence card says when a submission comes back a failure.
+ * What this page says for every failure code a submission can come back with.
  *
- * It reads as a lookup rather than a chain of conditionals because the native
- * side now distinguishes five outcomes here, and a chain that long is where a
- * new code quietly falls through to the catch-all sentence.
+ * Total by type, not Partial: the montage path really does return
+ * storage_unavailable (disk / permissions), protocol_mismatch (the request
+ * failed local validation — retrying is useless) and process_unavailable
+ * (the local worker would not start), and a Partial table collapsed all of
+ * them into one "try again later" sentence that was wrong for each
+ * (REVIEW-2026-08-06 I3). A new code now fails the build until it gets words.
  *
  * `render_unavailable` keeps its instruction to go and check the components,
  * because after the authoring failures were split out it is the only code left
  * that really does mean a packaged part could not be resolved.
  */
-const BRIEF_ERRORS: Partial<Record<MaterialVideoStudioErrorCode, string>> = {
+const BRIEF_ERRORS: Record<MaterialVideoStudioErrorCode, string> = {
   // Also where a saved-but-unusable model configuration lands, so the wording
   // covers both "you have not set one up" and "the one you saved is not
   // acceptable" — the move is the same page either way.
   configuration_required: "请先到“设置与诊断”配置并测试视频创作模型服务。",
   ...AUTHORING_ERRORS,
   render_unavailable: "本机渲染组件暂时不可用，请到“设置与诊断”检查组件。",
+  process_unavailable: "本机视频制作服务暂时无法启动，请稍后重试。",
+  storage_unavailable: "无法创建本机视频工作区，请检查磁盘空间和目录权限。",
+  view_unavailable: "完整制作界面暂时无法打开，请稍后重试。",
+  job_unavailable: "制作任务状态暂时不可用，可能已有任务正在进行，请稍后再试。",
+  draft_invalid: "草稿内容不符合要求，请检查后重试。",
+  protocol_mismatch:
+    "提交的制作参数未通过检查，请核对填写内容；如果反复出现，请更新 App 后重试。",
+  operation_unavailable: "视频制作暂时不可用，请稍后重试。",
 };
 
-const BRIEF_SUBMIT_FALLBACK = "一句话自动制作暂时无法提交，请稍后重试。";
-
-function materialStudioView(node: HTMLElement): MaterialVideoStudioView {
-  const bounds = node.getBoundingClientRect();
-  return {
-    x: bounds.x,
-    y: bounds.y,
-    width: bounds.width,
-    height: bounds.height,
-    visible:
-      bounds.bottom > 0 &&
-      bounds.right > 0 &&
-      bounds.top < window.innerHeight &&
-      bounds.left < window.innerWidth,
-  };
-}
-
-function EmbeddedMaterialStudio({
+function MaterialMontageForm({
   gateway,
-  onOpened,
+  onSubmitted,
 }: {
   readonly gateway: MaterialVideoStudioGateway;
-  readonly onOpened: () => void;
+  readonly onSubmitted: () => void;
 }) {
-  const host = useRef<HTMLDivElement | null>(null);
-  const [state, setState] = useState<"starting" | "ready" | "failed">("starting");
-  const [failure, setFailure] = useState<string | null>(null);
+  const [subject, setSubject] = useState("");
+  const [script, setScript] = useState("");
+  const [aspect, setAspect] = useState<"9:16" | "16:9" | "1:1">("9:16");
+  const [clipDurationSeconds, setClipDurationSeconds] = useState(4);
+  const [voiceName, setVoiceName] = useState("zh-CN-XiaoxiaoNeural-Female");
+  const [subtitleEnabled, setSubtitleEnabled] = useState(true);
+  const [fontSizePx, setFontSizePx] = useState(60);
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState<
+    { readonly tone: "success" | "error"; readonly text: string } | null
+  >(null);
 
-  useEffect(() => {
-    const node = host.current;
-    if (node === null) return;
-    let cancelled = false;
-    let opened = false;
-    let animationFrame: number | null = null;
-
-    node.scrollIntoView?.({ block: "start" });
-    const synchronize = () => {
-      animationFrame = null;
-      if (!opened || cancelled) return;
-      void gateway.updateView(materialStudioView(node)).catch(() => {
-        if (!cancelled) {
-          setFailure(MATERIAL_STUDIO_ERRORS.view_unavailable);
-          setState("failed");
-        }
-      });
-    };
-    const scheduleSynchronization = () => {
-      if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
-      animationFrame = window.requestAnimationFrame(synchronize);
-    };
-    const observer =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(scheduleSynchronization);
-    observer?.observe(node);
-    window.addEventListener("resize", scheduleSynchronization);
-    window.addEventListener("scroll", scheduleSynchronization, true);
-
+  const submit = () => {
+    if (submitting) return;
+    if (subject.trim().length === 0) {
+      setMessage({ tone: "error", text: "请先填写视频主题。" });
+      return;
+    }
+    setSubmitting(true);
+    setMessage(null);
     void gateway
-      .open(materialStudioView(node))
+      .submitMaterialMontage({
+        subject: subject.trim(),
+        script: script.trim() === "" ? null : script.trim(),
+        aspect,
+        clipDurationSeconds,
+        voiceName,
+        subtitleEnabled,
+        fontSizePx,
+        textColor: "#FFFFFF",
+        strokeColor: "#000000",
+        strokeWidthPx: 1.5,
+      })
       .then(() => {
-        opened = true;
-        if (cancelled) {
-          void gateway.close();
-          return;
-        }
-        setState("ready");
-        onOpened();
+        setMessage({
+          tone: "success",
+          text: "已提交制作任务，进度会显示在下面的任务列表里。",
+        });
+        onSubmitted();
       })
       .catch((error: unknown) => {
-        if (cancelled) return;
         const code =
           error instanceof MaterialVideoStudioGatewayError
             ? error.code
             : "operation_unavailable";
-        setFailure(MATERIAL_STUDIO_ERRORS[code]);
-        setState("failed");
+        setMessage({ tone: "error", text: BRIEF_ERRORS[code] });
+      })
+      .finally(() => {
+        setSubmitting(false);
       });
-
-    return () => {
-      cancelled = true;
-      observer?.disconnect();
-      window.removeEventListener("resize", scheduleSynchronization);
-      window.removeEventListener("scroll", scheduleSynchronization, true);
-      if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
-      void gateway.close();
-    };
-  }, [gateway, onOpened]);
+  };
 
   return (
-    <div
-      ref={host}
-      className="material-video-studio-embedded"
+    <section
+      className="material-montage-form"
       role="region"
-      aria-label="智能素材成片完整制作界面"
-      aria-busy={state === "starting"}
+      aria-label="智能素材成片制作表单"
     >
-      {state === "failed" ? (
-        <Alert
-          type="error"
-          showIcon
-          title={failure ?? MATERIAL_STUDIO_ERRORS.operation_unavailable}
-        />
-      ) : (
-        <Typography.Text type="secondary">
-          {state === "starting" ? "正在启动本机素材制作服务…" : "素材制作界面已嵌入当前 App。"}
-        </Typography.Text>
-      )}
-    </div>
+      <Space direction="vertical" size={14} style={{ width: "100%" }}>
+        <label className="material-montage-form__field">
+          <Typography.Text strong>视频主题</Typography.Text>
+          <Input.TextArea
+            aria-label="视频主题"
+            value={subject}
+            maxLength={240}
+            autoSize={{ minRows: 2, maxRows: 4 }}
+            placeholder="例如：三条实用的护肤知识"
+            onChange={(event) => setSubject(event.target.value)}
+          />
+        </label>
+        <label className="material-montage-form__field">
+          <Typography.Text>讲稿（可选，留空由 AI 生成）</Typography.Text>
+          <Input.TextArea
+            aria-label="讲稿"
+            value={script}
+            maxLength={5000}
+            autoSize={{ minRows: 2, maxRows: 8 }}
+            onChange={(event) => setScript(event.target.value)}
+          />
+        </label>
+        <Space wrap size={18}>
+          <label className="material-montage-form__field">
+            <Typography.Text>画面比例</Typography.Text>
+            <Segmented
+              value={aspect}
+              options={[
+                { value: "9:16", label: "竖屏 9:16" },
+                { value: "16:9", label: "横屏 16:9" },
+                { value: "1:1", label: "方形 1:1" },
+              ]}
+              onChange={(value) => {
+                setAspect(value as "9:16" | "16:9" | "1:1");
+              }}
+            />
+          </label>
+          <label className="material-montage-form__field">
+            <Typography.Text>单个画面时长（秒）</Typography.Text>
+            <InputNumber
+              aria-label="单个画面时长"
+              min={2}
+              max={10}
+              value={clipDurationSeconds}
+              onChange={(value) => {
+                if (typeof value === "number") setClipDurationSeconds(value);
+              }}
+            />
+          </label>
+          <label className="material-montage-form__field">
+            <Typography.Text>配音音色</Typography.Text>
+            <Select
+              aria-label="配音音色"
+              value={voiceName}
+              style={{ minWidth: 160 }}
+              options={[
+                { value: "zh-CN-XiaoxiaoNeural-Female", label: "晓晓（女声）" },
+                { value: "zh-CN-YunxiNeural-Male", label: "云希（男声）" },
+                { value: "zh-CN-YunjianNeural-Male", label: "云健（男声）" },
+                { value: "zh-CN-XiaoyiNeural-Female", label: "晓伊（女声）" },
+              ]}
+              onChange={setVoiceName}
+            />
+          </label>
+        </Space>
+        <Space wrap size={18}>
+          <label className="material-montage-form__field material-montage-form__field--inline">
+            <Typography.Text>显示字幕</Typography.Text>
+            <Switch checked={subtitleEnabled} onChange={setSubtitleEnabled} />
+          </label>
+          {subtitleEnabled ? (
+            <label className="material-montage-form__field">
+              <Typography.Text>字幕字号</Typography.Text>
+              <InputNumber
+                aria-label="字幕字号"
+                min={24}
+                max={120}
+                value={fontSizePx}
+                onChange={(value) => {
+                  if (typeof value === "number") setFontSizePx(value);
+                }}
+              />
+            </label>
+          ) : null}
+        </Space>
+        {message !== null ? (
+          <Alert
+            type={message.tone}
+            showIcon
+            title={message.text}
+          />
+        ) : null}
+        <div>
+          <Button type="primary" size="large" loading={submitting} onClick={submit}>
+            开始制作
+          </Button>
+        </div>
+      </Space>
+    </section>
   );
 }
 
@@ -864,7 +919,7 @@ function NewVideoPage({
           })}
         </div>
         {selectedMethod === "material_montage_v1" ? (
-          <EmbeddedMaterialStudio gateway={gateway} onOpened={onOpened} />
+          <MaterialMontageForm gateway={gateway} onSubmitted={onOpened} />
         ) : (
           <Alert
             type="info"
@@ -1558,7 +1613,7 @@ export function VideoStudio({
           error instanceof MaterialVideoStudioGatewayError
             ? error.code
             : "operation_unavailable";
-        failMotionRun({ tone: "error", text: BRIEF_ERRORS[code] ?? BRIEF_SUBMIT_FALLBACK });
+        failMotionRun({ tone: "error", text: BRIEF_ERRORS[code] });
       })
       .finally(() => setBusy(false));
   };

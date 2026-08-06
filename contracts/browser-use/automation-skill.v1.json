@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "notes": [
+    "SA-01: the closed vocabularies and limits of the declarative AutomationSkill document.",
+    "The Python validator (automation_tool.executor.automation_skill) and every later SA stage read these values from here, so a vocabulary change is one edit and one review.",
+    "Raw coordinates are evidence-only by construction: no goal or condition kind carries a coordinate field.",
+    "Fill values may only reference runtime parameters; literal text would smuggle user prose into a stored, replayed document."
+  ],
+  "platforms": ["douyin", "bilibili"],
+  "languages": ["zh-CN"],
+  "fingerprintKinds": ["dom_outline_v1"],
+  "actionKinds": ["click", "fill", "press_key", "scroll", "wait"],
+  "pressKeys": ["Enter", "Escape", "Tab", "ArrowDown", "ArrowUp"],
+  "scrollDirections": ["up", "down"],
+  "conditionKinds": ["element_visible", "element_absent", "url_matches"],
+  "evidenceKinds": ["url_matches", "element_visible", "click_point_v1"],
+  "goalRoles": [
+    "button",
+    "link",
+    "textbox",
+    "combobox",
+    "checkbox",
+    "radio",
+    "tab",
+    "menuitem",
+    "listitem",
+    "dialog",
+    "img"
+  ],
+  "relativePositions": ["above", "below", "left_of", "right_of", "inside"],
+  "riskLevels": ["low", "medium", "high"],
+  "limits": {
+    "maxSteps": 80,
+    "maxExternalSteps": 1,
+    "timeoutSecondsMinimum": 1,
+    "timeoutSecondsMaximum": 120,
+    "maxTextCharacters": 120,
+    "maxConditionsPerStep": 8,
+    "maxEvidenceEntries": 16,
+    "viewportMinimum": 320,
+    "viewportMaximum": 8192,
+    "maxParameterNameCharacters": 40
+  }
+}

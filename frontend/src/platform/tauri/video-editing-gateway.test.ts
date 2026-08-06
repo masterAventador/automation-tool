@@ -255,17 +255,30 @@ describe("Tauri video editing gateway", () => {
       .listProjects()
       .catch((error: unknown) => error);
     expect(opaque).toMatchObject({
-      code: "editing_service_unavailable",
+      // 认不出的形状仍然是一次失败的控制面请求（REVIEW-2026-08-06 M4）；
+      // 这里真正要守的是私有细节绝不反射出去。
+      code: "control_plane_unavailable",
       retryable: false,
     });
     expect(JSON.stringify(opaque)).not.toContain("private-value");
   });
 
   it("preserves retryability only for recognized native service errors", async () => {
+    // 这个网关的每条命令都打到控制服务，所以已识别的控制面错误必须以
+    // control_plane_unavailable 露出——2026-08-05 实测：云端旧版对
+    // /api/v1/editing-projects 返回 404，前端却说「本机剪辑服务不可用」，
+    // 把人指去检查一个根本没参与的进程。
     invoke.mockRejectedValueOnce({ code: "transport_unavailable", retryable: true });
     await expect(new TauriVideoEditingGateway().listProjects()).rejects.toMatchObject({
-      code: "editing_service_unavailable",
+      code: "control_plane_unavailable",
       retryable: true,
+    });
+
+    // 当晚那次真实失败的形状：列表接口 404 → request_rejected。
+    invoke.mockRejectedValueOnce({ code: "request_rejected", retryable: false });
+    await expect(new TauriVideoEditingGateway().listProjects()).rejects.toMatchObject({
+      code: "control_plane_unavailable",
+      retryable: false,
     });
 
     invoke.mockRejectedValueOnce({
@@ -273,10 +286,29 @@ describe("Tauri video editing gateway", () => {
       retryable: true,
       credential: "private-value",
     });
+    // REVIEW-2026-08-06 M4：这个网关的立论就是「每条命令都是控制面请求」，
+    // 那么一个形状不认识的失败仍然是控制面请求失败——旧兜底说「本机剪辑
+    // 服务不可用」，只是把 2026-08-05 修掉的那个误导缩小了范围。
     await expect(new TauriVideoEditingGateway().listProjects()).rejects.toMatchObject({
-      code: "editing_service_unavailable",
+      code: "control_plane_unavailable",
       retryable: false,
     });
+  });
+
+  it("maps session failures to a sign-in ask, not a network check", async () => {
+    // REVIEW-2026-08-06 M3：会话过期的补救是重新登录，跟网络毫无关系。
+    // 这三个码留在「请检查网络」桶里，U9 产品账号一上线就是现成的误导。
+    for (const code of [
+      "authentication_invalid",
+      "account_session_invalid",
+      "recovery_invalid",
+    ]) {
+      invoke.mockRejectedValueOnce({ code, retryable: false });
+      await expect(new TauriVideoEditingGateway().listProjects()).rejects.toMatchObject({
+        code: "account_session_expired",
+        retryable: false,
+      });
+    }
   });
 
   it("rejects invalid requests before invoking native code", async () => {

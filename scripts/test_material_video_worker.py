@@ -127,6 +127,7 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
                 "bootstrapVersion": "1",
                 "enableWebUi": False,
                 "localSessionToken": "a" * 64,
+                "pexelsApiKey": None,
                 "protocolVersion": "1.0",
                 "renderBrowser": None,
                 "scriptModel": None,
@@ -164,6 +165,7 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
                     "ffmpegPath": str(ffmpeg),
                     "ffprobePath": str(ffprobe),
                 },
+                "pexelsApiKey": None,
                 "protocolVersion": "1.0",
                 "renderBrowser": None,
                 "scriptModel": None,
@@ -210,6 +212,7 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
                     "ffmpegPath": str(ffmpeg),
                     "ffprobePath": str(ffprobe),
                 },
+                "pexelsApiKey": None,
                 "protocolVersion": "1.0",
                 "renderBrowser": None,
                 "scriptModel": None,
@@ -304,6 +307,7 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
                     "ffmpegPath": str(ffmpeg),
                     "ffprobePath": str(ffprobe),
                 },
+                "pexelsApiKey": None,
                 "protocolVersion": "1.0",
                 "renderBrowser": None,
                 "scriptModel": None,
@@ -377,6 +381,7 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
                     "ffmpegPath": str(ffmpeg),
                     "ffprobePath": str(ffprobe),
                 },
+                "pexelsApiKey": None,
                 "protocolVersion": "1.0",
                 "renderBrowser": None,
                 "scriptModel": {
@@ -624,6 +629,7 @@ class MaterialVideoWorkerBoundaryTest(unittest.TestCase):
                     "ffmpegPath": str(ffmpeg),
                     "ffprobePath": str(ffprobe),
                 },
+                "pexelsApiKey": None,
                 "protocolVersion": "1.0",
                 "renderBrowser": None,
                 "scriptModel": None,
@@ -1154,24 +1160,25 @@ class SubtitleFontRightsTest(unittest.TestCase):
             self.assertGreater(font.bytes, 0)
             self.assertTrue(font.attribution)
 
-    def test_no_font_binary_is_checked_into_the_repository(self) -> None:
-        # A 33 MB binary in Git history is unremovable without rewriting history,
-        # and every other large locked artifact (Chromium, ffmpeg) is fetched at
-        # build time instead. The fonts follow that rule rather than being the
-        # one exception.
-        self.assertFalse((ROOT / "assets/fonts").exists())
-        tracked = subprocess.run(
-            ["git", "ls-files"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.splitlines()
+    def test_every_cleared_font_is_committed_with_its_locked_digest(self) -> None:
+        # Reversed on 2026-08-05 by explicit decision: the fonts are immutable,
+        # not compiled per machine, and re-downloading them on every clean
+        # machine made the build depend on hosts some machines cannot reach
+        # (the Windows box fails the TLS handshake to the font hosts). They are
+        # committed once; the rights contract digest still decides what counts
+        # as the font, so a drifted committed file is as rejected as a
+        # corrupted download ever was.
+        committed_root = ROOT / "assets/subtitle-fonts"
         for font in subtitle_font_assets.bundled_subtitle_fonts():
+            committed = committed_root / font.packaged_name
+            self.assertTrue(
+                committed.is_file(),
+                f"{font.packaged_name} must be committed under assets/subtitle-fonts",
+            )
             self.assertEqual(
-                [path for path in tracked if path.endswith(font.packaged_name)],
-                [],
-                "a cleared font must not be committed to the repository",
+                hashlib.sha256(committed.read_bytes()).hexdigest(),
+                font.sha256,
+                f"{font.packaged_name} drifted from the rights contract digest",
             )
 
     def test_no_registered_font_is_a_proprietary_system_face(self) -> None:
@@ -1550,6 +1557,89 @@ class MaterialVideoWorkerDefaultSubtitleFontTest(unittest.TestCase):
             "hide_log = false\n",
         )
 
+    def test_bootstrap_carries_an_optional_pexels_api_key(self) -> None:
+        # 产品从未把素材站点密钥接进上游 WebUI（2026-08-05 用户实测：内置包
+        # 仍要求手工填写）。密钥走已有的 stdin 引导通道，与模型密钥同一条路。
+        document = {
+            "assetRoot": "unused",
+            "bootstrapVersion": "1",
+            "enableWebUi": True,
+            "localSessionToken": "a" * 64,
+            "pexelsApiKey": "A" * 56,
+            "protocolVersion": "1.0",
+            "renderBrowser": None,
+            "scriptModel": None,
+            "workerKind": "python",
+        }
+        with tempfile.TemporaryDirectory(
+            prefix="material-video-pexels-", dir=ROOT / ".local"
+        ) as directory:
+            asset_root = Path(directory) / "assets"
+            asset_root.mkdir()
+            document["assetRoot"] = str(asset_root)
+            line = json.dumps(document, separators=(",", ":")).encode() + b"\n"
+
+            bootstrap = gateway.parse_bootstrap(line)
+
+            self.assertEqual(bootstrap.pexels_api_key, "A" * 56)
+
+    def test_bootstrap_rejects_a_malformed_pexels_api_key(self) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="material-video-pexels-bad-", dir=ROOT / ".local"
+        ) as directory:
+            asset_root = Path(directory) / "assets"
+            asset_root.mkdir()
+            for bad in ("", "short", "契约外字符" * 10, "with space " + "a" * 40, 7):
+                document = {
+                    "assetRoot": str(asset_root),
+                    "bootstrapVersion": "1",
+                    "enableWebUi": True,
+                    "localSessionToken": "a" * 64,
+                    "pexelsApiKey": bad,
+                    "protocolVersion": "1.0",
+                    "renderBrowser": None,
+                    "scriptModel": None,
+                    "workerKind": "python",
+                }
+                line = json.dumps(document, separators=(",", ":")).encode() + b"\n"
+                with self.assertRaises(gateway.GatewayRejected):
+                    gateway.parse_bootstrap(line)
+
+    def test_private_config_pins_the_pexels_key_in_the_app_section(self) -> None:
+        # 与字幕字体同一机制：插进上游自己的 [app] 段，其余内容逐字保留。
+        document = _private_config_document(
+            "[app]\nvalue = 1\n\n[ui]\nhide_log = false\n",
+            "NotoSansCJKsc-Bold.ttf",
+            pexels_api_key="B" * 56,
+        )
+        self.assertEqual(
+            document,
+            "[app]\npexels_api_keys = [\"" + "B" * 56 + "\"]\nvalue = 1\n\n"
+            '[ui]\nfont_name = "NotoSansCJKsc-Bold.ttf"\nhide_log = false\n',
+        )
+
+    def test_the_real_upstream_template_parses_after_key_injection(self) -> None:
+        """带 key 的注入必须在真实上游模板上产出合法 TOML。
+
+        上游 config.example.toml 的 [app] 段本来就有 `pexels_api_keys = []`；
+        只插不换会造出重复键，上游 config 加载直接失败——冻结 worker 上
+        实测 exit 65（2026-08-06 带 key 首跑）。此前用例的合成 fixture 里
+        恰好没有这一行，于是全绿。真实文件才是判据。
+        """
+        import tomllib
+
+        real_template = (ROOT / "vendor/moneyprinterturbo/config.example.toml").read_text(
+            encoding="utf-8"
+        )
+        key = "C" * 56
+        document = _private_config_document(
+            real_template, "NotoSansCJKsc-Bold.ttf", pexels_api_key=key
+        )
+
+        parsed = tomllib.loads(document)  # duplicate keys raise here
+        self.assertEqual(parsed["app"]["pexels_api_keys"], [key])
+        self.assertEqual(parsed["ui"]["font_name"], "NotoSansCJKsc-Bold.ttf")
+
     def test_private_config_refuses_upstream_configuration_without_a_webui_section(
         self,
     ) -> None:
@@ -1649,6 +1739,438 @@ class MaterialVideoWorkerBackgroundMusicTest(unittest.TestCase):
     def test_private_project_keeps_every_upstream_rule(self) -> None:
         upstream = (UPSTREAM_WEBUI / "styles.css").read_text(encoding="utf-8")
         self.assertTrue(self.stylesheet.startswith(upstream))
+
+
+class MaterialMontageRequestTest(unittest.TestCase):
+    """The headless montage path: React collects the parameters, no Streamlit.
+
+    The request rides the already-authenticated stdin bootstrap — one worker
+    process per job, exactly the WebUI's lifecycle — and the upstream pipeline
+    (`app.services.task.start`) runs under the same private runtime the WebUI
+    used, so the observation bridge, the render-job ledger and cancel handling
+    are all unchanged.
+    """
+
+    def _request(self) -> dict[str, object]:
+        return {
+            "aspect": "9:16",
+            "clipDurationSeconds": 4,
+            "fontSizePx": 60,
+            "strokeWidthPx": 1.5,
+            "subject": "护肤知识三条",
+            "script": None,
+            "subtitleEnabled": True,
+            "textColor": "#FFFFFF",
+            "strokeColor": "#000000",
+            "voiceName": "zh-CN-XiaoxiaoNeural-Female",
+        }
+
+    def test_a_wellformed_request_parses_into_upstream_video_params(self) -> None:
+        from montage_runtime import parse_montage_request
+
+        request = parse_montage_request(self._request())
+
+        self.assertEqual(request.subject, "护肤知识三条")
+        self.assertEqual(request.aspect, "9:16")
+        self.assertEqual(request.clip_duration_seconds, 4)
+        self.assertTrue(request.subtitle_enabled)
+
+    def test_malformed_requests_are_rejected_not_defaulted(self) -> None:
+        from montage_runtime import MontageRejected, parse_montage_request
+
+        for field, value in (
+            ("subject", ""),
+            ("subject", "长" * 241),
+            ("aspect", "21:9"),
+            ("clipDurationSeconds", 0),
+            ("clipDurationSeconds", 61),
+            ("fontSizePx", 3),
+            ("textColor", "red"),
+            ("textColor", "#GGGGGG"),
+            ("voiceName", "../evil"),
+            ("script", 7),
+        ):
+            document = self._request()
+            document[field] = value
+            with self.assertRaises(MontageRejected, msg=f"{field}={value!r}"):
+                parse_montage_request(document)
+        with self.assertRaises(MontageRejected):
+            parse_montage_request({**self._request(), "extra": 1})
+        with self.assertRaises(MontageRejected):
+            parse_montage_request("not a dict")
+
+    def test_bootstrap_accepts_a_montage_request_and_refuses_it_with_webui(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="material-montage-bootstrap-", dir=ROOT / ".local"
+        ) as directory:
+            asset_root = Path(directory) / "assets"
+            asset_root.mkdir()
+            document = {
+                "assetRoot": str(asset_root),
+                "bootstrapVersion": "1",
+                "enableWebUi": False,
+                "localSessionToken": "a" * 64,
+                "montageRequest": self._request(),
+                "pexelsApiKey": None,
+                "protocolVersion": "1.0",
+                "renderBrowser": None,
+                "scriptModel": None,
+                "workerKind": "python",
+            }
+            line = json.dumps(document, separators=(",", ":")).encode() + b"\n"
+
+            bootstrap = gateway.parse_bootstrap(line)
+
+            self.assertIsNotNone(bootstrap.montage_request)
+            self.assertEqual(bootstrap.montage_request.subject, "护肤知识三条")
+
+            hybrid = dict(document)
+            hybrid["enableWebUi"] = True
+            hybrid_line = json.dumps(hybrid, separators=(",", ":")).encode() + b"\n"
+            with self.assertRaises(gateway.GatewayRejected):
+                gateway.parse_bootstrap(hybrid_line)
+
+    def test_start_montage_maps_the_request_through_the_pipeline_seam(self) -> None:
+        # 只验参数映射。真正的桥安装由
+        # test_montage_upstream_engine_installs_the_genuine_bridge 负责——
+        # 旧名字里的 under_the_bridge 恰恰是这个 seam 走不到的东西。
+        from montage_runtime import parse_montage_request, start_montage
+
+        request = parse_montage_request(self._request())
+        with tempfile.TemporaryDirectory(
+            prefix="material-montage-run-", dir=ROOT / ".local"
+        ) as directory:
+            workspace = Path(directory) / str(uuid4())
+            asset_root = workspace / "assets"
+            asset_root.mkdir(parents=True)
+            # 与 WebUI 的工作区布局一致：outputs 与 assets 平级。
+            (workspace / "outputs").mkdir()
+            observed: dict[str, object] = {}
+
+            def fake_pipeline(task_id: str, params: object, stop_at: str) -> None:
+                observed["task_id"] = task_id
+                observed["params"] = params
+                observed["stop_at"] = stop_at
+
+            def fake_preload(runtime_root: Path, pexels_api_key: object = None) -> None:
+                # 真身会 exec 上游 config（依赖只存在于冻结环境），它有自己的
+                # 独立用例；这里只断言 montage 路径把密钥递到了它手上。
+                observed["preload_key"] = pexels_api_key
+                observed["runtime_root"] = runtime_root
+
+            # 曾有一条 mock.patch.object(montage_runtime, "_preload", create=True)
+            # ——模块里根本没有这个名字，create=True 造了个空属性（M6）。
+            with mock.patch(
+                "webui_runtime._preload_private_config", fake_preload
+            ), mock.patch(
+                "webui_runtime._upstream_paths",
+                lambda: self._tiny_upstream(Path(directory)),
+            ):
+                runtime = start_montage(
+                    asset_root,
+                    None,
+                    "P" * 56,
+                    request,
+                    pipeline=fake_pipeline,
+                )
+                runtime.join(timeout=30)
+            self.assertEqual(observed["preload_key"], "P" * 56)
+
+            self.assertFalse(runtime.is_alive(), "the montage thread must finish")
+            params = observed["params"]
+            self.assertEqual(observed["stop_at"], "video")
+            self.assertEqual(params.video_subject, "护肤知识三条")
+            self.assertEqual(params.video_source, "pexels")
+            self.assertEqual(params.video_count, 1)
+            self.assertEqual(params.bgm_type, "")
+            # 字幕字体必须显式钉住契约清权字体。不传时上游默认
+            # STHeitiMedium.ttc——那个字体因未清权被有意裁出了分发包，
+            # 冻结 worker 上字幕烧录直接死于打不开字体（2026-08-06 实测，
+            # 带 key 的真实出片跑了 435 秒死在最后一步）。
+            from webui_runtime import default_subtitle_font_name
+
+            self.assertEqual(params.font_name, default_subtitle_font_name())
+
+    @staticmethod
+    def _tiny_upstream(base: Path) -> tuple[Path, Path, Path, Path]:
+        """A miniature upstream checkout: just what the shared runtime copies.
+
+        The real `vendor/moneyprinterturbo/resource` is ~197 MB; copying it
+        per test would be all cost and no extra proof.
+        """
+        resource = base / "upstream-resource"
+        (resource / "fonts").mkdir(parents=True)
+        (resource / "fonts" / "face.ttf").write_bytes(b"not a real font")
+        return (base / "app", base / "webui/Main.py", base / "config.toml", resource)
+
+    def test_start_montage_prepares_the_shared_runtime_layout(self) -> None:
+        """REVIEW-2026-08-06 C1: the montage path never built the layout.
+
+        The observation bridge resolves `storage/tasks` with strict=True at
+        install time and upstream `resource_dir()` is the subtitle-font root,
+        yet only the WebUI path (`_prepare_private_project`) ever created
+        them — a montage job died on FileNotFoundError before its first step.
+        """
+        from montage_runtime import parse_montage_request, start_montage
+
+        request = parse_montage_request(self._request())
+        with tempfile.TemporaryDirectory(
+            prefix="material-montage-layout-", dir=ROOT / ".local"
+        ) as directory:
+            workspace = Path(directory) / str(uuid4())
+            asset_root = workspace / "assets"
+            asset_root.mkdir(parents=True)
+            (workspace / "outputs").mkdir()
+            observed: dict[str, object] = {}
+
+            def fake_preload(runtime_root: Path, pexels_api_key: object = None) -> None:
+                observed["runtime_root"] = runtime_root
+
+            with mock.patch(
+                "webui_runtime._preload_private_config", fake_preload
+            ), mock.patch(
+                "webui_runtime._upstream_paths",
+                lambda: self._tiny_upstream(Path(directory)),
+            ):
+                runtime = start_montage(
+                    asset_root, None, None, request, pipeline=lambda *args: None
+                )
+                runtime.join(timeout=30)
+
+            runtime_root = observed["runtime_root"]
+            self.assertIsInstance(runtime_root, Path)
+            self.assertTrue(
+                (runtime_root / "storage/tasks").is_dir(),
+                "the bridge resolves storage/tasks strictly at install time",
+            )
+            self.assertTrue(
+                (runtime_root / "resource/fonts/face.ttf").is_file(),
+                "upstream resource_dir() must resolve inside the private runtime",
+            )
+
+    def test_montage_upstream_engine_installs_the_genuine_bridge(self) -> None:
+        """Drive `upstream_engine()` for real — upstream modules faked, bridge genuine.
+
+        The pipeline-seam test cannot see this path: passing `pipeline=` skips
+        `upstream_engine()` entirely, which is exactly where the bridge install
+        crashed in production (REVIEW-2026-08-06 C1).
+        """
+        import types as types_module
+
+        from montage_runtime import parse_montage_request, start_montage
+
+        request = parse_montage_request(self._request())
+        observed: dict[str, object] = {}
+
+        class FakeVideoParams:
+            def __init__(self, **kwargs: object) -> None:
+                self.__dict__.update(kwargs)
+
+        def fake_start(task_id: str, params: object, stop_at: str) -> None:
+            observed["task_id"] = task_id
+            observed["stop_at"] = stop_at
+
+        fake_modules: dict[str, types_module.ModuleType] = {}
+        for name in ("app", "app.models", "app.services", "app.utils"):
+            fake_modules[name] = types_module.ModuleType(name)
+        schema = types_module.ModuleType("app.models.schema")
+        schema.VideoParams = FakeVideoParams
+        llm = types_module.ModuleType("app.services.llm")
+        llm._generate_response = None
+        state_module = types_module.ModuleType("app.services.state")
+        state_module.state = types_module.SimpleNamespace()
+        task_module = types_module.ModuleType("app.services.task")
+        task_module.start = fake_start
+        utils = types_module.ModuleType("app.utils.utils")
+        utils.root_dir = lambda: ""
+        fake_modules.update(
+            {
+                "app.models.schema": schema,
+                "app.services.llm": llm,
+                "app.services.state": state_module,
+                "app.services.task": task_module,
+                "app.utils.utils": utils,
+            }
+        )
+
+        with tempfile.TemporaryDirectory(
+            prefix="material-montage-bridge-", dir=ROOT / ".local"
+        ) as directory:
+            workspace = Path(directory) / str(uuid4())
+            asset_root = workspace / "assets"
+            asset_root.mkdir(parents=True)
+            (workspace / "outputs").mkdir()
+
+            def fake_preload(runtime_root: Path, pexels_api_key: object = None) -> None:
+                observed["runtime_root"] = runtime_root
+
+            with mock.patch.dict(sys.modules, fake_modules), mock.patch(
+                "webui_runtime._preload_private_config", fake_preload
+            ), mock.patch(
+                "webui_runtime._upstream_paths",
+                lambda: self._tiny_upstream(Path(directory)),
+            ):
+                runtime = start_montage(asset_root, None, None, request)
+                runtime.join(timeout=30)
+                self.assertFalse(runtime.is_alive(), "the montage thread must finish")
+
+            self.assertEqual(
+                observed.get("stop_at"),
+                "video",
+                "upstream_engine() must survive the genuine bridge install and "
+                "reach task.start — before the fix it died on FileNotFoundError",
+            )
+
+    def test_a_failing_montage_thread_reports_failure_not_success(self) -> None:
+        """REVIEW-2026-08-06 C2: every failure used to exit 0 with no trace.
+
+        run() had no try at all and the watchdog called os._exit(0)
+        unconditionally, so a dead pipeline looked exactly like a finished
+        one. A failure must leave a terminal "failed" observation for the
+        App-owned ledger and mark the thread so the watchdog exits nonzero.
+        """
+        from montage_runtime import parse_montage_request, start_montage
+
+        request = parse_montage_request(self._request())
+        with tempfile.TemporaryDirectory(
+            prefix="material-montage-failure-", dir=ROOT / ".local"
+        ) as directory:
+            workspace = Path(directory) / str(uuid4())
+            asset_root = workspace / "assets"
+            asset_root.mkdir(parents=True)
+            (workspace / "outputs").mkdir()
+            observed: dict[str, object] = {}
+
+            def fake_preload(runtime_root: Path, pexels_api_key: object = None) -> None:
+                observed["runtime_root"] = runtime_root
+
+            def dying_pipeline(task_id: str, params: object, stop_at: str) -> None:
+                raise RuntimeError("upstream pipeline dependency unavailable")
+
+            with mock.patch(
+                "webui_runtime._preload_private_config", fake_preload
+            ), mock.patch(
+                "webui_runtime._upstream_paths",
+                lambda: self._tiny_upstream(Path(directory)),
+            ):
+                runtime = start_montage(
+                    asset_root, None, None, request, pipeline=dying_pipeline
+                )
+                runtime.join(timeout=30)
+
+            self.assertIs(
+                getattr(runtime, "failed", None),
+                True,
+                "the watchdog reads this flag to pick the process exit code",
+            )
+            runtime_root = observed["runtime_root"]
+            assert isinstance(runtime_root, Path)
+            observation_path = runtime_root / OBSERVATION_FILE
+            self.assertTrue(
+                observation_path.is_file(),
+                "a failure must leave a terminal observation for the App ledger",
+            )
+            document = json.loads(observation_path.read_text(encoding="utf-8"))
+            self.assertEqual(document["status"], "failed")
+            self.assertEqual(document["failureCode"], "generation_failed")
+            self.assertIsNone(document["outputFile"])
+            self.assertEqual(document["renderJobId"], workspace.name)
+            self.assertGreater(document["revision"], 0)
+
+    def test_a_bridge_written_terminal_observation_is_never_overwritten(self) -> None:
+        """When the genuine bridge already recorded the outcome, keep it.
+
+        JobCancelled propagates out of the pipeline after the bridge wrote
+        "cancelled"; rewriting that to "failed" would misreport a user action
+        as a defect. Cooperative cancellation is also not a process failure.
+        """
+        from job_observation_bridge import JobCancelled as CancelSignal
+        from montage_runtime import parse_montage_request, start_montage
+
+        request = parse_montage_request(self._request())
+        with tempfile.TemporaryDirectory(
+            prefix="material-montage-cancel-", dir=ROOT / ".local"
+        ) as directory:
+            workspace = Path(directory) / str(uuid4())
+            asset_root = workspace / "assets"
+            asset_root.mkdir(parents=True)
+            (workspace / "outputs").mkdir()
+            observed: dict[str, object] = {}
+
+            def fake_preload(runtime_root: Path, pexels_api_key: object = None) -> None:
+                observed["runtime_root"] = runtime_root
+
+            def cancelled_pipeline(task_id: str, params: object, stop_at: str) -> None:
+                runtime_root = observed["runtime_root"]
+                assert isinstance(runtime_root, Path)
+                (runtime_root / OBSERVATION_FILE).write_text(
+                    json.dumps(
+                        {
+                            "schemaVersion": 1,
+                            "renderJobId": workspace.name,
+                            "workerTaskId": str(uuid4()),
+                            "revision": 3,
+                            "status": "cancelled",
+                            "progressPercent": 40,
+                            "subject": "护肤知识三条",
+                            "outputFile": None,
+                            "failureCode": None,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                raise CancelSignal("render cancelled")
+
+            with mock.patch(
+                "webui_runtime._preload_private_config", fake_preload
+            ), mock.patch(
+                "webui_runtime._upstream_paths",
+                lambda: self._tiny_upstream(Path(directory)),
+            ):
+                runtime = start_montage(
+                    asset_root, None, None, request, pipeline=cancelled_pipeline
+                )
+                runtime.join(timeout=30)
+
+            self.assertIs(
+                getattr(runtime, "failed", None),
+                False,
+                "cooperative cancellation is a user action, not a worker failure",
+            )
+            runtime_root = observed["runtime_root"]
+            assert isinstance(runtime_root, Path)
+            document = json.loads(
+                (runtime_root / OBSERVATION_FILE).read_text(encoding="utf-8")
+            )
+            self.assertEqual(document["status"], "cancelled", "terminal states stay")
+            self.assertEqual(document["revision"], 3)
+
+    def test_a_unicode_alnum_pexels_key_is_refused_at_the_config_gate(self) -> None:
+        """REVIEW-2026-08-06 M5：str.isalnum() 对全角数字、CJK 都返回 True。
+
+        网关钉的是 ^[A-Za-z0-9]{20,120}$，config 预载却用 isalnum() 把关——
+        两个读者不同意什么算合法值，网关侧「CJK 被拒绝」的注释只对网关
+        成立。预载必须复用网关同一份模式，不许有第二份更松的定义。
+        """
+        from webui_runtime import WebUiRejected, _preload_private_config
+
+        with tempfile.TemporaryDirectory(
+            prefix="material-preload-key-", dir=ROOT / ".local"
+        ) as directory:
+            with self.assertRaises(WebUiRejected):
+                _preload_private_config(Path(directory), "Ｐ" * 40)  # 全角字母
+
+    def test_montage_exit_code_maps_the_thread_flag_to_the_process_result(self) -> None:
+        from worker_main import montage_exit_code
+
+        healthy = threading.Thread(target=lambda: None)
+        self.assertEqual(montage_exit_code(healthy), 0)
+        healthy.failed = False  # type: ignore[attr-defined]
+        self.assertEqual(montage_exit_code(healthy), 0)
+        healthy.failed = True  # type: ignore[attr-defined]
+        self.assertEqual(montage_exit_code(healthy), 1)
 
 
 if __name__ == "__main__":
