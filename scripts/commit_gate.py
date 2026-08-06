@@ -229,34 +229,26 @@ def _initialize_slow_checkout_repository(checkout: Path) -> None:
     if (checkout / ".git").exists():
         raise RuntimeError("the slow checkout unexpectedly already contains .git")
     _run_checkout_command(["git", "init", "--quiet"], checkout)
-    # The fast TypeScript tier has already linked ``node_modules`` into this
-    # same checkout. A symlink itself is not matched by a trailing-slash
-    # ``node_modules/`` ignore rule, so an unrestricted ``git add --all`` would
-    # commit an absolute host link. The nested checkout self-test then (rightly)
-    # refuses to extract that archive. Keep the runtime available on disk while
-    # excluding it from the disposable source snapshot.
-    _run_checkout_command(
-        [
-            "git",
-            "add",
-            "--all",
-            "--",
-            ".",
-            ":(exclude)frontend/node_modules",
-        ],
-        checkout,
-    )
-    # The fast tier adds this ignored runtime after `git archive` extracts the
-    # commit. A directory-shaped ignore (`node_modules/`) does not match the
-    # symlink itself, so source-identity checks would otherwise mistake the
-    # gate's absolute host link for an untracked release input. Keep the link
-    # usable by later render tests while excluding this one gate-owned path
-    # from the disposable repository's source inventory.
+    # The fast tier has already linked ``node_modules`` into this same checkout,
+    # and that link must stay usable on disk while staying out of the disposable
+    # source snapshot: a snapshot carrying an absolute host link makes the nested
+    # checkout self-test (rightly) refuse to extract the archive.
+    #
+    # Excluded through ``info/exclude`` rather than a ``:(exclude)`` pathspec,
+    # and written *before* the add rather than after. The two platforms present
+    # the link differently — macOS a symlink, which a directory-shaped
+    # ``node_modules/`` rule does not match, and Windows a directory junction,
+    # which it does — and naming an already-ignored path in a pathspec is an
+    # error rather than a no-op. So the pathspec form worked on one platform and
+    # failed the whole slow tier on the other (measured 2026-08-07: `git add`
+    # exit 1, "The following paths are ignored ... use -f"). One ignore entry,
+    # applied first, is right on both.
     info_exclude = checkout / ".git" / "info" / "exclude"
     existing = info_exclude.read_text(encoding="utf-8")
     marker = "/frontend/node_modules\n"
     if marker not in existing:
         info_exclude.write_text(existing + marker, encoding="utf-8")
+    _run_checkout_command(["git", "add", "--all", "--", "."], checkout)
     _run_checkout_command(
         [
             "git",

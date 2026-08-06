@@ -389,8 +389,14 @@ def check_slow_checkout_preparation_is_isolated_and_reconstructible() -> None:
         source = root / "source"
         checkout = root / "checkout"
         checkout.mkdir()
+        # The repository's own rules, not a convenient subset. `node_modules/`
+        # matters: the fast tier hands Windows a *directory junction*, which Git
+        # reads as a directory and therefore ignores — and naming an ignored
+        # path in a pathspec is an error, not a no-op. Without this line the
+        # fixture could not produce the condition that broke the real slow tier
+        # on 2026-08-07, so the check could not fail.
         (checkout / ".gitignore").write_text(
-            ".local/\n**/.venv/\n",
+            ".local/\n**/.venv/\nnode_modules/\n",
             encoding="utf-8",
         )
         (checkout / "tracked.txt").write_text("commit bytes\n", encoding="utf-8")
