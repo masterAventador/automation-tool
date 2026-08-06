@@ -9,9 +9,10 @@ by construction — and kept apart only by that construction. Unpacking a 171 MB
 archive into 328 digested files is also not free, and the release paid it on
 every build.
 
-One cache, keyed by the staging contract. That contract pins `archive_sha256`
-per target, so replacing the archive changes the key; a cache keyed on anything
-weaker would keep serving the previous browser.
+One cache, keyed by the staging contract *and the archive bytes*. The contract
+alone is not enough: swapping the file on disk leaves the contract unchanged,
+and a cache keyed on it would keep serving the previous browser without ever
+reading the new archive (REVIEW-2026-08-06 C3).
 
 What this deliberately does *not* hold is a signed tree. The release re-signs
 every Mach-O under the Developer ID and re-takes the digest inventory
@@ -37,7 +38,6 @@ from build_embedded_browser_distribution import (  # noqa: E402
 from build_embedded_chromium_staging import (  # noqa: E402
     build_staging,
     load_staging_contract,
-    sha256_file,
 )
 from embedded_browser_archives import (  # noqa: E402
     MACOS_ARM64_ARCHIVE,
@@ -77,29 +77,38 @@ def locked_archive(target_id: str) -> Path:
 def ensure_staged_browser(*, target_id: str, root: Path | None = None) -> Path:
     """Return the verified, unsigned distribution tree for one target.
 
-    Rebuilds only when the staging contract changed — which includes the
-    archive digest it pins.
+    Rebuilds when the staging contract *or the archive bytes* changed. The
+    expected digest is the contract's pin, never the archive's own — comparing
+    the archive against itself is a check that cannot go red, and it shipped
+    that way once (REVIEW-2026-08-06 C3).
     """
     archive = locked_archive(target_id)
+    if not archive.is_file():
+        raise EmbeddedBrowserStagingUnavailable(
+            f"the locked Chromium archive is not downloaded yet: {archive}"
+        )
+    contract = load_staging_contract(STAGING_CONTRACT_PATH)
+    target = contract.targets.get(target_id)
+    if target is None:
+        raise EmbeddedBrowserStagingUnavailable(
+            f"the staging contract declares no target {target_id}"
+        )
 
     def build(destination: Path) -> None:
-        if not archive.is_file():
-            raise EmbeddedBrowserStagingUnavailable(
-                f"the locked Chromium archive is not downloaded yet: {archive}"
-            )
-        contract = load_staging_contract(STAGING_CONTRACT_PATH)
         build_staging(
             contract=contract,
             target_id=target_id,
             archive_path=archive,
-            archive_sha256=sha256_file(archive),
+            archive_sha256=target.archive_sha256,
             output=destination,
         )
         build_distribution_manifest(staging=destination, target_id=target_id)
 
     return ensure_cached(
         name=cache_name(target_id),
-        contracts=[STAGING_CONTRACT_PATH],
+        # The archive itself is part of the key: a swapped or truncated file
+        # must invalidate the cached tree, not get skipped past by it.
+        contracts=[STAGING_CONTRACT_PATH, archive],
         build=build,
         root=root,
     )

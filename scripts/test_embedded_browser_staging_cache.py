@@ -20,9 +20,12 @@ copy: the cache holds the pre-signature tree only, and nothing signs in place.
 
 from __future__ import annotations
 
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -32,7 +35,9 @@ from desktop_e2e_prerequisites import (  # noqa: E402
     release_target_id,
 )
 from embedded_browser_staging_cache import (  # noqa: E402
+    LOCKED_ARCHIVES,
     STAGING_CONTRACT_PATH,
+    EmbeddedBrowserStagingUnavailable,
     cache_name,
     ensure_staged_browser,
     locked_archive,
@@ -153,6 +158,115 @@ class CopyTests(unittest.TestCase):
             )
             report = verify_distribution(staging=output, target_id=target)
             self.assertGreater(report.verified_files, 300)
+
+
+class ContractPinnedDigestTests(unittest.TestCase):
+    """REVIEW-2026-08-06 C3: the digest check must be able to go red.
+
+    `build()` used to pass `sha256_file(archive)` as the expected digest — the
+    archive compared against itself, a check that cannot fail. And the cache
+    key was the contract file alone, so swapping the archive bytes on disk
+    never invalidated the cached tree: `build()` was not even entered. A
+    truncated or overwritten archive would have sailed through manifest,
+    signature and `verify_distribution`, because every one of them described
+    the same broken bytes.
+
+    These tests stage nothing: `build_staging` is recorded, not run, because
+    what is under test is which digest reaches it and when it is called at all.
+    """
+
+    # Any declared target works — the archive and contract are private
+    # fixtures. Chosen dynamically so the literal-target AST guard holds.
+    FIXTURE_TARGET = sorted(LOCKED_ARCHIVES)[0]
+
+    def _run(
+        self,
+        base: Path,
+        *,
+        pinned: str,
+        archive: Path,
+        recorded: list[dict[str, object]],
+    ) -> Path:
+        import embedded_browser_staging_cache as cache_module
+
+        contract_path = base / "staging-contract.json"
+        if not contract_path.is_file():
+            document = json.loads(STAGING_CONTRACT_PATH.read_text(encoding="utf-8"))
+            document["targets"][self.FIXTURE_TARGET]["archive_sha256"] = pinned
+            contract_path.write_text(json.dumps(document), encoding="utf-8")
+
+        def fake_build_staging(**kwargs: object) -> None:
+            recorded.append(kwargs)
+            output = kwargs["output"]
+            assert isinstance(output, Path)
+            output.mkdir(parents=True)
+            (output / "marker").write_text("staged", encoding="utf-8")
+
+        with mock.patch.object(
+            cache_module, "STAGING_CONTRACT_PATH", contract_path
+        ), mock.patch.object(
+            cache_module, "locked_archive", lambda target_id: archive
+        ), mock.patch.object(
+            cache_module, "build_staging", fake_build_staging
+        ), mock.patch.object(
+            cache_module, "build_distribution_manifest", lambda **kwargs: None
+        ):
+            return ensure_staged_browser(target_id=self.FIXTURE_TARGET, root=base)
+
+    def test_the_expected_digest_is_the_contracts_not_the_archives_own(self) -> None:
+        pinned = "ab" * 32  # deliberately NOT the fixture archive's digest
+        recorded: list[dict[str, object]] = []
+        with tempfile.TemporaryDirectory(prefix="staging-digest-") as temporary:
+            base = Path(temporary)
+            archive = base / "chrome.zip"
+            archive.write_bytes(b"fixture archive bytes")
+
+            self._run(base, pinned=pinned, archive=archive, recorded=recorded)
+
+        self.assertEqual(len(recorded), 1)
+        self.assertEqual(
+            recorded[0]["archive_sha256"],
+            pinned,
+            "build_staging must receive the contract-pinned digest; handing it "
+            "the archive's own digest is a comparison that can never go red",
+        )
+
+    def test_swapping_the_archive_bytes_invalidates_the_cache(self) -> None:
+        pinned = "cd" * 32
+        recorded: list[dict[str, object]] = []
+        with tempfile.TemporaryDirectory(prefix="staging-swap-") as temporary:
+            base = Path(temporary)
+            archive = base / "chrome.zip"
+            archive.write_bytes(b"first archive")
+
+            self._run(base, pinned=pinned, archive=archive, recorded=recorded)
+            self.assertEqual(len(recorded), 1)
+
+            # Same contract, different bytes on disk — the docstring's promise.
+            archive.write_bytes(b"second archive, silently swapped")
+            self._run(base, pinned=pinned, archive=archive, recorded=recorded)
+
+        self.assertEqual(
+            len(recorded),
+            2,
+            "the archive bytes changed but the cache served the previous tree "
+            "— the key must cover the archive, not just the contract file",
+        )
+
+    def test_a_missing_archive_still_reports_the_staging_error(self) -> None:
+        # Guard for the fix itself: covering the archive with the cache key
+        # must not turn "archive not downloaded" into a cache-layer error.
+        recorded: list[dict[str, object]] = []
+        with tempfile.TemporaryDirectory(prefix="staging-absent-") as temporary:
+            base = Path(temporary)
+            with self.assertRaises(EmbeddedBrowserStagingUnavailable):
+                self._run(
+                    base,
+                    pinned="ef" * 32,
+                    archive=base / "never-downloaded.zip",
+                    recorded=recorded,
+                )
+        self.assertEqual(recorded, [], "nothing must stage from a missing archive")
 
 
 class HostTargetTests(unittest.TestCase):
