@@ -9,8 +9,12 @@ likely to succeed:
    that match the same page all stay eligible;
 2. **ranking** — among eligible versions, higher historical success rate wins;
    ties break by most recent hit, then by higher version. A version with no
-   history yet is reachable (so it can earn a record) but ranks below any proven
-   one.
+   history yet is reachable (so it can earn a record) but ranks below anything
+   that has ever succeeded — while a version that has *never* succeeded across
+   enough attempts ranks below the unproven ones. Page drift is what compiles
+   a candidate v2 in the first place; "any record beats no record" kept
+   routing to the drifted v1 forever and the replacement never got its first
+   chance (REVIEW-2026-08-06 SA#3).
 
 Rollback is exclusion, not deletion: a disabled version is skipped and routing
 falls back to another, and re-enabling it restores it — because the record was
@@ -20,6 +24,12 @@ never removed.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Final
+
+# Yielding to an unknown needs evidence, not an accident: one or two failures
+# can be a flaky page, three pure failures with zero successes is a version
+# that has never worked here.
+PROVEN_FAILING_THRESHOLD: Final = 3
 
 
 class NoRouteAvailable(RuntimeError):
@@ -78,9 +88,13 @@ def route_skill(
         version = _version_of(candidate)
         record = stats.get(version)
         if record is None or not record.observed:
-            # Unproven: reachable, but below anything with a record.
-            return (0, 0.0, 0, version)
-        return (1, record.success_rate, record.last_hit, version)
+            # Unproven: reachable, below anything that has ever succeeded.
+            return (1, 0.0, 0, version)
+        if record.successes == 0 and record.failures >= PROVEN_FAILING_THRESHOLD:
+            # Proven failing: below unproven, so a fresh candidate can earn
+            # its record instead of the dead version soaking every attempt.
+            return (0, 0.0, record.last_hit, version)
+        return (2, record.success_rate, record.last_hit, version)
 
     best = max(eligible, key=rank)
     return _version_of(best)

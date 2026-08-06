@@ -114,3 +114,39 @@ class TestUnseenVersions:
         # With v1 rolled back, the unproven v2 is the only route and is returned.
         candidates[0]["disabled"] = True
         assert route_skill(candidates, _context(), stats) == 2
+
+    def test_a_never_successful_version_yields_to_an_unproven_candidate(self) -> None:
+        """REVIEW-2026-08-06 SA#3：「有记录」曾无条件压过「无记录」。
+
+        页面改版后 v1 一路失败，SA-05/06 编译出 v2 来治它——旧排序下
+        0 成功/500 失败的 v1 却永远赢，v2 永远拿不到第一次机会去积累
+        记录，自愈链在路由这里死掉，除非人工停用 v1。
+        """
+        candidates = [_version(1, fingerprint="fp-a"), _version(2, fingerprint="fp-a")]
+        stats = {1: VersionStats(successes=0, failures=500, last_hit=9)}
+        assert route_skill(candidates, _context(), stats) == 2
+
+    def test_the_yield_threshold_needs_three_pure_failures(self) -> None:
+        # 端点两侧都要有用例（这条线反复栽在「新增区间没有端点用例」）：
+        # 两次纯失败还不构成「版本已死」的证据，不把流量切给未知；
+        # 第三次越过阈值，让位。
+        candidates = [_version(1, fingerprint="fp-a"), _version(2, fingerprint="fp-a")]
+        assert (
+            route_skill(
+                candidates, _context(), {1: VersionStats(successes=0, failures=2, last_hit=9)}
+            )
+            == 1
+        )
+        assert (
+            route_skill(
+                candidates, _context(), {1: VersionStats(successes=0, failures=3, last_hit=9)}
+            )
+            == 2
+        )
+
+    def test_a_low_but_nonzero_success_rate_still_beats_unproven(self) -> None:
+        # 让位只针对「从未成功过」的版本：成功率低但确实能跑通的 v1，
+        # 仍然优先于一无所知的 v2。
+        candidates = [_version(1, fingerprint="fp-a"), _version(2, fingerprint="fp-a")]
+        stats = {1: VersionStats(successes=1, failures=9, last_hit=9)}
+        assert route_skill(candidates, _context(), stats) == 1
