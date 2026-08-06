@@ -3,11 +3,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Literal, Protocol, runtime_checkable
+from datetime import UTC, datetime, timedelta
+from typing import Final, Literal, Protocol, runtime_checkable
 
 from automation_tool.control_plane.domain import InstallationId
 from automation_tool.protocol import PlatformSessionHealthEnvelope, PlatformSessionState
+
+
+PLATFORM_SESSION_HEALTH_CLOCK_SKEW: Final = timedelta(seconds=30)
+"""How far the Executor's clock may differ from this server's.
+
+Two machines never agree on the time, and the Executor's timestamps come from
+the operator's own computer. Comparing them to this server's clock with no
+tolerance made a fact true — a real login state, observed on that machine —
+unusable because the machine was a tenth of a second fast: on 2026-08-06 a
+Windows host ran about 110ms ahead, every Session health message landed in this
+server's future, and the Executor was closed as a protocol violation seconds
+after every platform command. It could not reach a QR code at all.
+
+The same allowance the device session already makes, and for the same reason.
+"""
 
 
 class PlatformSessionHealthRejected(ValueError):
@@ -176,9 +191,9 @@ class PlatformSessionHealthService:
         if not isinstance(message, PlatformSessionHealthEnvelope):
             raise PlatformSessionHealthRejected("not_a_session_health_envelope")
         received_at = self._now()
-        if received_at < message.sent_at:
+        if received_at + PLATFORM_SESSION_HEALTH_CLOCK_SKEW < message.sent_at:
             raise PlatformSessionHealthRejected("sent_at_is_in_the_future")
-        if received_at >= message.deadline_at:
+        if received_at - PLATFORM_SESSION_HEALTH_CLOCK_SKEW >= message.deadline_at:
             raise PlatformSessionHealthRejected("deadline_has_passed")
         if message.payload.observed_at > message.sent_at:
             raise PlatformSessionHealthRejected("observed_after_sent")
@@ -188,7 +203,12 @@ class PlatformSessionHealthService:
             state=message.payload.state,
             session_revision=message.payload.session_revision,
             observed_at=message.payload.observed_at,
-            received_at=received_at,
+            # A record cannot have been received before it was observed, and on
+            # an Executor whose clock runs slightly ahead the server's own
+            # `now()` says otherwise. Taking the later of the two keeps that
+            # invariant true in the stored row — which `converge` then compares
+            # against — instead of refusing the report over a tenth of a second.
+            received_at=max(received_at, message.payload.observed_at),
         )
         try:
             return await self._repository.converge(pending)

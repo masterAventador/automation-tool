@@ -392,12 +392,18 @@ async def test_each_rejection_names_the_rule_that_refused_it() -> None:
     service = PlatformSessionHealthService(repository=Repository(), clock=FixedClock())
 
     with pytest.raises(PlatformSessionHealthRejected) as sent_in_future:
-        await service.receive(message(sent_at=NOW + timedelta(seconds=5)))
+        # Beyond the skew allowance: a clock this wrong is a finding, not drift.
+        await service.receive(
+            message(
+                sent_at=NOW + timedelta(minutes=5),
+                deadline_at=NOW + timedelta(minutes=5, seconds=30),
+            )
+        )
     assert sent_in_future.value.reason == "sent_at_is_in_the_future"
 
     with pytest.raises(PlatformSessionHealthRejected) as expired:
         await service.receive(
-            message(sent_at=NOW - timedelta(seconds=60), deadline_at=NOW - timedelta(seconds=30))
+            message(sent_at=NOW - timedelta(minutes=10), deadline_at=NOW - timedelta(minutes=9))
         )
     assert expired.value.reason == "deadline_has_passed"
 
@@ -413,3 +419,42 @@ async def test_each_rejection_names_the_rule_that_refused_it() -> None:
 
     # The default stays usable for the raise sites that have nothing to add.
     assert PlatformSessionHealthRejected().reason == "unspecified"
+
+
+@pytest.mark.asyncio
+async def test_a_slightly_fast_executor_clock_is_tolerated() -> None:
+    """Two machines never agree on the time, and this one must not require it.
+
+    2026-08-06, customer Demo: every platform command on a Windows host ended
+    with the Executor exiting a few seconds after start, taking the operations
+    browser with it — the operator could not even reach the QR code. The cause
+    was this comparison, with no tolerance at all: that machine's clock ran
+    about 110ms ahead of the deployment host, so every `sent_at` landed in the
+    server's future, the message was refused as a protocol violation, the
+    Control Plane closed the WebSocket, and the Executor treats a server-side
+    close as unrecoverable.
+
+    The codebase already knows clocks differ — `DEVICE_SESSION_CLOCK_SKEW` is
+    30 seconds for exactly this reason. A fact observed on the operator's own
+    machine is not less trustworthy because their clock is a tenth of a second
+    fast.
+    """
+    service = PlatformSessionHealthService(repository=Repository(), clock=FixedClock())
+
+    # What the Windows host actually sent: ahead of the server, well inside skew.
+    ahead = await service.receive(
+        message(observed_at=NOW + timedelta(milliseconds=110),
+                sent_at=NOW + timedelta(milliseconds=110))
+    )
+    assert ahead.projection.session_revision == 7
+
+    # Still bounded: a clock that is wrong by more than the allowance is refused.
+    with pytest.raises(PlatformSessionHealthRejected) as far_ahead:
+        await service.receive(
+            message(
+                observed_at=NOW + timedelta(minutes=5),
+                sent_at=NOW + timedelta(minutes=5),
+                deadline_at=NOW + timedelta(minutes=5, seconds=30),
+            )
+        )
+    assert far_ahead.value.reason == "sent_at_is_in_the_future"
