@@ -91,6 +91,20 @@ class TestCleaning:
         assert click_points[0]["x"] == 640
         assert click_points[0]["y"] == 720
 
+    def test_checkpoints_mark_the_safe_point_before_each_external_step(self) -> None:
+        """REVIEW-2026-08-06 SA#9：检查点曾恒为第 1 步，恢复恒为全量重跑。
+
+        检查点是「从这里重新开始是安全的」的标注：入口一定是；每个外部
+        （不可逆）动作的前一个内部步是外部动作前最后的安全点。只标第 1 步
+        让 SA-05 的 resume_from 恒为 1——「不重复已通过的前缀」在任何真实
+        技能上都不成立，checkpoint 设计的收益是零。
+        """
+        cleaned = clean_trajectory(raw())
+
+        checkpoints = [step["checkpoint"] for step in cleaned["steps"]]
+        # 上传（入口）、填标题（发布前最后的安全点）、发布（外部步自己不标）。
+        assert checkpoints == [True, True, False]
+
     def test_the_entry_url_secret_is_stripped_to_a_path_pattern(self) -> None:
         cleaned = clean_trajectory(raw())
 

@@ -51,16 +51,19 @@ class TestHandback:
         assert decision.remaining_step_indexes == [1, 2, 3]
 
     def test_a_mid_run_pre_dispatch_failure_only_resumes_the_tail(self) -> None:
-        # The 作品标题 anchor is missing: step 1 (click, checkpoint) has passed
-        # and dispatched nothing external; step 2 fails before any side effect.
+        # The 作品标题 anchor is missing: step 1 has passed, and step 2 (the
+        # last safe point before the external 发布) is itself a checkpoint —
+        # so the resume really does start at 2 and the passed prefix is not
+        # repeated. Until REVIEW-2026-08-06 SA#9 this test *claimed* that in
+        # its name while asserting a full re-run from step 1 (SA#7).
         failure = _failure(FakePage(missing={"作品标题"}))
         assert failure.dispatched is False
 
         decision = decide_handback(skill(), failure)
 
         assert decision.action == "resume_browser_use"
-        assert decision.resume_from_checkpoint == 1
-        assert decision.remaining_step_indexes == [1, 2, 3]
+        assert decision.resume_from_checkpoint == 2
+        assert decision.remaining_step_indexes == [2, 3]
 
     def test_a_failure_after_the_external_step_still_reconciles_only(self) -> None:
         """发布成功 → 关确认弹窗失败：只对账，绝不继续、绝不重发。

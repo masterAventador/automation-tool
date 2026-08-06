@@ -196,11 +196,24 @@ def clean_trajectory(raw: object, *, with_metadata: bool = False) -> dict[str, o
                 "postconditions": postconditions,
                 "timeoutSeconds": 60 if external else 20,
                 "external": external,
-                "checkpoint": index == 1,
+                "checkpoint": False,  # assigned below, needs the full sequence
             }
         )
     if external_count > max_external:
         _reject("trajectory has more external actions than the boundary allows")
+
+    # Checkpoints are the points a failed replay may safely resume from: the
+    # entry step, plus the last internal step before each external one — the
+    # final safe point before an irreversible action. Marking only step 1 made
+    # SA-05's resume_from permanently 1, i.e. a full re-run every time
+    # (REVIEW-2026-08-06 SA#9).
+    for position, step in enumerate(steps):
+        next_is_external = position + 1 < len(steps) and bool(
+            steps[position + 1]["external"]
+        )
+        step["checkpoint"] = step["index"] == 1 or (
+            next_is_external and not step["external"]
+        )
 
     raw_evidence = raw.get("successEvidence")
     if not isinstance(raw_evidence, list) or not raw_evidence:
