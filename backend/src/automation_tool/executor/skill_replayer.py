@@ -37,7 +37,20 @@ from automation_tool.executor.automation_skill import (
 class ReplayPage(Protocol):
     """What the replayer needs from a page — semantic, never coordinate-based."""
 
-    def find(self, role: str, name: str) -> object | None: ...
+    def find(
+        self,
+        role: str,
+        name: str,
+        *,
+        near_text: str | None,
+        relative_position: str | None,
+    ) -> object | None:
+        """Resolve the goal's anchor, or ``None`` when it cannot be resolved
+        unambiguously. ``near_text``/``relative_position`` carry the goal's
+        disambiguation context: real pages duplicate anchor names freely
+        (8%–21% of visible link names on a portal homepage, SA-E2E-2026-08-06),
+        and a protocol that drops them can only ever refuse such anchors."""
+        ...
 
     def holds(
         self,
@@ -151,7 +164,12 @@ def replay_skill(
             if not _condition_holds(page, condition):
                 fail(f"precondition not met before step {step.index}")
 
-        handle = page.find(step.goal.role, step.goal.name)
+        handle = page.find(
+            step.goal.role,
+            step.goal.name,
+            near_text=step.goal.near_text,
+            relative_position=step.goal.relative_position,
+        )
         if handle is None:
             fail(f"anchor not found for step {step.index}: {step.goal.role}")
 

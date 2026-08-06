@@ -277,6 +277,72 @@ def test_sa_chain_end_to_end_on_the_embedded_chromium(
     assert_private_profile_directory(profile)
 
 
+def test_near_text_disambiguates_duplicate_anchors_on_the_real_page(
+    staged_embedded_chromium: Path, tmp_path: Path
+) -> None:
+    """Two visible same-name links; the goal's nearText must pick the right one.
+
+    The decoy leads back to the home page while the intended anchor leads to
+    the studio, so a wrong pick is exposed by the step's URL postcondition on
+    the real browser — not by inspecting which handle was returned.
+    """
+    profile = tmp_path / "automation-tool-sa-neartext-profile"
+    create_private_profile_directory(profile)
+    state = {"home": "home.html", "studio": "studio.html", "done": "done.html"}
+    runtime = BrowserRuntime()
+
+    with runtime.running(
+        BrowserLaunchRequest(
+            executable_path=staged_embedded_chromium,
+            profile_directory=profile,
+            headless=True,
+        )
+    ):
+        page = cast(Any, runtime.primary_window().playwright_page)
+        _serve_portal(page, state)
+        replay_page = PlaywrightReplayPage(page, action_timeout_seconds=5)
+        page.goto(ENTRY_URL, wait_until="domcontentloaded", timeout=30_000)
+
+        # The premise must be real before the disambiguation claim means
+        # anything: without context the duplicate name is genuinely ambiguous.
+        assert (
+            replay_page.find("link", "查看更多", near_text=None, relative_position=None)
+            is None
+        )
+
+        raw = {
+            "schemaVersion": 1,
+            "account": {"loggedIn": True, "handle": "automation-tool-sa-test-account"},
+            "platform": "douyin",
+            "domain": DOMAIN,
+            "language": "zh-CN",
+            "viewport": {"width": 1280, "height": 720},
+            "entryUrl": ENTRY_URL,
+            "actions": [
+                {
+                    "external": False,
+                    "kind": "click",
+                    "target": {
+                        "role": "link",
+                        "name": "查看更多",
+                        "nearText": "热榜",
+                        "relativePosition": "below",
+                    },
+                    "resultingUrl": f"https://{DOMAIN}{STUDIO_PATH}",
+                }
+            ],
+            "successEvidence": [
+                {"kind": "url_matches", "url": f"https://{DOMAIN}{STUDIO_PATH}"}
+            ],
+        }
+        outcome = replay_skill(_parse(clean_trajectory(raw)), replay_page, parameters={})
+        assert outcome.passed
+        assert replay_page.current_path() == STUDIO_PATH
+
+    assert not runtime.is_running
+    assert_private_profile_directory(profile)
+
+
 def _parse(candidate: dict[str, object]) -> Any:
     from automation_tool.executor.automation_skill import parse_automation_skill
 

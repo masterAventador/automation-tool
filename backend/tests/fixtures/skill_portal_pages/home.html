@@ -37,9 +37,15 @@
 </div>
 
 <main>
-  <section class="feed" id="feed" aria-label="今日要闻"></section>
+  <section class="feed" aria-label="今日要闻">
+    <h2>今日要闻精选</h2>
+    <!-- 与热榜区同名的可见链接：指向首页自身，点错会被 URL 后置条件当场揭穿 -->
+    <a href="/automation-tool-sa-portal">查看更多</a>
+    <div id="feed"></div>
+  </section>
   <aside>
     <h2>热榜</h2>
+    <a href="/automation-tool-sa-portal/studio">查看更多</a>
     <ol id="rank" aria-label="热榜列表"></ol>
     <h2>本地服务</h2>
     <ul id="services"></ul>

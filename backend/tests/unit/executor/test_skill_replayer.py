@@ -91,8 +91,17 @@ class FakePage:
         self.path = path
         self.side_effects: list[tuple[str, str]] = []
         self.visited: list[str] = []
+        self.finds: list[tuple[str, str, str | None, str | None]] = []
 
-    def find(self, role: str, name: str) -> object | None:
+    def find(
+        self,
+        role: str,
+        name: str,
+        *,
+        near_text: str | None = None,
+        relative_position: str | None = None,
+    ) -> object | None:
+        self.finds.append((role, name, near_text, relative_position))
         return None if name in self.missing else (role, name)
 
     def holds(self, kind: str, *, role=None, name=None, pattern=None) -> bool:
@@ -268,3 +277,18 @@ class TestDriverExceptions:
         assert raised.value.failed_index == 1
         assert raised.value.checkpoint_index == 1
         assert page.side_effects == []
+
+
+class TestGoalDisambiguation:
+    """真实站点 8%~21% 的链接名重复（SA-E2E-2026-08-06 网易读数），技能文档
+    里的 nearText/relativePosition 就是为此存在的——回放器必须把它们递给
+    页面适配层，否则重名锚点永远只能拒绝。"""
+
+    def test_replay_passes_the_goal_disambiguation_to_the_page(self) -> None:
+        page = FakePage()
+        replay_skill(skill(), page, parameters={"caption": "x"})
+
+        # raw() 的第 1 步在轨迹里带 nearText「从这里开始」；清洗器原样保留，
+        # 回放器必须一字不落地传给 find。
+        assert page.finds[0] == ("button", "上传视频", "从这里开始", None)
+        assert page.finds[1] == ("textbox", "作品标题", None, None)
