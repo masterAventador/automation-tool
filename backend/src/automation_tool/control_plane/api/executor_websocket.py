@@ -113,6 +113,47 @@ async def _deny(websocket: WebSocket, status_code: int) -> None:
     await websocket.send_denial_response(response)
 
 
+
+def _log_session_health_refusal(reason: str) -> None:
+    """Say which rule refused, in whole literal lines.
+
+    The Executor is told only "protocol rejected", by design, so the server log
+    is the one place the reason can exist — and one message per reason is how it
+    gets there without a formatted argument. Control Plane logging accepts only
+    literal messages (`test_control_plane_production_logging_calls_accept_only_literal_messages`)
+    because a formatted one carries whatever was interpolated into it; the
+    redaction layer would replace this reason with `[REDACTED]` and the line
+    would say nothing at all.
+    """
+
+    if reason == "sent_at_is_in_the_future":
+        logger.error("Executor Session health refused: sent_at is ahead of this server")
+    elif reason == "deadline_has_passed":
+        logger.error("Executor Session health refused: the message deadline had passed")
+    elif reason == "observed_after_sent":
+        logger.error("Executor Session health refused: observed_at is after sent_at")
+    elif reason == "not_a_session_health_envelope":
+        logger.error("Executor Session health refused: the message was not a health envelope")
+    elif reason == "installation_is_not_active":
+        logger.error("Executor Session health refused: the Installation is not active")
+    elif reason == "revision_went_backwards":
+        logger.error("Executor Session health refused: the session revision went backwards")
+    elif reason == "same_revision_observed_earlier":
+        logger.error("Executor Session health refused: same revision, observed earlier")
+    elif reason == "same_observation_different_state":
+        logger.error("Executor Session health refused: same observation, different state")
+    elif reason == "circuit_reopened_without_cause":
+        logger.error("Executor Session health refused: the circuit reopened without cause")
+    elif reason == "newer_revision_observed_no_later":
+        logger.error("Executor Session health refused: newer revision observed no later")
+    elif reason == "received_before_last_update":
+        logger.error("Executor Session health refused: received before the last update")
+    elif reason == "not_a_pending_health_record":
+        logger.error("Executor Session health refused: the pending record was malformed")
+    else:
+        logger.error("Executor Session health refused for a reason with no message")
+
+
 async def _close(websocket: WebSocket, *, code: int, reason: str) -> None:
     with suppress(RuntimeError):
         await websocket.close(code=code, reason=reason)
@@ -326,6 +367,7 @@ async def connect_executor(websocket: WebSocket) -> None:
             except WebSocketDisconnect:
                 return
             except _TextFrameRequired:
+                logger.error("Executor sent a non-text frame")
                 await _close(
                     websocket,
                     code=EXECUTOR_CLOSE_PROTOCOL_REJECTED,
@@ -336,6 +378,7 @@ async def connect_executor(websocket: WebSocket) -> None:
             try:
                 message = service.validate_inbound_message(bound, source)
             except ExecutorConnectionRejected:
+                logger.error("Executor sent a message this connection cannot accept")
                 await _close(
                     websocket,
                     code=EXECUTOR_CLOSE_PROTOCOL_REJECTED,
@@ -362,6 +405,7 @@ async def connect_executor(websocket: WebSocket) -> None:
                     )
                     return
                 except ExecutorConnectionRegistryRejected:
+                    logger.error("Executor heartbeat sequence was refused")
                     await _close(
                         websocket,
                         code=EXECUTOR_CLOSE_PROTOCOL_REJECTED,
@@ -380,6 +424,7 @@ async def connect_executor(websocket: WebSocket) -> None:
 
             if isinstance(message, PlatformSessionHealthEnvelope):
                 if session_health is None:
+                    logger.error("Executor sent Session health but the service is not wired")
                     await _close(
                         websocket,
                         code=EXECUTOR_CLOSE_PROTOCOL_REJECTED,
@@ -395,7 +440,8 @@ async def connect_executor(websocket: WebSocket) -> None:
                     return
                 try:
                     await session_health.receive(message)
-                except PlatformSessionHealthRejected:
+                except PlatformSessionHealthRejected as rejection:
+                    _log_session_health_refusal(rejection.reason)
                     await _close(
                         websocket,
                         code=EXECUTOR_CLOSE_PROTOCOL_REJECTED,

@@ -16,6 +16,7 @@ import hashlib
 import json
 import shutil
 import stat
+import sys
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -26,40 +27,24 @@ _MAX_ARCHIVE_ENTRIES: Final = 20_000
 _SHA256_HEX_LENGTH: Final = 64
 
 _REPOSITORY_ROOT: Final = Path(__file__).resolve().parents[1]
+if str(_REPOSITORY_ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(_REPOSITORY_ROOT / "scripts"))
+
+from embedded_browser_archives import default_archives  # noqa: E402
+
 CHROMIUM_CONTRACT: Final = (
     _REPOSITORY_ROOT / "contracts/browser/embedded-chromium-staging.v1.json"
 )
-_EB_03_CACHE: Final = (
-    ".local/embedded-browser-video-studio/eb-03-cache/chrome-mac-arm64.zip"
-)
-
-
-def _first_existing(*candidates: Path) -> Path:
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    return candidates[0]
-
-
-# Where the EB-03 archive cache is, for whoever needs to stage a Chromium.
+# Where the locked archives are, for whoever needs to stage a Chromium.
 #
 # This lived in `run_bm_08_acceptance.py` until that script was rewritten for
 # T78 and dropped it, which broke the two files that imported it from there —
 # `backend/tests/integration/conftest.py` and `run_bm_16_acceptance.py` — and
-# with them the whole backend integration collection. It belongs here instead:
-# both of those already import this module for `load_staging_contract`, so one
-# definition serves every caller and no acceptance script owns it by accident.
-#
-# The macOS entry checks two roots on purpose. The cache is written into the
-# primary checkout's `.local`, and a `wt/<task>` worktree sits two directories
-# below it; resolving both is what lets these tests run from either layout.
-DEFAULT_ARCHIVES: Final = {
-    "macos-arm64": _first_existing(
-        _REPOSITORY_ROOT / _EB_03_CACHE,
-        _REPOSITORY_ROOT.parent.parent / _EB_03_CACHE,
-    ),
-    "windows-x86_64": _REPOSITORY_ROOT / ".local/eb-04-windows/chrome-win64.zip",
-}
+# with them the whole backend integration collection. It moved here, and then
+# the archives moved to a machine-wide cache while this copy stayed behind
+# describing the old layout. Re-exported now instead of re-derived: the callers
+# that already import this module keep working, and there is one lookup again.
+DEFAULT_ARCHIVES: Final = default_archives()
 
 
 class StagingRejected(RuntimeError):

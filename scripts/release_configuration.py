@@ -28,6 +28,7 @@ import os
 from pathlib import Path
 
 from release_assembly import RELEASE_PACKAGE_RESOURCES
+from release_identity import PACKAGED_IDENTITY_NAME
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 TAURI_ROOT = REPOSITORY_ROOT / "frontend/src-tauri"
@@ -97,6 +98,7 @@ def write_release_configuration(
     name: str,
     bundle_overrides: dict[str, object] | None = None,
     relative_sources: bool = False,
+    release_identity: Path | None = None,
 ) -> Path:
     """Write one release configuration declaring every bundler-owned resource.
 
@@ -104,6 +106,13 @@ def write_release_configuration(
     A missing entry is refused rather than silently written out as a smaller
     package — that omission is the defect this module exists to prevent, and a
     configuration is the last place it can still be caught cheaply.
+
+    `release_identity` is deliberately *not* one of those sources. It is a
+    single provenance file rather than a resource tree the product resolves at
+    runtime, and its macOS carrier is `Info.plist`, so declaring it in
+    `release-package-resources.v1.json` would oblige the macOS assembler to
+    install a file macOS does not have. It is passed separately, named, and
+    lands at the resource root beside them.
     """
     required = set(bundler_declared_resources(platform))
     provided = set(sources)
@@ -123,6 +132,24 @@ def write_release_configuration(
             else f"{os.fspath(source)}{os.sep}"
         )
         resources[rendered] = f"{installed_destination(resource_name)}/"
+    if release_identity is not None:
+        if release_identity.name != PACKAGED_IDENTITY_NAME:
+            _reject(
+                f"the release identity must be named {PACKAGED_IDENTITY_NAME}, "
+                f"not {release_identity.name}"
+            )
+        if not release_identity.is_file():
+            _reject(f"the release identity does not exist at {release_identity}")
+        rendered = (
+            relative_to_tauri_root(release_identity)
+            if relative_sources
+            else os.fspath(release_identity)
+        )
+        # No trailing slash, unlike every entry above. tauri-utils reads a
+        # destination ending in `/` as the name to write the file *as*, so
+        # `"…/x.json": "x.json/"` would install a file called `x.json` — the
+        # same name by luck, and a different one the moment either changes.
+        resources[rendered] = PACKAGED_IDENTITY_NAME
     configuration["bundle"]["resources"] = resources
     for key, value in (bundle_overrides or {}).items():
         configuration["bundle"][key] = value
@@ -148,7 +175,12 @@ def write_macos_release_configuration(
 
 
 def write_windows_release_configuration(
-    *, directory: Path, executor: Path, payload: Path, name: str
+    *,
+    directory: Path,
+    executor: Path,
+    payload: Path,
+    name: str,
+    release_identity: Path | None = None,
 ) -> Path:
     """Windows: every resource ships through the bundler, from a verified payload."""
     sources: dict[str, Path] = {}
@@ -159,12 +191,18 @@ def write_windows_release_configuration(
         sources[resource_name] = payload.joinpath(
             *installed_destination(resource_name).split("/")
         )
+    # Absolute, like macOS. Written relative to the Tauri root instead, every
+    # source became `../../../../build/payload/…`, which the bundler resolves
+    # through `<work>/source-snapshot-XXXXXXXX/repository/frontend/src-tauri/`
+    # — 67 characters of round trip inside a 260-character limit `makensis`
+    # cannot escape. Measured 2026-08-05: the deepest payload file landed on
+    # exactly 260 and the build died at its last step.
     return write_release_configuration(
         directory=directory,
         platform="windows",
         sources=sources,
         name=name,
-        relative_sources=True,
+        release_identity=release_identity,
     )
 
 

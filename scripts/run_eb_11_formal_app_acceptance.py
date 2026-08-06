@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ruff: noqa: RUF001, UP017
+# ruff: noqa: UP017
 """Accept EB-11 only through the notarized macOS App's normal account page.
 
 The accessibility tree is the sole source of product state.  The runner never
@@ -36,6 +36,7 @@ if os.fspath(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(SCRIPT_ROOT))
 
 from release_identity import (  # noqa: E402
+    PACKAGED_IDENTITY_NAME,
     SourceFacts,
     repository_source_facts,
     source_commit_is_ancestor,
@@ -43,14 +44,19 @@ from release_identity import (  # noqa: E402
 
 REPOSITORY_ROOT: Final = Path(__file__).resolve().parents[1]
 APP_IDENTIFIER: Final = "com.aventador.automationtool"
-APP_DATA: Final = Path.home() / "Library" / "Application Support" / APP_IDENTIFIER
 DEMO_PROFILE_VERSION: Final = "customer-demo-profile.v1"
 DEMO_PROFILE_KIND: Final = "demo"
 LAUNCH_NONCE_ENVIRONMENT: Final = "AUTOMATION_TOOL_EB11_ACCEPTANCE_NONCE"
-EXECUTOR_MANIFEST: Final = Path(
-    "Contents/Resources/local-executor/package/executor-manifest.v1.json"
+# Relative to the packaged resource root, which differs by target: a macOS
+# bundle nests it under `Contents/Resources`, a Windows install root *is* it.
+# The two names below do not vary, and `DeviceDriver.resource_root` supplies the
+# part that does.
+EXECUTOR_MANIFEST_RELATIVE: Final = Path(
+    "local-executor/package/executor-manifest.v1.json"
 )
-BROWSER_MANIFEST: Final = Path("Contents/Resources/embedded-browser/distribution-manifest.v1.json")
+BROWSER_MANIFEST_RELATIVE: Final = Path(
+    "embedded-browser/distribution-manifest.v1.json"
+)
 ACCOUNT_PAGE_LABEL: Final = "账号与平台"
 RECHECK_LABEL: Final = "我已处理，重新检查"
 OPEN_LOGIN_LABEL: Final = "打开登录处理"
@@ -58,6 +64,21 @@ LOGOUT_LABEL: Final = "安全注销"
 CONFIRM_LOGOUT_LABEL: Final = "确认注销"
 LOGIN_REQUIRED_LABEL: Final = "需要登录"
 HEALTHY_LABEL: Final = "登录正常"
+# Every state the account page can settle on — `STATE_LABELS` in
+# `PlatformSessions.tsx`, which is a closed set keyed by the snapshot state.
+# Copied rather than shared because that page is TypeScript and this is Python;
+# `test_the_state_labels_match_the_page_that_renders_them` pins the two together,
+# because both times this list was short the script did not fail on the missing
+# state — it timed out somewhere else and reported something unrelated.
+SESSION_STATE_LABELS: Final = frozenset(
+    {
+        HEALTHY_LABEL,
+        "登录已过期",
+        LOGIN_REQUIRED_LABEL,
+        "需要人工处理",
+        "尚未确认",
+    }
+)
 SCAN_CHECKPOINT: Final = "douyin_scan_confirmed"
 LOGIN_PROGRESS_MARKERS: Final = (
     "请在打开的运营浏览器中扫码登录。",
@@ -67,11 +88,36 @@ LOGIN_PROGRESS_MARKERS: Final = (
     "抖音仍未登录，请在运营浏览器中继续处理。",
 )
 UNAVAILABLE_CODE: Final = "process_unavailable"
+# How a Chromium process says it is a child of a browser rather than one.
+CHROMIUM_CHILD_PROCESS_SWITCH: Final = "--type="
+# Where the App records which operations Profile it is using. It sits beside the
+# `douyin/` directory that holds the Profile itself, and survives the App
+# exiting — measured 2026-08-05, unchanged across launch, recheck and quit.
+CURRENT_PROFILE_MARKER_NAME: Final = "current-douyin-profile-v1"
+# Digests of packaged executables, by file identity — see `code_identity`.
+# Module level rather than per driver, because `device_driver()` constructs a
+# new driver on every call and the sampler calls it many times a second: an
+# instance-held cache would be empty every time it was asked, which is a cache
+# that measures well in a test and does nothing in the run.
+PACKAGED_CODE_IDENTITIES: dict[tuple[str, int, int, int, int], "CodeIdentity"] = {}
 SIGNING_CONTRACT: Final = (
     REPOSITORY_ROOT / "contracts" / "quality" / "macos-release-signing.v1.json"
 )
 RELEASE_IDENTITY_KEY: Final = "AutomationToolReleaseIdentity"
 RELEASE_IDENTITY_SCHEMA: Final = "automation-tool.release-identity.v1"
+# Read a file without following a link into it. POSIX closes the window between
+# `lstat` saying "regular file" and `open` acting on it; Windows has no such
+# flag, so there the check and the read are two steps, and a reparse point
+# swapped in between them would not be caught. Named rather than branched at the
+# call site, so the gap is stated once, where it is decided.
+NO_FOLLOW_OPEN_FLAG: Final = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+# Cleanup escalates from "ask" to "insist". `signal.SIGKILL` does not exist on
+# Windows, where `os.kill` calls `TerminateProcess` for any signal that is not a
+# console control event — so both rungs are the same act there, and naming
+# `signal.SIGKILL` directly would raise `AttributeError` inside the exception
+# handler that runs after a launch has already gone wrong.
+GRACEFUL_SIGNAL: Final = signal.SIGTERM
+FORCEFUL_SIGNAL: Final = getattr(signal, "SIGKILL", signal.SIGTERM)
 OBSERVED_AT_PATTERN: Final = re.compile(
     r"最近检查[：:]\s*("
     r"\d{4}(?:[/-]\d{1,2}[/-]\d{1,2}|年\d{1,2}月\d{1,2}日)"
@@ -104,10 +150,7 @@ USER_DATA_DIRECTORY_PATTERN: Final = re.compile(
 CURRENT_DOUYIN_PROFILE_FILE: Final = "current-douyin-profile-v1"
 PROFILE_LEASE_FILE_PREFIX: Final = ".automation-tool-profile-lease-v1-"
 PRIVATE_DIRECTORY_MODE: Final = 0o700
-DEFAULT_BROWSER_PROFILE_ROOTS: Final = (
-    Path.home() / "Library/Application Support/Google/Chrome",
-    Path.home() / "Library/Application Support/Microsoft Edge",
-)
+PRIVATE_EVIDENCE_MODE: Final = 0o600
 
 
 class AcceptanceFailed(RuntimeError):
@@ -131,20 +174,47 @@ class AppIdentity:
 
 @dataclass(frozen=True)
 class CodeIdentity:
+    """What identifies one packaged executable, by whatever this host can prove.
+
+    macOS fills the Developer ID triple and leaves `image_sha256` empty; Windows
+    has no signature to read on this machine and fills the digest instead. The
+    same asymmetry as `ArtifactFacts`, for the same reason: an empty signer
+    field reads as "not established", while a filled one that meant "not
+    checked" would read as its opposite.
+    """
+
     identifier: str
-    authority: str
-    team_id: str
-    cdhash: str
+    authority: str = ""
+    team_id: str = ""
+    cdhash: str = ""
+    image_sha256: str = ""
 
 
 @dataclass(frozen=True)
 class ArtifactFacts:
-    authority: str
-    team_id: str
-    bundle_cdhash: str
+    """What is known about the installed package, and how it came to be known.
+
+    The first three fields hold on every host: the exact bytes of the install
+    tree, and which Executor build they carry. The rest is the OS trust chain,
+    and it is optional because on Windows there is none — this machine has no
+    code-signing certificate, so nothing can be verified against a signer.
+
+    That asymmetry is carried in the data rather than papered over. macOS fills
+    `authority` / `team_id` / `bundle_cdhash` from the Developer ID chain and
+    sets `code_signing` to the same authority; Windows leaves them empty and
+    records the measured `Get-AuthenticodeSignature` status, which is `NotSigned`
+    today and will change on its own if a certificate ever appears. An empty
+    signer field reads as "not established"; a filled one that meant "we did not
+    check" would read as the opposite.
+    """
+
     bundle_tree_sha256: str
     bundle_bytes: int
     executor_build_id: str
+    authority: str = ""
+    team_id: str = ""
+    bundle_cdhash: str = ""
+    code_signing: str = ""
 
 
 @dataclass(frozen=True)
@@ -284,14 +354,12 @@ class EvidencePublication:
             raise AcceptanceFailed("EB-11 evidence publication is already closed")
         try:
             require_evidence_parent_binding(self.target)
-            metadata = os.stat(
-                self.target.name,
-                dir_fd=self.target.parent_fd,
-                follow_symlinks=False,
+            metadata = device_driver().stat_in(
+                self.target.parent_fd, self.target.name
             )
             if (
                 not stat.S_ISREG(metadata.st_mode)
-                or stat.S_IMODE(metadata.st_mode) != 0o600
+                or not device_driver().require_published_evidence_mode(metadata)
                 or (metadata.st_dev, metadata.st_ino) != self.identity
             ):
                 raise AcceptanceFailed("EB-11 evidence identity changed before PASS")
@@ -308,12 +376,11 @@ class EvidencePublication:
         descriptor = self.target.parent_fd
         self.target.parent_fd = -1
         self.active = False
-        try:
+        # The evidence was already inode-verified, fsynced and reported, so a
+        # close interrupted here changes nothing a reader would see; process
+        # exit reclaims the descriptor.
+        with contextlib.suppress(OSError):
             os.close(descriptor)
-        except OSError:
-            # The evidence was already inode-verified, fsynced and reported.
-            # Process exit will reclaim a descriptor whose close was interrupted.
-            pass
 
 
 def parse_arguments() -> Arguments:
@@ -342,23 +409,1217 @@ def require_no_symlink_components(path: Path, *, include_leaf: bool) -> None:
             raise AcceptanceFailed("EB-11 refuses a path with a symlink component")
 
 
+class DeviceDriver:
+    """How one host is observed. What is being observed does not vary.
+
+    EB-11's definition is platform-neutral: sign in, re-check, log out and prove
+    the old Profile is gone, scan again, restart and prove the same Profile came
+    back, exit and prove none of our processes survive. Only the instruments are
+    macOS-specific — AppleScript for the accessibility tree, `codesign` against
+    a live PID, `lsof` for open files, `F_GETPATH` to prove an inode has no name.
+
+    A second Windows runner would fork that definition, and the definition is
+    the valuable part. So it stays in one file and the instruments sit here.
+    """
+
+    platform = ""
+
+    def unavailable(self, capability: str) -> AcceptanceFailed:
+        """Name the gap, not the host.
+
+        `EB-11 formal App acceptance requires macOS` told an operator on Windows
+        nothing about what was missing or what would close it.
+        """
+        return AcceptanceFailed(
+            f"EB-11 cannot {capability} on {self.platform}: this observation has "
+            "no implementation for this host yet"
+        )
+
+    def press(self, process_id: int, label: str) -> None:
+        raise self.unavailable(f"press {label!r} through the accessibility tree")
+
+    def visible_ui_text(self, process_id: int) -> str:
+        raise self.unavailable("read the accessibility tree")
+
+    def wait_for_window(self, process_id: int) -> None:
+        raise self.unavailable("wait for the App window")
+
+    def read_release_identity(self, app: Path) -> SignedReleaseIdentity:
+        raise self.unavailable("read the signed release identity")
+
+    def verify_artifact(self, app: Path, executor_build_id: str) -> ArtifactFacts:
+        raise self.unavailable("verify the installed package")
+
+    def process_snapshot(self) -> list[ProcessRecord]:
+        raise self.unavailable("take a process snapshot")
+
+    def process_has_launch_nonce(self, record: ProcessRecord, nonce: str) -> bool:
+        raise self.unavailable("read a process launch nonce")
+
+    def start_app(self, app: Path, nonce: str) -> None:
+        raise self.unavailable("start the formal App")
+
+    def bundle_process_ids(self, app: Path) -> set[int]:
+        raise self.unavailable("list this product's running processes")
+
+    def request_quit(self, process_id: int) -> None:
+        raise self.unavailable("ask the App to quit normally")
+
+    def read_process_open_paths(self, records: list[ProcessRecord]) -> list[Path] | None:
+        raise self.unavailable("audit which files a process holds open")
+
+    def require_app_path(self, app: Path) -> Path:
+        """Accept only a path shaped like an installed package on this host."""
+        raise self.unavailable("recognise an installed package path")
+
+    def running_as_administrator(self) -> bool:
+        """Is this run elevated? EB-11 refuses to drive the App with more rights
+        than the person who will use it has."""
+        raise self.unavailable("check whether this run is elevated")
+
+    def read_identity(self, app: Path) -> AppIdentity:
+        raise self.unavailable("read the installed package's identity")
+
+    def code_identity(
+        self, executable: Path, artifact: ArtifactFacts | None = None
+    ) -> CodeIdentity:
+        raise self.unavailable("identify a packaged executable")
+
+    def verify_runtime_process_identity(
+        self, record: ProcessRecord, expected: CodeIdentity
+    ) -> bool:
+        """Is this live process still running exactly what was verified?
+
+        `False` means it exited while being sampled, which the caller retries.
+        A mismatch raises.
+        """
+        raise self.unavailable("identify a running packaged process")
+
+    def require_running_release(
+        self, instance: ProcessRecord, release: VerifiedRelease
+    ) -> None:
+        """The App this run launched must be the release that was verified."""
+        raise self.unavailable("verify the running App against the release")
+
+    def app_data_root(self) -> Path:
+        """Where the product keeps its own data, per this platform's convention."""
+        raise self.unavailable("locate the product's data directory")
+
+    def daily_browser_profile_roots(self) -> tuple[Path, ...]:
+        """The user's own browser profiles, which the packaged browser must never open.
+
+        `CLAUDE.md` §5: the product does not automate the operator's day-to-day
+        Chrome or Edge and never reads their cookies. This is the run-time proof
+        of it, so the paths have to be the ones this host actually uses — a list
+        naming another platform's layout forbids nothing at all.
+        """
+        raise self.unavailable("name this host's everyday browser profiles")
+
+    def open_directory(self, path: Path) -> int:
+        """A descriptor that keeps naming this directory after it is renamed."""
+        raise self.unavailable("hold a directory open")
+
+    # Evidence is published relative to a directory this run holds open, so that
+    # replacing the directory between the check and the write is caught. POSIX
+    # expresses that with `dir_fd`; Windows has no such argument anywhere in
+    # `os`, so the four operations it needs are named here and each host does
+    # them its own way.
+    def stat_in(self, parent_fd: int, name: str) -> os.stat_result:
+        raise self.unavailable("inspect a file inside a held directory")
+
+    def open_in(self, parent_fd: int, name: str, flags: int, mode: int = 0o600) -> int:
+        raise self.unavailable("create a file inside a held directory")
+
+    def unlink_in(self, parent_fd: int, name: str) -> None:
+        raise self.unavailable("remove a file inside a held directory")
+
+    def replace_in(self, parent_fd: int, source: str, destination: str) -> None:
+        raise self.unavailable("rename a file inside a held directory")
+
+    def link_in(self, parent_fd: int, source: str, destination: str) -> None:
+        raise self.unavailable("publish a file inside a held directory")
+
+    def make_private_file(self, descriptor: int) -> None:
+        """Narrow a freshly created file to this user, if the host has a way to."""
+        raise self.unavailable("make a file private")
+
+    def sync_directory(self, parent_fd: int) -> None:
+        """Flush the directory entry itself, where that is a thing."""
+        raise self.unavailable("flush a directory")
+
+    def require_published_evidence_mode(self, metadata: os.stat_result) -> bool:
+        """Is this the private file this run created, by permission bits?
+
+        macOS asserts `0o600`. That assertion is part of a *substitution* check —
+        together with the inode identity it says "this is the file I wrote".
+        Windows has no such bits (`S_IMODE` is `0o777` for everything), and the
+        identity comparison beside it already discriminates far more sharply, so
+        that host answers `True` and leans on the identity.
+        """
+        raise self.unavailable("check evidence file permissions")
+
+    def directory_entry_identities(self, directory_fd: int) -> list[tuple[int, int]]:
+        """The identity of everything currently inside an open directory."""
+        raise self.unavailable("list an open directory")
+
+    def open_directory_identity(self, directory_fd: int) -> tuple[int, int] | None:
+        """What this handle's surviving name resolves to, or `None` if it has none.
+
+        This is the disk-side half of safe logout: after the App removes a
+        Profile, the directory this run held open must have no name left
+        anywhere. `None` is the passing answer.
+        """
+        raise self.unavailable("ask whether an open directory still has a name")
+
+    def require_private_directory(self, path: Path) -> tuple[int, tuple[int, int]]:
+        """Open a directory only this user can read, and return its identity.
+
+        Returns `(descriptor, (device, inode))`. The identity is what binds "the
+        same Profile came back after a restart" and "the deleted Profile has no
+        name left"; the privacy check is what keeps platform session cookies
+        from being readable by anyone else.
+        """
+        raise self.unavailable("check that a directory is private to this user")
+
+    def resource_root(self, app: Path) -> Path:
+        """Where the packaged resource trees live inside an installed package."""
+        raise self.unavailable("locate the packaged resources")
+
+    def executor_manifest(self, app: Path) -> Path:
+        return self.resource_root(app) / EXECUTOR_MANIFEST_RELATIVE
+
+    def browser_manifest(self, app: Path) -> Path:
+        return self.resource_root(app) / BROWSER_MANIFEST_RELATIVE
+
+    def expected_release_target(self, machine: str) -> tuple[str, str] | None:
+        """The one `(target, architecture)` a package may claim on this machine.
+
+        `None` means this host is not a target the project builds for, which is
+        refused rather than waved through — a package that names a different
+        architecture is not one this run can conclude anything about.
+        """
+        raise self.unavailable("name the release target for this host")
+
+    def packaged_prefix(self, app: Path) -> str:
+        """Where a packaged process's image path starts.
+
+        macOS puts every executable under `Contents/`; a Windows install root
+        holds them directly. Getting this wrong is silent in the worst way —
+        nothing matches, every packaged process reads as foreign, and the run
+        concludes the App it just started never started.
+        """
+        raise self.unavailable("recognise a packaged process")
+
+
+class MacosDeviceDriver(DeviceDriver):
+    platform = "darwin"
+
+    def press(self, process_id: int, label: str) -> None:
+        macos_press(process_id, label)
+
+    def visible_ui_text(self, process_id: int) -> str:
+        return macos_visible_ui_text(process_id)
+
+    def wait_for_window(self, process_id: int) -> None:
+        macos_wait_for_window(process_id)
+
+    def read_release_identity(self, app: Path) -> SignedReleaseIdentity:
+        return read_signed_release_identity(app)
+
+    def verify_artifact(self, app: Path, executor_build_id: str) -> ArtifactFacts:
+        return verify_formal_app(app, executor_build_id)
+
+    def process_snapshot(self) -> list[ProcessRecord]:
+        return macos_process_snapshot()
+
+    def process_has_launch_nonce(self, record: ProcessRecord, nonce: str) -> bool:
+        return macos_process_has_launch_nonce(record, nonce)
+
+    def packaged_prefix(self, app: Path) -> str:
+        return f"{app}{os.sep}Contents{os.sep}"
+
+    def start_app(self, app: Path, nonce: str) -> None:
+        run_checked(
+            [
+                "/usr/bin/open",
+                "-n",
+                "-a",
+                os.fspath(app),
+                "--env",
+                f"{LAUNCH_NONCE_ENVIRONMENT}={nonce}",
+            ]
+        )
+
+    def bundle_process_ids(self, app: Path) -> set[int]:
+        return macos_bundle_process_ids()
+
+    def request_quit(self, process_id: int) -> None:
+        macos_request_quit(process_id)
+
+    def read_process_open_paths(self, records: list[ProcessRecord]) -> list[Path] | None:
+        return macos_read_process_open_paths(records)
+
+    def require_app_path(self, app: Path) -> Path:
+        if not app.is_absolute() or app.suffix.lower() != ".app":
+            raise AcceptanceFailed("EB-11 App path must be one absolute .app")
+        require_no_symlink_components(app, include_leaf=True)
+        resolved = app.resolve(strict=True)
+        if not resolved.is_dir():
+            raise AcceptanceFailed("EB-11 App bundle is unavailable")
+        return resolved
+
+    def running_as_administrator(self) -> bool:
+        return os.geteuid() == 0
+
+    def read_identity(self, app: Path) -> AppIdentity:
+        return macos_read_identity(app)
+
+    def code_identity(
+        self, executable: Path, artifact: ArtifactFacts | None = None
+    ) -> CodeIdentity:
+        if artifact is None:
+            raise AcceptanceFailed("EB-11 runtime code identity needs the release signer")
+        return signed_code_identity(
+            executable, authority=artifact.authority, team_id=artifact.team_id
+        )
+
+    def verify_runtime_process_identity(
+        self, record: ProcessRecord, expected: CodeIdentity
+    ) -> bool:
+        return macos_verify_runtime_process_identity(record, expected)
+
+    def require_running_release(
+        self, instance: ProcessRecord, release: VerifiedRelease
+    ) -> None:
+        macos_require_running_release(instance, release)
+
+    def app_data_root(self) -> Path:
+        return Path.home() / "Library" / "Application Support" / APP_IDENTIFIER
+
+    def daily_browser_profile_roots(self) -> tuple[Path, ...]:
+        support = Path.home() / "Library/Application Support"
+        return (support / "Google/Chrome", support / "Microsoft Edge")
+
+    def open_directory(self, path: Path) -> int:
+        return open_absolute_directory(path)
+
+    def stat_in(self, parent_fd: int, name: str) -> os.stat_result:
+        return os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+
+    def open_in(self, parent_fd: int, name: str, flags: int, mode: int = 0o600) -> int:
+        return os.open(name, flags, mode, dir_fd=parent_fd)
+
+    def unlink_in(self, parent_fd: int, name: str) -> None:
+        os.unlink(name, dir_fd=parent_fd)
+
+    def replace_in(self, parent_fd: int, source: str, destination: str) -> None:
+        os.replace(source, destination, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+
+    def link_in(self, parent_fd: int, source: str, destination: str) -> None:
+        os.link(
+            source,
+            destination,
+            src_dir_fd=parent_fd,
+            dst_dir_fd=parent_fd,
+            follow_symlinks=False,
+        )
+
+    def make_private_file(self, descriptor: int) -> None:
+        os.fchmod(descriptor, PRIVATE_EVIDENCE_MODE)
+
+    def sync_directory(self, parent_fd: int) -> None:
+        os.fsync(parent_fd)
+
+    def require_published_evidence_mode(self, metadata: os.stat_result) -> bool:
+        return stat.S_IMODE(metadata.st_mode) == PRIVATE_EVIDENCE_MODE
+
+    def directory_entry_identities(self, directory_fd: int) -> list[tuple[int, int]]:
+        identities: list[tuple[int, int]] = []
+        for name in os.listdir(directory_fd):
+            try:
+                entry = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            identities.append((entry.st_dev, entry.st_ino))
+        return identities
+
+    def open_directory_identity(self, directory_fd: int) -> tuple[int, int] | None:
+        macos_fcntl = importlib.import_module("fcntl")
+        raw_path = macos_fcntl.fcntl(directory_fd, macos_fcntl.F_GETPATH, b"\0" * 1024)
+        current_path = Path(os.fsdecode(raw_path.split(b"\0", 1)[0]))
+        try:
+            current = current_path.lstat()
+        except FileNotFoundError:
+            return None
+        return (current.st_dev, current.st_ino)
+
+    def require_private_directory(self, path: Path) -> tuple[int, tuple[int, int]]:
+        return macos_require_private_directory(path)
+
+    def resource_root(self, app: Path) -> Path:
+        return app / "Contents" / "Resources"
+
+    def expected_release_target(self, machine: str) -> tuple[str, str] | None:
+        return {
+            "arm64": ("macos-arm64", "aarch64"),
+            "aarch64": ("macos-arm64", "aarch64"),
+        }.get(machine)
+
+
+AUTHENTICODE_PATH_ENVIRONMENT: Final = "AUTOMATION_TOOL_EB11_SIGNED_PATH"
+EXTENDED_LENGTH_PREFIX: Final = "\\\\?\\"
+# Where NTFS parks a file that has been deleted while a handle is still open.
+# A handle whose final path lands here has no name in the ordinary namespace,
+# which is precisely what safe logout has to prove.
+NTFS_DELETED_HOLDING_AREA: Final = "\\$Extend\\$Deleted\\"
+# NSIS writes its own uninstaller into the install root; it is not a product
+# binary, and it is excluded by exact name so a genuine second executable still
+# makes the choice ambiguous rather than being silently picked.
+WINDOWS_UNINSTALLER_NAME: Final = "uninstall.exe"
+UIA_PROCESS_ENVIRONMENT: Final = "AUTOMATION_TOOL_EB11_UIA_PID"
+UIA_LABEL_ENVIRONMENT: Final = "AUTOMATION_TOOL_EB11_UIA_LABEL"
+# What WebView2 needs before it builds an accessibility tree at all. Chromium
+# accessibility is lazy: with no client attached the tree holds two shell panes
+# and nothing else — measured 2026-08-05, 17 descendants and 2 names against 27
+# and 9 with the flag. The runner sets this when it launches the App; the
+# shipped package is unchanged, exactly as macOS relies on the system a11y
+# stack without the product knowing.
+WEBVIEW_ACCESSIBILITY_ENVIRONMENT: Final = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"
+WEBVIEW_ACCESSIBILITY_ARGUMENT: Final = "--force-renderer-accessibility"
+# Bind the window, then hand the body a live element collection. The process id
+# arrives through the environment rather than the source so this stays a
+# constant: a script assembled per call is a script that can be assembled
+# wrongly, and one of the two values it would interpolate is a UI label.
+UIA_WINDOW_PRELUDE: Final = """
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$targetPid = [int]$env:AUTOMATION_TOOL_EB11_UIA_PID
+if ($targetPid -le 0) { Write-Output 'no_process'; exit 0 }
+if ($null -eq (Get-Process -Id $targetPid -ErrorAction SilentlyContinue)) {
+    Write-Output 'no_process'
+    exit 0
+}
+$root = [System.Windows.Automation.AutomationElement]::RootElement
+$byProcess = New-Object System.Windows.Automation.PropertyCondition(
+    [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $targetPid)
+$window = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $byProcess)
+if ($null -eq $window) { Write-Output 'no_window'; exit 0 }
+$all = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+    [System.Windows.Automation.Condition]::TrueCondition)
+"""
+UIA_PRESS_BODY: Final = """
+$label = $env:AUTOMATION_TOOL_EB11_UIA_LABEL
+foreach ($element in $all) {
+    if ($element.Current.Name -cne $label) { continue }
+    if (-not $element.Current.IsEnabled) { Write-Output 'disabled'; exit 0 }
+    $invoke = $null
+    if (-not $element.TryGetCurrentPattern(
+            [System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke)) {
+        Write-Output 'no_invoke_pattern'
+        exit 0
+    }
+    $invoke.Invoke()
+    Write-Output 'pressed'
+    exit 0
+}
+Write-Output 'not_found'
+"""
+UIA_VISIBLE_TEXT_BODY: Final = """
+$collected = New-Object System.Collections.Generic.List[string]
+foreach ($element in $all) {
+    $name = $element.Current.Name
+    if ($name) { [void]$collected.Add($name) }
+    $value = $null
+    if ($element.TryGetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern, [ref]$value)) {
+        $rendered = $value.Current.Value
+        if ($rendered -and -not $collected.Contains($rendered)) {
+            [void]$collected.Add($rendered)
+        }
+    }
+}
+Write-Output ($collected -join [Environment]::NewLine)
+"""
+UIA_WINDOW_READY_BODY: Final = """
+Write-Output 'ready'
+"""
+UIA_QUIT_BODY: Final = """
+$close = $null
+if (-not $window.TryGetCurrentPattern(
+        [System.Windows.Automation.WindowPattern]::Pattern, [ref]$close)) {
+    Write-Output 'no_window_pattern'
+    exit 0
+}
+$close.Close()
+Write-Output 'requested'
+"""
+UIA_NO_TREE: Final = frozenset({"no_process", "no_window"})
+
+
+def windows_command_arguments(command_line: str) -> str:
+    """Everything after argv[0], including the space that separates it.
+
+    Windows hands a process one string, not a vector, and argv[0] in it is
+    usually quoted. Splitting it off by the quoting rule — closing quote if it
+    opens with one, first space otherwise — is what lets the image path be put
+    back in front unquoted without losing or duplicating an argument.
+
+    Returns "" when there are no arguments, so the caller concatenates rather
+    than joins and never leaves a trailing space that `command_runs` would then
+    have to tolerate.
+    """
+    stripped = command_line.lstrip()
+    if stripped.startswith('"'):
+        closing = stripped.find('"', 1)
+        remainder = stripped[closing + 1 :] if closing != -1 else ""
+    else:
+        space = stripped.find(" ")
+        remainder = stripped[space:] if space != -1 else ""
+    remainder = remainder.rstrip()
+    if not remainder:
+        return ""
+    return remainder if remainder.startswith(" ") else f" {remainder}"
+
+
+def windows_file_version(binary: Path) -> str:
+    """The binary's own `FileVersion`, as `a.b.c.d`, or "" if it carries none.
+
+    The Tauri bundler writes this from the same `version` a macOS bundle would
+    put in `CFBundleShortVersionString`, so it is the honest counterpart rather
+    than a second source of truth.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    version_api = ctypes.WinDLL("version", use_last_error=True)
+    rendered = os.fspath(binary)
+    size = version_api.GetFileVersionInfoSizeW(rendered, None)
+    if not size:
+        return ""
+    buffer = ctypes.create_string_buffer(size)
+    if not version_api.GetFileVersionInfoW(rendered, 0, size, buffer):
+        return ""
+    block = ctypes.c_void_p()
+    length = wintypes.UINT(0)
+    if not version_api.VerQueryValueW(
+        buffer, "\\", ctypes.byref(block), ctypes.byref(length)
+    ):
+        return ""
+
+    class FixedFileInfo(ctypes.Structure):
+        _fields_ = (
+            ("dwSignature", wintypes.DWORD),
+            ("dwStrucVersion", wintypes.DWORD),
+            ("dwFileVersionMS", wintypes.DWORD),
+            ("dwFileVersionLS", wintypes.DWORD),
+        )
+
+    if length.value < ctypes.sizeof(FixedFileInfo):
+        return ""
+    information = FixedFileInfo.from_address(block.value or 0)
+    if information.dwSignature != 0xFEEF04BD:
+        return ""
+    return ".".join(
+        str(part)
+        for part in (
+            information.dwFileVersionMS >> 16,
+            information.dwFileVersionMS & 0xFFFF,
+            information.dwFileVersionLS >> 16,
+            information.dwFileVersionLS & 0xFFFF,
+        )
+    )
+
+
+def windows_product_binary(app: Path) -> Path:
+    """The one product executable in an installed Windows package.
+
+    Tauri names it from `mainBinaryName`, falling back to the product name; the
+    production configuration sets neither, so it is resolved from the artifact
+    rather than assumed — the same rule `run_eb_16_windows_acceptance.main_binary`
+    follows, and for the same reason.
+    """
+    candidates = sorted(
+        path
+        for path in app.glob("*.exe")
+        if path.is_file() and path.name.lower() != WINDOWS_UNINSTALLER_NAME
+    )
+    if len(candidates) != 1:
+        raise AcceptanceFailed(
+            "EB-11 installed package does not hold exactly one product executable: "
+            f"{[path.name for path in candidates]}"
+        )
+    return candidates[0]
+
+
+def power_shell(
+    source: str,
+    *,
+    environment: dict[str, str],
+    timeout: float = 30.0,
+) -> str:
+    """Run one PowerShell script, the way `apple_script` runs one AppleScript.
+
+    `-EncodedCommand` rather than a command line or stdin: the argument is
+    UTF-16LE, which is what PowerShell itself is, so nothing depends on the
+    console code page for input. Output goes the other way through
+    `[Console]::OutputEncoding` in the prelude, because a redirected PowerShell
+    5.1 otherwise writes the OEM code page — 936 on this machine, which turns
+    every Chinese UI label into mojibake at the exact moment the runner
+    compares one.
+    """
+    encoded = base64.b64encode(source.encode("utf-16-le")).decode("ascii")
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        env={**os.environ, **environment},
+    )
+    if result.returncode != 0:
+        message = (result.stderr or "").strip() or "unknown UI automation failure"
+        raise AcceptanceFailed(f"EB-11 App UI automation failed: {message}")
+    return (result.stdout or "").strip()
+
+
+class WindowsDeviceDriver(DeviceDriver):
+    """The Windows instruments, as they arrive.
+
+    Implemented: the release identity, because
+    `build_release_package.py --platform windows` writes it. An NSIS package has
+    no `Info.plist`, so the seven fields macOS keeps under the Developer ID seal
+    are written to `release-identity.v1.json` in the payload instead — weaker,
+    and recorded as such where it is written. And the accessibility tree, via
+    UIAutomation: reading it was measured on 2026-08-05, and so was pressing —
+    an external client invoked `重新检查` on the installed formal package and the
+    App opened a fresh control-plane connection, 1 → 2 on a counting listener.
+
+    Which process is being driven is *not* re-established here. macOS can ask
+    AppleScript for a process's bundle identifier almost for free; UIA addresses
+    windows by process id, and this host has no Authenticode identity to check a
+    live PID against at all. The binding that does hold is the runner's own:
+    it launched the App, holds a `ProcessRecord` with its start time, and every
+    sample re-checks that record. A recycled pid fails there, not here — so this
+    script only distinguishes "that pid is gone" from "it has no window yet".
+
+    Not yet implemented, each failing by name rather than as "requires macOS":
+    verifying a running PID's Authenticode signature, proving which Profile
+    directory the browser has open, and proving a deleted Profile's file id has
+    no remaining name.
+    """
+
+    platform = "win32"
+
+    def _query(self, process_id: int, body: str, label: str = "") -> str:
+        return power_shell(
+            UIA_WINDOW_PRELUDE + body,
+            environment={
+                UIA_PROCESS_ENVIRONMENT: str(process_id),
+                UIA_LABEL_ENVIRONMENT: label,
+            },
+        )
+
+    def press(self, process_id: int, label: str) -> None:
+        result = self._query(process_id, UIA_PRESS_BODY, label)
+        if result == "disabled":
+            raise AcceptanceFailed(
+                f"EB-11 App control is present but disabled, so it was not pressed: {label}"
+            )
+        if result != "pressed":
+            raise AcceptanceFailed(f"EB-11 could not press the App control: {label}")
+
+    def visible_ui_text(self, process_id: int) -> str:
+        rendered = self._query(process_id, UIA_VISIBLE_TEXT_BODY)
+        if rendered in UIA_NO_TREE:
+            raise AcceptanceFailed("EB-11 formal App window disappeared")
+        return rendered
+
+    def wait_for_window(self, process_id: int) -> None:
+        deadline = time.monotonic() + WINDOW_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            result = self._query(process_id, UIA_WINDOW_READY_BODY)
+            if result == "ready":
+                return
+            if result == "no_process":
+                raise AcceptanceFailed("EB-11 formal App process identity changed")
+            time.sleep(POLL_SECONDS)
+        raise AcceptanceFailed("EB-11 formal App did not expose its normal main window")
+
+    def read_release_identity(self, app: Path) -> SignedReleaseIdentity:
+        identity_path = app / PACKAGED_IDENTITY_NAME
+        try:
+            record = json.loads(identity_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise AcceptanceFailed("EB-11 signed release identity is unavailable") from error
+        return release_identity_from_record(record)
+
+    def authenticode_status(self, path: Path) -> str:
+        """What Windows says about this file's signature, whatever that is.
+
+        Measured on every run rather than assumed. Today it is `NotSigned` on
+        this host — no code-signing certificate exists in either store — and
+        that is exactly why it is recorded instead of asserted: the run states
+        what it found, so the evidence changes by itself the day a real
+        certificate appears.
+        """
+        rendered = power_shell(
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n"
+            "$target = $env:AUTOMATION_TOOL_EB11_SIGNED_PATH\n"
+            "Write-Output (Get-AuthenticodeSignature -LiteralPath $target).Status\n",
+            environment={AUTHENTICODE_PATH_ENVIRONMENT: os.fspath(path)},
+        )
+        return rendered or "Unknown"
+
+    def packaged_prefix(self, app: Path) -> str:
+        return f"{app}{os.sep}"
+
+    def start_app(self, app: Path, nonce: str) -> None:
+        """Run the installed executable, with what the run needs in its environment.
+
+        macOS asks LaunchServices for a new instance and hands it one variable;
+        Windows has no such service, so the runner starts the process itself.
+        Two things go in:
+
+        * the launch nonce, which is how a reparented helper is later recognised
+          as this run's;
+        * `--force-renderer-accessibility`, without which WebView2 builds no
+          accessibility tree and nothing in the App can be read or pressed.
+
+        The child is deliberately not waited on. `quit_app` proves the App exits
+        on its own when asked, and holding it open here would make this process
+        its reaper — which is exactly the relationship being measured.
+        """
+        binary = windows_product_binary(app)
+        environment = dict(
+            os.environ,
+            **{
+                LAUNCH_NONCE_ENVIRONMENT: nonce,
+                WEBVIEW_ACCESSIBILITY_ENVIRONMENT: WEBVIEW_ACCESSIBILITY_ARGUMENT,
+            },
+        )
+        try:
+            subprocess.Popen(
+                [os.fspath(binary)],
+                env=environment,
+                cwd=os.fspath(app),
+                close_fds=True,
+            )
+        except OSError as error:
+            raise AcceptanceFailed("EB-11 formal App could not be started") from error
+
+    def bundle_process_ids(self, app: Path) -> set[int]:
+        """Every running process that *is* this product, however it was started.
+
+        macOS asks for processes with the product bundle identifier. Windows has
+        no such identifier, so the equivalent question is which processes are
+        running the installed product executable — which is the fact the check
+        actually wants: a second instance someone launched by hand would show up
+        here just the same.
+        """
+        import windows_processes
+
+        binary = os.path.normcase(os.fspath(windows_product_binary(app)))
+        found: set[int] = set()
+        for process_id in windows_processes.process_table():
+            image = windows_processes.image_path(process_id)
+            if image and os.path.normcase(image) == binary:
+                found.add(process_id)
+        return found
+
+    def request_quit(self, process_id: int) -> None:
+        """Close the window, the way a person closes it.
+
+        Not `TerminateProcess`. EB-11's closing assertion is that a *normal*
+        exit leaves no Executor and no Chromium behind; killing the process
+        would leave that unmeasured while looking identical in the evidence.
+        """
+        result = self._query(process_id, UIA_QUIT_BODY)
+        if result != "requested":
+            raise AcceptanceFailed("EB-11 could not request normal App quit")
+
+    def require_app_path(self, app: Path) -> Path:
+        """An install root, not a bundle.
+
+        A Windows package is a directory holding the executable — there is no
+        `.app` suffix to demand, so what is demanded instead is that it holds
+        exactly one product executable, which `windows_product_binary` refuses
+        to guess at.
+        """
+        if not app.is_absolute():
+            raise AcceptanceFailed("EB-11 App path must be one absolute install directory")
+        require_no_symlink_components(app, include_leaf=True)
+        try:
+            resolved = app.resolve(strict=True)
+        except OSError as error:
+            # A path that is simply not there is a refusal with a reason, not a
+            # raw `FileNotFoundError` escaping from the first gate of the run.
+            raise AcceptanceFailed("EB-11 App install directory is unavailable") from error
+        if not resolved.is_dir():
+            raise AcceptanceFailed("EB-11 App install directory is unavailable")
+        windows_product_binary(resolved)
+        return resolved
+
+    def running_as_administrator(self) -> bool:
+        import ctypes
+
+        return bool(ctypes.WinDLL("shell32", use_last_error=True).IsUserAnAdmin())
+
+    def read_identity(self, app: Path) -> AppIdentity:
+        """The three facts `Info.plist` carries, found where Windows keeps them.
+
+        * the executable — resolved from the artifact, as `windows_product_binary`
+          explains;
+        * the version — the binary's own version resource, which the Tauri
+          bundler fills from the same `version` the plist would have carried;
+        * the identifier — **verified rather than read.** An NSIS install root
+          holds no manifest naming the product, but the Tauri configuration is
+          compiled into the binary, and `compiled_deployment_profile_root`
+          already establishes facts about this binary by finding a byte sequence
+          in it. A package built for some other product does not contain this
+          one's identifier, so it cannot pass by being silent.
+        """
+        binary = windows_product_binary(app)
+        try:
+            compiled = binary.read_bytes()
+        except OSError as error:
+            raise AcceptanceFailed("EB-11 App executable is unavailable") from error
+        if APP_IDENTIFIER.encode("utf-8") not in compiled:
+            raise AcceptanceFailed("EB-11 requires the production bundle identifier")
+        version = windows_file_version(binary)
+        if not version:
+            raise AcceptanceFailed("EB-11 App version is unavailable")
+        return AppIdentity(APP_IDENTIFIER, version, binary)
+
+    def code_identity(
+        self, executable: Path, artifact: ArtifactFacts | None = None
+    ) -> CodeIdentity:
+        """Identify an executable by its bytes, since there is no signer to ask.
+
+        The same substitution the artifact binding already made, one level down:
+        the identifier is the path the package puts it at, and the identity is
+        the digest of what is there.
+
+        The answer is kept, because this is asked on every runtime sample and
+        the file cannot change while a process holds its image mapped. Reading
+        it again bought nothing and cost a great deal: 8.6MB for the Executor
+        plus Chromium, about ten times a second, which is what made a sample
+        take 0.30s while a browser was up and — measured on 2026-08-05 — made
+        the Executor fail about one session recheck in two while the sampler
+        ran. An acceptance runner that changes the outcome it is measuring is
+        not measuring anything.
+
+        The key is the file's own identity rather than its path, so a different
+        file at the same path is hashed again and a substitute renamed into
+        place does not inherit the previous answer.
+        """
+        del artifact
+        try:
+            metadata = executable.stat()
+        except OSError as error:
+            raise AcceptanceFailed("EB-11 packaged runtime executable is unavailable") from error
+        key = (
+            os.path.normcase(os.fspath(executable)),
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_size,
+            metadata.st_mtime_ns,
+        )
+        cached = PACKAGED_CODE_IDENTITIES.get(key)
+        if cached is not None:
+            return cached
+        digest = hashlib.sha256()
+        try:
+            with executable.open("rb") as source:
+                while chunk := source.read(1024 * 1024):
+                    digest.update(chunk)
+        except OSError as error:
+            raise AcceptanceFailed("EB-11 packaged runtime executable is unavailable") from error
+        identity = CodeIdentity(
+            identifier=os.path.normcase(os.fspath(executable)),
+            image_sha256=digest.hexdigest(),
+        )
+        PACKAGED_CODE_IDENTITIES[key] = identity
+        return identity
+
+    def verify_runtime_process_identity(
+        self, record: ProcessRecord, expected: CodeIdentity
+    ) -> bool:
+        """The running process must *be* the executable that was verified.
+
+        macOS asks `codesign` about the pid, which answers about the code
+        actually loaded. There is no such question here, so two weaker facts are
+        combined: the image path the kernel reports for this process, and the
+        digest of the file now at that path. Windows keeps a running image
+        mapped, so the file cannot be replaced underneath it — it can be
+        renamed, which is why the digest is compared and not only the path.
+
+        Stated plainly because it is weaker than the macOS check: this proves
+        the process was started from those bytes, not that those bytes are what
+        is currently executing in memory.
+        """
+        import windows_processes
+
+        if record not in process_snapshot():
+            return False
+        image = windows_processes.image_path(record.pid)
+        if image is None:
+            return False
+        observed = self.code_identity(Path(image))
+        if record not in process_snapshot():
+            return False
+        if observed != expected:
+            raise AcceptanceFailed("EB-11 packaged runtime process does not match the signed App")
+        return True
+
+    def open_directory(self, path: Path) -> int:
+        from windows_private_directory import (
+            PrivateDirectoryRejected,
+            open_private_directory,
+        )
+
+        try:
+            return open_private_directory(path)
+        except PrivateDirectoryRejected as error:
+            raise AcceptanceFailed(f"EB-11 directory could not be held open: {error}") from error
+
+    def _held_directory(self, parent_fd: int) -> Path:
+        directory = self._named_path(parent_fd)
+        if directory is None:
+            raise AcceptanceFailed("EB-11 held directory no longer has a name")
+        return directory
+
+    def stat_in(self, parent_fd: int, name: str) -> os.stat_result:
+        return os.stat(self._held_directory(parent_fd) / name, follow_symlinks=False)
+
+    def open_in(self, parent_fd: int, name: str, flags: int, mode: int = 0o600) -> int:
+        return os.open(self._held_directory(parent_fd) / name, flags | os.O_BINARY, mode)
+
+    def unlink_in(self, parent_fd: int, name: str) -> None:
+        os.unlink(self._held_directory(parent_fd) / name)
+
+    def replace_in(self, parent_fd: int, source: str, destination: str) -> None:
+        directory = self._held_directory(parent_fd)
+        os.replace(directory / source, directory / destination)
+
+    def link_in(self, parent_fd: int, source: str, destination: str) -> None:
+        directory = self._held_directory(parent_fd)
+        os.link(directory / source, directory / destination)
+
+    def make_private_file(self, descriptor: int) -> None:
+        """Nothing to narrow: the file inherits the directory it was created in.
+
+        `os.fchmod` does not exist here, and the read-only attribute Windows
+        does expose is not a permission. The evidence directory is chosen by the
+        operator with `--evidence`, so who can read the file is decided by that
+        directory's ACL — stated rather than silently skipped.
+        """
+        del descriptor
+
+    def sync_directory(self, parent_fd: int) -> None:
+        """No counterpart, and none needed.
+
+        `fsync` on a directory handle is how POSIX forces a directory entry to
+        disk. NTFS journals metadata, and Windows offers no handle-level flush
+        for a directory; `FlushFileBuffers` on one fails.
+        """
+        del parent_fd
+
+    def require_published_evidence_mode(self, metadata: os.stat_result) -> bool:
+        # See the base class: the identity comparison next to this one carries
+        # the substitution check, and there are no permission bits to compare.
+        del metadata
+        return True
+
+    def directory_entry_identities(self, directory_fd: int) -> list[tuple[int, int]]:
+        """What is inside this open directory, by identity.
+
+        Windows has no `dir_fd`, so the handle is turned back into a path and
+        listed. That is one step less atomic than the macOS `openat` walk, and
+        it is the same gap `open_private_directory` already states: this is a
+        misoperation and regression gate inside a trusted flow.
+        """
+        directory = self._named_path(directory_fd)
+        if directory is None:
+            return []
+        identities: list[tuple[int, int]] = []
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    try:
+                        # `entry.stat()` on Windows answers from the directory
+                        # listing, which carries no file index — it reports
+                        # `st_ino` 0 for everything, so every identity would
+                        # compare equal to every other. A real `os.stat` opens
+                        # the entry and fills it in.
+                        metadata = os.stat(entry.path, follow_symlinks=False)
+                    except OSError:
+                        continue
+                    identities.append((metadata.st_dev, metadata.st_ino))
+        except OSError:
+            return identities
+        return identities
+
+    def open_directory_identity(self, directory_fd: int) -> tuple[int, int] | None:
+        """`None` once NTFS has no name for it — which is what deletion looks like.
+
+        Measured 2026-08-05: a directory deleted while this handle is open (the
+        handle carries `FILE_SHARE_DELETE`, so the delete succeeds) vanishes
+        from its parent at once, and `GetFinalPathNameByHandleW` then answers
+        `\\\\?\\C:\\$Extend\\$Deleted\\…` — NTFS's holding area for
+        delete-pending files. A rename, by contrast, keeps answering a real
+        path, which is why safe logout cannot be satisfied by one.
+        """
+        named = self._named_path(directory_fd)
+        if named is None:
+            return None
+        try:
+            current = named.lstat()
+        except (OSError, ValueError):
+            return None
+        return (current.st_dev, current.st_ino)
+
+    @staticmethod
+    def _named_path(directory_fd: int) -> Path | None:
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = kernel32.GetFinalPathNameByHandleW(
+            wintypes.HANDLE(msvcrt.get_osfhandle(directory_fd)), buffer, 32768, 0
+        )
+        if not length or length >= 32768:
+            return None
+        rendered = buffer.value
+        if rendered.startswith(EXTENDED_LENGTH_PREFIX):
+            rendered = rendered[len(EXTENDED_LENGTH_PREFIX) :]
+        if NTFS_DELETED_HOLDING_AREA in rendered:
+            return None
+        return Path(rendered)
+
+    def app_data_root(self) -> Path:
+        """`%APPDATA%\\<identifier>` — Roaming, which is what Tauri uses.
+
+        Measured against the running product rather than taken from the docs:
+        the App has created exactly this directory on this machine, and every
+        Profile path in the run hangs off it.
+        """
+        roaming = os.environ.get("APPDATA")
+        if not roaming:
+            raise AcceptanceFailed("EB-11 product data directory is unavailable")
+        return Path(roaming) / APP_IDENTIFIER
+
+    def daily_browser_profile_roots(self) -> tuple[Path, ...]:
+        local = os.environ.get("LOCALAPPDATA")
+        if not local:
+            raise AcceptanceFailed("EB-11 cannot locate this user's browser profiles")
+        root = Path(local)
+        # Chromium keeps profiles under `User Data` on Windows, one level deeper
+        # than the macOS layout. Naming the vendor directory alone would also
+        # match the browser's own installation and turn this into a check that
+        # fires on a healthy run.
+        return (
+            root / "Google/Chrome/User Data",
+            root / "Microsoft/Edge/User Data",
+        )
+
+    def require_running_release(
+        self, instance: ProcessRecord, release: VerifiedRelease
+    ) -> None:
+        """The running App must be the binary the verified package installed.
+
+        macOS asks `codesign` about the pid. There is nothing to ask here, so
+        the same substitution the rest of this driver already makes applies:
+        the process's image path must be the product executable the release
+        identified, and the file there must still hash to what it hashes to now.
+        That binary sits inside the install tree whose digest `verify_artifact`
+        already took, which is what ties this back to the package.
+        """
+        expected = self.code_identity(release.app_identity.executable_path)
+        if not self.verify_runtime_process_identity(instance, expected):
+            raise AcceptanceFailed("EB-11 formal App process identity changed")
+
+    def require_private_directory(self, path: Path) -> tuple[int, tuple[int, int]]:
+        """The `0o700` check, in the terms this platform actually has.
+
+        `st_mode` and `st_uid` are the meaningless part on Windows — CPython
+        reports `0o777` and `0` for every directory, so the macOS comparison
+        cannot be true even for a correctly private one. The property is not
+        meaningless at all: `browser_profiles_windows.rs` writes a DACL with one
+        access-allowed ACE for the token user and sets `SE_DACL_PROTECTED`, and
+        that is what is verified here.
+
+        The identity half needs no translation. Measured 2026-08-05: `os.fstat`
+        on a directory handle reports `S_ISDIR` and the same `(st_dev, st_ino)`
+        as `os.stat`, stable across calls and distinct per directory.
+        """
+        from windows_private_directory import (
+            PrivateDirectoryRejected,
+            open_private_directory,
+            require_private_dacl,
+        )
+
+        try:
+            descriptor = open_private_directory(path)
+        except PrivateDirectoryRejected as error:
+            raise AcceptanceFailed(
+                f"EB-11 App-owned Profile directory is unsafe: {error}"
+            ) from error
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISDIR(metadata.st_mode):
+                raise AcceptanceFailed("EB-11 App-owned Profile directory is unsafe")
+            require_private_dacl(descriptor)
+        except PrivateDirectoryRejected as error:
+            os.close(descriptor)
+            raise AcceptanceFailed(
+                f"EB-11 App-owned Profile directory is not private: {error}"
+            ) from error
+        except BaseException:
+            os.close(descriptor)
+            raise
+        return descriptor, (metadata.st_dev, metadata.st_ino)
+
+    def resource_root(self, app: Path) -> Path:
+        """The install root itself.
+
+        `contracts/quality/release-package-resources.v1.json` says so: its
+        `resourceRoot.windows` is the empty list, against `["Contents",
+        "Resources"]` for macOS. The bundler copies every declared tree straight
+        into the directory holding the executable.
+        """
+        return app
+
+    def expected_release_target(self, machine: str) -> tuple[str, str] | None:
+        return {
+            "amd64": ("windows-x86_64", "x86_64"),
+            "x86_64": ("windows-x86_64", "x86_64"),
+        }.get(machine)
+
+    def read_process_open_paths(self, records: list[ProcessRecord]) -> list[Path] | None:
+        """Which files these processes hold open — the `lsof -p` of this host.
+
+        `None` means one of them exited mid-audit, which the caller retries; an
+        empty list means they are alive and hold nothing on disk. Windows has no
+        per-process handle query, so the whole system table is taken and
+        filtered; `windows_processes.open_file_paths` documents why that cannot
+        hang.
+        """
+        import windows_processes
+
+        try:
+            paths = windows_processes.open_file_paths(
+                [record.pid for record in records]
+            )
+        except windows_processes.WindowsProcessesUnavailable as error:
+            current = process_snapshot()
+            if any(record not in current for record in records):
+                return None
+            raise AcceptanceFailed(
+                "EB-11 could not audit stable Chromium open files"
+            ) from error
+        current = process_snapshot()
+        if any(record not in current for record in records):
+            return None
+        return [Path(item) for item in paths]
+
+    def process_snapshot(self) -> list[ProcessRecord]:
+        """The `ps -axo pid,ppid,lstart,command` of this host.
+
+        `command` is assembled rather than taken verbatim, because three callers
+        read it three ways and a raw Windows command line satisfies none of them
+        cleanly: it starts with a *quoted* argv[0], so a prefix match against the
+        install root fails on the opening quote. The image path is therefore put
+        back at the front unquoted, with the original arguments after it — the
+        exact shape `ps` produces and the three callers already expect.
+
+        A process nobody can open still gets a record. Most of the machine is
+        unreadable — other users, protected services — and dropping those would
+        quietly shrink the table that `instance_process_records` uses to decide
+        whether a *foreign* App instance is running. Its Toolhelp name is the
+        weakest possible `command`, and it matches no packaged prefix, which is
+        the correct answer for a process this run cannot identify.
+        """
+        import windows_processes
+
+        records: list[ProcessRecord] = []
+        for pid, process in windows_processes.process_table().items():
+            image = windows_processes.image_path(pid)
+            rendered = windows_processes.command_line(pid)
+            if image and rendered:
+                command = f"{image}{windows_command_arguments(rendered)}"
+            else:
+                command = image or process.executable_name
+            records.append(
+                ProcessRecord(
+                    pid=pid,
+                    ppid=process.ppid,
+                    command=command,
+                    started_at=windows_processes.created_at(pid),
+                )
+            )
+        return records
+
+    def process_has_launch_nonce(self, record: ProcessRecord, nonce: str) -> bool:
+        import windows_processes
+
+        values = windows_processes.environment(record.pid)
+        return bool(values) and values.get(LAUNCH_NONCE_ENVIRONMENT) == nonce
+
+    def verify_artifact(self, app: Path, executor_build_id: str) -> ArtifactFacts:
+        """Bind the installed package by its bytes, and claim nothing more.
+
+        macOS binds it by the Developer ID chain — `codesign --verify`, `spctl`
+        and `stapler` together mean "the OS trusts this and it has not been
+        altered since it was signed". This host has no certificate at all, so
+        there is no signer to verify against and no Gatekeeper to ask.
+
+        What is still true, and is what this returns: the install tree hashes to
+        exactly one value, that value can be compared against the package the
+        release produced, and the Executor inside it carries a signed manifest
+        of its own. That proves *this is the package built from this source
+        tree*. It does not prove that nobody altered it before the digest was
+        taken, and it does not prove the OS trusts it. The difference is
+        recorded in `code_signing` rather than argued away.
+        """
+        binary = windows_product_binary(app)
+        tree_sha256, bundle_bytes = bundle_tree_digest(app)
+        return ArtifactFacts(
+            bundle_tree_sha256=tree_sha256,
+            bundle_bytes=bundle_bytes,
+            executor_build_id=executor_build_id,
+            code_signing=self.authenticode_status(binary),
+        )
+
+
+DEVICE_DRIVERS: tuple[type[DeviceDriver], ...] = (MacosDeviceDriver, WindowsDeviceDriver)
+
+
+def device_driver() -> DeviceDriver:
+    for candidate in DEVICE_DRIVERS:
+        if candidate.platform == sys.platform:
+            return candidate()
+    raise AcceptanceFailed(f"EB-11 has no device driver for {sys.platform}")
+
+
 def require_device_boundary(arguments: Arguments) -> tuple[Path, Path]:
-    if sys.platform != "darwin":
-        raise AcceptanceFailed("EB-11 formal App acceptance requires macOS")
+    # Selected rather than refused. A host without a driver still fails here;
+    # a host with a partial one now fails at the specific observation it cannot
+    # make, which is where the next piece of work is.
+    driver = device_driver()
     if not arguments.interactive_device_acceptance:
         raise AcceptanceFailed("EB-11 requires --interactive-device-acceptance")
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise AcceptanceFailed("EB-11 requires an interactive console")
-    if os.geteuid() == 0:
-        raise AcceptanceFailed("EB-11 refuses to run as root")
+    if driver.running_as_administrator():
+        raise AcceptanceFailed("EB-11 refuses to run with administrator rights")
 
-    app = arguments.app
-    if not app.is_absolute() or app.suffix.lower() != ".app":
-        raise AcceptanceFailed("EB-11 App path must be one absolute .app")
-    require_no_symlink_components(app, include_leaf=True)
-    app = app.resolve(strict=True)
-    if not app.is_dir():
-        raise AcceptanceFailed("EB-11 App bundle is unavailable")
+    app = driver.require_app_path(arguments.app)
 
     evidence = arguments.evidence
     if not evidence.is_absolute() or evidence.suffix.lower() != ".json":
@@ -377,7 +1638,7 @@ def require_evidence_outside_app(app: Path, evidence: Path) -> Path:
     resolved_app = app.resolve(strict=True)
     resolved_parent = evidence.parent.resolve(strict=True)
     resolved_evidence = resolved_parent / evidence.name
-    resolved_app_data = APP_DATA.resolve(strict=False)
+    resolved_app_data = device_driver().app_data_root().resolve(strict=False)
     if resolved_evidence == resolved_app or resolved_app in resolved_evidence.parents:
         raise AcceptanceFailed("EB-11 evidence must stay outside the App bundle")
     if resolved_evidence == resolved_app_data or resolved_app_data in resolved_evidence.parents:
@@ -426,7 +1687,22 @@ def run_checked(
     )
 
 
+def app_data_root() -> Path:
+    """Where the product keeps its own data on this host.
+
+    A function rather than the module constant it used to be: the answer is
+    `~/Library/Application Support/<id>` on macOS and `%APPDATA%` + the id on
+    Windows, and resolving it at import time would make this module fail to
+    import on a host with no driver at all.
+    """
+    return device_driver().app_data_root()
+
+
 def read_identity(app: Path) -> AppIdentity:
+    return device_driver().read_identity(app)
+
+
+def macos_read_identity(app: Path) -> AppIdentity:
     information_path = app / "Contents" / "Info.plist"
     if information_path.is_symlink() or not information_path.is_file():
         raise AcceptanceFailed("EB-11 App Info.plist is unavailable")
@@ -522,14 +1798,22 @@ def compiled_deployment_profile_root(executable: Path, deployment_profile: Path)
         raise AcceptanceFailed(
             "EB-11 App does not carry the expected signed deployment Profile"
         )
-    return APP_DATA / "profiles" / profile_id / "embedded-browser-profiles"
+    return (
+        device_driver().app_data_root()
+        / "profiles"
+        / profile_id
+        / "embedded-browser-profiles"
+    )
 
 
 def read_runtime_contract(app: Path, profile_root: Path) -> tuple[RuntimeContract, str]:
-    executor_root = app / EXECUTOR_MANIFEST.parent
-    executor_manifest = read_packaged_json(app, EXECUTOR_MANIFEST)
-    browser_root = app / BROWSER_MANIFEST.parent
-    browser_manifest = read_packaged_json(app, BROWSER_MANIFEST)
+    driver = device_driver()
+    executor_path = driver.executor_manifest(app)
+    browser_path = driver.browser_manifest(app)
+    executor_root = executor_path.parent
+    executor_manifest = read_packaged_json(app, executor_path.relative_to(app))
+    browser_root = browser_path.parent
+    browser_manifest = read_packaged_json(app, browser_path.relative_to(app))
     build_id = executor_manifest.get("build_id")
     if not isinstance(build_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", build_id):
         raise AcceptanceFailed("EB-11 packaged Executor build identity is invalid")
@@ -578,7 +1862,7 @@ def bundle_tree_digest(app: Path) -> tuple[str, int]:
                 visit(path)
             elif stat.S_ISREG(metadata.st_mode):
                 hash_field(digest, b"F", relative, metadata.st_size.to_bytes(8, "big"))
-                descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+                descriptor = os.open(path, os.O_RDONLY | NO_FOLLOW_OPEN_FLAG)
                 try:
                     while chunk := os.read(descriptor, 1024 * 1024):
                         digest.update(chunk)
@@ -620,12 +1904,15 @@ def verify_formal_app(app: Path, executor_build_id: str) -> ArtifactFacts:
     run_checked(["xcrun", "stapler", "validate", os.fspath(app)])
     tree_sha256, bundle_bytes = bundle_tree_digest(app)
     return ArtifactFacts(
-        authority=expected_certificate,
-        team_id=expected_team,
-        bundle_cdhash=cdhash_match.group(1).lower(),
         bundle_tree_sha256=tree_sha256,
         bundle_bytes=bundle_bytes,
         executor_build_id=executor_build_id,
+        authority=expected_certificate,
+        team_id=expected_team,
+        bundle_cdhash=cdhash_match.group(1).lower(),
+        # Everything above this line was verified against the Developer ID
+        # chain, `spctl` and `stapler`, so the trust statement names it.
+        code_signing=expected_certificate,
     )
 
 
@@ -678,21 +1965,14 @@ def bind_runtime_code_identities(
     contract: RuntimeContract,
     artifact: ArtifactFacts,
 ) -> RuntimeContract:
+    driver = device_driver()
     return RuntimeContract(
         app_path=contract.app_path,
         executor_path=contract.executor_path,
         browser_path=contract.browser_path,
         profile_root=contract.profile_root,
-        executor_identity=signed_code_identity(
-            contract.executor_path,
-            authority=artifact.authority,
-            team_id=artifact.team_id,
-        ),
-        browser_identity=signed_code_identity(
-            contract.browser_path,
-            authority=artifact.authority,
-            team_id=artifact.team_id,
-        ),
+        executor_identity=driver.code_identity(contract.executor_path, artifact),
+        browser_identity=driver.code_identity(contract.browser_path, artifact),
     )
 
 
@@ -703,6 +1983,15 @@ def read_signed_release_identity(app: Path) -> SignedReleaseIdentity:
             record = plistlib.load(source).get(RELEASE_IDENTITY_KEY)
     except (OSError, plistlib.InvalidFileException, AttributeError) as error:
         raise AcceptanceFailed("EB-11 signed release identity is unavailable") from error
+    return release_identity_from_record(record)
+
+
+def release_identity_from_record(record: object) -> SignedReleaseIdentity:
+    """Validate the seven fields, wherever this platform carries them.
+
+    Shared so a Windows package cannot be accepted on looser terms than a macOS
+    one: the carrier differs, what has to be true of the contents does not.
+    """
     required = {
         "architecture",
         "buildId",
@@ -750,13 +2039,11 @@ def require_release_identity(
     profile_root: Path,
     source: SourceFacts,
 ) -> None:
-    machine = platform.machine().lower()
-    expected_platform = {
-        "arm64": ("macos-arm64", "aarch64"),
-        "aarch64": ("macos-arm64", "aarch64"),
-    }.get(machine)
+    expected_platform = device_driver().expected_release_target(
+        platform.machine().lower()
+    )
     if expected_platform is None or (release.target, release.architecture) != expected_platform:
-        raise AcceptanceFailed("EB-11 signed release target does not match this Mac")
+        raise AcceptanceFailed("EB-11 signed release target does not match this host")
     if app_identity.bundle_identifier != APP_IDENTIFIER or not app_identity.version:
         raise AcceptanceFailed("EB-11 signed release App identity is invalid")
     if release.source_tree_sha256 != source.tree_sha256:
@@ -788,10 +2075,11 @@ def verify_release_artifact(app: Path, deployment_profile: Path) -> VerifiedRele
         app_identity.executable_path,
         deployment_profile,
     )
+    driver = device_driver()
     runtime_contract, executor_build_id = read_runtime_contract(app, profile_root)
-    artifact = verify_formal_app(app, executor_build_id)
+    artifact = driver.verify_artifact(app, executor_build_id)
     runtime_contract = bind_runtime_code_identities(runtime_contract, artifact)
-    release_identity = read_signed_release_identity(app)
+    release_identity = driver.read_release_identity(app)
     require_release_identity(
         release_identity,
         artifact=artifact,
@@ -823,7 +2111,7 @@ def apple_script(source: str, *, timeout: float = 30.0) -> str:
     return result.stdout.strip()
 
 
-def bundle_process_ids() -> set[int]:
+def macos_bundle_process_ids() -> set[int]:
     rendered = apple_script(
         f'''
 tell application "System Events"
@@ -856,7 +2144,23 @@ end tell
 '''
 
 
+def start_app(app: Path, nonce: str) -> None:
+    device_driver().start_app(app, nonce)
+
+
+def bundle_process_ids(app: Path) -> set[int]:
+    return device_driver().bundle_process_ids(app)
+
+
 def process_snapshot() -> list[ProcessRecord]:
+    return device_driver().process_snapshot()
+
+
+def process_has_launch_nonce(record: ProcessRecord, nonce: str) -> bool:
+    return device_driver().process_has_launch_nonce(record, nonce)
+
+
+def macos_process_snapshot() -> list[ProcessRecord]:
     completed = run_checked(
         ["/bin/ps", "-ww", "-axo", "pid=,ppid=,lstart=,command="],
         capture=True,
@@ -890,7 +2194,7 @@ def descendant_records(root_process_id: int, records: list[ProcessRecord]) -> li
 
 
 def packaged_process_records(app: Path, records: list[ProcessRecord]) -> list[ProcessRecord]:
-    executable_prefix = f"{app}{os.sep}Contents{os.sep}"
+    executable_prefix = device_driver().packaged_prefix(app)
     return [
         record
         for record in records
@@ -1004,6 +2308,10 @@ def path_is_within(path: Path, root: Path) -> bool:
 
 
 def require_private_directory_identity(path: Path) -> tuple[int, tuple[int, int]]:
+    return device_driver().require_private_directory(path)
+
+
+def macos_require_private_directory(path: Path) -> tuple[int, tuple[int, int]]:
     try:
         descriptor = open_absolute_directory(path)
         metadata = os.fstat(descriptor)
@@ -1020,6 +2328,10 @@ def require_private_directory_identity(path: Path) -> tuple[int, tuple[int, int]
 
 
 def read_process_open_paths(records: list[ProcessRecord]) -> list[Path] | None:
+    return device_driver().read_process_open_paths(records)
+
+
+def macos_read_process_open_paths(records: list[ProcessRecord]) -> list[Path] | None:
     process_ids = ",".join(str(record.pid) for record in records)
     try:
         rendered = run_checked(
@@ -1061,14 +2373,25 @@ def require_browser_profile_boundary(
         opened_paths = read_process_open_paths(browser_tree)
         if opened_paths is None:
             return None
-        if not any(path_is_within(path, candidate) for path in opened_paths):
-            raise AcceptanceFailed("EB-11 Chromium did not open the App-owned Profile")
+        # Order matters, and so does which of these is fatal. A path inside the
+        # operator's own browser Profile is proof that the thing `CLAUDE.md` §5
+        # forbids has happened, so one sighting ends the run — and it is checked
+        # first, because otherwise a sample that saw the daily Profile but had
+        # not yet seen the App-owned one reported the wrong finding.
         if any(
             path_is_within(path, default_root)
             for path in opened_paths
-            for default_root in DEFAULT_BROWSER_PROFILE_ROOTS
+            for default_root in device_driver().daily_browser_profile_roots()
         ):
             raise AcceptanceFailed("EB-11 Chromium opened a default browser Profile")
+        # Not having opened the App-owned Profile *yet* proves nothing: the
+        # browser tree changes between samples, and one that holds nothing on
+        # disk simply carries no binding — the same conclusion `opened_paths is
+        # None` already draws for a process that exited mid-audit. The guarantee
+        # is unweakened because `require_complete_runtime` still fails the run
+        # unless some sample did observe it.
+        if not any(path_is_within(path, candidate) for path in opened_paths):
+            return None
 
         for directory, first_identity in zip(
             directories,
@@ -1097,6 +2420,36 @@ def require_browser_profile_boundary(
             os.close(descriptor)
 
 
+def packaged_browser_records(
+    records: list[ProcessRecord],
+    browser_path: Path,
+) -> list[ProcessRecord]:
+    """The browsers among these processes — a browser's own children are not one.
+
+    Chromium runs its renderers, GPU process, network and storage services and
+    crash handler as children of the browser, and states which it is with
+    `--type=`; the browser process itself carries none. On macOS those children
+    execute a separate helper binary inside the bundle, so matching on the
+    packaged executable already excluded them and this made no difference. On
+    Windows they are all the same `chrome.exe`: measured on the installed
+    release on 2026-08-05, one open QR login showed eleven processes running it,
+    one browser and ten children, which the duplicate-instance check then read
+    as ten browsers.
+
+    So the rule is Chromium's own rather than a per-host guess, and it holds on
+    both platforms. What it must not do is weaken the check it unblocked: a
+    second process running the packaged browser with no `--type=` is a second
+    browser and still fails.
+    """
+
+    return [
+        record
+        for record in records
+        if command_runs(record.command, browser_path)
+        and CHROMIUM_CHILD_PROCESS_SWITCH not in record.command
+    ]
+
+
 def observe_runtime(
     contract: RuntimeContract,
     records: list[ProcessRecord],
@@ -1106,9 +2459,7 @@ def observe_runtime(
     executor_observed = any(
         command_runs(record.command, contract.executor_path) for record in records
     )
-    browser_records = [
-        record for record in records if command_runs(record.command, contract.browser_path)
-    ]
+    browser_records = packaged_browser_records(records, contract.browser_path)
     profile_directories = tuple(
         sorted(
             set(verified_profile_directories),
@@ -1136,9 +2487,7 @@ def observe_instance_runtime(
     executor_records = [
         record for record in scoped if command_runs(record.command, contract.executor_path)
     ]
-    browser_records = [
-        record for record in scoped if command_runs(record.command, contract.browser_path)
-    ]
+    browser_records = packaged_browser_records(scoped, contract.browser_path)
     if len(executor_records) > 1 or len(browser_records) > 1:
         raise AcceptanceFailed("EB-11 observed duplicate packaged runtime processes")
     if browser_records:
@@ -1187,6 +2536,13 @@ def observe_instance_runtime(
 
 
 def verify_runtime_process_identity(
+    record: ProcessRecord,
+    expected: CodeIdentity,
+) -> bool:
+    return device_driver().verify_runtime_process_identity(record, expected)
+
+
+def macos_verify_runtime_process_identity(
     record: ProcessRecord,
     expected: CodeIdentity,
 ) -> bool:
@@ -1287,6 +2643,28 @@ def continuous_runtime_observation(
         watcher.close()
 
 
+def require_recheck_runtime(observation: RuntimeObservation) -> None:
+    """What a session recheck can be held to.
+
+    Not a complete runtime observation, because a recheck does not keep a
+    browser open to be observed: the Executor opens one, checks, and closes it
+    the moment the state reaches `healthy` — about 0.7 seconds, measured
+    2026-08-05 — before the App even publishes the result this waits for. The
+    QR-login window is the one that holds a browser open for as long as the
+    operator takes to scan, and that is where the full chain is proved.
+
+    What holds every time: the packaged Executor is running, because it is
+    long-lived and appears in every sample. And whatever the sampler did manage
+    to catch still has to be right — two Profiles at once is a finding whether
+    or not a browser was expected.
+    """
+
+    if not observation.executor_observed:
+        raise AcceptanceFailed("EB-11 did not observe the packaged Executor")
+    if len(observation.profile_directories) > 1:
+        raise AcceptanceFailed("EB-11 did not observe exactly one App-owned Profile")
+
+
 def require_complete_runtime(observation: RuntimeObservation) -> None:
     if not observation.executor_observed:
         raise AcceptanceFailed("EB-11 did not observe the packaged Executor")
@@ -1302,28 +2680,91 @@ def require_same_profile_reuse(
     qr_open: RuntimeObservation,
     qr_recheck: RuntimeObservation,
     restarted: RuntimeObservation,
+    profile_root: Path,
 ) -> None:
-    """Bind QR confirmation and restart health to one exact Profile inode."""
+    """Bind QR confirmation and restart health to one exact Profile inode.
 
-    identities: list[tuple[Path, tuple[int, int], tuple[int, int]]] = []
-    for observation in (qr_open, qr_recheck, restarted):
-        require_complete_runtime(observation)
-        if len(observation.profile_bindings) != 1:
-            raise AcceptanceFailed(
-                "EB-11 session reuse did not retain exactly one Profile identity"
-            )
-        binding = observation.profile_bindings[0]
-        if (
-            binding.parent_fd < 0
-            or binding.directory_fd < 0
-            or binding.path != observation.profile_directories[0]
-        ):
-            raise AcceptanceFailed("EB-11 session reuse Profile identity is unavailable")
-        identities.append((binding.path, binding.parent_identity, binding.identity))
-    if any(identity != identities[0] for identity in identities[1:]):
+    The anchor is the QR login window, and only that window is required to hold
+    a complete runtime observation: the browser stays open there for as long as
+    the operator takes to scan, so the packaged Executor, the packaged Chromium
+    and the App-owned Profile are proved to be one chain while it is wide open.
+
+    The two recheck windows are not required to have caught a browser, because
+    the product does not keep one there to be caught. Measured on 2026-08-05
+    against the installed release with a healthy session, the recheck browser
+    lives about **0.7 seconds** — opened, checked, and closed the moment the
+    state reaches `healthy`, before the result is even returned:
+
+        t+2.95s  browsers=1  chromium=True  profile=True
+        t+3.31s  browsers=1  chromium=True  profile=False
+        t+3.67s  browsers=0
+
+    while one sample costs ~0.30s with a browser up, because the Windows
+    open-handle audit walks the whole system handle table. Demanding that the
+    sampler land inside that window is a coin flip, and it came up tails on a
+    real run after the operator had scanned twice.
+
+    What replaces it does not expire. The Profile directory this run bound at
+    QR-login time must still carry a name in its parent — proving the restart
+    did not replace it — and the App's own record of which Profile it is using
+    must still name that same directory. Both are read after the restart, both
+    are deterministic, and together they say what the coin flip was reaching
+    for: the same Profile, still there, still the one in use. A browser that
+    *was* caught in either window is still held to it.
+    """
+
+    require_complete_runtime(qr_open)
+    if len(qr_open.profile_bindings) != 1:
+        raise AcceptanceFailed("EB-11 session reuse did not retain exactly one Profile identity")
+    anchor = qr_open.profile_bindings[0]
+    if (
+        anchor.parent_fd < 0
+        or anchor.directory_fd < 0
+        or anchor.path != qr_open.profile_directories[0]
+    ):
+        raise AcceptanceFailed("EB-11 session reuse Profile identity is unavailable")
+
+    expected = (anchor.path, anchor.parent_identity, anchor.identity)
+    for observation in (qr_recheck, restarted):
+        if not observation.executor_observed:
+            raise AcceptanceFailed("EB-11 did not observe the packaged Executor")
+        for binding in observation.profile_bindings:
+            if (binding.path, binding.parent_identity, binding.identity) != expected:
+                raise AcceptanceFailed(
+                    "EB-11 QR login and restart did not reuse the same App-owned Profile"
+                )
+
+    if device_driver().open_directory_identity(anchor.directory_fd) != anchor.identity:
         raise AcceptanceFailed(
             "EB-11 QR login and restart did not reuse the same App-owned Profile"
         )
+    if read_current_profile_name(profile_root) != anchor.path.name:
+        raise AcceptanceFailed(
+            "EB-11 QR login and restart did not reuse the same App-owned Profile"
+        )
+
+
+def read_current_profile_name(profile_root: Path) -> str:
+    """Which Profile the App itself records as the one in use.
+
+    The App writes the identifier it will reopen next into this file, so it is
+    the product's own answer to "which Profile am I using" — not an inference
+    from a process that happens to be running. Reading it is how a restart that
+    quietly abandoned the old Profile for a fresh one is caught, which the
+    surviving-name check alone would miss if the old directory were orphaned
+    rather than removed.
+    """
+
+    marker = profile_root / CURRENT_PROFILE_MARKER_NAME
+    if marker.is_symlink() or not marker.is_file():
+        raise AcceptanceFailed("EB-11 App-owned Profile record is unreadable")
+    try:
+        rendered = marker.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError) as error:
+        raise AcceptanceFailed("EB-11 App-owned Profile record is unreadable") from error
+    if not rendered:
+        raise AcceptanceFailed("EB-11 App-owned Profile record is empty")
+    return rendered
 
 
 def require_observed_profile_unlinked(binding: ProfileDirectoryBinding) -> None:
@@ -1338,27 +2779,14 @@ def require_observed_profile_unlinked(binding: ProfileDirectoryBinding) -> None:
         profile.st_ino,
     ) != binding.identity:
         raise AcceptanceFailed("EB-11 observed Profile identity changed")
-    for name in os.listdir(binding.parent_fd):
-        try:
-            candidate = os.stat(name, dir_fd=binding.parent_fd, follow_symlinks=False)
-        except FileNotFoundError:
-            continue
-        if (candidate.st_dev, candidate.st_ino) == binding.identity:
-            raise AcceptanceFailed("EB-11 safe logout retained the old Profile inode")
+    driver = device_driver()
+    if binding.identity in driver.directory_entry_identities(binding.parent_fd):
+        raise AcceptanceFailed("EB-11 safe logout retained the old Profile inode")
     try:
-        macos_fcntl = importlib.import_module("fcntl")
-        raw_path = macos_fcntl.fcntl(
-            binding.directory_fd,
-            macos_fcntl.F_GETPATH,
-            b"\0" * 1024,
-        )
-        current_path = Path(os.fsdecode(raw_path.split(b"\0", 1)[0]))
-        current = current_path.lstat()
-    except FileNotFoundError:
-        return
+        surviving = driver.open_directory_identity(binding.directory_fd)
     except OSError as error:
         raise AcceptanceFailed("EB-11 could not verify the removed Profile inode") from error
-    if (current.st_dev, current.st_ino) == binding.identity:
+    if surviving == binding.identity:
         raise AcceptanceFailed("EB-11 safe logout retained the old Profile inode")
 
 
@@ -1416,13 +2844,13 @@ def require_safe_logout_cleanup(
 
 
 def require_isolated_launch(app: Path) -> None:
-    if bundle_process_ids() or packaged_process_records(app, process_snapshot()):
+    if bundle_process_ids(app) or packaged_process_records(app, process_snapshot()):
         raise AcceptanceFailed(
             "EB-11 refuses to share a running production App with another session"
         )
 
 
-def process_has_launch_nonce(record: ProcessRecord, nonce: str) -> bool:
+def macos_process_has_launch_nonce(record: ProcessRecord, nonce: str) -> bool:
     try:
         rendered = run_checked(
             ["/bin/ps", "eww", "-p", str(record.pid), "-o", "command="],
@@ -1434,6 +2862,13 @@ def process_has_launch_nonce(record: ProcessRecord, nonce: str) -> bool:
 
 
 def verify_running_release_process(
+    instance: ProcessRecord,
+    release: VerifiedRelease,
+) -> None:
+    device_driver().require_running_release(instance, release)
+
+
+def macos_require_running_release(
     instance: ProcessRecord,
     release: VerifiedRelease,
 ) -> None:
@@ -1467,16 +2902,7 @@ def launch_app(app: Path, executable_path: Path) -> ProcessRecord:
     nonce = secrets.token_urlsafe(24)
     identified: dict[tuple[int, str], ProcessRecord] = {}
     try:
-        run_checked(
-            [
-                "/usr/bin/open",
-                "-n",
-                "-a",
-                os.fspath(app),
-                "--env",
-                f"{LAUNCH_NONCE_ENVIRONMENT}={nonce}",
-            ]
-        )
+        start_app(app, nonce)
         deadline = time.monotonic() + WINDOW_TIMEOUT_SECONDS
         expected_command = os.fspath(executable_path)
         while time.monotonic() < deadline:
@@ -1501,7 +2927,7 @@ def launch_app(app: Path, executable_path: Path) -> ProcessRecord:
                 instance = own_records[0]
                 if len(main_records) != 1:
                     raise AcceptanceFailed("EB-11 launched alongside another App process")
-                visible_ids = bundle_process_ids()
+                visible_ids = bundle_process_ids(app)
                 if visible_ids and visible_ids != {instance.pid}:
                     raise AcceptanceFailed("EB-11 launched an ambiguous App process")
                 instance_process_records(app, instance, process_snapshot())
@@ -1540,7 +2966,27 @@ def cleanup_delayed_nonce_owned_runtime(app: Path, nonce: str) -> None:
             time.sleep(POLL_SECONDS)
 
 
+def press(process_id: int, label: str) -> None:
+    """Press one named control, on whichever host this is.
+
+    The three UI instruments are dispatched rather than imported directly so the
+    lifecycle below reads the same on both platforms. What EB-11 *means* — sign
+    in, re-check, log out, prove the Profile is gone, scan again, restart and
+    prove it came back — is the part worth keeping single; only the instrument
+    differs, and it differs entirely inside the driver.
+    """
+    device_driver().press(process_id, label)
+
+
+def visible_ui_text(process_id: int) -> str:
+    return device_driver().visible_ui_text(process_id)
+
+
 def wait_for_window(process_id: int) -> None:
+    device_driver().wait_for_window(process_id)
+
+
+def macos_wait_for_window(process_id: int) -> None:
     deadline = time.monotonic() + WINDOW_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         result = apple_script(
@@ -1557,7 +3003,7 @@ def wait_for_window(process_id: int) -> None:
     raise AcceptanceFailed("EB-11 formal App did not expose its normal main window")
 
 
-def visible_ui_text(process_id: int) -> str:
+def macos_visible_ui_text(process_id: int) -> str:
     body = """
     if (count of windows) is 0 then return "__NO_WINDOW__"
     set collected to {}
@@ -1587,7 +3033,7 @@ def visible_ui_text(process_id: int) -> str:
     return rendered
 
 
-def press(process_id: int, label: str) -> None:
+def macos_press(process_id: int, label: str) -> None:
     """Press one named control, refusing to mistake a disabled one for a click.
 
     `AXPress` on a disabled element does nothing, and a disabled element still
@@ -1656,13 +3102,19 @@ def open_account_page(process_id: int) -> tuple[str, bool]:
 
     This used to wait for `登录正常` and nothing else, which made the whole run
     depend on a session existing before it started. On a clean machine — the
-    state a real user is in, and the one EB-17 exists to verify — the App shows
-    `需要登录`, so the wait ran to its timeout and the run died with
-    `did not expose required UI state: 登录正常` without ever offering a QR code.
-    The lifecycle this script verifies (recheck → safe logout → rescan → restart
-    reuse) still needs a session to start from; what changed is that the script
-    now *observes* whether it has one instead of assuming it, and the caller
-    establishes one by scanning when it does not.
+    state a real user is in, and the one EB-17 exists to verify — no session is
+    there, so the wait ran to its timeout and the run died without ever offering
+    a QR code. The lifecycle this script verifies (recheck → safe logout →
+    rescan → restart reuse) still needs a session to start from; what changed is
+    that the script now *observes* whether it has one instead of assuming it,
+    and the caller establishes one by scanning when it does not.
+
+    Which state a clean machine actually shows was then got wrong twice, so the
+    question is settled structurally rather than by naming states one at a time:
+    the page publishes exactly one of `SESSION_STATE_LABELS`, and only
+    `登录正常` is a session. A freshly installed package with no check on record
+    reads `尚未确认`, not `需要登录` — the first guess — and the second miss cost
+    the operator a run that ended before the QR code, same as the first.
     """
     deadline = time.monotonic() + WINDOW_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
@@ -1685,11 +3137,11 @@ def open_account_page(process_id: int) -> tuple[str, bool]:
                 )
             if HEALTHY_LABEL in latest:
                 return latest, True
-            if LOGIN_REQUIRED_LABEL in latest:
+            if any(label in latest for label in SESSION_STATE_LABELS):
                 return latest, False
             time.sleep(POLL_SECONDS)
         raise AcceptanceFailed(
-            "EB-11 account page settled on neither a signed-in nor a signed-out state"
+            "EB-11 account page settled on no state this App can publish"
         )
     raise AcceptanceFailed("EB-11 account navigation did not become ready")
 
@@ -1818,7 +3270,7 @@ def recheck_healthy_session(
                     if observed_time(latest) > before_time:
                         if watcher is not None:
                             observation = observation.merge(watcher.result())
-                            require_complete_runtime(observation)
+                            require_recheck_runtime(observation)
                         return before, after, observation
                 time.sleep(POLL_SECONDS)
             if watcher is not None:
@@ -1839,6 +3291,14 @@ def terminate_records(records: list[ProcessRecord], signal_number: int) -> None:
             os.kill(record.pid, signal_number)
         except ProcessLookupError:
             continue
+        except PermissionError:
+            # Windows raises this for a process that has exited but whose id is
+            # still visible. Cleanup runs after something has already gone
+            # wrong, so it races with exits by construction; a process that is
+            # gone is the outcome being asked for, not a failure.
+            if still_running([record]):
+                raise
+            continue
 
 
 def cleanup_owned_runtime(
@@ -1857,7 +3317,7 @@ def cleanup_owned_runtime(
     root_pid = instance.pid if instance is not None else None
     root = [record for record in records if record.pid == root_pid]
     descendants = [record for record in records if record.pid != root_pid]
-    terminate_records(root + descendants, signal.SIGTERM)
+    terminate_records(root + descendants, GRACEFUL_SIGNAL)
     deadline = time.monotonic() + 8.0
     while time.monotonic() < deadline:
         residual = still_running(records)
@@ -1872,7 +3332,7 @@ def cleanup_owned_runtime(
             *owned_process_records(app, instance, reject_foreign=False),
         ]
     }
-    terminate_records(list(residual_by_pid.values()), signal.SIGKILL)
+    terminate_records(list(residual_by_pid.values()), FORCEFUL_SIGNAL)
     deadline = time.monotonic() + 8.0
     while time.monotonic() < deadline:
         residual = still_running(records)
@@ -1880,20 +3340,14 @@ def cleanup_owned_runtime(
         residual_by_pid = {record.pid: record for record in residual}
         if not residual_by_pid:
             return
-        terminate_records(list(residual_by_pid.values()), signal.SIGKILL)
+        terminate_records(list(residual_by_pid.values()), FORCEFUL_SIGNAL)
         time.sleep(0.2)
     raise AcceptanceFailed("EB-11 could not clean its owned App process tree")
 
 
-def quit_app(app: Path, instance: ProcessRecord) -> None:
-    process_id = instance.pid
-    tracked = owned_process_records(app, instance)
-    if instance not in tracked:
-        cleanup_owned_runtime(app, instance, tracked)
-        raise AcceptanceFailed("EB-11 formal App exited before normal quit")
-    try:
-        result = apple_script(
-            f'''
+def macos_request_quit(process_id: int) -> None:
+    result = apple_script(
+        f'''
 tell application "System Events"
   set matches to every application process whose unix id is {process_id}
   if (count of matches) is not 1 then return "not_running"
@@ -1904,9 +3358,19 @@ tell application "System Events"
   return "requested"
 end tell
 '''
-        )
-        if result != "requested":
-            raise AcceptanceFailed("EB-11 could not request normal App quit")
+    )
+    if result != "requested":
+        raise AcceptanceFailed("EB-11 could not request normal App quit")
+
+
+def quit_app(app: Path, instance: ProcessRecord) -> None:
+    process_id = instance.pid
+    tracked = owned_process_records(app, instance)
+    if instance not in tracked:
+        cleanup_owned_runtime(app, instance, tracked)
+        raise AcceptanceFailed("EB-11 formal App exited before normal quit")
+    try:
+        device_driver().request_quit(process_id)
         deadline = time.monotonic() + QUIT_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
             residual = still_running(tracked)
@@ -1945,12 +3409,12 @@ def open_evidence_target(path: Path) -> EvidenceTarget:
         raise AcceptanceFailed("EB-11 evidence target is invalid")
     resolved_path = path.parent.resolve(strict=True) / path.name
     try:
-        descriptor = open_absolute_directory(resolved_path.parent)
+        descriptor = device_driver().open_directory(resolved_path.parent)
     except OSError as error:
         raise AcceptanceFailed("EB-11 evidence directory is unavailable") from error
     try:
         try:
-            os.stat(resolved_path.name, dir_fd=descriptor, follow_symlinks=False)
+            device_driver().stat_in(descriptor, resolved_path.name)
         except FileNotFoundError:
             pass
         else:
@@ -1983,7 +3447,7 @@ def require_evidence_parent_binding(target: EvidenceTarget) -> None:
     if target.parent_fd < 0:
         raise AcceptanceFailed("EB-11 evidence directory handle is closed")
     try:
-        current_descriptor = open_absolute_directory(target.path.parent)
+        current_descriptor = device_driver().open_directory(target.path.parent)
     except OSError as error:
         raise AcceptanceFailed("EB-11 evidence directory path changed") from error
     try:
@@ -2002,14 +3466,11 @@ def unlink_owned_file(
 ) -> None:
     if identity is None:
         return
+    driver = device_driver()
     try:
-        metadata = os.stat(
-            name,
-            dir_fd=target.parent_fd,
-            follow_symlinks=False,
-        )
+        metadata = driver.stat_in(target.parent_fd, name)
         if stat.S_ISREG(metadata.st_mode) and (metadata.st_dev, metadata.st_ino) == identity:
-            os.unlink(name, dir_fd=target.parent_fd)
+            driver.unlink_in(target.parent_fd, name)
     except FileNotFoundError:
         return
 
@@ -2022,20 +3483,21 @@ def write_evidence(
         raise AcceptanceFailed("EB-11 evidence directory handle is closed")
     require_evidence_parent_binding(target)
     payload = (json.dumps(document, ensure_ascii=False, indent=2) + "\n").encode()
+    driver = device_driver()
     temporary = f".{target.name}.{secrets.token_hex(12)}.tmp"
     descriptor = -1
     identity: tuple[int, int] | None = None
     published = False
     try:
-        descriptor = os.open(
+        descriptor = driver.open_in(
+            target.parent_fd,
             temporary,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-            mode=0o600,
-            dir_fd=target.parent_fd,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | NO_FOLLOW_OPEN_FLAG,
+            PRIVATE_EVIDENCE_MODE,
         )
         opened = os.fstat(descriptor)
         identity = (opened.st_dev, opened.st_ino)
-        os.fchmod(descriptor, 0o600)
+        driver.make_private_file(descriptor)
         offset = 0
         while offset < len(payload):
             written = os.write(descriptor, payload[offset:])
@@ -2046,7 +3508,7 @@ def write_evidence(
         completed = os.fstat(descriptor)
         if (
             not stat.S_ISREG(completed.st_mode)
-            or stat.S_IMODE(completed.st_mode) != 0o600
+            or not driver.require_published_evidence_mode(completed)
             or completed.st_size != len(payload)
             or (completed.st_dev, completed.st_ino) != identity
         ):
@@ -2055,28 +3517,18 @@ def write_evidence(
         descriptor = -1
 
         require_evidence_parent_binding(target)
-        os.link(
-            temporary,
-            target.name,
-            src_dir_fd=target.parent_fd,
-            dst_dir_fd=target.parent_fd,
-            follow_symlinks=False,
-        )
+        driver.link_in(target.parent_fd, temporary, target.name)
         published = True
-        published_metadata = os.stat(
-            target.name,
-            dir_fd=target.parent_fd,
-            follow_symlinks=False,
-        )
+        published_metadata = driver.stat_in(target.parent_fd, target.name)
         if (
             not stat.S_ISREG(published_metadata.st_mode)
-            or stat.S_IMODE(published_metadata.st_mode) != 0o600
+            or not driver.require_published_evidence_mode(published_metadata)
             or published_metadata.st_size != len(payload)
             or (published_metadata.st_dev, published_metadata.st_ino) != identity
         ):
             raise AcceptanceFailed("EB-11 published evidence verification failed")
-        os.unlink(temporary, dir_fd=target.parent_fd)
-        os.fsync(target.parent_fd)
+        driver.unlink_in(target.parent_fd, temporary)
+        driver.sync_directory(target.parent_fd)
         require_evidence_parent_binding(target)
         return identity
     except BaseException:
@@ -2181,6 +3633,7 @@ def run_acceptance(arguments: Arguments) -> EvidencePublication:
                 qr_open_runtime,
                 qr_recheck_runtime,
                 restart_runtime,
+                profile_root,
             )
             qr_runtime = qr_open_runtime.merge(qr_recheck_runtime)
             verify_running_release_process(owned_instance, verified_release)
@@ -2202,6 +3655,13 @@ def run_acceptance(arguments: Arguments) -> EvidencePublication:
                 "signingAuthority": artifact.authority,
                 "signingTeamId": artifact.team_id,
                 "bundleCdHash": artifact.bundle_cdhash,
+                # What the artifact binding actually rests on. On macOS the
+                # Developer ID authority; on Windows the measured Authenticode
+                # status, which is `NotSigned` on a host with no certificate —
+                # so a reader can tell "the OS vouches for this" from "the bytes
+                # match what we built" without inferring it from three empty
+                # fields.
+                "codeSigning": artifact.code_signing,
                 "bundleTreeSha256": artifact.bundle_tree_sha256,
                 "bundleBytes": artifact.bundle_bytes,
                 "executorBuildId": artifact.executor_build_id,

@@ -57,6 +57,45 @@ class ArchivePathTests(unittest.TestCase):
         self.assertEqual(archive_path(MACOS_ARM64_ARCHIVE).name, "chrome-mac-arm64.zip")
         self.assertEqual(archive_path(WINDOWS_X86_64_ARCHIVE).name, "chrome-win64.zip")
 
+
+class OnlyOneArchiveLookupTests(unittest.TestCase):
+    """`build_embedded_chromium_staging` kept a second copy of this lookup.
+
+    The move to a machine-wide cache rewrote `embedded_browser_archives` and
+    deleted the two-candidate `_first_existing()` search from
+    `build_release_package`. It left an identical one behind in
+    `build_embedded_chromium_staging`: same helper name, same two candidates,
+    the same two `.local/` literals, and a comment still describing the cache as
+    living in "the primary checkout's `.local`".
+
+    That copy is not dead code. Five callers read its `DEFAULT_ARCHIVES` —
+    `backend/tests/integration/conftest.py`, `run_bm_16_acceptance.py`,
+    `run_eb_16_acceptance.py`, `run_le_22_macos_package_acceptance.py` and
+    `run_pc_16_macos_package_acceptance.py` — and three of them call
+    `.resolve(strict=True)` on the result, so once the archive actually moved
+    they stopped failing with "not downloaded yet" and started raising
+    `FileNotFoundError` at a path nothing writes any more.
+    """
+
+    def test_the_staging_module_reuses_the_shared_lookup(self) -> None:
+        from build_embedded_chromium_staging import DEFAULT_ARCHIVES
+
+        self.assertEqual(
+            default_archives(),
+            DEFAULT_ARCHIVES,
+            "a second archive lookup disagrees with the shared one",
+        )
+
+    def test_no_staging_default_points_inside_a_checkout(self) -> None:
+        from build_embedded_chromium_staging import DEFAULT_ARCHIVES
+
+        for target_id, path in DEFAULT_ARCHIVES.items():
+            with self.subTest(target=target_id):
+                self.assertTrue(
+                    path.is_relative_to(cache_root()),
+                    f"{target_id} resolves to {path}, outside the machine cache",
+                )
+
     def test_cache_override_moves_the_archives_with_it(self) -> None:
         # `AUTOMATION_TOOL_BUILD_CACHE` already relocates every other pinned
         # artifact. An archive that ignored it would split one machine's cache

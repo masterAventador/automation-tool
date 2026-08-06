@@ -373,3 +373,88 @@ async def test_begin_logout_rejects_invalid_scope_and_system_clock_is_utc() -> N
             platform="private",
         )
     assert SystemPlatformSessionHealthClock().now().utcoffset() == UTC.utcoffset(NOW)
+
+
+@pytest.mark.asyncio
+async def test_each_rejection_names_the_rule_that_refused_it() -> None:
+    """A refusal has to say which rule refused, or nobody can act on it.
+
+    2026-08-06: a Windows Executor was closed by this service with
+    `Executor protocol is rejected` and no log line at all. Finding out why took
+    a loopback packet capture on the deployment host, unmasking the WebSocket
+    client frames by hand, and replaying the captured message against these
+    models locally — and the answer was still not in reach, because every branch
+    here raises the same bare exception.
+
+    The reason is a fixed vocabulary, never message content: these lines go to a
+    server log, and `CLAUDE.md` §7 keeps platform facts out of ordinary logs.
+    """
+    service = PlatformSessionHealthService(repository=Repository(), clock=FixedClock())
+
+    with pytest.raises(PlatformSessionHealthRejected) as sent_in_future:
+        # Beyond the skew allowance: a clock this wrong is a finding, not drift.
+        await service.receive(
+            message(
+                sent_at=NOW + timedelta(minutes=5),
+                deadline_at=NOW + timedelta(minutes=5, seconds=30),
+            )
+        )
+    assert sent_in_future.value.reason == "sent_at_is_in_the_future"
+
+    with pytest.raises(PlatformSessionHealthRejected) as expired:
+        await service.receive(
+            message(sent_at=NOW - timedelta(minutes=10), deadline_at=NOW - timedelta(minutes=9))
+        )
+    assert expired.value.reason == "deadline_has_passed"
+
+    with pytest.raises(PlatformSessionHealthRejected) as observed_after_sent:
+        await service.receive(
+            message(observed_at=NOW + timedelta(seconds=1), sent_at=NOW)
+        )
+    assert observed_after_sent.value.reason == "observed_after_sent"
+
+    with pytest.raises(PlatformSessionHealthRejected) as wrong_type:
+        await service.receive(object())  # type: ignore[arg-type]
+    assert wrong_type.value.reason == "not_a_session_health_envelope"
+
+    # The default stays usable for the raise sites that have nothing to add.
+    assert PlatformSessionHealthRejected().reason == "unspecified"
+
+
+@pytest.mark.asyncio
+async def test_a_slightly_fast_executor_clock_is_tolerated() -> None:
+    """Two machines never agree on the time, and this one must not require it.
+
+    2026-08-06, customer Demo: every platform command on a Windows host ended
+    with the Executor exiting a few seconds after start, taking the operations
+    browser with it — the operator could not even reach the QR code. The cause
+    was this comparison, with no tolerance at all: that machine's clock ran
+    about 110ms ahead of the deployment host, so every `sent_at` landed in the
+    server's future, the message was refused as a protocol violation, the
+    Control Plane closed the WebSocket, and the Executor treats a server-side
+    close as unrecoverable.
+
+    The codebase already knows clocks differ — `DEVICE_SESSION_CLOCK_SKEW` is
+    30 seconds for exactly this reason. A fact observed on the operator's own
+    machine is not less trustworthy because their clock is a tenth of a second
+    fast.
+    """
+    service = PlatformSessionHealthService(repository=Repository(), clock=FixedClock())
+
+    # What the Windows host actually sent: ahead of the server, well inside skew.
+    ahead = await service.receive(
+        message(observed_at=NOW + timedelta(milliseconds=110),
+                sent_at=NOW + timedelta(milliseconds=110))
+    )
+    assert ahead.projection.session_revision == 7
+
+    # Still bounded: a clock that is wrong by more than the allowance is refused.
+    with pytest.raises(PlatformSessionHealthRejected) as far_ahead:
+        await service.receive(
+            message(
+                observed_at=NOW + timedelta(minutes=5),
+                sent_at=NOW + timedelta(minutes=5),
+                deadline_at=NOW + timedelta(minutes=5, seconds=30),
+            )
+        )
+    assert far_ahead.value.reason == "sent_at_is_in_the_future"

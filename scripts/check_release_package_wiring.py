@@ -43,6 +43,7 @@ from release_assembly import (  # noqa: E402
     ASSEMBLER_INSTALLED_RESOURCES,
     RELEASE_PACKAGE_RESOURCES,
 )
+from release_identity import PACKAGED_IDENTITY_NAME  # noqa: E402
 
 PLATFORMS = ("macos", "windows")
 # The paths that can produce a distributable artifact. The macOS one is a
@@ -78,6 +79,22 @@ class WiringRejected(RuntimeError):
 
 def _reject(message: str) -> None:
     raise WiringRejected(f"release package wiring rejected: {message}")
+
+
+def _repository_scratch() -> tempfile.TemporaryDirectory[str]:
+    """Scratch space a Windows release configuration can still point at.
+
+    The Windows writer records resource sources relative to the Tauri root, and
+    Windows has no relative path between two drives. The system temporary
+    directory is on `C:` while a checkout may be on any other, so this gate
+    aborted on that host with "resource source must be relative to the Tauri
+    root" — a message about the gate's own scratch directory, not about
+    anything it was checking. Under the repository, both are always on one
+    drive.
+    """
+    scratch = ROOT / ".local"
+    scratch.mkdir(exist_ok=True)
+    return tempfile.TemporaryDirectory(prefix="release-wiring-", dir=scratch)
 
 
 def check_every_resource_has_an_owner() -> None:
@@ -142,24 +159,45 @@ def check_every_video_resource_has_a_builder() -> None:
 
 
 def check_the_release_configuration_declares_every_bundled_resource() -> None:
-    """Write both release configurations and read back what they declare."""
-    with tempfile.TemporaryDirectory(prefix="release-wiring-") as raw:
+    """Write both release configurations and read back what they declare.
+
+    The Windows one is written the way a *release* writes it — with the
+    provenance file the EB-11 runner reads back out of the installed package.
+    It is not one of the contract's resource trees and must not be counted as
+    one, but it must be there: a release once wrote it into the payload and
+    shipped an installer without it, because nothing connected "written" to
+    "declared". Both halves of that are asserted here.
+    """
+    with _repository_scratch() as raw:
         base = Path(raw)
         executor = base / "executor"
         executor.mkdir()
         payload = base / "payload"
         payload.mkdir()
+        identity = payload / PACKAGED_IDENTITY_NAME
+        identity.write_text("{}", encoding="utf-8")
         written = {
             "macos": release_configuration.write_macos_release_configuration(
                 directory=base, executor=executor, name="macos.json"
             ),
             "windows": release_configuration.write_windows_release_configuration(
-                directory=base, executor=executor, payload=payload, name="windows.json"
+                directory=base,
+                executor=executor,
+                payload=payload,
+                name="windows.json",
+                release_identity=identity,
             ),
         }
         for platform, path in written.items():
             declared = json.loads(path.read_text(encoding="utf-8"))["bundle"]["resources"]
             destinations = {value.rstrip("/") for value in declared.values()}
+            if platform == "windows":
+                if PACKAGED_IDENTITY_NAME not in destinations:
+                    _reject(
+                        "the windows release configuration drops the release "
+                        f"identity, so the installer could not carry {PACKAGED_IDENTITY_NAME}"
+                    )
+                destinations.discard(PACKAGED_IDENTITY_NAME)
             expected = {
                 release_configuration.installed_destination(name)
                 for name in release_configuration.bundler_declared_resources(platform)

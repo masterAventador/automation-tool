@@ -28,6 +28,7 @@ from automation_tool.executor.command_processor import (
     ExecutorOutboundMessage,
 )
 from automation_tool.executor.diagnostics import ExecutorRecoveryDiagnostics
+from automation_tool.executor.frame_output import write_protocol_line
 from automation_tool.executor.transport import (
     ExecutorTransportRejected,
     connect_executor_websocket,
@@ -137,13 +138,7 @@ class ExecutorProcessReporter:
                 sort_keys=True,
             )
             with self._lock:
-                binary_output = getattr(self._output, "buffer", None)
-                if binary_output is not None:
-                    binary_output.write((source + "\n").encode("utf-8"))
-                    binary_output.flush()
-                else:
-                    self._output.write(source + "\n")
-                    self._output.flush()
+                write_protocol_line(self._output, source)
         except Exception:
             failed = True
         if failed:

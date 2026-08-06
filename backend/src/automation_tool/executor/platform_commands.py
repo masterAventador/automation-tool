@@ -37,6 +37,7 @@ from automation_tool.executor.browser_use_safety import (
     SideEffectApproval,
     SideEffectConfirmationGate,
 )
+from automation_tool.executor.frame_output import write_protocol_line
 from automation_tool.executor.ledger import ExecutorLedger
 from automation_tool.executor.rpa.douyin.login import (
     DouyinQrLoginFlow,
@@ -1055,8 +1056,7 @@ def write_platform_command_result(
         )
         if len(source.encode("utf-8")) > 4096:
             raise ValueError
-        output.write(source + "\n")
-        output.flush()
+        write_protocol_line(output, source)
     except Exception:
         raise PlatformCommandRejected from None
 

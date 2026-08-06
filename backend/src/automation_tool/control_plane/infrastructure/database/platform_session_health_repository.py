@@ -84,7 +84,7 @@ class SqlAlchemyPlatformSessionHealthRepository:
         pending: PendingPlatformSessionHealth,
     ) -> PlatformSessionHealthConvergenceResult:
         if not isinstance(pending, PendingPlatformSessionHealth):
-            raise PlatformSessionHealthRejected
+            raise PlatformSessionHealthRejected("not_a_pending_health_record")
         try:
             async with self._database.session() as session:
                 installation = (
@@ -102,7 +102,7 @@ class SqlAlchemyPlatformSessionHealthRepository:
                     installation is None
                     or installation["status"] != InstallationStatus.ACTIVE.value
                 ):
-                    raise PlatformSessionHealthRejected
+                    raise PlatformSessionHealthRejected("installation_is_not_active")
                 current = (
                     (
                         await session.execute(
@@ -144,23 +144,23 @@ class SqlAlchemyPlatformSessionHealthRepository:
 
                 projection = _projection(current)
                 if pending.session_revision < projection.session_revision:
-                    raise PlatformSessionHealthRejected
+                    raise PlatformSessionHealthRejected("revision_went_backwards")
                 if pending.session_revision == projection.session_revision:
                     if pending.observed_at < projection.observed_at:
-                        raise PlatformSessionHealthRejected
+                        raise PlatformSessionHealthRejected("same_revision_observed_earlier")
                     if pending.observed_at == projection.observed_at:
                         if pending.state is not projection.state:
-                            raise PlatformSessionHealthRejected
+                            raise PlatformSessionHealthRejected("same_observation_different_state")
                         return PlatformSessionHealthConvergenceResult(
                             projection=projection,
                             duplicate=True,
                         )
                     if projection.circuit_open and not pending.circuit_open:
-                        raise PlatformSessionHealthRejected
+                        raise PlatformSessionHealthRejected("circuit_reopened_without_cause")
                 elif pending.observed_at <= projection.observed_at:
-                    raise PlatformSessionHealthRejected
+                    raise PlatformSessionHealthRejected("newer_revision_observed_no_later")
                 if pending.received_at < projection.updated_at:
-                    raise PlatformSessionHealthRejected
+                    raise PlatformSessionHealthRejected("received_before_last_update")
 
                 gate_revision = await session.scalar(
                     select(platform_session_gates.c.session_revision)

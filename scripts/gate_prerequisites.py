@@ -142,11 +142,24 @@ def _video_e2e_browser_paths() -> tuple[str, ...]:
     return (manifest.as_posix(),)
 
 
+def _offline_motion_catalog_paths() -> tuple[str, ...]:
+    """Absolute for the same reason the staged browser is: one per machine.
+
+    The locked catalog is a digest-pinned build input fetched from three CDNs,
+    so it moved beside the other pinned inputs in the artifact cache. It used
+    to be named `.local/offline-motion-deps/catalog`, which a worktree never
+    had — `.local` is not carried into one.
+    """
+    from build_offline_motion_catalog import catalog_root
+
+    return (catalog_root().as_posix(),)
+
+
 PREREQUISITES: Final[tuple[Prerequisite, ...]] = (
     Prerequisite(
         name="offline-motion-catalog",
         gate="scripts/test_motion_catalog_release.py",
-        produces=(".local/offline-motion-deps/catalog",),
+        produces=_offline_motion_catalog_paths(),
         producer=("{python}", "scripts/build_offline_motion_catalog.py"),
         automatic=False,
         why=(
@@ -362,9 +375,9 @@ def main() -> int:
 
 __all__ = [
     "PREREQUISITES",
+    "REPOSITORY_ROOT",
     "Prerequisite",
     "PrerequisiteMissing",
-    "REPOSITORY_ROOT",
     "by_name",
     "ensure",
     "explain",

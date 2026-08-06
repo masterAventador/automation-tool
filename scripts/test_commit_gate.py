@@ -13,6 +13,7 @@ of them. So the properties under test are not "does it run mypy" but:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -20,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import commit_gate  # noqa: E402
+import commit_gate
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 
@@ -388,8 +389,14 @@ def check_slow_checkout_preparation_is_isolated_and_reconstructible() -> None:
         source = root / "source"
         checkout = root / "checkout"
         checkout.mkdir()
+        # The repository's own rules, not a convenient subset. `node_modules/`
+        # matters: the fast tier hands Windows a *directory junction*, which Git
+        # reads as a directory and therefore ignores — and naming an ignored
+        # path in a pathspec is an error, not a no-op. Without this line the
+        # fixture could not produce the condition that broke the real slow tier
+        # on 2026-08-07, so the check could not fail.
         (checkout / ".gitignore").write_text(
-            ".local/\n**/.venv/\n",
+            ".local/\n**/.venv/\nnode_modules/\n",
             encoding="utf-8",
         )
         (checkout / "tracked.txt").write_text("commit bytes\n", encoding="utf-8")
@@ -404,9 +411,15 @@ def check_slow_checkout_preparation_is_isolated_and_reconstructible() -> None:
             interpreter = environment / executable[0] / executable[1]
             interpreter.parent.mkdir(parents=True)
             interpreter.write_text("runtime only\n", encoding="utf-8")
-        cached = source / ".local/offline-motion-deps/catalog"
+        # The locked catalog is a machine-wide build input now, not a per-checkout
+        # one, so it is placed where `catalog_root()` resolves rather than under
+        # the source tree. `AUTOMATION_TOOL_BUILD_CACHE` is the supported way to
+        # relocate that, and the three implementations of it agree by gate.
+        cache = source.parent / "artifact-cache"
+        cached = cache / "offline-motion-catalog"
         cached.mkdir(parents=True)
         (cached / "locked.txt").write_text("digest-pinned\n", encoding="utf-8")
+        os.environ["AUTOMATION_TOOL_BUILD_CACHE"] = os.fspath(cache)
         modules = source / "frontend/node_modules"
         modules.mkdir(parents=True)
         (modules / "runtime.txt").write_text("dependency only\n", encoding="utf-8")
@@ -441,12 +454,15 @@ def check_slow_checkout_preparation_is_isolated_and_reconstructible() -> None:
             _fail("slow checkout lost the Node dependency linked by the fast tier")
         if not (checkout / "backend/.venv" / executable[0] / executable[1]).is_file():
             _fail("slow checkout cannot resolve the project interpreter layout")
-        copied = checkout / ".local/offline-motion-deps/catalog/locked.txt"
-        if not copied.is_file() or copied.is_symlink():
-            _fail("slow checkout did not copy its offline catalog input")
-        copied.write_text("test mutation\n", encoding="utf-8")
+        # No copy any more: the catalog is read-only input shared by every
+        # checkout on the machine, so duplicating 46 MiB per slow-tier run
+        # bought nothing. What still has to hold is that the slow tier does not
+        # write into it — the release it builds is an output and goes to
+        # `.local` inside the checkout.
+        if (checkout / ".local/offline-motion-deps").exists():
+            _fail("slow checkout still carries a per-checkout copy of the catalog")
         if (cached / "locked.txt").read_text(encoding="utf-8") != "digest-pinned\n":
-            _fail("slow checkout writes through into the developer's build cache")
+            _fail("slow checkout wrote into the shared build input")
         if not (
             checkout / ".local/motion-catalog-release/1.0.0/manifest.json"
         ).is_file():

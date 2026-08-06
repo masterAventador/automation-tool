@@ -229,34 +229,26 @@ def _initialize_slow_checkout_repository(checkout: Path) -> None:
     if (checkout / ".git").exists():
         raise RuntimeError("the slow checkout unexpectedly already contains .git")
     _run_checkout_command(["git", "init", "--quiet"], checkout)
-    # The fast TypeScript tier has already linked ``node_modules`` into this
-    # same checkout. A symlink itself is not matched by a trailing-slash
-    # ``node_modules/`` ignore rule, so an unrestricted ``git add --all`` would
-    # commit an absolute host link. The nested checkout self-test then (rightly)
-    # refuses to extract that archive. Keep the runtime available on disk while
-    # excluding it from the disposable source snapshot.
-    _run_checkout_command(
-        [
-            "git",
-            "add",
-            "--all",
-            "--",
-            ".",
-            ":(exclude)frontend/node_modules",
-        ],
-        checkout,
-    )
-    # The fast tier adds this ignored runtime after `git archive` extracts the
-    # commit. A directory-shaped ignore (`node_modules/`) does not match the
-    # symlink itself, so source-identity checks would otherwise mistake the
-    # gate's absolute host link for an untracked release input. Keep the link
-    # usable by later render tests while excluding this one gate-owned path
-    # from the disposable repository's source inventory.
+    # The fast tier has already linked ``node_modules`` into this same checkout,
+    # and that link must stay usable on disk while staying out of the disposable
+    # source snapshot: a snapshot carrying an absolute host link makes the nested
+    # checkout self-test (rightly) refuse to extract the archive.
+    #
+    # Excluded through ``info/exclude`` rather than a ``:(exclude)`` pathspec,
+    # and written *before* the add rather than after. The two platforms present
+    # the link differently — macOS a symlink, which a directory-shaped
+    # ``node_modules/`` rule does not match, and Windows a directory junction,
+    # which it does — and naming an already-ignored path in a pathspec is an
+    # error rather than a no-op. So the pathspec form worked on one platform and
+    # failed the whole slow tier on the other (measured 2026-08-07: `git add`
+    # exit 1, "The following paths are ignored ... use -f"). One ignore entry,
+    # applied first, is right on both.
     info_exclude = checkout / ".git" / "info" / "exclude"
     existing = info_exclude.read_text(encoding="utf-8")
     marker = "/frontend/node_modules\n"
     if marker not in existing:
         info_exclude.write_text(existing + marker, encoding="utf-8")
+    _run_checkout_command(["git", "add", "--all", "--", "."], checkout)
     _run_checkout_command(
         [
             "git",
@@ -289,10 +281,21 @@ def _link_slow_runtime_inputs(checkout: Path, source_root: Path) -> None:
         _link_directory(destination, source)
 
 
-def _copy_offline_motion_catalog(checkout: Path, source_root: Path) -> None:
-    """Copy the digest-locked download cache without linking writes to it."""
-    relative = Path(".local/offline-motion-deps/catalog")
-    source = source_root / relative
+def _require_offline_motion_catalog() -> None:
+    """Check the shared build input the slow checkout will read, without copying it.
+
+    This used to copy 46 MiB into the checkout, because the catalog lived in
+    `.local` and a link would have exposed the host's copy to writes. It now
+    lives in the machine-wide artifact cache, which every checkout resolves to
+    identically, and the slow tier only *reads* it: `_build_slow_motion_release`
+    runs the release build, whose output goes to `.local` inside the checkout.
+    So the copy is gone and the two checks it carried stay — a missing input and
+    a link inside the tree are still worth naming here rather than as a failure
+    deeper inside the release build.
+    """
+    from build_offline_motion_catalog import catalog_root
+
+    source = catalog_root()
     if not source.is_dir():
         raise RuntimeError(
             f"slow-tier build input is missing: {source}; "
@@ -304,9 +307,6 @@ def _copy_offline_motion_catalog(checkout: Path, source_root: Path) -> None:
             "slow-tier offline catalog contains a link: "
             f"{links[0].relative_to(source).as_posix()}"
         )
-    destination = checkout / relative
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source, destination)
 
 
 def _build_slow_motion_release(checkout: Path, source_root: Path) -> None:
@@ -339,7 +339,7 @@ def prepare_slow_checkout(
     """Prepare only ignored/reconstructible inputs for aggregate script tests."""
     _initialize_slow_checkout_repository(checkout)
     _link_slow_runtime_inputs(checkout, source_root)
-    _copy_offline_motion_catalog(checkout, source_root)
+    _require_offline_motion_catalog()
     if build_release is None:
         _build_slow_motion_release(checkout, source_root)
     else:

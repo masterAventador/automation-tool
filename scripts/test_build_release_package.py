@@ -8,6 +8,8 @@ notarises, signs or builds a bundle — those need Apple and forty minutes.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import json
 import os
 import plistlib
 import subprocess
@@ -22,9 +24,41 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import build_release_package  # noqa: E402
-from build_release_package import attach_command  # noqa: E402
-from build_release_package import embed_release_identity  # noqa: E402
+from build_release_package import (  # noqa: E402
+    attach_command,
+    embed_release_identity,
+)
 from release_identity import SourceFacts  # noqa: E402
+
+
+def make_private(path: Path) -> None:
+    """Give the file the shape its reader actually requires on this host.
+
+    `chmod(0o600)` only toggles the read-only attribute on Windows — `S_IMODE`
+    stays `0o666` for every writable file — so a fixture that stops there tests
+    the rejection path on one platform and the acceptance path on the other.
+    The property is the same either way: this user and nobody else.
+    """
+    path.chmod(0o600)
+    if os.name == "nt":
+        from test_customer_demo_release import make_windows_private
+
+        make_windows_private(path)
+
+
+def rendered_capability_reference(read_descriptor: int) -> str:
+    """What this platform's spawner would actually put in the environment.
+
+    POSIX hands over the file descriptor; Windows hands over an inheritable OS
+    handle, because `pass_fds` does not exist there. Spelling the descriptor
+    into the environment on both would test the reader against a shape nothing
+    in the product ever produces.
+    """
+    if os.name == "nt":
+        import msvcrt
+
+        return str(msvcrt.get_osfhandle(read_descriptor))
+    return str(read_descriptor)
 
 
 class PexelsKeyAssemblyGateTests(unittest.TestCase):
@@ -112,6 +146,39 @@ class PexelsKeyAssemblyGateTests(unittest.TestCase):
             "require_compiled_pexels_key(",
             body,
             "build_macos_release must read the key back out of the finished binary",
+        )
+
+    def test_a_windows_release_without_a_stock_footage_key_is_refused(self) -> None:
+        """The refusal has to hold on both containers, not just the `.app`.
+
+        `main()` reaches one call site through
+        `build_windows_release if platform == "windows" else build_macos_release`,
+        so a keyword only one of them accepts is a `TypeError` on the other —
+        and a Windows package that somehow got built without the key would ship
+        the ask-the-user behaviour this gate exists to remove.
+        """
+        with tempfile.TemporaryDirectory(prefix="windows-release-gate-") as temporary:
+            with self.assertRaisesRegex(
+                build_release_package.ReleaseFailed, "pexels"
+            ):
+                build_release_package.build_windows_release(
+                    work_directory=Path(temporary),
+                    archive=None,
+                    build_id="gate-check",
+                )
+
+    def test_the_readback_is_wired_into_the_windows_release_path(self) -> None:
+        source = (ROOT / "scripts/build_release_package.py").read_text(encoding="utf-8")
+        body = source.split("def build_windows_release", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn(
+            "require_compiled_pexels_key(",
+            body,
+            "build_windows_release must read the key back out of the finished binary",
+        )
+        self.assertIn(
+            "pexels_api_key=pexels_api_key",
+            body,
+            "build_windows_release must hand the key to the compile environment",
         )
 
 
@@ -209,7 +276,7 @@ class SignedReleaseIdentityTests(unittest.TestCase):
             with (
                 mock.patch.dict(
                     os.environ,
-                    {capability_name: str(read_descriptor)},
+                    {capability_name: rendered_capability_reference(read_descriptor)},
                     clear=False,
                 ),
                 mock.patch.object(
@@ -234,10 +301,8 @@ class SignedReleaseIdentityTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 os.fstat(read_descriptor)
         finally:
-            try:
+            with contextlib.suppress(OSError):
                 os.close(read_descriptor)
-            except OSError:
-                pass
 
     def test_snapshot_capability_cannot_bless_the_ordinary_checkout(self) -> None:
         source_facts = build_release_package.repository_source_facts(ROOT)
@@ -254,23 +319,23 @@ class SignedReleaseIdentityTests(unittest.TestCase):
         os.write(write_descriptor, payload)
         os.close(write_descriptor)
         try:
-            with mock.patch.dict(
-                os.environ,
-                {capability_name: str(read_descriptor)},
-                clear=False,
-            ):
-                with self.assertRaisesRegex(
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {capability_name: rendered_capability_reference(read_descriptor)},
+                    clear=False,
+                ),
+                self.assertRaisesRegex(
                     build_release_package.ReleaseFailed,
                     "snapshot layout",
-                ):
-                    build_release_package.require_materialized_source_snapshot(
-                        ROOT / ".local" / "release-work"
-                    )
+                ),
+            ):
+                build_release_package.require_materialized_source_snapshot(
+                    ROOT / ".local" / "release-work"
+                )
         finally:
-            try:
+            with contextlib.suppress(OSError):
                 os.close(read_descriptor)
-            except OSError:
-                pass
 
     def test_snapshot_restart_preserves_the_callers_relative_path_base(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -309,7 +374,9 @@ class SignedReleaseIdentityTests(unittest.TestCase):
                     "run",
                     return_value=child,
                 ) as run,
-                mock.patch.object(sys, "argv", ["build_release_package.py", "--work-dir", "../out"]),
+                mock.patch.object(
+                    sys, "argv", ["build_release_package.py", "--work-dir", "../out"]
+                ),
             ):
                 result = build_release_package.run_from_materialized_source_snapshot(
                     argparse.Namespace(work_dir=work_directory)
@@ -390,11 +457,20 @@ class SignedReleaseIdentityTests(unittest.TestCase):
         self.assertLess(gate, identity)
 
     def test_release_entry_restarts_the_build_from_the_materialized_snapshot(self) -> None:
+        """Whichever platform is being built, the restart comes first.
+
+        This used to look for `build_macos_release(` because that was the only
+        builder `main()` could reach. `main()` now picks between two, so the
+        anchor is the dispatch — searching for one platform's builder would
+        stop covering the other, silently.
+        """
         source = Path(build_release_package.__file__).read_text(encoding="utf-8")
         main = source.index("def main()")
         snapshot = source.index("run_from_materialized_source_snapshot(", main)
-        build = source.index("build_macos_release(", main)
-        self.assertLess(snapshot, build)
+        dispatch = source.index("build_windows_release if", main)
+        invocation = source.index("result = build(", main)
+        self.assertLess(snapshot, dispatch)
+        self.assertLess(dispatch, invocation)
 
     def test_release_identity_is_embedded_before_the_outer_app_seal(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -437,7 +513,15 @@ class SignedReleaseIdentityTests(unittest.TestCase):
 
             with plist_path.open("rb") as plist_source:
                 identity = plistlib.load(plist_source)["AutomationToolReleaseIdentity"]
-            self.assertEqual(plist_path.stat().st_mode & 0o777, 0o644)
+            # Skipped rather than relaxed on Windows. `chmod` there only toggles
+            # the read-only bit, so every mode reads back as 0o666: asserting
+            # equality against 0o644 fails for an unrelated reason, and
+            # asserting "unchanged" instead passes even when the code sets a
+            # different mode — measured, by setting 0o600 and watching this stay
+            # green. A vacuous assertion is worse than an absent one, because it
+            # reads like coverage.
+            if os.name != "nt":
+                self.assertEqual(plist_path.stat().st_mode & 0o777, 0o644)
             self.assertEqual(
                 identity,
                 {
@@ -633,6 +717,247 @@ class TheOutputDirectoryIsCreatedBeforeItIsUsed(unittest.TestCase):
         )
 
 
+class WindowsReleaseTests(unittest.TestCase):
+    """EB-18. `--platform windows` must build, not refuse.
+
+    Until now the Windows release existed only inside
+    `scripts/run_eb_16_windows_acceptance.py`, and two further Windows
+    acceptance runners each carried their own `build_installer()`. Three copies
+    of the shipped path, none of them reachable as a command, and the one
+    command that *is* the shipped path refused the platform outright.
+
+    That is the exact shape the macOS half was created to end: when the
+    verified path and the shipped path are different code, they drift, and on
+    2026-07-26 the shipped one went out with three resources missing.
+    """
+
+    def test_the_build_id_names_the_platform_being_built(self) -> None:
+        """A real Windows release shipped `"buildId": "macos-release"`.
+
+        The default was the literal string `macos-release`, and nothing changed
+        it when `--platform windows` was passed. The field is not decoration:
+        the EB-11 runner matches it against the packaged executor's build id, so
+        a package that misnames itself either fails there for a confusing reason
+        or agrees because both sides carry the same wrong name.
+        """
+        for platform_name in ("macos", "windows"):
+            with self.subTest(platform=platform_name):
+                arguments = build_release_package.parse_arguments(
+                    ["--platform", platform_name]
+                )
+
+                self.assertEqual(f"{platform_name}-release", arguments.build_id)
+
+    def test_an_explicit_build_id_still_wins(self) -> None:
+        arguments = build_release_package.parse_arguments(
+            ["--platform", "windows", "--build-id", "customer-demo-xuanbai"]
+        )
+
+        self.assertEqual("customer-demo-xuanbai", arguments.build_id)
+
+    def test_a_configuration_that_would_ship_no_release_identity_is_refused(
+        self,
+    ) -> None:
+        """Writing the identity and shipping it are two different things.
+
+        The 2026-08-05 Windows release wrote `release-identity.v1.json` into the
+        payload, announced it, passed every gate and produced an installer whose
+        install root did not contain it — because `bundle.resources` is derived
+        from the resource contract and the identity is not a resource. The EB-11
+        runner reads that file out of the *installed* package, so the whole
+        provenance claim was unreachable while every step reported success.
+
+        This is the cheapest place to catch it: the configuration is written
+        minutes before `makensis` runs, and it is the last artifact that still
+        says what the installer will contain.
+        """
+        from release_identity import PACKAGED_IDENTITY_NAME
+
+        with tempfile.TemporaryDirectory() as temporary:
+            configuration = Path(temporary) / "tauri.json"
+            resources = {"../../build/payload/embedded-browser/": "embedded-browser/"}
+            configuration.write_text(
+                json.dumps({"bundle": {"resources": dict(resources)}}),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(build_release_package.ReleaseFailed):
+                build_release_package.require_declared_release_identity(configuration)
+
+            resources["../../build/payload/release-identity.v1.json"] = (
+                PACKAGED_IDENTITY_NAME
+            )
+            configuration.write_text(
+                json.dumps({"bundle": {"resources": resources}}), encoding="utf-8"
+            )
+
+            build_release_package.require_declared_release_identity(configuration)
+
+    def test_the_packaged_executor_carries_the_build_id_the_identity_claims(
+        self,
+    ) -> None:
+        """Two names for one build is the same defect as `buildId: macos-release`.
+
+        The Windows executor builder lives in the EB-16 acceptance script and
+        hardcoded `eb-16-windows-release` into the manifest it signs, while the
+        release identity beside it carried `--build-id`. Measured on the package
+        installed 2026-08-05: the identity said `windows-release` and the
+        packaged executor manifest said `eb-16-windows-release`.
+
+        That is not cosmetic. `require_release_identity` compares the two, so
+        EB-11 refuses the package with "signed release does not match the
+        packaged Executor" — an accurate message pointing at a build that was
+        internally inconsistent from the start.
+        """
+        with tempfile.TemporaryDirectory() as temporary:
+            executor = Path(temporary)
+            manifest = executor / "executor-manifest.v1.json"
+            manifest.write_text(
+                json.dumps({"build_id": "eb-16-windows-release"}), encoding="utf-8"
+            )
+
+            with self.assertRaises(build_release_package.ReleaseFailed):
+                build_release_package.require_executor_build_id(executor, "windows-release")
+
+            manifest.write_text(json.dumps({"build_id": "windows-release"}), encoding="utf-8")
+
+            build_release_package.require_executor_build_id(executor, "windows-release")
+
+    def test_a_missing_executor_manifest_is_refused_rather_than_assumed(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            self.assertRaises(build_release_package.ReleaseFailed),
+        ):
+            build_release_package.require_executor_build_id(
+                Path(temporary), "windows-release"
+            )
+
+    def test_the_default_work_directory_passes_the_gate_that_guards_it(self) -> None:
+        """A default the tool itself rejects is not a default.
+
+        `.local/release` is 33 characters against this checkout and the NSIS
+        path budget allows 31, so `--platform windows` with no `--work-dir`
+        could never run — measured 2026-08-05, and the refusal even suggested
+        `C:\\atrel`, sending the operator outside the project for no reason. A
+        shorter name under `.local` fits, so the release output stays where
+        every other build artefact in this project lives.
+        """
+        arguments = build_release_package.parse_arguments(["--platform", "windows"])
+
+        build_release_package.require_windows_path_budget(arguments.work_dir)
+
+        self.assertEqual(
+            arguments.work_dir.parent, build_release_package.REPOSITORY_ROOT / ".local"
+        )
+
+    def test_both_platforms_share_one_default_work_directory(self) -> None:
+        """One name, because the reason for a second one was removed.
+
+        A shorter Windows default existed only to survive the 67 characters the
+        bundler used to walk through: the resource sources were written relative
+        to the Tauri root, so `makensis` saw
+        `…\source-snapshot-XXXXXXXX\repository\frontend\src-tauri\..\..\..\..\build\payload\…`
+        — a detour that resolves straight back to the work directory. Absolute
+        sources, which macOS has always used, removed it.
+        """
+        macos = build_release_package.parse_arguments(["--platform", "macos"]).work_dir
+        windows = build_release_package.parse_arguments(["--platform", "windows"]).work_dir
+
+        self.assertEqual(macos, windows)
+        self.assertEqual(macos, build_release_package.REPOSITORY_ROOT / ".local/release")
+
+    def test_the_refusal_points_inside_the_project(self) -> None:
+        """The message is the only guidance an operator gets at that moment."""
+        deep = build_release_package.REPOSITORY_ROOT / ".local" / ("d" * 200)
+
+        with self.assertRaises(build_release_package.ReleaseFailed) as raised:
+            build_release_package.require_windows_path_budget(deep)
+
+        self.assertNotIn("C:\\atrel", str(raised.exception))
+        self.assertIn(".local", str(raised.exception))
+
+    def test_the_windows_platform_has_a_release_builder(self) -> None:
+        self.assertTrue(
+            hasattr(build_release_package, "build_windows_release"),
+            "--platform windows has no builder, so main() can only refuse it",
+        )
+
+    def test_a_private_dependency_copy_does_not_depend_on_bin_cp(self) -> None:
+        """The snapshot's private copy must exist on the host doing the build.
+
+        `_clone_snapshot_dependency` shells out to `/bin/cp -c` for APFS
+        `clonefile`. There is no `/bin/cp` on Windows and no `cp` on PATH
+        (measured), so on the host that builds the Windows package this raises
+        `release source snapshot dependency could not be copied` before a
+        single byte is copied.
+
+        The property under test is not the technique but the outcome the
+        docstring already claims: the build gets its own copy, and writing to
+        it does not reach the operator's. A filesystem without clone support
+        is allowed to be slower; it is not allowed to be absent.
+        """
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "node_modules"
+            (source / "nested").mkdir(parents=True)
+            (source / "nested" / "marker.txt").write_text("原始", encoding="utf-8")
+            target = root / "snapshot-node_modules"
+
+            build_release_package._clone_snapshot_dependency(source, target)
+
+            copied = target / "nested" / "marker.txt"
+            self.assertEqual(copied.read_text(encoding="utf-8"), "原始")
+            copied.write_text("快照改过", encoding="utf-8")
+            self.assertEqual(
+                (source / "nested" / "marker.txt").read_text(encoding="utf-8"),
+                "原始",
+                "the snapshot copy is not independent of the operator's tree",
+            )
+
+    def test_the_snapshot_capability_reaches_a_child_on_this_host(self) -> None:
+        """The capability handoff must work on the host that builds the package.
+
+        Round 14 of the EB-11 review replaced two public environment variables
+        with a one-shot anonymous pipe precisely because the public pair let a
+        caller dress an ordinary writable checkout up as a materialized
+        snapshot. The pipe is handed over with `subprocess.run(pass_fds=...)`,
+        and `pass_fds` raises `AssertionError: pass_fds not supported on
+        Windows` (measured on this host).
+
+        So on Windows the release identity has no delivery mechanism at all —
+        not a weaker one, none. This asserts the round trip rather than the
+        mechanism: the parent hands a payload to exactly one child, and the
+        child reads back the same bytes.
+        """
+        self.assertTrue(
+            hasattr(build_release_package, "spawn_with_source_snapshot_capability"),
+            "the capability handoff is inlined and POSIX-only, so no Windows "
+            "release can carry a trustworthy source identity",
+        )
+        payload = b"automation-tool.release-source-snapshot.v1\x00probe\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            echoed = Path(temporary) / "echoed.bin"
+            reader = Path(temporary) / "reader.py"
+            reader.write_text(
+                "import os, pathlib, sys\n"
+                f"sys.path.insert(0, {os.fspath(ROOT / 'scripts')!r})\n"
+                "import build_release_package as release\n"
+                "pathlib.Path(sys.argv[1]).write_bytes("
+                "release.read_source_snapshot_capability_bytes())\n",
+                encoding="utf-8",
+            )
+            returncode = build_release_package.spawn_with_source_snapshot_capability(
+                [sys.executable, os.fspath(reader), os.fspath(echoed)],
+                capability=payload,
+                environment=os.environ.copy(),
+                cwd=Path.cwd(),
+            )
+            # Asserted inside the context manager: `echoed` lives in the
+            # temporary directory, so reading it after the block only ever
+            # reports that the directory was cleaned up.
+            self.assertEqual(returncode, 0)
+            self.assertEqual(echoed.read_bytes(), payload)
+
 
 class ThePexelsKeyRidesTheBuildNotTheRepository(unittest.TestCase):
     """The stock-footage key is baked in at compile time, from an operator file.
@@ -648,7 +973,7 @@ class ThePexelsKeyRidesTheBuildNotTheRepository(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             key_file = Path(directory) / "pexels-api-key"
             key_file.write_text("C" * 56 + "\n", encoding="utf-8")
-            key_file.chmod(0o600)
+            make_private(key_file)
 
             value = build_release_package.read_pexels_api_key(key_file)
 

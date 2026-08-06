@@ -29,6 +29,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import platform as platform_module
@@ -77,6 +78,7 @@ from customer_demo_release import (  # noqa: E402
     customer_demo_material,
     describe_deployment,
     require_compiled_deployment,
+    windows_private_key_file_refusal,
 )
 from embedded_browser_archives import (  # noqa: E402
     MACOS_ARM64_ARCHIVE,
@@ -107,6 +109,7 @@ from release_configuration import (  # noqa: E402
     write_macos_release_configuration,
 )
 from release_identity import (  # noqa: E402
+    PACKAGED_IDENTITY_NAME,
     ReleaseIdentityRejected,
     SourceFacts,
     materialize_repository_snapshot,
@@ -192,7 +195,15 @@ def read_pexels_api_key(path: Path) -> str:
         raise ReleaseFailed(f"pexels api key file is unavailable: {path}") from error
     if not stat.S_ISREG(stats.st_mode):
         raise ReleaseFailed("pexels api key file must be a regular file")
-    if stat.S_IMODE(stats.st_mode) & 0o077:
+    if os.name == "nt":
+        # The permission-bit comparison below can never pass on Windows, which
+        # would make `--pexels-api-key` unusable there and, with the gate in
+        # `build_windows_release`, the platform unbuildable. Same rule, read off
+        # the security descriptor — shared with the deployment signing seeds.
+        refusal = windows_private_key_file_refusal(path)
+        if refusal is not None:
+            raise ReleaseFailed(f"pexels api key file {refusal}")
+    elif stat.S_IMODE(stats.st_mode) & 0o077:
         raise ReleaseFailed("pexels api key file must not be group or world accessible")
     if stats.st_size > 4096:
         raise ReleaseFailed("pexels api key file is implausibly large")
@@ -227,6 +238,15 @@ def require_macos_target() -> tuple[str, str]:
     # Intel Mac 于 2026-08-04 退出交付目标。落到这里必须硬拒绝而不是回退到
     # 一个「能打但没人验过」的包——出厂一个从未验收的架构比不出厂更糟。
     raise ReleaseFailed("this macOS architecture is unsupported")
+
+
+def require_windows_target() -> tuple[str, str]:
+    if os.name != "nt":
+        raise ReleaseFailed("the Windows release package must be built on Windows")
+    machine = platform_module.machine().lower()
+    if machine in {"amd64", "x86_64"}:
+        return "windows-x86_64", "x86_64"
+    raise ReleaseFailed("this Windows architecture is unsupported")
 
 
 def refresh_staging_inventory(staging: Path, target_id: str) -> int:
@@ -949,6 +969,336 @@ def build_macos_release(
     return result
 
 
+# Measured from the path a real release actually failed to open, not estimated.
+# `makensis` is a native tool that does not understand the `\\?\` prefix, and
+# the deepest name it has to open is 229 characters below the work directory:
+#
+#   source-snapshot-XXXXXXXX\repository\frontend\src-tauri\..\..\..\..\
+#   build\payload\material-video-worker\package\_internal\streamlit\.agents\
+#   skills\developing-with-streamlit\assets\templates\apps\
+#   dashboard-companies\pyproject.toml
+#
+# — the un-normalised `..\..\..\..` counts, because NSIS passes the name through
+# as written. From `F:\automation-tool\.local\release-windows` (41) that totals
+# 270 and the bundle aborts after the whole Rust compile has already run; from
+# `C:\atrel` (8) it totals 237 and the installer is produced.
+#
+# A first attempt at this constant guessed 218 and let the 41-character path
+# through, which is worth recording: a budget that admits the exact path already
+# observed to fail is not a budget.
+WINDOWS_DEEPEST_PAYLOAD_PATH = 164
+WINDOWS_PATH_LIMIT = 260
+
+
+def require_windows_path_budget(work_directory: Path) -> None:
+    """Refuse a work directory too deep for the NSIS bundler, before building.
+
+    This has to fail here rather than where it actually breaks. `makensis` runs
+    at the very end, after the Rust release compile and the whole payload
+    assembly, so the operator otherwise waits out the entire build to be told
+    that a directory name was too long — and the message they get names one
+    `pyproject.toml` inside streamlit, which points nowhere useful.
+    """
+    # `MAX_PATH` counts the terminating NUL, so 259 characters is the most a
+    # path may actually be. The failing measurement landed on exactly 260.
+    budget = WINDOWS_PATH_LIMIT - 1 - WINDOWS_DEEPEST_PAYLOAD_PATH
+    length = len(os.fspath(work_directory))
+    if length > budget:
+        raise ReleaseFailed(
+            f"the Windows release work directory is {length} characters and the "
+            f"NSIS bundler leaves room for {budget}: pass a shorter --work-dir, "
+            f"such as the default {DEFAULT_WORK_DIRECTORY}"
+        )
+
+
+def embed_windows_release_identity(
+    *,
+    payload: Path,
+    source: SourceFacts,
+    build_id: str,
+    target_id: str,
+    architecture: str,
+    deployment_profile_id: str,
+) -> Path:
+    """Write release provenance into the payload the NSIS bundler will ship.
+
+    macOS puts this in `Info.plist` and the outer Developer ID signature seals
+    it. Windows has no plist and this host has no Authenticode certificate, so
+    the honest carrier is a file inside the payload, sealed by nothing.
+
+    That is weaker, and the difference is stated rather than papered over: on
+    macOS the identity cannot be edited without breaking the signature, here it
+    can. What it still does is exactly what review round 19 already narrowed the
+    claim to — a reproducibility and misoperation gate inside a trusted release
+    flow, which is the thing that catches "you are testing yesterday's package".
+    It is not a defence against someone editing the file.
+
+    When an Authenticode identity exists this moves under it; the file lands
+    before the bundler runs, so the installer and its payload are signed
+    together and nothing here has to change to gain that.
+    """
+    identity_path = payload / PACKAGED_IDENTITY_NAME
+    if identity_path.exists() or identity_path.is_symlink():
+        raise ReleaseFailed("the release payload identity slot is occupied")
+    payload.mkdir(parents=True, exist_ok=True)
+    identity_path.write_text(
+        json.dumps(
+            {
+                "architecture": architecture,
+                "buildId": build_id,
+                "deploymentProfileId": deployment_profile_id,
+                "schema": RELEASE_IDENTITY_SCHEMA,
+                "sourceGitCommit": source.git_commit,
+                "sourceTreeSha256": source.tree_sha256,
+                "target": target_id,
+            },
+            ensure_ascii=False,
+            indent=1,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return identity_path
+
+
+def require_executor_build_id(executor: Path, build_id: str) -> None:
+    """One build, one name.
+
+    The release identity records `--build-id`; the packaged Executor records its
+    own in a signed manifest, and `run_eb_11_formal_app_acceptance` compares the
+    two. The Windows Executor builder is borrowed from the EB-16 acceptance
+    script, which hardcoded its own name into that manifest — so every Windows
+    release shipped an identity and an Executor that disagreed, and EB-11
+    refused the package with a message about a mismatch nobody had introduced
+    on purpose.
+
+    Checked here rather than trusted, because the two names are written by two
+    different pieces of code and nothing else brings them together until the
+    acceptance run does.
+    """
+    manifest = executor / "executor-manifest.v1.json"
+    try:
+        recorded = json.loads(manifest.read_text(encoding="utf-8")).get("build_id")
+    except (OSError, json.JSONDecodeError, AttributeError) as error:
+        raise ReleaseFailed(
+            f"the packaged Executor manifest is unavailable: {manifest}"
+        ) from error
+    if recorded != build_id:
+        raise ReleaseFailed(
+            f"the packaged Executor calls this build {recorded!r} while the release "
+            f"identity calls it {build_id!r}; EB-11 compares the two"
+        )
+
+
+def require_declared_release_identity(configuration: Path) -> None:
+    """Refuse to build an installer that would leave the identity behind.
+
+    `embed_windows_release_identity` writes the file into the payload; the
+    bundler only carries what `bundle.resources` names, and that map is derived
+    from the resource contract, which the identity is deliberately not part of.
+    Nothing connected the two, so a real release wrote the file, said so, and
+    shipped an install root without it — while the EB-11 runner's only way to
+    learn which source tree the App came from is to read it back from there.
+
+    Checked against the configuration rather than the installer because an NSIS
+    package cannot be reopened, and checked before `makensis` rather than after
+    because this is ten minutes ahead of the artifact.
+    """
+    try:
+        declared = json.loads(configuration.read_text(encoding="utf-8"))["bundle"][
+            "resources"
+        ]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+        raise ReleaseFailed(
+            f"the release configuration declares no resources: {configuration}"
+        ) from error
+    if PACKAGED_IDENTITY_NAME not in set(declared.values()):
+        raise ReleaseFailed(
+            "the release configuration would ship an installer without "
+            f"{PACKAGED_IDENTITY_NAME}, so the package could not prove which "
+            "source tree it was built from"
+        )
+
+
+def build_windows_release(
+    *,
+    work_directory: Path,
+    archive: Path | None,
+    build_id: str,
+    deployment: CustomerDemoMaterial | None = None,
+    update_endpoint: str | None = None,
+    update_public_key: str | None = None,
+    pexels_api_key: str | None = None,
+) -> dict[str, object]:
+    """Produce one distributable Windows package and pass every release gate.
+
+    The same command, the same gates and the same assembler as macOS; only the
+    container differs. Two orderings differ with it, both forced by the format
+    rather than chosen:
+
+    * the browser is installed into the **payload** before the bundler runs.
+      An NSIS installer is a sealed executable that cannot be opened afterwards,
+      whereas an `.app` is a directory the macOS path fills in after bundling;
+    * nothing is signed on the way in. Authenticode is applied by the bundler to
+      the installer and the main binary, which are produced last, so the
+      re-seal macOS needs has no counterpart — `seal_windows_payload` asserts
+      the configuration really declares no signing identity rather than assuming
+      it.
+    """
+    from run_eb_16_windows_acceptance import (
+        build_executor_candidate as build_windows_executor,
+    )
+    from run_eb_16_windows_acceptance import (
+        build_release_package as build_windows_bundle,
+    )
+    from run_eb_16_windows_acceptance import (
+        effective_configuration as windows_effective_configuration,
+    )
+    from run_eb_16_windows_acceptance import (
+        seal_windows_payload,
+        write_release_configuration,
+    )
+
+    if pexels_api_key is None:
+        # Refused here, before anything is built, for the reason the macOS path
+        # refuses it: a distributable package without the key asks the user to
+        # type one by hand, and nothing between the omitted flag and the
+        # installed App would say a word. `main()` reaches both builders through
+        # one call site, so a platform that merely ignored the keyword would
+        # ship exactly that (REVIEW-2026-08-06 I5).
+        raise ReleaseFailed(
+            "a distributable release needs --pexels-api-key; a build without "
+            "one ships the ask-the-user behaviour"
+        )
+    work_directory = require_source_stable_work_directory(work_directory)
+    target_id, architecture = require_windows_target()
+    require_windows_path_budget(work_directory)
+    announce("Checking the locked read-only third-party source checkouts")
+    run_checked(
+        [
+            sys.executable,
+            os.fspath(REPOSITORY_ROOT / "scripts/check_third_party_sources.py"),
+        ],
+        cwd=REPOSITORY_ROOT,
+    )
+    source_identity = repository_source_facts(REPOSITORY_ROOT)
+    build_directory = work_directory / "build"
+    cargo_target = work_directory / "cargo-target"
+    work_directory.mkdir(parents=True, exist_ok=True)
+    if build_directory.exists():
+        shutil.rmtree(build_directory)
+    build_directory.mkdir(parents=True)
+
+    staging = build_directory / "browser-staging"
+    announce(f"Staging the digest-locked {target_id} Chromium from the machine cache")
+    copy_staged_browser(target_id=target_id, output=staging)
+    executor = build_directory / "executor" / "automation-tool-executor"
+    public_key, private_key = build_windows_executor(executor, architecture, build_id)
+    require_executor_build_id(executor, build_id)
+    (build_directory / "executor-verifying-key").write_text(public_key, encoding="utf-8")
+
+    payload = build_directory / "payload"
+    announce("Preparing the pinned video runtime resources (cached per machine)")
+    video_runtime = prepare_video_runtime(platform="windows")
+    announce("Staging the frozen catalog of animation parts")
+    motion_catalog = stage_motion_catalog(staging=build_directory / "catalog").parent
+    announce("Assembling the release payload, verifying it, then sealing")
+    installed_video = install_video_runtime(
+        application=payload, staging=video_runtime, platform="windows"
+    )
+    announce(f"Video runtime staged into the payload: {sorted(installed_video)}")
+    installed_catalog = install_motion_catalog(
+        application=payload, staging=motion_catalog, platform="windows"
+    )
+    announce(f"Catalog staged into the payload: {sorted(installed_catalog)}")
+    if repository_source_facts(REPOSITORY_ROOT) != source_identity:
+        raise ReleaseFailed("release sources changed while the payload was assembled")
+    identity_path = embed_windows_release_identity(
+        payload=payload,
+        source=source_identity,
+        build_id=build_id,
+        target_id=target_id,
+        architecture=architecture,
+        deployment_profile_id="local" if deployment is None else deployment.profile_id,
+    )
+    announce(f"Release identity written to {identity_path.name}")
+    install_and_seal(
+        application=payload,
+        staging=staging,
+        target_id=target_id,
+        platform="windows",
+        seal=seal_windows_payload,
+    )
+    # The release gate, in the position `create_disk_image` holds on macOS:
+    # nothing distributable is produced from an unverified payload.
+    require_packaged_browser(application=payload, target_id=target_id, platform="windows")
+    require_packaged_video_runtime(application=payload, platform="windows")
+    require_packaged_motion_catalog(application=payload, platform="windows")
+
+    configuration = write_release_configuration(
+        build_directory, executor, payload, identity_path
+    )
+    require_declared_release_identity(configuration)
+    effective = windows_effective_configuration(configuration, build_directory)
+    environment = release_environment(
+        cargo_target,
+        public_key,
+        deployment_profile=None if deployment is None else deployment.environment(),
+        action_authorization_public_key=(
+            None if deployment is None else deployment.action_authorization_public_key
+        ),
+        update_endpoint=update_endpoint,
+        update_public_key=update_public_key,
+        pexels_api_key=pexels_api_key,
+    )
+    if deployment is not None:
+        announce(f"Building for the deployment at {deployment.base_url}")
+    binary, installer = build_windows_bundle(
+        configuration=configuration, environment=environment, target=cargo_target
+    )
+    if deployment is not None:
+        require_compiled_deployment(binary, deployment)
+        announce(f"Binary carries the deployment profile for {deployment.base_url}")
+    # Read back out of the finished binary, as on macOS: everything before this
+    # was an instruction to a compiler that a stale cache may decline to follow.
+    require_compiled_pexels_key(binary, pexels_api_key)
+    announce("Binary carries the packaged stock-footage key")
+    audited_assets = snapshot_production_assets(build_directory / AUDITED_DISTRIBUTION_NAME)
+    if repository_source_facts(REPOSITORY_ROOT) != source_identity:
+        raise ReleaseFailed("release sources changed while the App was being built")
+    # The built bundle, not `payload / EXECUTOR_RESOURCE`. On macOS the executor
+    # is installed into the `.app` and verified where it landed; on Windows the
+    # bundler copies it out of `build/executor/` into the sealed installer, so
+    # nothing ever writes it under the payload. Measured by a real release that
+    # produced the installer and then died on the last line looking for
+    # `payload/local-executor/package/executor-manifest.v1.json`.
+    verify_manifest_signature(executor, private_key)
+    result: dict[str, object] = {
+        "architecture": architecture,
+        "audited_assets": os.fspath(audited_assets),
+        "configuration": os.fspath(effective),
+        "installer": os.fspath(installer),
+        "installer_bytes": installer.stat().st_size,
+        "main_binary": os.fspath(binary),
+        "main_binary_bytes": binary.stat().st_size,
+        "payload": os.fspath(payload),
+        # Measured, never asserted away: this host has no Authenticode identity,
+        # so the package is unsigned and the evidence has to say so.
+        "signing": windows_signing_report(binary, installer),
+        "target": target_id,
+    }
+    if deployment is not None:
+        result["deployment"] = describe_deployment(deployment)
+    return result
+
+
+def windows_signing_report(binary: Path, installer: Path) -> dict[str, Any]:
+    from run_eb_16_windows_acceptance import signing_report
+
+    return signing_report(binary, installer)
+
+
 DEPLOYMENT_ARGUMENTS = (
     "deployment_profile",
     "profile_signing_key",
@@ -959,9 +1309,15 @@ DEPLOYMENT_ARGUMENTS = (
 def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform", choices=("macos", "windows"), default="macos")
-    parser.add_argument("--work-dir", type=Path, default=DEFAULT_WORK_DIRECTORY)
+    parser.add_argument("--work-dir", type=Path, default=None)
     parser.add_argument("--archive", type=Path)
-    parser.add_argument("--build-id", default="macos-release")
+    # Derived from the platform rather than defaulted to one of them. A real
+    # Windows release shipped `"buildId": "macos-release"` in its own
+    # `release-identity.v1.json`, and that field is not decoration: the EB-11
+    # runner matches it against the packaged executor's build id, so a package
+    # that misnames itself either fails there or — worse — agrees because both
+    # sides are wrong in the same way.
+    parser.add_argument("--build-id", default=None)
     parser.add_argument(
         "--update-endpoint",
         help=(
@@ -1006,6 +1362,10 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     arguments = parser.parse_args(argv)
+    if arguments.build_id is None:
+        arguments.build_id = f"{arguments.platform}-release"
+    if arguments.work_dir is None:
+        arguments.work_dir = DEFAULT_WORK_DIRECTORY
     # Every step of a release runs a subprocess with `cwd=frontend/`, so a
     # relative path given on the command line would be re-interpreted against
     # a directory the operator never named. Bind them all to the invocation
@@ -1109,7 +1469,12 @@ def _link_snapshot_build_dependency(snapshot: Path, relative: Path) -> None:
     if relative in _SNAPSHOT_PRIVATE_DEPENDENCIES:
         _clone_snapshot_dependency(source, target)
         return
-    target.symlink_to(source, target_is_directory=True)
+    # Shared with the operator's checkout on purpose. `.local` is where the
+    # build works (`--work-dir` defaults under it) and where local build inputs
+    # such as the staged motion catalog live; `backend/.venv` is read, not
+    # rewritten. Only `frontend/node_modules` above is rewritten in place, which
+    # is why it is the one that gets a private copy.
+    _create_directory_link(target, source)
 
 
 def _clone_snapshot_dependency(source: Path, target: Path) -> None:
@@ -1131,52 +1496,142 @@ def _clone_snapshot_dependency(source: Path, target: Path) -> None:
     `node_modules` in 9.7 s sharing blocks with the original, the same technique
     `scripts/new_worktree.py` uses for `vendor/`. A filesystem without clone
     support falls back to a plain copy: slower, never wrong.
+
+    `/bin/cp` is a macOS path, and the host that builds the Windows package has
+    neither it nor `cp` anywhere on PATH (measured), so this used to die with
+    `WinError 2` before copying a byte. The portable branch below is what runs
+    there.
     """
-    command = ["/bin/cp", "-c", "-p", "-R", os.fspath(source), os.fspath(target)]
-    result = subprocess.run(command, check=False, capture_output=True, text=True)
-    if result.returncode != 0:
-        fallback = ["/bin/cp", "-p", "-R", os.fspath(source), os.fspath(target)]
-        result = subprocess.run(fallback, check=False, capture_output=True, text=True)
-    if result.returncode != 0 or not target.is_dir():
+    if sys.platform == "darwin":
+        command = ["/bin/cp", "-c", "-p", "-R", os.fspath(source), os.fspath(target)]
+        result = subprocess.run(command, check=False, capture_output=True, text=True)
+        if result.returncode != 0:
+            fallback = ["/bin/cp", "-p", "-R", os.fspath(source), os.fspath(target)]
+            result = subprocess.run(fallback, check=False, capture_output=True, text=True)
+        if result.returncode != 0 or not target.is_dir():
+            raise ReleaseFailed("release source snapshot dependency could not be copied")
+        return
+    _copy_tree_preserving_links(source, target)
+    if not target.is_dir():
         raise ReleaseFailed("release source snapshot dependency could not be copied")
 
 
-def _read_source_snapshot_capability() -> tuple[Path, str]:
-    rendered_descriptor = os.environ.pop(
-        SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT,
-        None,
-    )
-    if (
-        rendered_descriptor is None
-        or not rendered_descriptor.isascii()
-        or not rendered_descriptor.isdigit()
-        or str(int(rendered_descriptor)) != rendered_descriptor
-    ):
-        raise ReleaseFailed("release source snapshot capability is unavailable")
-    descriptor = int(rendered_descriptor)
+def _copy_tree_preserving_links(source: Path, target: Path) -> None:
+    """Copy a dependency tree where neither `cp` nor `os.symlink` is available.
+
+    `shutil.copytree(symlinks=True)` is the obvious answer and it does not work
+    here: it recreates links with `os.symlink`, which a non-elevated Windows
+    user without Developer Mode is refused outright —
+
+        OSError: [WinError 1314] 客户端没有所需的特权。
+
+    and `frontend/node_modules` is 2,057 links over 87,734 real files (measured
+    on the Windows host). Dereferencing them instead is not an option either:
+    every one of them points into `.pnpm/`, so following them would duplicate
+    the whole store many times over.
+
+    Directory junctions need no privilege at all, so the links are recreated as
+    junctions when symlinks are refused. A junction cannot hold a relative
+    target, so it is resolved — against **this copy**, never against the
+    operator's tree, which is the entire property this function exists for.
+    """
+    source = _long_path(source)
+    target = _long_path(target)
+    links: list[tuple[Path, str]] = []
+    for directory, subdirectories, files in os.walk(source, followlinks=False):
+        here = Path(directory)
+        relative = here.relative_to(source)
+        (target / relative).mkdir(parents=True, exist_ok=True)
+        remaining = []
+        for name in subdirectories:
+            entry = here / name
+            if entry.is_symlink() or entry.is_junction():
+                links.append((relative / name, os.readlink(entry)))
+            else:
+                remaining.append(name)
+        # Assigning into the list `os.walk` handed us is how the traversal is
+        # told not to descend: following a link here would copy the same store
+        # entry once per package that points at it.
+        subdirectories[:] = remaining
+        for name in files:
+            entry = here / name
+            if entry.is_symlink():
+                links.append((relative / name, os.readlink(entry)))
+            else:
+                shutil.copy2(entry, target / relative / name, follow_symlinks=False)
+    for relative, raw_target in links:
+        _recreate_dependency_link(target / relative, raw_target, root=target)
+
+
+def _long_path(path: Path) -> Path:
+    """Lift the 260-character path limit for one tree, on the hosts that have it.
+
+    Measured, and only by a real release: a probe copied `node_modules` to
+    `.local/eb18-clone-probe/` and passed, while the actual snapshot writes to
+    `.local/<work>/source-snapshot-XXXXXX/repository/frontend/node_modules/`
+    and then pnpm's own `.pnpm/<87-character-hash>/node_modules/<pkg>/…` on top
+    of that. The first file past 260 characters ends the build with
+
+        FileNotFoundError: [WinError 3] 系统找不到指定的路径。
+
+    The `\\\\?\\` prefix raises the limit to about 32,767, and requires a
+    fully-qualified path with no `.` or `..` components — hence `resolve()`
+    rather than a string concatenation.
+    """
+    if os.name != "nt":
+        return path
+    resolved = path.resolve()
+    if os.fspath(resolved).startswith("\\\\?\\"):
+        return resolved
+    return Path("\\\\?\\" + os.fspath(resolved))
+
+
+def _recreate_dependency_link(link: Path, raw_target: str, *, root: Path) -> None:
+    """Point `link` at the copied tree, by symlink if allowed, else a junction."""
+    resolved = Path(os.path.normpath(link.parent / raw_target))
+    # Fail closed rather than quietly wire the build's private copy back to the
+    # tree it was made to stay away from.
+    if not resolved.is_relative_to(root):
+        raise ReleaseFailed("release source snapshot dependency link escapes the copy")
+    _create_directory_link(link, resolved, relative_target=raw_target)
+
+
+def _create_directory_link(
+    link: Path, target: Path, *, relative_target: str | None = None
+) -> None:
+    """Link one directory to another, whatever this host is willing to grant.
+
+    A symlink is preferred because it can be relative and survives the tree
+    being moved. Windows refuses it to a non-elevated user without Developer
+    Mode —
+
+        OSError: [WinError 1314] 客户端没有所需的特权。
+
+    — which took out both callers here: every Windows release died linking
+    `.local` into its snapshot. A directory junction needs no privilege at all
+    (measured: `mklink /J` returns 0, writes pass through), and its one
+    limitation, that the target must be absolute, does not matter for a
+    snapshot that is deleted when the build ends.
+    """
+    link.parent.mkdir(parents=True, exist_ok=True)
     try:
-        metadata = os.fstat(descriptor)
-        if not stat.S_ISFIFO(metadata.st_mode):
-            raise ReleaseFailed("release source snapshot capability is invalid")
-        os.set_blocking(descriptor, False)
-        try:
-            payload = os.read(descriptor, SOURCE_SNAPSHOT_CAPABILITY_MAX_BYTES + 1)
-            trailing = os.read(descriptor, 1)
-        except BlockingIOError as error:
-            raise ReleaseFailed("release source snapshot capability is incomplete") from error
-    except OSError as error:
-        raise ReleaseFailed("release source snapshot capability is unavailable") from error
-    finally:
-        try:
-            os.close(descriptor)
-        except OSError:
-            pass
-    if (
-        not payload
-        or len(payload) > SOURCE_SNAPSHOT_CAPABILITY_MAX_BYTES
-        or trailing
-    ):
-        raise ReleaseFailed("release source snapshot capability is invalid")
+        os.symlink(relative_target or target, link, target_is_directory=True)
+        return
+    except OSError:
+        # Refused or unsupported on this host. Fall through to the junction.
+        pass
+    completed = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", os.fspath(link), os.fspath(target)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 or not link.exists():
+        raise ReleaseFailed("release source snapshot dependency link could not be created")
+
+
+def _read_source_snapshot_capability() -> tuple[Path, str]:
+    payload = read_source_snapshot_capability_bytes()
     fields = payload.split(b"\0")
     if len(fields) != 4 or fields[0] != SOURCE_SNAPSHOT_CAPABILITY_MAGIC:
         raise ReleaseFailed("release source snapshot capability is invalid")
@@ -1188,12 +1643,186 @@ def _read_source_snapshot_capability() -> tuple[Path, str]:
         raise ReleaseFailed("release source snapshot capability is invalid") from error
     if (
         fields[3] != expected_identity.encode("ascii") + b"\n"
-        or parent_process_id != os.getppid()
+        or not _capability_writer_is_an_ancestor(parent_process_id)
         or len(expected_identity) != 64
         or any(character not in "0123456789abcdef" for character in expected_identity)
     ):
         raise ReleaseFailed("release source snapshot capability is invalid")
     return declared, expected_identity
+
+
+def read_source_snapshot_capability_bytes() -> bytes:
+    """Consume, exactly once, the one-shot capability this process was handed.
+
+    The transport differs by platform and the value in the environment differs
+    with it: a file descriptor on POSIX, an inheritable OS handle on Windows.
+    Both arrive as a pipe — `os.fstat` reports `S_ISFIFO` either way (measured)
+    — so everything downstream of this function is identical.
+    """
+    rendered = os.environ.pop(SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT, None)
+    if (
+        rendered is None
+        or not rendered.isascii()
+        or not rendered.isdigit()
+        or str(int(rendered)) != rendered
+    ):
+        raise ReleaseFailed("release source snapshot capability is unavailable")
+    if os.name == "nt":
+        import msvcrt
+
+        try:
+            descriptor = msvcrt.open_osfhandle(int(rendered), os.O_RDONLY)
+        except OSError as error:
+            raise ReleaseFailed("release source snapshot capability is unavailable") from error
+    else:
+        descriptor = int(rendered)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISFIFO(metadata.st_mode):
+            raise ReleaseFailed("release source snapshot capability is invalid")
+        payload = _read_capability_payload(descriptor)
+    except OSError as error:
+        raise ReleaseFailed("release source snapshot capability is unavailable") from error
+    finally:
+        with contextlib.suppress(OSError):
+            os.close(descriptor)
+    if not payload or len(payload) > SOURCE_SNAPSHOT_CAPABILITY_MAX_BYTES:
+        raise ReleaseFailed("release source snapshot capability is invalid")
+    return payload
+
+
+def _read_capability_payload(descriptor: int) -> bytes:
+    """Read the whole capability and refuse anything longer than one."""
+    if os.name == "nt":
+        # `os.set_blocking` does not accept this handle on Windows, and it is
+        # not needed: the writing end is closed before the child is created, so
+        # reading to EOF cannot block. The cap is enforced as it accumulates
+        # rather than by a trailing-byte probe.
+        chunks: list[bytes] = []
+        size = 0
+        while True:
+            chunk = os.read(descriptor, SOURCE_SNAPSHOT_CAPABILITY_MAX_BYTES + 1)
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+            size += len(chunk)
+            if size > SOURCE_SNAPSHOT_CAPABILITY_MAX_BYTES:
+                raise ReleaseFailed("release source snapshot capability is invalid")
+    os.set_blocking(descriptor, False)
+    try:
+        payload = os.read(descriptor, SOURCE_SNAPSHOT_CAPABILITY_MAX_BYTES + 1)
+        trailing = os.read(descriptor, 1)
+    except BlockingIOError as error:
+        raise ReleaseFailed("release source snapshot capability is incomplete") from error
+    if trailing:
+        raise ReleaseFailed("release source snapshot capability is invalid")
+    return payload
+
+
+def spawn_with_source_snapshot_capability(
+    command: list[str],
+    *,
+    capability: bytes,
+    environment: dict[str, str],
+    cwd: Path,
+) -> int:
+    """Run `command` as the single process able to read `capability`.
+
+    Round 14 of the EB-11 review replaced two public environment variables with
+    this, because the public pair let a caller dress an ordinary writable
+    checkout up as a materialized snapshot. The handoff was written with
+    `subprocess.run(pass_fds=...)`, which does not exist on Windows:
+
+        AssertionError: pass_fds not supported on Windows.
+
+    So the Windows release had no delivery mechanism for its source identity at
+    all — not a weaker one, none. `STARTUPINFO.lpAttributeList["handle_list"]`
+    is the platform's own answer to the same question and inherits exactly the
+    handles named, nothing else.
+    """
+    if len(capability) > SOURCE_SNAPSHOT_CAPABILITY_MAX_BYTES:
+        raise ReleaseFailed("release source snapshot capability could not be created")
+    read_descriptor, write_descriptor = os.pipe()
+    try:
+        written = os.write(write_descriptor, capability)
+        if written != len(capability):
+            raise ReleaseFailed("release source snapshot capability could not be created")
+    finally:
+        # Closed before the child exists, so the child reads a complete payload
+        # followed by EOF and never waits on a writer that will not write again.
+        os.close(write_descriptor)
+    child_environment = dict(environment)
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle = msvcrt.get_osfhandle(read_descriptor)
+            os.set_handle_inheritable(handle, True)
+            startup = subprocess.STARTUPINFO()
+            startup.lpAttributeList = {"handle_list": [handle]}
+            child_environment[SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT] = str(handle)
+            completed = subprocess.run(
+                command,
+                cwd=cwd,
+                env=child_environment,
+                startupinfo=startup,
+                close_fds=True,
+                check=False,
+            )
+        else:
+            child_environment[SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT] = str(read_descriptor)
+            completed = subprocess.run(
+                command,
+                cwd=cwd,
+                env=child_environment,
+                pass_fds=(read_descriptor,),
+                check=False,
+            )
+    finally:
+        os.close(read_descriptor)
+    return completed.returncode
+
+
+def _capability_writer_is_an_ancestor(process_id: int) -> bool:
+    """Whether `process_id` is this process's parent, or an ancestor of it.
+
+    On POSIX this is the direct parent and nothing else. On Windows "direct
+    parent" is not a usable notion here: `backend/.venv/Scripts/python.exe` is a
+    uv trampoline that launches the real interpreter as its own child, so the
+    process running this code is a *grandchild* of the release command and
+    `os.getppid()` names the trampoline — which has already exited. Measured:
+
+        spawning process pid: 14572
+        child ppid via venv python:  17468   (the trampoline)
+        child ppid via base python:  14572
+
+    A direct-parent test therefore rejects every Windows release unconditionally.
+    Widening it to the ancestor chain keeps what the check is for — a payload
+    lifted from somewhere else does not validate here — and gives up nothing
+    that was true before, since the trampoline is a process this build created.
+
+    Windows recycles process ids, so an ancestor id is not proof of identity.
+    That is consistent with what this gate already claims: a reproducibility and
+    misoperation check inside a trusted release flow, not a defence against an
+    active same-UID attacker (`EB-11.md`, review round 19).
+    """
+    if os.name != "nt":
+        return process_id == os.getppid()
+    return process_id in _windows_ancestor_process_ids()
+
+
+def _windows_ancestor_process_ids(*, limit: int = 16) -> set[int]:
+    """Walk this process's ancestry through a Toolhelp process snapshot.
+
+    The snapshot itself lives in `windows_processes`, which EB-11 also reads its
+    ownership facts from. One Toolhelp walker, not two that agree by accident.
+    """
+    from windows_processes import WindowsProcessesUnavailable, ancestor_process_ids
+
+    try:
+        return ancestor_process_ids(os.getpid(), limit=limit)
+    except WindowsProcessesUnavailable as error:
+        raise ReleaseFailed("release source snapshot capability is unavailable") from error
 
 
 def require_snapshot_repository_layout(snapshot: Path, work_directory: Path) -> None:
@@ -1223,17 +1852,31 @@ def require_snapshot_repository_layout(snapshot: Path, work_directory: Path) -> 
         git_metadata = git_directory.lstat()
     except OSError as error:
         raise ReleaseFailed("release source snapshot layout is unavailable") from error
+    # POSIX ownership and mode, where they exist. Windows has neither
+    # `os.geteuid` nor meaningful `st_uid`/`st_mode` bits — `os.chmod` there
+    # only toggles the read-only flag — so asserting 0o700 and a matching uid
+    # would either raise `AttributeError` or, worse, pass vacuously. The layout
+    # checks that do carry over (private work directory, exact
+    # `source-snapshot-*/repository` shape, real `.git` directory, no symlink
+    # anywhere on the path) are enforced on both.
+    owned_by_this_user = (
+        True
+        if os.name == "nt"
+        else (
+            container_metadata.st_uid == os.geteuid()
+            and snapshot_metadata.st_uid == os.geteuid()
+            and git_metadata.st_uid == os.geteuid()
+            and stat.S_IMODE(container_metadata.st_mode) == 0o700
+        )
+    )
     if (
         stat.S_ISLNK(container_metadata.st_mode)
         or not stat.S_ISDIR(container_metadata.st_mode)
-        or container_metadata.st_uid != os.geteuid()
-        or stat.S_IMODE(container_metadata.st_mode) != 0o700
         or stat.S_ISLNK(snapshot_metadata.st_mode)
         or not stat.S_ISDIR(snapshot_metadata.st_mode)
-        or snapshot_metadata.st_uid != os.geteuid()
         or stat.S_ISLNK(git_metadata.st_mode)
         or not stat.S_ISDIR(git_metadata.st_mode)
-        or git_metadata.st_uid != os.geteuid()
+        or not owned_by_this_user
     ):
         raise ReleaseFailed("release source snapshot layout is invalid")
     try:
@@ -1320,57 +1963,38 @@ def run_from_materialized_source_snapshot(arguments: argparse.Namespace) -> int:
             SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT,
         ):
             environment.pop(name, None)
-        read_descriptor, write_descriptor = os.pipe()
-        try:
-            capability = b"\0".join(
-                (
-                    SOURCE_SNAPSHOT_CAPABILITY_MAGIC,
-                    str(os.getpid()).encode("ascii"),
-                    os.fsencode(snapshot),
-                    source.tree_sha256.encode("ascii") + b"\n",
-                )
+        capability = b"\0".join(
+            (
+                SOURCE_SNAPSHOT_CAPABILITY_MAGIC,
+                str(os.getpid()).encode("ascii"),
+                os.fsencode(snapshot),
+                source.tree_sha256.encode("ascii") + b"\n",
             )
-            written = os.write(write_descriptor, capability)
-            if written != len(capability):
-                raise ReleaseFailed("release source snapshot capability could not be created")
-        finally:
-            os.close(write_descriptor)
-        try:
-            environment[SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT] = str(read_descriptor)
-            completed = subprocess.run(
-                [
-                    sys.executable,
-                    os.fspath(snapshot / "scripts/build_release_package.py"),
-                    *sys.argv[1:],
-                ],
-                # Preserve the operator's relative-path base. The child parses the
-                # original argv again from the detached script, and changing cwd
-                # here would silently retarget --work-dir, --archive and key paths.
-                cwd=invocation_directory,
-                env=environment,
-                pass_fds=(read_descriptor,),
-                check=False,
-            )
-        finally:
-            os.close(read_descriptor)
-        return completed.returncode
+        )
+        return spawn_with_source_snapshot_capability(
+            [
+                sys.executable,
+                os.fspath(snapshot / "scripts/build_release_package.py"),
+                *sys.argv[1:],
+            ],
+            capability=capability,
+            environment=environment,
+            # Preserve the operator's relative-path base. The child parses the
+            # original argv again from the detached script, and changing cwd
+            # here would silently retarget --work-dir, --archive and key paths.
+            cwd=invocation_directory,
+        )
     except ReleaseIdentityRejected as error:
         raise ReleaseFailed("release source snapshot could not be materialized") from error
     finally:
-        shutil.rmtree(container)
+        # Long-path prefixed for the same reason the copy is: the tree being
+        # removed is the one that needed it, and `rmtree` hits WinError 3 on
+        # the first pnpm path past 260 characters.
+        shutil.rmtree(_long_path(container), ignore_errors=False)
 
 
 def main() -> int:
     arguments = parse_arguments()
-    if arguments.platform == "windows":
-        # Refused rather than half-implemented: the Windows release still runs
-        # through `scripts/run_eb_16_windows_acceptance.py`, which owns the NSIS
-        # payload layout and the installer round trip.
-        raise ReleaseFailed(
-            "the Windows release still runs through "
-            "scripts/run_eb_16_windows_acceptance.py; this command builds macOS "
-            "packages only"
-        )
     if SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT not in os.environ:
         if (
             SOURCE_SNAPSHOT_ENVIRONMENT in os.environ
@@ -1383,7 +2007,11 @@ def main() -> int:
     # refused now rather than twenty minutes from now.
     deployment = resolve_deployment(arguments)
     update_endpoint, update_public_key = resolve_update_configuration(arguments)
-    result = build_macos_release(
+    # One command, one set of gates, and the fork is here rather than in a
+    # second script: the steps above are shared, and the two builders differ
+    # only in the container they put the verified payload into.
+    build = build_windows_release if arguments.platform == "windows" else build_macos_release
+    result = build(
         work_directory=arguments.work_dir,
         archive=arguments.archive,
         build_id=arguments.build_id,
@@ -1402,8 +2030,19 @@ def main() -> int:
         json.dumps(result, ensure_ascii=False, indent=1, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    announce(f"Built application: {result['application']}")
-    announce(f"Built disk image: {result['disk_image']} ({result['disk_image_bytes']} bytes)")
+    if arguments.platform == "windows":
+        announce(
+            f"Built main binary: {result['main_binary']} "
+            f"({result['main_binary_bytes']} bytes)"
+        )
+        announce(
+            f"Built installer: {result['installer']} ({result['installer_bytes']} bytes)"
+        )
+    else:
+        announce(f"Built application: {result['application']}")
+        announce(
+            f"Built disk image: {result['disk_image']} ({result['disk_image_bytes']} bytes)"
+        )
     announce("Release package built and every release gate passed")
     return 0
 

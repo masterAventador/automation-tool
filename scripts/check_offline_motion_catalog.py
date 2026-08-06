@@ -183,8 +183,10 @@ def main() -> None:
     lock = load_json(arguments.lock)
     catalog_contract = load_json(CATALOG_CONTRACT_PATH)
     rights = load_json(RIGHTS_PATH)
-    catalog_root = arguments.catalog_root or REPOSITORY_ROOT / lock["layout"]["catalogRoot"]
-    manifest = verify_catalog(catalog_root, lock, catalog_contract, rights)
+    from build_offline_motion_catalog import catalog_root as locked_catalog_root
+
+    catalog_directory = arguments.catalog_root or locked_catalog_root(lock)
+    manifest = verify_catalog(catalog_directory, lock, catalog_contract, rights)
     pending = sorted(
         item["name"] for item in manifest["items"] if item["pendingAssetReplacement"]
     )
