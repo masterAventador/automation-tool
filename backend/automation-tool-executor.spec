@@ -120,6 +120,11 @@ motion_authoring_resources = [
     # PC-26: the narrator's voice model id and audio hosts come from the same
     # catalog declaration the App reads.
     "contracts/video/bailian-model-catalog.v1.json",
+    # SA-01: the AutomationSkill vocabulary. automation_skill.py resolves it
+    # through the shared resource root, so the frozen build must carry it —
+    # a checkout being green proves nothing about the package
+    # (REVIEW-2026-08-06 SA#5).
+    "contracts/browser-use/automation-skill.v1.json",
     "vendor/hyperframes/skills/hyperframes-core/references/minimal-composition.md",
     "vendor/hyperframes/skills/hyperframes-core/references/determinism-rules.md",
 ]

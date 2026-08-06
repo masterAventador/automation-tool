@@ -21,12 +21,16 @@ import json
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path
 from typing import Final, NoReturn
 from uuid import UUID
 
-_REPOSITORY_ROOT: Final = Path(__file__).resolve().parents[4]
-CONTRACT_PATH: Final = _REPOSITORY_ROOT / "contracts/browser-use/automation-skill.v1.json"
+from automation_tool.executor.motion_authoring.resources import CONTRACTS_ROOT
+
+# Resolved through the shared resource root so the frozen Executor and a
+# source checkout read the same file through the same code — a second copy of
+# "where our files are" is how the two start disagreeing (REVIEW-2026-08-06
+# SA#5; the spec packages contracts/browser-use for the frozen half).
+CONTRACT_PATH: Final = CONTRACTS_ROOT / "browser-use/automation-skill.v1.json"
 
 _SHA256: Final = re.compile(r"^[0-9a-f]{64}$")
 _HOSTNAME: Final = re.compile(
