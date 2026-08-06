@@ -206,6 +206,7 @@ def start_montage(
         WebUiRejected,
         _preload_private_config,
         _prepare_shared_runtime,
+        default_subtitle_font_name,
     )
 
     runtime_parent = asset_root / ".automation-tool-montage"
@@ -269,6 +270,11 @@ def start_montage(
                 # 本次发行不随包提供任何背景音乐素材（与 WebUI 侧的移除一致）。
                 bgm_type="",
                 subtitle_enabled=request.subtitle_enabled,
+                # Pinned explicitly: upstream's default is STHeitiMedium.ttc,
+                # which the shipped package deliberately excludes (rights not
+                # cleared) — subtitle burn-in died on the missing file the
+                # first time a keyed montage reached it (2026-08-06).
+                font_name=default_subtitle_font_name(),
                 font_size=request.font_size_px,
                 text_color=request.text_color,
                 stroke_color=request.stroke_color,

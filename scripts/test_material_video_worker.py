@@ -1618,6 +1618,28 @@ class MaterialVideoWorkerDefaultSubtitleFontTest(unittest.TestCase):
             '[ui]\nfont_name = "NotoSansCJKsc-Bold.ttf"\nhide_log = false\n',
         )
 
+    def test_the_real_upstream_template_parses_after_key_injection(self) -> None:
+        """带 key 的注入必须在真实上游模板上产出合法 TOML。
+
+        上游 config.example.toml 的 [app] 段本来就有 `pexels_api_keys = []`；
+        只插不换会造出重复键，上游 config 加载直接失败——冻结 worker 上
+        实测 exit 65（2026-08-06 带 key 首跑）。此前用例的合成 fixture 里
+        恰好没有这一行，于是全绿。真实文件才是判据。
+        """
+        import tomllib
+
+        real_template = (ROOT / "vendor/moneyprinterturbo/config.example.toml").read_text(
+            encoding="utf-8"
+        )
+        key = "C" * 56
+        document = _private_config_document(
+            real_template, "NotoSansCJKsc-Bold.ttf", pexels_api_key=key
+        )
+
+        parsed = tomllib.loads(document)  # duplicate keys raise here
+        self.assertEqual(parsed["app"]["pexels_api_keys"], [key])
+        self.assertEqual(parsed["ui"]["font_name"], "NotoSansCJKsc-Bold.ttf")
+
     def test_private_config_refuses_upstream_configuration_without_a_webui_section(
         self,
     ) -> None:
@@ -1863,6 +1885,13 @@ class MaterialMontageRequestTest(unittest.TestCase):
             self.assertEqual(params.video_source, "pexels")
             self.assertEqual(params.video_count, 1)
             self.assertEqual(params.bgm_type, "")
+            # 字幕字体必须显式钉住契约清权字体。不传时上游默认
+            # STHeitiMedium.ttc——那个字体因未清权被有意裁出了分发包，
+            # 冻结 worker 上字幕烧录直接死于打不开字体（2026-08-06 实测，
+            # 带 key 的真实出片跑了 435 秒死在最后一步）。
+            from webui_runtime import default_subtitle_font_name
+
+            self.assertEqual(params.font_name, default_subtitle_font_name())
 
     @staticmethod
     def _tiny_upstream(base: Path) -> tuple[Path, Path, Path, Path]:

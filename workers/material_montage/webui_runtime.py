@@ -182,10 +182,20 @@ def _private_config_document(
     if pexels_api_key is not None and app_index is None:
         raise WebUiRejected("upstream configuration has no app section")
     insertions: dict[int, str] = {ui_index: f'font_name = "{font_name}"\n'}
+    replaced_keys: set[str] = set()
     if pexels_api_key is not None and app_index is not None:
         insertions[app_index] = f'pexels_api_keys = ["{pexels_api_key}"]\n'
+        # The upstream template already declares `pexels_api_keys = []` in
+        # [app]; inserting without dropping that line produced a duplicate
+        # TOML key, and upstream's config load died on it — measured on the
+        # frozen worker the first time a key ever rode this path (2026-08-06).
+        # Any pinned key replaces the upstream default rather than joining it.
+        replaced_keys.add("pexels_api_keys")
     document: list[str] = []
     for index, line in enumerate(lines):
+        bare = line.split("=", 1)[0].strip()
+        if bare in replaced_keys and not line.lstrip().startswith("#"):
+            continue
         document.append(line)
         if index in insertions:
             document.append(insertions[index])
