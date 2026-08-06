@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>综合门户 - 自动化运营工具 SA 验收站</title>
+<style>
+  body { margin: 0; font-family: sans-serif; }
+  header { display: flex; gap: 12px; padding: 10px 24px; background: #16213e; color: #fff; flex-wrap: wrap; }
+  header a { color: #dfe6f3; text-decoration: none; font-size: 13px; }
+  .drawer { display: none; }
+  main { display: flex; gap: 16px; padding: 16px 24px; }
+  .feed { flex: 3; }
+  .card { border: 1px solid #e3e3e3; margin-bottom: 8px; padding: 8px 12px; }
+  .card h3 { margin: 0 0 4px; font-size: 15px; }
+  .card p { margin: 0; color: #666; font-size: 13px; }
+  .meta { display: flex; gap: 10px; font-size: 12px; color: #999; margin-top: 6px; }
+  aside { flex: 1; }
+  aside ol { padding-left: 20px; }
+  footer { padding: 20px 24px; background: #f4f4f4; display: flex; gap: 14px; flex-wrap: wrap; }
+  footer a { font-size: 12px; color: #555; }
+</style>
+</head>
+<body>
+<header>
+  <strong>综合门户</strong>
+  <nav id="channels" aria-label="频道导航"></nav>
+  <input type="search" aria-label="全站搜索" placeholder="搜索资讯、视频、话题">
+  <a href="/automation-tool-sa-portal/studio">创作中心</a>
+  <a href="/automation-tool-sa-portal">创作中心手册</a>
+  <button type="button">登录</button>
+</header>
+
+<!-- 折叠抽屉：与主导航同名的隐藏重复项，验证适配层只认可见锚点 -->
+<div class="drawer" aria-hidden="false">
+  <a href="/automation-tool-sa-portal/studio">创作中心</a>
+  <button type="button">登录</button>
+</div>
+
+<main>
+  <section class="feed" id="feed" aria-label="今日要闻"></section>
+  <aside>
+    <h2>热榜</h2>
+    <ol id="rank" aria-label="热榜列表"></ol>
+    <h2>本地服务</h2>
+    <ul id="services"></ul>
+  </aside>
+</main>
+
+<footer id="footer"></footer>
+
+<script>
+  // 同步生成门户级 DOM 规模：数百卡片、榜单与页脚，共数千节点。
+  const channels = document.getElementById("channels");
+  const channelNames = ["要闻","视频","财经","科技","体育","娱乐","汽车","房产","旅游","健康",
+    "教育","军事","历史","美食","时尚","游戏","数码","文化","公益","天气",
+    "股票","基金","彩票","直播","读书","艺术","科学","国际","社会","法治"];
+  for (const name of channelNames) {
+    const link = document.createElement("a");
+    link.href = "/automation-tool-sa-portal";
+    link.textContent = name + "频道";
+    channels.appendChild(link);
+  }
+
+  const feed = document.getElementById("feed");
+  for (let index = 1; index <= 400; index += 1) {
+    const card = document.createElement("article");
+    card.className = "card";
+    const heading = document.createElement("h3");
+    const headline = document.createElement("a");
+    headline.href = "/automation-tool-sa-portal";
+    headline.textContent = "今日资讯第" + index + "条：行业观察与深度解读";
+    heading.appendChild(headline);
+    const summary = document.createElement("p");
+    summary.textContent = "这是第" + index + "条资讯的摘要，覆盖行业动态、市场变化与专家观点，供验收页面制造真实规模的可访问性树。";
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    for (const label of ["来源" + (index % 23), "评论" + (index * 7 % 199), "阅读" + (index * 31 % 9973)]) {
+      const span = document.createElement("span");
+      span.textContent = label;
+      meta.appendChild(span);
+    }
+    card.append(heading, summary, meta);
+    feed.appendChild(card);
+  }
+
+  const rank = document.getElementById("rank");
+  for (let index = 1; index <= 50; index += 1) {
+    const item = document.createElement("li");
+    const link = document.createElement("a");
+    link.href = "/automation-tool-sa-portal";
+    link.textContent = "热点话题第" + index + "名";
+    item.appendChild(link);
+    rank.appendChild(item);
+  }
+
+  const services = document.getElementById("services");
+  for (const name of ["邮箱","云盘","翻译","地图","日历","笔记","会议","文档"]) {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = name + "服务";
+    item.appendChild(button);
+    services.appendChild(item);
+  }
+
+  const footer = document.getElementById("footer");
+  for (const name of ["关于我们","联系方式","招聘信息","广告合作","版权声明","隐私政策","站点地图",
+    "帮助反馈","开放平台","无障碍声明","营业执照","举报入口"]) {
+    const link = document.createElement("a");
+    link.href = "/automation-tool-sa-portal";
+    link.textContent = name;
+    footer.appendChild(link);
+  }
+</script>
+</body>
+</html>

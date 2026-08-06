@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>创作中心 - 发布内容（改版）</title>
+<style>
+  body { margin: 0; font-family: sans-serif; }
+  header { padding: 10px 24px; background: #0f3460; color: #fff; display: flex; gap: 16px; }
+  header a { color: #dfe6f3; text-decoration: none; font-size: 13px; }
+  form { max-width: 860px; margin: 24px auto; display: grid; gap: 12px; grid-template-columns: 2fr 1fr; }
+  label { font-size: 13px; color: #444; display: grid; gap: 4px; }
+  input, textarea { padding: 8px; border: 1px solid #ccc; font-size: 14px; }
+  .actions { display: flex; gap: 10px; grid-column: 1 / -1; }
+  .tags { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+<header>
+  <strong>创作中心</strong>
+  <a href="/automation-tool-sa-portal">返回首页</a>
+  <a href="/automation-tool-sa-portal">内容管理</a>
+  <a href="/automation-tool-sa-portal">数据看板</a>
+  <a href="/automation-tool-sa-portal">活动广场</a>
+</header>
+
+<!-- 改版后的发布页：布局重排，发布按钮改名为「立即发表」，回放 v1 必须在外部动作前失败 -->
+<form onsubmit="return false">
+  <label>标题
+    <input type="text" aria-label="标题内容" placeholder="给作品起个好标题">
+  </label>
+  <label>封面
+    <button type="button">选择封面</button>
+  </label>
+  <label>简介
+    <textarea aria-label="简介内容" rows="6" placeholder="介绍一下这部作品"></textarea>
+  </label>
+  <label>定时
+    <input type="text" aria-label="定时发布时间" placeholder="立即发布">
+  </label>
+  <fieldset class="tags" aria-label="话题标签">
+    <legend>话题标签</legend>
+    <label><input type="checkbox">行业观察</label>
+    <label><input type="checkbox">深度解读</label>
+    <label><input type="checkbox">今日热点</label>
+  </fieldset>
+  <div class="actions">
+    <button type="button" onclick="location.href='/automation-tool-sa-portal/studio/done'">立即发表</button>
+    <button type="button">存草稿</button>
+    <button type="button" onclick="location.href='/automation-tool-sa-portal'">取消</button>
+  </div>
+</form>
+</body>
+</html>
