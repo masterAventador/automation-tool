@@ -149,7 +149,11 @@ def start_montage(
     `pipeline` exists for tests; production always drives the packaged
     upstream `app.services.task.start`.
     """
-    from webui_runtime import WebUiRejected, _preload_private_config
+    from webui_runtime import (
+        WebUiRejected,
+        _preload_private_config,
+        _prepare_shared_runtime,
+    )
 
     runtime_parent = asset_root / ".automation-tool-montage"
     runtime_parent.mkdir(mode=0o700, exist_ok=True)
@@ -163,6 +167,10 @@ def start_montage(
     if output_root.is_symlink() or not output_root.is_dir():
         raise WebUiRejected("invalid output root")
     _preload_private_config(runtime_root, pexels_api_key)
+    # Before the thread, not inside it: a runtime that cannot be laid out must
+    # fail the submission synchronously, where worker_main can still refuse the
+    # job, instead of dying on a daemon thread after "submitted" was reported.
+    _prepare_shared_runtime(runtime_root)
     if configuration is not None:
         install_script_model(configuration)
 

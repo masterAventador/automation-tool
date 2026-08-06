@@ -356,15 +356,29 @@ def _preload_private_config(
     config_package.config = config_module
 
 
+def _prepare_shared_runtime(runtime_root: Path) -> None:
+    """The private-runtime layout every surface needs before upstream code runs.
+
+    The observation bridge resolves `storage/tasks` with strict=True at
+    install time, and upstream `resource_dir()` is the subtitle-font root —
+    so the WebUI *and* the headless montage path must both build these before
+    wiring the upstream engine. The montage path skipping this is exactly how
+    every montage job died on FileNotFoundError (REVIEW-2026-08-06 C1).
+    """
+    _, _, _, upstream_resource = _upstream_paths()
+    if not upstream_resource.is_dir():
+        raise WebUiRejected("upstream WebUI assets unavailable")
+    shutil.copytree(upstream_resource, runtime_root / "resource")
+    (runtime_root / "storage/tasks").mkdir(parents=True)
+
+
 def _prepare_private_project(runtime_root: Path) -> Path:
-    _, upstream_main, _, upstream_resource = _upstream_paths()
+    _, upstream_main, _, _ = _upstream_paths()
     upstream_webui = upstream_main.parent
-    if not upstream_webui.is_dir() or not upstream_resource.is_dir():
+    if not upstream_webui.is_dir():
         raise WebUiRejected("upstream WebUI assets unavailable")
     private_webui = runtime_root / "webui"
-    private_resource = runtime_root / "resource"
     shutil.copytree(upstream_webui, private_webui)
-    shutil.copytree(upstream_resource, private_resource)
     stylesheet = private_webui / STYLESHEET_FILE_NAME
     if not stylesheet.is_file():
         raise WebUiRejected("upstream WebUI stylesheet unavailable")
@@ -372,7 +386,7 @@ def _prepare_private_project(runtime_root: Path) -> Path:
         _private_stylesheet_document(stylesheet.read_text(encoding="utf-8")),
         encoding="utf-8",
     )
-    (runtime_root / "storage/tasks").mkdir(parents=True)
+    _prepare_shared_runtime(runtime_root)
     return private_webui / "Main.py"
 
 

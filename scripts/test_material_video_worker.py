@@ -1810,8 +1810,10 @@ class MaterialMontageRequestTest(unittest.TestCase):
             with self.assertRaises(gateway.GatewayRejected):
                 gateway.parse_bootstrap(hybrid_line)
 
-    def test_start_montage_drives_the_upstream_pipeline_under_the_bridge(self) -> None:
-        import montage_runtime
+    def test_start_montage_maps_the_request_through_the_pipeline_seam(self) -> None:
+        # 只验参数映射。真正的桥安装由
+        # test_montage_upstream_engine_installs_the_genuine_bridge 负责——
+        # 旧名字里的 under_the_bridge 恰恰是这个 seam 走不到的东西。
         from montage_runtime import parse_montage_request, start_montage
 
         request = parse_montage_request(self._request())
@@ -1836,10 +1838,13 @@ class MaterialMontageRequestTest(unittest.TestCase):
                 observed["preload_key"] = pexels_api_key
                 observed["runtime_root"] = runtime_root
 
-            with mock.patch.object(
-                montage_runtime, "_preload", fake_preload, create=True
-            ), mock.patch(
+            # 曾有一条 mock.patch.object(montage_runtime, "_preload", create=True)
+            # ——模块里根本没有这个名字，create=True 造了个空属性（M6）。
+            with mock.patch(
                 "webui_runtime._preload_private_config", fake_preload
+            ), mock.patch(
+                "webui_runtime._upstream_paths",
+                lambda: self._tiny_upstream(Path(directory)),
             ):
                 runtime = start_montage(
                     asset_root,
@@ -1858,6 +1863,136 @@ class MaterialMontageRequestTest(unittest.TestCase):
             self.assertEqual(params.video_source, "pexels")
             self.assertEqual(params.video_count, 1)
             self.assertEqual(params.bgm_type, "")
+
+    @staticmethod
+    def _tiny_upstream(base: Path) -> tuple[Path, Path, Path, Path]:
+        """A miniature upstream checkout: just what the shared runtime copies.
+
+        The real `vendor/moneyprinterturbo/resource` is ~197 MB; copying it
+        per test would be all cost and no extra proof.
+        """
+        resource = base / "upstream-resource"
+        (resource / "fonts").mkdir(parents=True)
+        (resource / "fonts" / "face.ttf").write_bytes(b"not a real font")
+        return (base / "app", base / "webui/Main.py", base / "config.toml", resource)
+
+    def test_start_montage_prepares_the_shared_runtime_layout(self) -> None:
+        """REVIEW-2026-08-06 C1: the montage path never built the layout.
+
+        The observation bridge resolves `storage/tasks` with strict=True at
+        install time and upstream `resource_dir()` is the subtitle-font root,
+        yet only the WebUI path (`_prepare_private_project`) ever created
+        them — a montage job died on FileNotFoundError before its first step.
+        """
+        from montage_runtime import parse_montage_request, start_montage
+
+        request = parse_montage_request(self._request())
+        with tempfile.TemporaryDirectory(
+            prefix="material-montage-layout-", dir=ROOT / ".local"
+        ) as directory:
+            workspace = Path(directory) / str(uuid4())
+            asset_root = workspace / "assets"
+            asset_root.mkdir(parents=True)
+            (workspace / "outputs").mkdir()
+            observed: dict[str, object] = {}
+
+            def fake_preload(runtime_root: Path, pexels_api_key: object = None) -> None:
+                observed["runtime_root"] = runtime_root
+
+            with mock.patch(
+                "webui_runtime._preload_private_config", fake_preload
+            ), mock.patch(
+                "webui_runtime._upstream_paths",
+                lambda: self._tiny_upstream(Path(directory)),
+            ):
+                runtime = start_montage(
+                    asset_root, None, None, request, pipeline=lambda *args: None
+                )
+                runtime.join(timeout=30)
+
+            runtime_root = observed["runtime_root"]
+            self.assertIsInstance(runtime_root, Path)
+            self.assertTrue(
+                (runtime_root / "storage/tasks").is_dir(),
+                "the bridge resolves storage/tasks strictly at install time",
+            )
+            self.assertTrue(
+                (runtime_root / "resource/fonts/face.ttf").is_file(),
+                "upstream resource_dir() must resolve inside the private runtime",
+            )
+
+    def test_montage_upstream_engine_installs_the_genuine_bridge(self) -> None:
+        """Drive `upstream_engine()` for real — upstream modules faked, bridge genuine.
+
+        The pipeline-seam test cannot see this path: passing `pipeline=` skips
+        `upstream_engine()` entirely, which is exactly where the bridge install
+        crashed in production (REVIEW-2026-08-06 C1).
+        """
+        import types as types_module
+
+        from montage_runtime import parse_montage_request, start_montage
+
+        request = parse_montage_request(self._request())
+        observed: dict[str, object] = {}
+
+        class FakeVideoParams:
+            def __init__(self, **kwargs: object) -> None:
+                self.__dict__.update(kwargs)
+
+        def fake_start(task_id: str, params: object, stop_at: str) -> None:
+            observed["task_id"] = task_id
+            observed["stop_at"] = stop_at
+
+        fake_modules: dict[str, types_module.ModuleType] = {}
+        for name in ("app", "app.models", "app.services", "app.utils"):
+            fake_modules[name] = types_module.ModuleType(name)
+        schema = types_module.ModuleType("app.models.schema")
+        schema.VideoParams = FakeVideoParams
+        llm = types_module.ModuleType("app.services.llm")
+        llm._generate_response = None
+        state_module = types_module.ModuleType("app.services.state")
+        state_module.state = types_module.SimpleNamespace()
+        task_module = types_module.ModuleType("app.services.task")
+        task_module.start = fake_start
+        utils = types_module.ModuleType("app.utils.utils")
+        utils.root_dir = lambda: ""
+        fake_modules.update(
+            {
+                "app.models.schema": schema,
+                "app.services.llm": llm,
+                "app.services.state": state_module,
+                "app.services.task": task_module,
+                "app.utils.utils": utils,
+            }
+        )
+
+        with tempfile.TemporaryDirectory(
+            prefix="material-montage-bridge-", dir=ROOT / ".local"
+        ) as directory:
+            workspace = Path(directory) / str(uuid4())
+            asset_root = workspace / "assets"
+            asset_root.mkdir(parents=True)
+            (workspace / "outputs").mkdir()
+
+            def fake_preload(runtime_root: Path, pexels_api_key: object = None) -> None:
+                observed["runtime_root"] = runtime_root
+
+            with mock.patch.dict(sys.modules, fake_modules), mock.patch(
+                "webui_runtime._preload_private_config", fake_preload
+            ), mock.patch(
+                "webui_runtime._upstream_paths",
+                lambda: self._tiny_upstream(Path(directory)),
+            ):
+                runtime = start_montage(asset_root, None, None, request)
+                runtime.join(timeout=30)
+                self.assertFalse(runtime.is_alive(), "the montage thread must finish")
+
+            self.assertEqual(
+                observed.get("stop_at"),
+                "video",
+                "upstream_engine() must survive the genuine bridge install and "
+                "reach task.start — before the fix it died on FileNotFoundError",
+            )
 
 
 if __name__ == "__main__":
