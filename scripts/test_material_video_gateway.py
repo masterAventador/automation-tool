@@ -70,6 +70,9 @@ def bootstrap_line(asset_root: Path, **changes: object) -> bytes:
         "bootstrapVersion": "1",
         "enableWebUi": False,
         "localSessionToken": TOKEN,
+        # 密钥键必须总在场（无密钥构建时为 null），否则两个 worker 会各认
+        # 一套协议——见 gateway.parse_bootstrap 里 base_keys 的说明。
+        "pexelsApiKey": None,
         "protocolVersion": "1.0",
         "renderBrowser": None,
         "scriptModel": None,
