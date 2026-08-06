@@ -244,6 +244,26 @@ describe("video studio shell", () => {
     expect(await screen.findByText(/已提交制作任务/u)).toBeVisible();
   });
 
+  it("tells the operator what actually failed when a montage submission is refused", async () => {
+    // REVIEW-2026-08-06 I3：全量错误表被删后，磁盘满、参数不合法、服务
+    // 起不来全都退化成「请稍后重试」——重试对它们一个都不管用。表必须
+    // 是不带 Partial 的全量 Record，让 TS 在新增码时报错。
+    const user = userEvent.setup();
+    const studioGateway = gateway();
+    vi.mocked(studioGateway.submitMaterialMontage).mockRejectedValue(
+      new MaterialVideoStudioGatewayError("storage_unavailable", false),
+    );
+    render(<VideoStudio gateway={studioGateway} />);
+
+    await user.click(screen.getByRole("tab", { name: "新建视频" }));
+    await user.click(screen.getByRole("button", { name: "选择智能素材成片" }));
+    await user.type(screen.getByLabelText("视频主题"), "护肤知识三条");
+    await user.click(screen.getByRole("button", { name: "开始制作" }));
+
+    expect(await screen.findByText(/磁盘空间和目录权限/u)).toBeVisible();
+    expect(document.body).not.toHaveTextContent(/请稍后重试/u);
+  });
+
   it("keeps the settings page gated until the brand motion method is selected", async () => {
     const user = userEvent.setup();
     render(<VideoStudio gateway={gateway()} />);

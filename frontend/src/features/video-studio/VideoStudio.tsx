@@ -418,26 +418,35 @@ const AUTHORING_ERRORS = {
 
 
 /**
- * What the one-sentence card says when a submission comes back a failure.
+ * What this page says for every failure code a submission can come back with.
  *
- * It reads as a lookup rather than a chain of conditionals because the native
- * side now distinguishes five outcomes here, and a chain that long is where a
- * new code quietly falls through to the catch-all sentence.
+ * Total by type, not Partial: the montage path really does return
+ * storage_unavailable (disk / permissions), protocol_mismatch (the request
+ * failed local validation — retrying is useless) and process_unavailable
+ * (the local worker would not start), and a Partial table collapsed all of
+ * them into one "try again later" sentence that was wrong for each
+ * (REVIEW-2026-08-06 I3). A new code now fails the build until it gets words.
  *
  * `render_unavailable` keeps its instruction to go and check the components,
  * because after the authoring failures were split out it is the only code left
  * that really does mean a packaged part could not be resolved.
  */
-const BRIEF_ERRORS: Partial<Record<MaterialVideoStudioErrorCode, string>> = {
+const BRIEF_ERRORS: Record<MaterialVideoStudioErrorCode, string> = {
   // Also where a saved-but-unusable model configuration lands, so the wording
   // covers both "you have not set one up" and "the one you saved is not
   // acceptable" — the move is the same page either way.
   configuration_required: "请先到“设置与诊断”配置并测试视频创作模型服务。",
   ...AUTHORING_ERRORS,
   render_unavailable: "本机渲染组件暂时不可用，请到“设置与诊断”检查组件。",
+  process_unavailable: "本机视频制作服务暂时无法启动，请稍后重试。",
+  storage_unavailable: "无法创建本机视频工作区，请检查磁盘空间和目录权限。",
+  view_unavailable: "完整制作界面暂时无法打开，请稍后重试。",
+  job_unavailable: "制作任务状态暂时不可用，可能已有任务正在进行，请稍后再试。",
+  draft_invalid: "草稿内容不符合要求，请检查后重试。",
+  protocol_mismatch:
+    "提交的制作参数未通过检查，请核对填写内容；如果反复出现，请更新 App 后重试。",
+  operation_unavailable: "视频制作暂时不可用，请稍后重试。",
 };
-
-const BRIEF_SUBMIT_FALLBACK = "一句话自动制作暂时无法提交，请稍后重试。";
 
 function MaterialMontageForm({
   gateway,
@@ -491,10 +500,7 @@ function MaterialMontageForm({
           error instanceof MaterialVideoStudioGatewayError
             ? error.code
             : "operation_unavailable";
-        setMessage({
-          tone: "error",
-          text: BRIEF_ERRORS[code] ?? "制作任务暂时无法提交，请稍后重试。",
-        });
+        setMessage({ tone: "error", text: BRIEF_ERRORS[code] });
       })
       .finally(() => {
         setSubmitting(false);
@@ -1607,7 +1613,7 @@ export function VideoStudio({
           error instanceof MaterialVideoStudioGatewayError
             ? error.code
             : "operation_unavailable";
-        failMotionRun({ tone: "error", text: BRIEF_ERRORS[code] ?? BRIEF_SUBMIT_FALLBACK });
+        failMotionRun({ tone: "error", text: BRIEF_ERRORS[code] });
       })
       .finally(() => setBusy(false));
   };
