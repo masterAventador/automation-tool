@@ -25,7 +25,10 @@ test("EB-11 exposes one explicit formal-App real-session acceptance command", as
   assert.match(runnerSource, /--deployment-profile/u);
   assert.match(runnerSource, /AutomationToolReleaseIdentity/u);
   assert.match(runnerSource, /repository_source_facts/u);
-  assert.match(runnerSource, /sys\.platform\s*!=\s*["']darwin["']/u);
+  // 2026-08-07 起脚本双平台化：mac-only 守卫换成按 sys.platform 派发设备驱动，
+  // 无驱动的平台 fail-closed。
+  assert.match(runnerSource, /candidate\.platform == sys\.platform/u);
+  assert.match(runnerSource, /has no device driver for \{sys\.platform\}/u);
   assert.match(runnerSource, /isatty\(\)/u);
   assert.match(runnerSource, /com\.aventador\.automationtool/u);
 });
@@ -77,7 +80,8 @@ test("EB-11 drives the full normal account page login lifecycle", async () => {
   assert.match(runner, /expected_team/u);
   assert.match(runner, /hashlib\.sha256/u);
   assert.match(runner, /O_NOFOLLOW/u);
-  assert.match(runner, /mode=0o600/u);
+  // 证据文件的私有位改由具名常量承载（Windows 侧走 DACL 等价物）。
+  assert.match(runner, /PRIVATE_EVIDENCE_MODE: Final = 0o600/u);
   assert.match(runner, /application process whose unix id is/u);
   assert.match(runner, /descendant_records/u);
   assert.match(runner, /cleanup_owned_runtime/u);

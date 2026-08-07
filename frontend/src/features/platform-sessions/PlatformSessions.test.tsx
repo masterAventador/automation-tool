@@ -11,9 +11,9 @@ import {
 import {
   CONTROL_PLANE_REQUESTS_PER_SECOND,
   HEALTH_PUBLICATION_MINIMUM_INTERVAL_MILLISECONDS,
-  PlatformSessions,
   healthPublicationDelays,
-} from "./PlatformSessions";
+} from "./health-publication-cadence";
+import { PlatformSessions } from "./PlatformSessions";
 
 function gateway(): PlatformSessionGateway {
   let state: "healthy" | "missing" = "missing";
