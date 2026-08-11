@@ -30,7 +30,7 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "zod": "^4.4.3",
-    "@unified-login/tauri": "file:../../unified-login/sdk/tauri"
+    "@unified-login/tauri": "github:masterAventador/unified-login#4574393ff1ccd9356f70d812a75fb2d5eb661e3e&path:sdk/tauri"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

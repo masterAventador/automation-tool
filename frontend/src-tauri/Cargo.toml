@@ -43,8 +43,8 @@ tauri-plugin-dialog = "=2.7.2"
 tauri-plugin-updater = "=2.10.1"
 tauri-plugin-wdio = { version = "1.2.0", optional = true }
 tauri-plugin-wdio-webdriver = { version = "1.2.0", optional = true }
-# 统一登录 SDK：与本仓库同级检出 ~/code/unified-login
-unified-login-tauri = { path = "../../../unified-login/sdk/tauri" }
+# 统一登录 SDK：直接依赖 unified-login 仓库，锁定 commit
+unified-login-tauri = { git = "https://github.com/masterAventador/unified-login.git", rev = "4574393ff1ccd9356f70d812a75fb2d5eb661e3e" }
 time = { version = "=0.3.53", features = ["parsing"] }
 tokio = { version = "=1.53.0", features = ["fs", "sync", "time"] }
 tokio-util = { version = "=0.7.18", features = ["io"] }

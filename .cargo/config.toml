@@ -1,0 +1,4 @@
+# unified-login SDK 是私有仓库的 git 依赖；cargo 内置抓取不走 git 凭据助手，
+# 必须让它改用 git CLI 才能在各开发机上复用已有的 GitHub 凭据。
+[net]
+git-fetch-with-cli = true
