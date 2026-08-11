@@ -5553,9 +5553,19 @@ pub fn run() {
         deployment_profile::DeploymentProfile::load().expect("deployment profile rejected");
     let update_configuration = app_update_coordinator::UpdateRuntimeConfiguration::load()
         .expect("desktop update configuration rejected");
+    let unified_login_config = unified_login_tauri::auth::AuthConfig::builder(
+        "https://login.xuanbai.tech",
+        "automation-tool-desktop",
+        "com.automation-tool.desktop",
+    )
+    .scopes(["openid", "profile", "email"])
+    .build();
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(
+            unified_login_tauri::plugin::Builder::from_config_result(unified_login_config).build(),
+        )
         .setup(move |app| {
             let app_data_root = app.path().app_data_dir()?;
             if app_logging::initialize(&app_data_root).is_err() {

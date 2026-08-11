@@ -15,7 +15,8 @@ import { TauriPlatformAdapter } from "./platform/tauri/platform-adapter";
 import { TauriPlatformSessionGateway } from "./platform/tauri/platform-session-gateway";
 import { TauriStartupEnvironmentGateway } from "./platform/tauri/startup-environment-gateway";
 import { TauriAppUpdateGateway } from "./platform/tauri/app-update-gateway";
-import { TauriAccountSessionGateway } from "./platform/tauri/account-session-gateway";
+import { UnifiedLoginGate } from "./features/account-session/UnifiedLoginGate";
+import { createUnifiedLoginClient } from "./platform/tauri/unified-login-client";
 import { TauriModelServiceGateway } from "./platform/tauri/model-service-gateway";
 import { TauriBilibiliServiceGateway } from "./platform/tauri/bilibili-service-gateway";
 import { TauriMaterialVideoStudioGateway } from "./platform/tauri/material-video-studio-gateway";
@@ -52,16 +53,11 @@ const publishWorkspaceGateway = new TauriPublishWorkspaceGateway();
 const videoEditingGateway = new TauriVideoEditingGateway();
 const materialLibraryGateway = new TauriMaterialLibraryGateway();
 const smartEditGateway = new TauriSmartEditGateway();
-// Always constructed. Whether a product account is actually required is a
-// property of the deployment this build was configured for, answered at
-// runtime by `restore_product_account_session`. Selecting it by Vite mode
-// meant the release package — built in the default mode — contained no login
-// screen at all, so no command could produce a customer Demo package.
-const accountSessionGateway = new TauriAccountSessionGateway();
 
 createRoot(root).render(
   <StrictMode>
-    <App
+    <UnifiedLoginGate client={createUnifiedLoginClient()}>
+      <App
       startupCheck={startupCheck}
       taskSource={taskSource}
       taskCreationGateway={taskCreationGateway}
@@ -78,9 +74,9 @@ createRoot(root).render(
       materialVideoStudioGateway={materialVideoStudioGateway}
       publishWorkspaceGateway={publishWorkspaceGateway}
       videoEditingGateway={videoEditingGateway}
-      materialLibraryGateway={materialLibraryGateway}
-      smartEditGateway={smartEditGateway}
-      accountSessionGateway={accountSessionGateway}
-    />
+        materialLibraryGateway={materialLibraryGateway}
+        smartEditGateway={smartEditGateway}
+      />
+    </UnifiedLoginGate>
   </StrictMode>,
 );

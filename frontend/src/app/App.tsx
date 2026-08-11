@@ -18,8 +18,6 @@ import { WorkbenchShell } from "./WorkbenchShell";
 import { Diagnostics } from "../features/diagnostics/Diagnostics";
 import { AppUpdateCenter } from "../features/app-updates/AppUpdateCenter";
 import type { AppUpdateGateway } from "../features/app-updates/contracts";
-import { AccountSessionGate } from "../features/account-session/AccountSessionGate";
-import type { AccountSessionGateway } from "../features/account-session/account-session-gateway";
 import type { ModelServiceGateway } from "../features/settings/model-service-gateway";
 import { ModelServiceSettings } from "../features/settings/ModelServiceSettings";
 import type { BilibiliServiceGateway } from "../features/settings/bilibili-service-gateway";
@@ -44,7 +42,6 @@ interface AppProps {
   platformAdapter?: PlatformAdapter;
   platformSessionGateway?: PlatformSessionGateway;
   appUpdateGateway?: AppUpdateGateway;
-  accountSessionGateway?: AccountSessionGateway;
   modelServiceGateway?: ModelServiceGateway;
   bilibiliServiceGateway?: BilibiliServiceGateway;
   materialVideoStudioGateway?: MaterialVideoStudioGateway;
@@ -68,7 +65,6 @@ export function App({
   platformAdapter,
   platformSessionGateway,
   appUpdateGateway,
-  accountSessionGateway,
   modelServiceGateway,
   bilibiliServiceGateway,
   materialVideoStudioGateway,
@@ -147,15 +143,7 @@ export function App({
           },
         }}
       >
-        <AntDesignApp>
-          {accountSessionGateway === undefined ? (
-            desktopApplication
-          ) : (
-            <AccountSessionGate gateway={accountSessionGateway}>
-              {desktopApplication}
-            </AccountSessionGate>
-          )}
-        </AntDesignApp>
+        <AntDesignApp>{desktopApplication}</AntDesignApp>
       </ConfigProvider>
     </QueryClientProvider>
   );
