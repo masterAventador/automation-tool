@@ -27,7 +27,6 @@ automation-tool-build-windows-executor = "automation_tool.executor.windows_candi
 automation-tool-executor = "automation_tool.executor.cli:main"
 automation-tool-export-executor-schema = "automation_tool.protocol.schema:main"
 automation-tool-export-openapi = "automation_tool.control_plane.bootstrap.openapi:main"
-automation-tool-account-operations = "automation_tool.control_plane.bootstrap.account_operations_cli:main"
 automation-tool-revoke-installation = "automation_tool.control_plane.bootstrap.revoke_installation_cli:main"
 
 [build-system]

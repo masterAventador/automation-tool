@@ -1,10 +1,5 @@
 """Async PostgreSQL infrastructure."""
 
-from .account_device_repository import SqlAlchemyAccountDeviceRepository
-from .account_installation_binding_repository import (
-    SqlAlchemyAccountInstallationBindingRepository,
-)
-from .account_session_repository import SqlAlchemyAccountSessionRepository
 from .action_execution_orchestration_repository import (
     SqlAlchemyActionExecutionOrchestrationRepository,
 )
@@ -12,19 +7,12 @@ from .action_risk_authorization_repository import (
     SqlAlchemyActionRiskAuthorizationRepository,
 )
 from .bilibili_publish_repository import SqlAlchemyBilibiliArchivePublishStore
-from .customer_account_repository import SqlAlchemyCustomerAccountRepository
 from .editing_job_repository import SqlAlchemyEditingJobRepository
 from .editing_project_repository import SqlAlchemyEditingProjectRepository
 from .installation_revocation_repository import SqlAlchemyInstallationRevocationRepository
 from .material_repository import SqlAlchemyMaterialRepository
 from .platform_session_health_repository import SqlAlchemyPlatformSessionHealthRepository
 from .schema import (
-    account_audit_events,
-    account_installation_binding_challenges,
-    account_login_rate_limits,
-    account_recovery_tokens,
-    account_session_families,
-    account_session_tokens,
     action_failure_circuits,
     action_risk_authorizations,
     action_risk_results,
@@ -66,13 +54,9 @@ from .timeline_repository import SqlAlchemyTimelineRepository
 
 __all__ = [
     "Database",
-    "SqlAlchemyAccountDeviceRepository",
-    "SqlAlchemyAccountInstallationBindingRepository",
-    "SqlAlchemyAccountSessionRepository",
     "SqlAlchemyActionExecutionOrchestrationRepository",
     "SqlAlchemyActionRiskAuthorizationRepository",
     "SqlAlchemyBilibiliArchivePublishStore",
-    "SqlAlchemyCustomerAccountRepository",
     "SqlAlchemyEditingJobRepository",
     "SqlAlchemyEditingProjectRepository",
     "SqlAlchemyInstallationRevocationRepository",
@@ -85,12 +69,6 @@ __all__ = [
     "SqlAlchemyTaskTargetRepository",
     "SqlAlchemyTaskTargetResultRepository",
     "SqlAlchemyTimelineRepository",
-    "account_audit_events",
-    "account_installation_binding_challenges",
-    "account_login_rate_limits",
-    "account_recovery_tokens",
-    "account_session_families",
-    "account_session_tokens",
     "action_failure_circuits",
     "action_risk_authorizations",
     "action_risk_results",

@@ -11,7 +11,6 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from automation_tool.control_plane import create_app
-from automation_tool.control_plane.application.account_sessions import AccountSessionService
 from automation_tool.control_plane.application.device_credentials import (
     DEVICE_CREDENTIAL_SCOPE,
     DeviceCredentialFactory,
@@ -488,30 +487,3 @@ def application_database(pending: PendingDeviceSession, owner_user_id: UUID | No
         authenticated_at=datetime.now(UTC),
     )
 
-
-@pytest.mark.asyncio
-async def test_configured_product_accounts_make_installation_ownership_mandatory() -> None:
-    pending = session_factory().create()
-    app = create_app(
-        database=application_database(pending, None),
-        account_session_service=MagicMock(spec=AccountSessionService),
-    )
-
-    with pytest.raises(DeviceSessionRejected):
-        await app.state.device_session_service.authenticate(
-            session_token=pending.session_token,
-            required_capability=DeviceSessionCapability.APP_CONTROL_PLANE,
-        )
-
-
-@pytest.mark.asyncio
-async def test_deployments_without_product_accounts_keep_unowned_installations() -> None:
-    pending = session_factory().create()
-    app = create_app(database=application_database(pending, None))
-
-    authenticated = await app.state.device_session_service.authenticate(
-        session_token=pending.session_token,
-        required_capability=DeviceSessionCapability.APP_CONTROL_PLANE,
-    )
-
-    assert authenticated.installation_id == INSTALLATION_ID

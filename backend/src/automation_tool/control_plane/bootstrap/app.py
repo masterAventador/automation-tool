@@ -7,11 +7,6 @@ from math import isfinite
 from fastapi import FastAPI
 
 from automation_tool import __version__
-from automation_tool.control_plane.api.account_devices import router as account_device_router
-from automation_tool.control_plane.api.account_installation_bindings import (
-    router as account_installation_binding_router,
-)
-from automation_tool.control_plane.api.account_sessions import router as account_session_router
 from automation_tool.control_plane.api.bilibili_publishing import (
     router as bilibili_publishing_router,
 )
@@ -63,11 +58,6 @@ from automation_tool.control_plane.api.task_target_results import (
 )
 from automation_tool.control_plane.api.tasks import router as task_router
 from automation_tool.control_plane.api.workbench import router as workbench_router
-from automation_tool.control_plane.application.account_devices import AccountDeviceService
-from automation_tool.control_plane.application.account_installation_bindings import (
-    AccountInstallationBindingService,
-)
-from automation_tool.control_plane.application.account_sessions import AccountSessionService
 from automation_tool.control_plane.application.action_execution_orchestration import (
     ActionExecutionOrchestrationService,
 )
@@ -112,15 +102,6 @@ from automation_tool.control_plane.application.task_target_results import (
 from automation_tool.control_plane.application.tasks import TaskCreationService
 from automation_tool.control_plane.application.timelines import TimelineService
 from automation_tool.control_plane.application.workbench_metrics import WorkbenchMetricsService
-from automation_tool.control_plane.bootstrap.account_devices import (
-    account_device_service as build_account_device_service,
-)
-from automation_tool.control_plane.bootstrap.account_installation_bindings import (
-    account_installation_binding_service as build_account_installation_binding_service,
-)
-from automation_tool.control_plane.bootstrap.account_sessions import (
-    account_session_service_from_environment,
-)
 from automation_tool.control_plane.bootstrap.action_execution import (
     action_execution_runtime_from_environment,
 )
@@ -239,9 +220,6 @@ async def control_plane_lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app(
     *,
     database: DatabaseLifecycle | _FromEnvironment | None = _FROM_ENVIRONMENT,
-    account_session_service: AccountSessionService | None = None,
-    account_installation_binding_service: AccountInstallationBindingService | None = None,
-    account_device_service: AccountDeviceService | None = None,
     registration_service: InstallationRegistrationService | None = None,
     local_registration_bootstrap: LocalRegistrationBootstrap | None = None,
     device_credential_service: DeviceCredentialService | None = None,
@@ -279,9 +257,6 @@ def create_app(
     resolved_database = (
         database_from_environment() if isinstance(database, _FromEnvironment) else database
     )
-    resolved_account_session_service = account_session_service
-    resolved_account_installation_binding_service = account_installation_binding_service
-    resolved_account_device_service = account_device_service
     resolved_registration_service = registration_service
     resolved_device_credential_service = device_credential_service
     resolved_device_session_service = device_session_service
@@ -308,30 +283,6 @@ def create_app(
     resolved_workbench_metrics_service = workbench_metrics_service
     resolved_desktop_update_catalog = desktop_update_catalog
     resolved_bilibili_publishing_runtime = bilibili_publishing_runtime
-    if (
-        resolved_account_session_service is None
-        and isinstance(database, _FromEnvironment)
-        and isinstance(resolved_database, Database)
-    ):
-        resolved_account_session_service = account_session_service_from_environment(
-            resolved_database
-        )
-    if (
-        resolved_account_installation_binding_service is None
-        and isinstance(resolved_database, Database)
-        and resolved_account_session_service is not None
-    ):
-        resolved_account_installation_binding_service = build_account_installation_binding_service(
-            resolved_database, resolved_account_session_service
-        )
-    if (
-        resolved_account_device_service is None
-        and isinstance(resolved_database, Database)
-        and resolved_account_session_service is not None
-    ):
-        resolved_account_device_service = build_account_device_service(
-            resolved_database, resolved_account_session_service
-        )
     if resolved_desktop_update_catalog is None:
         resolved_desktop_update_catalog = (
             desktop_update_catalog_from_environment()
@@ -349,14 +300,9 @@ def create_app(
     if resolved_device_credential_service is None and isinstance(resolved_database, Database):
         resolved_device_credential_service = build_device_credential_service(resolved_database)
     if resolved_device_session_service is None and isinstance(resolved_database, Database):
-        # A deployment that carries product accounts must not let an Installation
-        # reach business APIs without one. Ownership can only exist where accounts
-        # exist, so the same configuration decides both: enabling accounts enables
-        # the requirement, and there is no configuration that enables accounts
-        # while leaving unowned Installations addressable.
         resolved_device_session_service = build_device_session_service(
             resolved_database,
-            require_installation_owner=resolved_account_session_service is not None,
+            require_installation_owner=False,
         )
     if resolved_executor_connection_service is None and resolved_device_session_service is not None:
         resolved_executor_connection_service = ExecutorConnectionService(
@@ -440,9 +386,6 @@ def create_app(
     )
     app.state.lifecycle_state = "created"
     app.state.database = resolved_database
-    app.state.account_session_service = resolved_account_session_service
-    app.state.account_installation_binding_service = resolved_account_installation_binding_service
-    app.state.account_device_service = resolved_account_device_service
     app.state.registration_service = resolved_registration_service
     app.state.device_credential_service = resolved_device_credential_service
     app.state.device_session_service = resolved_device_session_service
@@ -476,10 +419,7 @@ def create_app(
     app.state.task_event_stream_max_connection_seconds = stream_max_connection_seconds
     install_request_context(app)
     register_error_handlers(app)
-    app.include_router(account_session_router)
     app.include_router(bilibili_publishing_router)
-    app.include_router(account_installation_binding_router)
-    app.include_router(account_device_router)
     app.include_router(desktop_update_router)
     app.include_router(system_router)
     app.include_router(registration_router)

@@ -29,9 +29,6 @@ from pathlib import Path
 import pytest
 from automation_tool.control_plane.domain import InstallationId, UserId
 from automation_tool.control_plane.infrastructure.database import Database
-from automation_tool.control_plane.infrastructure.database.account_device_repository import (
-    SqlAlchemyAccountDeviceRepository,
-)
 from automation_tool.control_plane.infrastructure.database.workbench_metrics_repository import (
     SqlAlchemyWorkbenchMetricsRepository,
 )
@@ -59,44 +56,6 @@ def refused_database() -> Database:
         f"postgresql+asyncpg://{LEAK_ROLE}:unused@127.0.0.1:{port}/{LEAK_DATABASE}",
         connect_timeout_seconds=1.0,
     )
-
-
-@pytest.mark.asyncio
-async def test_account_device_repository_redacts_a_refused_connection() -> None:
-    repository = SqlAlchemyAccountDeviceRepository(refused_database())
-
-    with pytest.raises(Exception) as raised:  # 断言在下面：抓什么类型正是被测行为
-        await repository.list_owned(user_id=USER_ID)
-
-    rendered = f"{type(raised.value).__name__}: {raised.value}"
-    assert not isinstance(raised.value, OSError), (
-        f"connection refused escaped the repository unchanged: {rendered}"
-    )
-    assert "127.0.0.1" not in rendered, f"the host reached the caller: {rendered}"
-    assert LEAK_ROLE not in rendered, f"the role name reached the caller: {rendered}"
-    assert LEAK_DATABASE not in rendered, f"the database name reached the caller: {rendered}"
-
-
-@pytest.mark.asyncio
-async def test_account_device_revoke_redacts_a_refused_connection() -> None:
-    repository = SqlAlchemyAccountDeviceRepository(refused_database())
-
-    with pytest.raises(Exception) as raised:  # 断言在下面：抓什么类型正是被测行为
-        await repository.revoke_owned(
-            user_id=USER_ID,
-            installation_id=INSTALLATION_ID,
-            expected_revision=1,
-            revoked_at=NOW,
-            request_id="h8-23-refused",
-        )
-
-    rendered = f"{type(raised.value).__name__}: {raised.value}"
-    assert not isinstance(raised.value, OSError), (
-        f"connection refused escaped the repository unchanged: {rendered}"
-    )
-    assert "127.0.0.1" not in rendered, f"the host reached the caller: {rendered}"
-
-
 @pytest.mark.asyncio
 async def test_workbench_metrics_repository_redacts_a_refused_connection() -> None:
     repository = SqlAlchemyWorkbenchMetricsRepository(refused_database())

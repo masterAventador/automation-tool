@@ -1,4 +1,3 @@
-pub mod account_session_vault;
 mod app_logging;
 pub mod app_update_cache;
 pub mod app_update_coordinator;
@@ -47,10 +46,6 @@ pub mod startup_environment;
 pub mod video_job_workspace;
 pub mod video_media_toolchain;
 
-use account_session_vault::{
-    initialize_production_account_session_vault, AccountSessionSnapshot, AccountSessionVaultError,
-    AccountSessionVaultErrorCode, ProductionAccountSessionVault,
-};
 use device_credentials::initialize_production_device_credential_vault;
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use device_credentials::ProductionDeviceCredentialVault;
@@ -68,7 +63,6 @@ use tauri::Manager;
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use tauri_plugin_dialog::{DialogExt, FilePath};
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
-use zeroize::Zeroizing;
 
 struct ControlPlaneCommandError {
     code: &'static str,
@@ -2793,227 +2787,6 @@ fn map_control_plane_error(error: control_plane::ControlPlaneError) -> ControlPl
     }
 }
 
-fn map_account_session_vault_error(error: AccountSessionVaultError) -> ControlPlaneCommandError {
-    let code = match error.code() {
-        AccountSessionVaultErrorCode::StorageUnavailable => "storage_unavailable",
-        AccountSessionVaultErrorCode::InvalidSession
-        | AccountSessionVaultErrorCode::CorruptStoredSession => "session_invalid",
-    };
-    ControlPlaneCommandError {
-        code,
-        retryable: false,
-    }
-}
-
-/// Whether the deployment this App was configured for issues product accounts.
-/// Resolved once from the deployment configuration at startup so that the one
-/// account gateway and the one login screen serve every deployment; the local
-/// developer profile answers "no" and the customer Demo answers "yes".
-pub struct ProductAccountRequirement(bool);
-
-impl ProductAccountRequirement {
-    fn required(&self) -> bool {
-        self.0
-    }
-}
-
-fn clear_account_session(
-    vault: &ProductionAccountSessionVault,
-) -> Result<AccountSessionSnapshot, ControlPlaneCommandError> {
-    vault.delete().map_err(map_account_session_vault_error)?;
-    Ok(AccountSessionSnapshot::unauthenticated())
-}
-
-#[tauri::command]
-async fn restore_product_account_session(
-    client: tauri::State<'_, control_plane::ControlPlaneClient>,
-    vault: tauri::State<'_, ProductionAccountSessionVault>,
-    requirement: tauri::State<'_, ProductAccountRequirement>,
-) -> Result<AccountSessionSnapshot, ControlPlaneCommandError> {
-    // Answered before the vault is opened or the network is touched: a
-    // deployment that issues no product accounts must reach the workbench
-    // without depending on either being available.
-    if !requirement.required() {
-        return Ok(AccountSessionSnapshot::not_required());
-    }
-    let stored = match vault.load() {
-        Ok(stored) => stored,
-        Err(error) if error.code() == AccountSessionVaultErrorCode::CorruptStoredSession => {
-            return clear_account_session(&vault);
-        }
-        Err(error) => return Err(map_account_session_vault_error(error)),
-    };
-    let Some(stored) = stored else {
-        return Ok(AccountSessionSnapshot::unauthenticated());
-    };
-    match client.refresh_account_session(stored.refresh_token()).await {
-        Ok(rotated) => {
-            vault
-                .replace(&rotated)
-                .map_err(map_account_session_vault_error)?;
-            Ok(AccountSessionSnapshot::authenticated(&rotated))
-        }
-        Err(error)
-            if error.code() == control_plane::ControlPlaneErrorCode::AccountSessionInvalid =>
-        {
-            clear_account_session(&vault)
-        }
-        Err(error) => Err(map_control_plane_error(error)),
-    }
-}
-
-#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
-#[tauri::command]
-async fn login_product_account(
-    client: tauri::State<'_, control_plane::ControlPlaneClient>,
-    vault: tauri::State<'_, ProductionAccountSessionVault>,
-    identity: tauri::State<'_, ProductionDeviceIdentity>,
-    device_credential_vault: tauri::State<'_, ProductionDeviceCredentialVault>,
-    login_name: String,
-    password: String,
-) -> Result<AccountSessionSnapshot, ControlPlaneCommandError> {
-    let password = Zeroizing::new(password);
-    let session = client
-        .login_account_session(&login_name, password.as_str())
-        .await
-        .map_err(map_control_plane_error)?;
-    if let Err(error) = client
-        .bind_account_installation(session.access_token(), &identity, &device_credential_vault)
-        .await
-    {
-        let _ = client.logout_account_session(session.refresh_token()).await;
-        return Err(map_control_plane_error(error));
-    }
-    if let Err(error) = vault.replace(&session) {
-        let _ = client.logout_account_session(session.refresh_token()).await;
-        return Err(map_account_session_vault_error(error));
-    }
-    Ok(AccountSessionSnapshot::authenticated(&session))
-}
-
-#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
-#[tauri::command]
-async fn recover_product_account_password(
-    client: tauri::State<'_, control_plane::ControlPlaneClient>,
-    vault: tauri::State<'_, ProductionAccountSessionVault>,
-    recovery_token: String,
-    new_password: String,
-) -> Result<AccountSessionSnapshot, ControlPlaneCommandError> {
-    let recovery_token = Zeroizing::new(recovery_token);
-    let new_password = Zeroizing::new(new_password);
-    client
-        .recover_account_password(recovery_token.as_str(), new_password.as_str())
-        .await
-        .map_err(map_control_plane_error)?;
-    clear_account_session(&vault)
-}
-
-#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
-#[tauri::command]
-async fn change_product_account_password(
-    client: tauri::State<'_, control_plane::ControlPlaneClient>,
-    vault: tauri::State<'_, ProductionAccountSessionVault>,
-    current_password: String,
-    new_password: String,
-) -> Result<AccountSessionSnapshot, ControlPlaneCommandError> {
-    let session = vault
-        .load()
-        .map_err(map_account_session_vault_error)?
-        .ok_or(ControlPlaneCommandError {
-            code: "session_invalid",
-            retryable: false,
-        })?;
-    let current_password = Zeroizing::new(current_password);
-    let new_password = Zeroizing::new(new_password);
-    client
-        .change_account_password(
-            session.access_token(),
-            current_password.as_str(),
-            new_password.as_str(),
-        )
-        .await
-        .map_err(map_control_plane_error)?;
-    clear_account_session(&vault)
-}
-
-#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
-#[tauri::command]
-async fn logout_product_account(
-    client: tauri::State<'_, control_plane::ControlPlaneClient>,
-    vault: tauri::State<'_, ProductionAccountSessionVault>,
-) -> Result<AccountSessionSnapshot, ControlPlaneCommandError> {
-    let Some(session) = vault.load().map_err(map_account_session_vault_error)? else {
-        return Ok(AccountSessionSnapshot::unauthenticated());
-    };
-    match client.logout_account_session(session.refresh_token()).await {
-        Ok(()) => clear_account_session(&vault),
-        Err(error)
-            if error.code() == control_plane::ControlPlaneErrorCode::AccountSessionInvalid =>
-        {
-            clear_account_session(&vault)
-        }
-        Err(error) => Err(map_control_plane_error(error)),
-    }
-}
-
-#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
-#[tauri::command]
-async fn list_product_account_devices(
-    client: tauri::State<'_, control_plane::ControlPlaneClient>,
-    vault: tauri::State<'_, ProductionAccountSessionVault>,
-) -> Result<Vec<control_plane::AccountDevice>, ControlPlaneCommandError> {
-    let session = vault
-        .load()
-        .map_err(map_account_session_vault_error)?
-        .ok_or(ControlPlaneCommandError {
-            code: "session_invalid",
-            retryable: false,
-        })?;
-    match client
-        .list_account_installations(session.access_token())
-        .await
-    {
-        Ok(devices) => Ok(devices),
-        Err(error)
-            if error.code() == control_plane::ControlPlaneErrorCode::AccountSessionInvalid =>
-        {
-            vault.delete().map_err(map_account_session_vault_error)?;
-            Err(map_control_plane_error(error))
-        }
-        Err(error) => Err(map_control_plane_error(error)),
-    }
-}
-
-#[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
-#[tauri::command]
-async fn revoke_product_account_device(
-    client: tauri::State<'_, control_plane::ControlPlaneClient>,
-    vault: tauri::State<'_, ProductionAccountSessionVault>,
-    installation_id: String,
-    expected_revision: u32,
-) -> Result<control_plane::AccountDevice, ControlPlaneCommandError> {
-    let session = vault
-        .load()
-        .map_err(map_account_session_vault_error)?
-        .ok_or(ControlPlaneCommandError {
-            code: "session_invalid",
-            retryable: false,
-        })?;
-    match client
-        .revoke_account_installation(session.access_token(), &installation_id, expected_revision)
-        .await
-    {
-        Ok(device) => Ok(device),
-        Err(error)
-            if error.code() == control_plane::ControlPlaneErrorCode::AccountSessionInvalid =>
-        {
-            vault.delete().map_err(map_account_session_vault_error)?;
-            Err(map_control_plane_error(error))
-        }
-        Err(error) => Err(map_control_plane_error(error)),
-    }
-}
-
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 fn map_task_emergency_stop_platform_error(
     error: executor_platform::ExecutorPlatformError,
@@ -5578,9 +5351,6 @@ pub fn run() {
             app_logging::record(app_logging::DesktopLogEvent::ControlPlaneClientInitialized);
             let app_data_directory = deployment_profile.prepare_data_directory(&app_data_root)?;
             app_logging::record(app_logging::DesktopLogEvent::ProfileDataDirectoryReady);
-            app.manage(ProductAccountRequirement(
-                deployment_profile.requires_product_account(),
-            ));
             let update_policy =
                 std::sync::Arc::new(app_update_policy::UpdatePolicyService::initialize(
                     &app_data_directory,
@@ -5691,13 +5461,6 @@ pub fn run() {
             // The account session vault is prepared in every build, because the
             // account gate answers before the workbench mounts and its command
             // cannot be reached without this state. Preparing it costs nothing
-            // and reveals nothing: it binds a path inside this build's own App
-            // data directory and reads nothing until a session is stored. The
-            // device identity and credential vault below are a different matter
-            // and stay separated — those mint real device credentials.
-            let account_session_vault =
-                initialize_production_account_session_vault(&app_data_directory)?;
-            app.manage(account_session_vault);
 
             #[cfg(all(feature = "desktop-e2e", not(feature = "control-plane-e2e")))]
             {
@@ -5737,7 +5500,6 @@ pub fn run() {
         // On the path to the workbench in every deployment: the gate blocks the
         // whole App until this answers, and a deployment that issues no product
         // accounts is answered without opening the vault or touching the network.
-        restore_product_account_session,
         get_executor_status,
         restart_executor,
         get_executor_diagnostics,
@@ -5776,13 +5538,6 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         check_control_plane_health,
         check_local_startup_environment,
-        restore_product_account_session,
-        login_product_account,
-        recover_product_account_password,
-        change_product_account_password,
-        logout_product_account,
-        list_product_account_devices,
-        revoke_product_account_device,
         create_douyin_search_exposure_task,
         start_task_discovery,
         get_task_target_preview,
@@ -5859,13 +5614,6 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         check_control_plane_health,
         check_local_startup_environment,
-        restore_product_account_session,
-        login_product_account,
-        recover_product_account_password,
-        change_product_account_password,
-        logout_product_account,
-        list_product_account_devices,
-        revoke_product_account_device,
         create_douyin_search_exposure_task,
         start_task_discovery,
         get_task_target_preview,

@@ -16,7 +16,6 @@ use time::{Duration as TimeDuration, OffsetDateTime, UtcOffset};
 use uuid::Variant;
 use zeroize::Zeroizing;
 
-use crate::account_session_vault::AccountSessionSecrets;
 use crate::deployment_profile::{DeploymentProfile, DeploymentProfileKind};
 use crate::device_credentials::{
     DeviceCredentialErrorCode, DeviceCredentialVault, StoredDeviceCredential,
@@ -495,24 +494,6 @@ struct InstallationAccessResponse {
     status: String,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct AccountProjectionResponse {
-    user_id: String,
-    login_name: String,
-    status: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct AccountSessionResponse {
-    access_token: String,
-    refresh_token: String,
-    access_expires_at: String,
-    refresh_expires_at: String,
-    account: AccountProjectionResponse,
-}
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AccountDevice {
@@ -521,12 +502,6 @@ pub struct AccountDevice {
     revision: u32,
     created_at: String,
     updated_at: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AccountDeviceListResponse {
-    devices: Vec<AccountDevice>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -1193,203 +1168,6 @@ impl ControlPlaneClient {
             )
             .await?;
         parse_installation_access(&body).map(|_| ())
-    }
-
-    pub async fn login_account_session(
-        &self,
-        login_name: &str,
-        password: &str,
-    ) -> Result<AccountSessionSecrets, ControlPlaneError> {
-        require_login_input(login_name, password)?;
-        let body = serde_json::json!({ "loginName": login_name, "password": password });
-        let response = self
-            .execute(
-                ControlPlaneOperation::LoginAccountSession,
-                None,
-                Some(&body),
-                None,
-                None,
-            )
-            .await?;
-        parse_account_session(&response)
-    }
-
-    pub async fn bind_account_installation<S>(
-        &self,
-        access_token: &str,
-        identity: &ProductionDeviceIdentity,
-        vault: &DeviceCredentialVault<S>,
-    ) -> Result<InstallationRegistration, ControlPlaneError>
-    where
-        S: SecretStore,
-    {
-        require_opaque_bearer(access_token, "atas1")?;
-        let challenge_request = serde_json::to_value(AccountBindingChallengeRequest {
-            device_public_key: URL_SAFE_NO_PAD.encode(identity.public_key()),
-        })
-        .map_err(|_| protocol_invalid())?;
-        let challenge_body = self
-            .execute(
-                ControlPlaneOperation::IssueAccountInstallationBindingChallenge,
-                Some(access_token),
-                Some(&challenge_request),
-                None,
-                None,
-            )
-            .await?;
-        let challenge = parse_registration_challenge(&challenge_body)?;
-        let signing_payload = decode_canonical_base64url(&challenge.signing_payload, 1, 2048)?;
-        let signature = identity.sign(&signing_payload).map_err(|_| {
-            ControlPlaneError::new(ControlPlaneErrorCode::IdentityUnavailable, false)
-        })?;
-        let completion_request = serde_json::to_value(AccountInstallationBindingRequest {
-            challenge_id: challenge.challenge_id,
-            signing_payload: challenge.signing_payload,
-            signature: URL_SAFE_NO_PAD.encode(signature),
-        })
-        .map_err(|_| protocol_invalid())?;
-        let response = self
-            .execute(
-                ControlPlaneOperation::CompleteAccountInstallationBinding,
-                Some(access_token),
-                Some(&completion_request),
-                None,
-                None,
-            )
-            .await?;
-        let bound = parse_account_installation_binding(&response)?;
-        let credential = Zeroizing::new(bound.device_credential.credential);
-        vault
-            .replace(&credential)
-            .map_err(|error| match error.code() {
-                DeviceCredentialErrorCode::InvalidCredential => protocol_invalid(),
-                DeviceCredentialErrorCode::SecureStoreUnavailable
-                | DeviceCredentialErrorCode::CorruptStoredCredential => {
-                    ControlPlaneError::new(ControlPlaneErrorCode::OutcomeUncertain, false)
-                }
-            })?;
-        Ok(InstallationRegistration {
-            installation_id: bound.installation_id,
-            credential_version: bound.device_credential.version,
-        })
-    }
-
-    pub async fn refresh_account_session(
-        &self,
-        refresh_token: &str,
-    ) -> Result<AccountSessionSecrets, ControlPlaneError> {
-        require_opaque_bearer(refresh_token, "atrs1")?;
-        let response = self
-            .execute(
-                ControlPlaneOperation::RefreshAccountSession,
-                Some(refresh_token),
-                None,
-                None,
-                None,
-            )
-            .await?;
-        parse_account_session(&response)
-    }
-
-    pub async fn list_account_installations(
-        &self,
-        access_token: &str,
-    ) -> Result<Vec<AccountDevice>, ControlPlaneError> {
-        require_opaque_bearer(access_token, "atas1")?;
-        let response = self
-            .execute(
-                ControlPlaneOperation::ListAccountInstallations,
-                Some(access_token),
-                None,
-                None,
-                None,
-            )
-            .await?;
-        parse_account_device_list(&response)
-    }
-
-    pub async fn revoke_account_installation(
-        &self,
-        access_token: &str,
-        installation_id: &str,
-        expected_revision: u32,
-    ) -> Result<AccountDevice, ControlPlaneError> {
-        require_opaque_bearer(access_token, "atas1")?;
-        let response = self
-            .execute(
-                ControlPlaneOperation::RevokeAccountInstallation,
-                Some(access_token),
-                None,
-                None,
-                Some(ControlPlaneRequestTarget::AccountDevice {
-                    installation_id,
-                    expected_revision,
-                }),
-            )
-            .await?;
-        parse_account_device(&response)
-    }
-
-    pub async fn logout_account_session(
-        &self,
-        refresh_token: &str,
-    ) -> Result<(), ControlPlaneError> {
-        require_opaque_bearer(refresh_token, "atrs1")?;
-        let response = self
-            .execute(
-                ControlPlaneOperation::LogoutAccountSession,
-                Some(refresh_token),
-                None,
-                None,
-                None,
-            )
-            .await?;
-        require_empty_response(&response)
-    }
-
-    pub async fn change_account_password(
-        &self,
-        access_token: &str,
-        current_password: &str,
-        new_password: &str,
-    ) -> Result<(), ControlPlaneError> {
-        require_opaque_bearer(access_token, "atas1")?;
-        require_password(current_password)?;
-        require_password(new_password)?;
-        let body = serde_json::json!({
-            "currentPassword": current_password,
-            "newPassword": new_password,
-        });
-        let response = self
-            .execute(
-                ControlPlaneOperation::ChangeAccountPassword,
-                Some(access_token),
-                Some(&body),
-                None,
-                None,
-            )
-            .await?;
-        require_empty_response(&response)
-    }
-
-    pub async fn recover_account_password(
-        &self,
-        recovery_token: &str,
-        new_password: &str,
-    ) -> Result<(), ControlPlaneError> {
-        require_opaque_bearer(recovery_token, "atrp1")?;
-        require_password(new_password)?;
-        let body = serde_json::json!({ "newPassword": new_password });
-        let response = self
-            .execute(
-                ControlPlaneOperation::RecoverAccountPassword,
-                Some(recovery_token),
-                Some(&body),
-                None,
-                None,
-            )
-            .await?;
-        require_empty_response(&response)
     }
 
     #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
@@ -3688,20 +3466,6 @@ fn parse_health_response(body: &[u8]) -> Result<ControlPlaneHealth, ControlPlane
     })
 }
 
-fn parse_account_session(body: &[u8]) -> Result<AccountSessionSecrets, ControlPlaneError> {
-    let response: AccountSessionResponse = parse_exact_json(body)?;
-    AccountSessionSecrets::new(
-        response.access_token,
-        response.refresh_token,
-        response.access_expires_at,
-        response.refresh_expires_at,
-        response.account.user_id,
-        response.account.login_name,
-        response.account.status,
-    )
-    .map_err(|_| protocol_invalid())
-}
-
 fn validate_account_device(device: &AccountDevice) -> Result<(), ControlPlaneError> {
     require_canonical_uuid_v4(&device.installation_id)?;
     if !matches!(device.status.as_str(), "active" | "revoked") || device.revision == 0 {
@@ -3713,23 +3477,6 @@ fn validate_account_device(device: &AccountDevice) -> Result<(), ControlPlaneErr
         return Err(protocol_invalid());
     }
     Ok(())
-}
-
-fn parse_account_device_list(body: &[u8]) -> Result<Vec<AccountDevice>, ControlPlaneError> {
-    let response: AccountDeviceListResponse = parse_exact_json(body)?;
-    if response.devices.len() > 1000 {
-        return Err(protocol_invalid());
-    }
-    for device in &response.devices {
-        validate_account_device(device)?;
-    }
-    Ok(response.devices)
-}
-
-fn parse_account_device(body: &[u8]) -> Result<AccountDevice, ControlPlaneError> {
-    let device: AccountDevice = parse_exact_json(body)?;
-    validate_account_device(&device)?;
-    Ok(device)
 }
 
 fn parse_bilibili_publish_response(
@@ -6314,7 +6061,7 @@ mod tests {
     use zeroize::Zeroizing;
 
     use super::{
-        new_request_id, parse_account_device, parse_account_device_list, parse_account_session,
+        new_request_id,
         parse_bilibili_publish_response, parse_created_task, parse_device_session,
         parse_douyin_platform_session, parse_douyin_platform_session_logout_prepare,
         parse_editing_job, parse_editing_material_list, parse_editing_project,
@@ -8180,146 +7927,6 @@ mod tests {
         ] {
             assert!(parse_health_response(invalid).is_err());
         }
-    }
-
-    #[test]
-    fn account_session_response_is_exact_canonical_and_keeps_bearers_native() {
-        let access_token = opaque_bearer("atas1");
-        let refresh_token = opaque_bearer("atrs1");
-        let valid = serde_json::json!({
-            "accessToken": access_token,
-            "refreshToken": refresh_token,
-            "accessExpiresAt": "2026-07-23T10:10:00Z",
-            "refreshExpiresAt": "2026-08-22T10:00:00Z",
-            "account": {
-                "userId": IDENTIFIER,
-                "loginName": "demo.operator",
-                "status": "active"
-            }
-        });
-        let body = serde_json::to_vec(&valid).expect("account fixture JSON");
-        let parsed = parse_account_session(&body).expect("canonical account Session");
-        assert_eq!(parsed.access_token(), valid["accessToken"]);
-        assert_eq!(parsed.refresh_token(), valid["refreshToken"]);
-        assert_eq!(parsed.account().login_name(), "demo.operator");
-
-        for invalid in [
-            {
-                let mut value = valid.clone();
-                value["accessToken"] = serde_json::json!("atas1.private");
-                value
-            },
-            {
-                let mut value = valid.clone();
-                value["account"]["loginName"] = serde_json::json!("Demo.Operator");
-                value
-            },
-            {
-                let mut value = valid.clone();
-                value["account"]["extra"] = serde_json::json!(true);
-                value
-            },
-        ] {
-            assert!(parse_account_session(
-                &serde_json::to_vec(&invalid).expect("invalid account fixture JSON")
-            )
-            .is_err());
-        }
-    }
-
-    #[test]
-    fn account_installation_binding_response_allows_rotation_but_rejects_secrets_in_shape() {
-        let credential = opaque_bearer("atdc1");
-        let valid = serde_json::json!({
-            "installationId": IDENTIFIER,
-            "status": "active",
-            "revision": 2,
-            "deviceCredential": {
-                "credential": credential,
-                "version": 3,
-                "scope": "device.session.exchange"
-            }
-        });
-        let parsed = super::parse_account_installation_binding(
-            &serde_json::to_vec(&valid).expect("binding JSON"),
-        )
-        .expect("valid account Installation binding");
-        assert_eq!(parsed.installation_id, IDENTIFIER);
-        assert_eq!(parsed.device_credential.version, 3);
-
-        for invalid in [
-            {
-                let mut value = valid.clone();
-                value["deviceCredential"]["version"] = serde_json::json!(0);
-                value
-            },
-            {
-                let mut value = valid.clone();
-                value["ownerUserId"] = serde_json::json!(IDENTIFIER);
-                value
-            },
-        ] {
-            assert!(super::parse_account_installation_binding(
-                &serde_json::to_vec(&invalid).expect("invalid binding JSON")
-            )
-            .is_err());
-        }
-    }
-
-    #[test]
-    fn account_device_projection_is_exact_bounded_and_secret_free() {
-        let device = serde_json::json!({
-            "installationId": IDENTIFIER,
-            "status": "active",
-            "revision": 1,
-            "createdAt": "2026-07-23T02:15:00Z",
-            "updatedAt": "2026-07-23T02:20:00Z"
-        });
-        let list = serde_json::json!({"devices": [device.clone()]});
-        let parsed =
-            parse_account_device_list(&serde_json::to_vec(&list).expect("account devices JSON"))
-                .expect("valid account devices");
-        assert_eq!(parsed.len(), 1);
-        assert!(
-            parse_account_device(&serde_json::to_vec(&device).expect("account device JSON"))
-                .is_ok()
-        );
-
-        for invalid in [
-            {
-                let mut value = device.clone();
-                value["revision"] = serde_json::json!(0);
-                value
-            },
-            {
-                let mut value = device.clone();
-                value["updatedAt"] = serde_json::json!("2026-07-23T02:14:59Z");
-                value
-            },
-            {
-                let mut value = device.clone();
-                value["deviceCredential"] = serde_json::json!("atdc1.private");
-                value
-            },
-        ] {
-            assert!(parse_account_device(
-                &serde_json::to_vec(&invalid).expect("invalid account device JSON")
-            )
-            .is_err());
-        }
-
-        let revoke_path = request_path(
-            ControlPlaneOperation::RevokeAccountInstallation,
-            Some(ControlPlaneRequestTarget::AccountDevice {
-                installation_id: IDENTIFIER,
-                expected_revision: 1,
-            }),
-        )
-        .expect("validated account device path");
-        assert_eq!(
-            revoke_path,
-            format!("/api/v1/account-installations/{IDENTIFIER}?expectedRevision=1")
-        );
     }
 
     #[test]
