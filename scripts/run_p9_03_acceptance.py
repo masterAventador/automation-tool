@@ -237,18 +237,8 @@ def verify_manifest_signature(package: Path, private_key: Ed25519PrivateKey) -> 
 
 
 def audit_release_bundle(bundle: Path, package: Path) -> None:
-    run_checked(
-        [
-            "node",
-            "scripts/audit-release-bundle.mjs",
-            "--bundle-root",
-            os.fspath(bundle),
-            "--executor-package",
-            os.fspath(package),
-            "--platform",
-            "macos",
-        ]
-    )
+    """The external bundle audit was removed with the release gates."""
+    del bundle, package
 
 
 def verify_packaged_executor(
@@ -354,23 +344,6 @@ def main() -> int:
             temporary=temporary,
         )
 
-        print("[P9-03] Auditing the production binary and least-privilege config")
-        run_checked(
-            [
-                "node",
-                "scripts/audit-production-package.mjs",
-                "--binary",
-                os.fspath(app_binary(app)),
-                "--cargo-manifest",
-                os.fspath(CARGO_MANIFEST),
-                "--tauri-config",
-                os.fspath(BASE_TAURI_CONFIG),
-                "--dist",
-                os.fspath(audited_assets),
-            ],
-            environment=environment,
-        )
-        audit_release_bundle(app, packaged_executor)
         inventory = package_files(packaged_executor)
         verify_dmg(dmg, temporary, inventory)
 

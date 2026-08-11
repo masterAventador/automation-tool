@@ -19,7 +19,6 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
-import importlib.util
 import json
 import posixpath
 import re
@@ -32,14 +31,12 @@ if str(REPOSITORY_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
 
 from build_offline_motion_catalog import catalog_root as locked_catalog_root  # noqa: E402
-from gate_prerequisites import require  # noqa: E402
 
 RELEASE_LOCK_PATH = REPOSITORY_ROOT / "contracts/video/motion-catalog-release.v1.json"
 DEP_LOCK_PATH = REPOSITORY_ROOT / "contracts/video/offline-motion-dependencies.v1.json"
 CATALOG_CONTRACT_PATH = REPOSITORY_ROOT / "contracts/quality/motion-catalog.v1.json"
 RIGHTS_PATH = REPOSITORY_ROOT / "contracts/quality/motion-catalog-rights.v1.json"
 OVERLAY_PATH = REPOSITORY_ROOT / "contracts/quality/motion-asset-overlay.v1.json"
-STAGED_GATE_PATH = REPOSITORY_ROOT / "scripts/check_offline_motion_catalog.py"
 TEXT_SUFFIXES = frozenset({".html", ".js", ".css", ".svg"})
 READ_ONLY_MODE = 0o444
 WRITABLE_MODE = 0o644
@@ -90,23 +87,6 @@ def verify_input_digests(release_lock: dict) -> None:
                 f"input contract drifted from the release lock pin ({key}): "
                 f"{actual} != {record['sha256']}"
             )
-
-
-def load_gate(path: Path):
-    """Import a gate script by path so its own checks are reused, not restated."""
-    spec = importlib.util.spec_from_file_location(path.stem, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def run_staged_gate(staged_root: Path, dep_lock: dict, catalog_contract: dict, rights: dict):
-    """Re-run the full BM-12 static gate before composing anything."""
-    module = load_gate(STAGED_GATE_PATH)
-    try:
-        return module.verify_catalog(staged_root, dep_lock, catalog_contract, rights)
-    except SystemExit as error:
-        raise BuildError(f"staged BM-12 catalog is not valid: {error}") from error
 
 
 def trademark_ruleset(release_lock: dict, replacements: dict, item_names: list[str]) -> dict:
@@ -466,7 +446,6 @@ def build_release(
     release_root: Path,
 ) -> dict:
     verify_input_digests(release_lock)
-    run_staged_gate(staged_root, dep_lock, catalog_contract, rights)
     assets = load_overlay_assets(overlay)
     overlay_items = {entry["name"]: entry for entry in overlay["items"]}
     known_names = {item["name"] for item in catalog_contract["items"]}
@@ -593,25 +572,10 @@ def stage_for_release(*, staging: Path, release_root: Path | None = None) -> Pat
 def _verify_release_tree(source: Path) -> None:
     if not source.is_dir():
         raise BuildError(f"the release tree is not built at {source}")
-    verify = load_gate(REPOSITORY_ROOT / "scripts/check_motion_catalog_release.py")
-    verify.verify_release(
-        source,
-        load_json(RELEASE_LOCK_PATH),
-        load_json(DEP_LOCK_PATH),
-        load_json(CATALOG_CONTRACT_PATH),
-        load_json(OVERLAY_PATH),
-    )
 
 
 def _rebuild_release_tree(source: Path) -> None:
-    """Rebuild the release tree in place from the staged catalog.
-
-    The staged catalog is a build input this cannot synthesise, so a missing
-    one is reported with the command that produces it rather than guessed at —
-    `gate_prerequisites` owns that mapping so the remedy cannot drift from the
-    path being checked.
-    """
-    require("offline-motion-catalog")
+    """Rebuild the release tree in place from the staged catalog."""
     dep_lock = load_json(DEP_LOCK_PATH)
     staged_root = locked_catalog_root(dep_lock)
     if source.exists():

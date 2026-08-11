@@ -8,26 +8,15 @@
     "resolveJsonModule": true,
     "strict": true,
     "noEmit": true,
-    "types": [
-      "node",
-      "@wdio/globals/types",
-      "@wdio/mocha-framework",
-      "@wdio/tauri-service"
-    ]
+    "types": ["node"]
   },
   "include": [
     "vite.config.ts",
     "vitest.config.ts",
-    "playwright.config.ts",
-    "wdio*.conf.ts",
-    "wdio-runtime-artifacts.ts",
-    "wdio-request-compatibility.ts",
     // Shared with the app project on purpose: the harness port has to be the
-    // same number for the Vite server and the Playwright client, and the
-    // unit test that pins it lives under `src/`.
+    // same number for the Vite server and its clients, and the unit test that
+    // pins it lives under `src/`.
     "src/test-harness/harness-port.ts",
-    "e2e/**/*.ts",
-    "e2e-tauri/**/*.ts",
     "eslint.config.js"
   ]
 }

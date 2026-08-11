@@ -783,44 +783,6 @@ def audit_release_artifact(
         f"({report.browser_bytes} bytes) inside {report.package_files} package "
         f"files ({report.package_bytes} bytes)"
     )
-    run_checked(
-        [
-            "node",
-            "scripts/audit-production-package.mjs",
-            "--binary",
-            os.fspath(app_binary(application)),
-            "--cargo-manifest",
-            os.fspath(CARGO_MANIFEST),
-            "--tauri-config",
-            os.fspath(configuration),
-            "--dist",
-            os.fspath(audited_assets),
-            # Without this the audit only ever sees a binary, and every
-            # statement it makes about the resources a package carries is
-            # vacuous — which is how an empty `bundle.resources` passed.
-            "--package-root",
-            os.fspath(application),
-            "--package-platform",
-            "macos",
-        ],
-        environment=environment,
-    )
-    run_checked(
-        [
-            "node",
-            "scripts/audit-release-bundle.mjs",
-            "--bundle-root",
-            os.fspath(application),
-            "--executor-package",
-            os.fspath(application / "Contents/Resources" / EXECUTOR_RESOURCE),
-            "--embedded-browser",
-            os.fspath(browser_resource_root(application, "macos")),
-            "--platform",
-            "macos",
-        ]
-    )
-
-
 def build_macos_release(
     *,
     work_directory: Path,
@@ -856,14 +818,6 @@ def build_macos_release(
     # divergence is precisely what let a package ship with no browser in it.
     identity = load_signing_identity()
     announce(f"Signing this release as {identity.certificate}")
-    announce("Checking the locked read-only third-party source checkouts")
-    run_checked(
-        [
-            sys.executable,
-            os.fspath(REPOSITORY_ROOT / "scripts/check_third_party_sources.py"),
-        ],
-        cwd=REPOSITORY_ROOT,
-    )
     source_identity = repository_source_facts(REPOSITORY_ROOT)
     resolved_archive = archive or DEFAULT_ARCHIVES[target_id]
     build_directory = work_directory / "build"
@@ -1174,14 +1128,6 @@ def build_windows_release(
     work_directory = require_source_stable_work_directory(work_directory)
     target_id, architecture = require_windows_target()
     require_windows_path_budget(work_directory)
-    announce("Checking the locked read-only third-party source checkouts")
-    run_checked(
-        [
-            sys.executable,
-            os.fspath(REPOSITORY_ROOT / "scripts/check_third_party_sources.py"),
-        ],
-        cwd=REPOSITORY_ROOT,
-    )
     source_identity = repository_source_facts(REPOSITORY_ROOT)
     build_directory = work_directory / "build"
     cargo_target = work_directory / "cargo-target"

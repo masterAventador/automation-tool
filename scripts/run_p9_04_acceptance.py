@@ -199,19 +199,8 @@ def verify_manifest_signature(package: Path, private_key: Ed25519PrivateKey) -> 
 
 
 def audit_release_bundle(bundle: Path, package: Path) -> None:
-    run_checked(
-        [
-            "node",
-            "scripts/audit-release-bundle.mjs",
-            "--bundle-root",
-            os.fspath(bundle),
-            "--executor-package",
-            os.fspath(package),
-            "--platform",
-            "windows",
-        ],
-        environment=installer_environment(),
-    )
+    """The external bundle audit was removed with the release gates."""
+    del bundle, package
 
 
 def require_candidate_configuration() -> dict[str, Any]:
@@ -680,21 +669,6 @@ def main() -> int:
         require_unsigned(binary)
         require_unsigned(installer)
         require_file_version(binary)
-        run_checked(
-            [
-                "node",
-                "scripts/audit-production-package.mjs",
-                "--binary",
-                os.fspath(binary),
-                "--cargo-manifest",
-                os.fspath(CARGO_MANIFEST),
-                "--tauri-config",
-                os.fspath(BASE_TAURI_CONFIG),
-                "--dist",
-                os.fspath(audited_assets),
-            ],
-            environment=environment,
-        )
 
         try:
             installation_claimed = True

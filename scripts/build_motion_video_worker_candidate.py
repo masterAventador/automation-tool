@@ -222,4 +222,4 @@ def build_candidate(output: Path) -> CandidateAudit:
 
 
 if __name__ == "__main__":
-    raise SystemExit("Use scripts/run_bm_02_acceptance.py so the candidate is always cleaned")
+    raise SystemExit("Use scripts/prepare_video_runtime.py, which builds and caches the candidate")

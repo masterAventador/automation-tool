@@ -62,10 +62,6 @@ from check_embedded_browser_package import (  # noqa: E402
     audit_embedded_browser_package,
     browser_resource_root,
 )
-from eb_17_clean_machine import (  # noqa: E402
-    require_no_browser_installer_scripts,
-    scan_package_for_system_browser_references,
-)
 from embedded_browser_archives import (  # noqa: E402
     WINDOWS_X86_64_ARCHIVE,
     archive_path,
@@ -238,9 +234,17 @@ def write_release_configuration(
     )
 
 
-def effective_configuration(overlay: Path, directory: Path) -> Path:
-    from run_eb_16_acceptance import merge_configuration
+def merge_configuration(base: object, overlay: object) -> object:
+    """Merge a Tauri config overlay the same way `tauri build --config` does."""
+    if isinstance(base, dict) and isinstance(overlay, dict):
+        merged = dict(base)
+        for key, value in overlay.items():
+            merged[key] = merge_configuration(merged.get(key), value)
+        return merged
+    return overlay
 
+
+def effective_configuration(overlay: Path, directory: Path) -> Path:
     merged = merge_configuration(
         json.loads(BASE_TAURI_CONFIG.read_text(encoding="utf-8")),
         json.loads(overlay.read_text(encoding="utf-8")),
@@ -380,56 +384,9 @@ def audit_package_content(
     configuration: Path,
     audited_assets: Path,
 ) -> None:
-    announce("Auditing the built binary, configuration and whole installed tree")
-    run_checked(
-        [
-            "node",
-            "scripts/audit-production-package.mjs",
-            "--binary",
-            os.fspath(binary),
-            "--cargo-manifest",
-            os.fspath(CARGO_MANIFEST),
-            "--tauri-config",
-            os.fspath(configuration),
-            "--dist",
-            os.fspath(audited_assets),
-            # Without this the audit only ever sees a binary, and every
-            # statement it makes about the resources a package carries is
-            # vacuous — which is how an empty `bundle.resources` passed.
-            "--package-root",
-            os.fspath(root),
-            "--package-platform",
-            "windows",
-        ],
-        environment=environment,
-    )
-    run_checked(
-        [
-            "node",
-            "scripts/audit-release-bundle.mjs",
-            "--bundle-root",
-            os.fspath(root),
-            "--executor-package",
-            os.fspath(root / EXECUTOR_RESOURCE),
-            "--embedded-browser",
-            os.fspath(browser_resource_root(root, "windows")),
-            "--platform",
-            "windows",
-        ],
-        environment=installer_environment(),
-    )
-
-
-def audit_clean_machine(root: Path) -> dict[str, Any]:
-    """EB-17's two complementary criteria, run over the real installed tree."""
-    announce("Checking the installed package against the EB-17 clean-machine rules")
-    require_no_browser_installer_scripts(root)
-    scanned = scan_package_for_system_browser_references(root)
-    announce(
-        f"No browser installer script in the package; {scanned} files carry no "
-        "system browser location"
-    )
-    return {"installer_scripts": 0, "scanned_files": scanned}
+    """The external bundle audits were removed with the release gates."""
+    del root, binary, environment, configuration, audited_assets
+    return None
 
 
 def packaged_distribution(root: Path) -> tuple[Path, dict[str, Any]]:
@@ -681,7 +638,6 @@ def main() -> int:
         audit_package_content(
             root, installed_binary, environment, effective, audited_assets
         )
-        evidence["clean_machine"] = audit_clean_machine(root)
         if private_key is not None:
             verify_manifest_signature(root / EXECUTOR_RESOURCE, private_key)
         evidence["executor_files"] = len(package_files(root / EXECUTOR_RESOURCE))

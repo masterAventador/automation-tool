@@ -50,6 +50,7 @@ if set(bootstrap) != {
     "enableWebUi",
     "localSessionToken",
     "mediaTools",
+    "pexelsApiKey",
     "protocolVersion",
     "renderBrowser",
     "scriptModel",
