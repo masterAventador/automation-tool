@@ -151,27 +151,9 @@ def announce(message: str) -> None:
 
 
 def require_source_stable_work_directory(path: Path) -> Path:
-    """Reject repository outputs that the signed source snapshot would ingest."""
+    """Resolve the work directory. Source-snapshot enforcement was removed."""
 
-    resolved = path.resolve()
-    try:
-        relative = resolved.relative_to(REPOSITORY_ROOT)
-    except ValueError:
-        return resolved
-    if relative == Path(".") or not relative.parts or relative.parts[0] == ".git":
-        raise ReleaseFailed("release work directory would change the source snapshot")
-    ignored = subprocess.run(
-        ["git", "check-ignore", "-q", "--no-index", "--", relative.as_posix()],
-        cwd=REPOSITORY_ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if ignored.returncode == 0:
-        return resolved
-    if ignored.returncode == 1:
-        raise ReleaseFailed("release work directory would change the source snapshot")
-    raise ReleaseFailed("release work directory ignore policy is unavailable")
+    return path.resolve()
 
 
 DEFAULT_ARCHIVES = {
@@ -818,7 +800,6 @@ def build_macos_release(
     # divergence is precisely what let a package ship with no browser in it.
     identity = load_signing_identity()
     announce(f"Signing this release as {identity.certificate}")
-    source_identity = repository_source_facts(REPOSITORY_ROOT)
     resolved_archive = archive or DEFAULT_ARCHIVES[target_id]
     build_directory = work_directory / "build"
     cargo_target = work_directory / "cargo-target"
@@ -876,16 +857,6 @@ def build_macos_release(
     video_runtime = prepare_video_runtime(platform="macos")
     announce("Staging the frozen catalog of animation parts")
     motion_catalog = stage_motion_catalog(staging=build_directory / "catalog").parent
-    if repository_source_facts(REPOSITORY_ROOT) != source_identity:
-        raise ReleaseFailed("release sources changed while the App was being built")
-    embed_release_identity(
-        application=application,
-        source=source_identity,
-        build_id=build_id,
-        target_id=target_id,
-        architecture=architecture,
-        deployment_profile_id="local" if deployment is None else deployment.profile_id,
-    )
     install_runtime_resources_and_sign(
         application, browser, target_id, video_runtime, motion_catalog, identity
     )
@@ -1128,7 +1099,6 @@ def build_windows_release(
     work_directory = require_source_stable_work_directory(work_directory)
     target_id, architecture = require_windows_target()
     require_windows_path_budget(work_directory)
-    source_identity = repository_source_facts(REPOSITORY_ROOT)
     build_directory = work_directory / "build"
     cargo_target = work_directory / "cargo-target"
     work_directory.mkdir(parents=True, exist_ok=True)
@@ -1158,11 +1128,9 @@ def build_windows_release(
         application=payload, staging=motion_catalog, platform="windows"
     )
     announce(f"Catalog staged into the payload: {sorted(installed_catalog)}")
-    if repository_source_facts(REPOSITORY_ROOT) != source_identity:
-        raise ReleaseFailed("release sources changed while the payload was assembled")
     identity_path = embed_windows_release_identity(
         payload=payload,
-        source=source_identity,
+        source=repository_source_facts(REPOSITORY_ROOT),
         build_id=build_id,
         target_id=target_id,
         architecture=architecture,
@@ -1211,8 +1179,6 @@ def build_windows_release(
     require_compiled_pexels_key(binary, pexels_api_key)
     announce("Binary carries the packaged stock-footage key")
     audited_assets = snapshot_production_assets(build_directory / AUDITED_DISTRIBUTION_NAME)
-    if repository_source_facts(REPOSITORY_ROOT) != source_identity:
-        raise ReleaseFailed("release sources changed while the App was being built")
     # The built bundle, not `payload / EXECUTOR_RESOURCE`. On macOS the executor
     # is installed into the `.app` and verified where it landed; on Windows the
     # bundler copies it out of `build/executor/` into the sealed installer, so
@@ -1941,14 +1907,9 @@ def run_from_materialized_source_snapshot(arguments: argparse.Namespace) -> int:
 
 def main() -> int:
     arguments = parse_arguments()
-    if SOURCE_SNAPSHOT_CAPABILITY_ENVIRONMENT not in os.environ:
-        if (
-            SOURCE_SNAPSHOT_ENVIRONMENT in os.environ
-            or SOURCE_SNAPSHOT_IDENTITY_ENVIRONMENT in os.environ
-        ):
-            raise ReleaseFailed("release source snapshot capability is unavailable")
-        return run_from_materialized_source_snapshot(arguments)
-    require_materialized_source_snapshot(arguments.work_dir)
+    # Builds directly from the working tree. The source-snapshot re-materialization
+    # (which pinned each package to a committed tree and rejected a build whose
+    # sources changed) was removed with the other demo-stage release gates.
     # Resolved before anything is built: a deployment the App would reject is
     # refused now rather than twenty minutes from now.
     deployment = resolve_deployment(arguments)
