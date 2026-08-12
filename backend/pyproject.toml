@@ -19,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 automation-tool-control-plane = "automation_tool.control_plane.bootstrap.cli:main"
+automation-tool-local-service = "automation_tool.local_service:main"
 automation-tool-control-plane-container = "automation_tool.control_plane.bootstrap.container_cli:main"
 automation-tool-build-executor-manifest = "automation_tool.executor.package_manifest:main"
 automation-tool-build-macos-executor = "automation_tool.executor.macos_candidate:main"

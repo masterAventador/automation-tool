@@ -137,6 +137,17 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
     except ExecutorBootstrapRejected:
         _fixed_error(stderr, "Local Executor bootstrap is rejected")
         return 2
+    return run_executor_with_bootstrap(bootstrap, stdin, stdout, stderr)
+
+
+def run_executor_with_bootstrap(
+    bootstrap: object,
+    stdin: BinaryIO,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
+    """Run one Executor lifetime from an already-parsed bootstrap document."""
+
     try:
         authenticator = LocalSessionAuthenticator(bootstrap.local_session_token)
         try:
