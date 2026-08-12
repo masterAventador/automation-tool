@@ -440,7 +440,7 @@ def test_executor_package_module_uses_the_formal_cli_entry() -> None:
 
     assert completed.returncode == 2
     assert completed.stdout == b""
-    assert completed.stderr == b"Local Executor bootstrap is rejected\n"
+    assert completed.stderr == b"Local service bootstrap is rejected\n"
 
 
 def test_main_serves_one_motion_authoring_request_when_asked_for_that_entry(

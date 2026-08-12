@@ -78,6 +78,16 @@ def _start_server_thread(server: uvicorn.Server) -> threading.Thread:
 
 
 def main() -> None:
+    if sys.argv[1:] == ["--author-motion"]:
+        # 一次性动效创作子进程：答一个请求就退出，不需要 HTTP 与执行器循环。
+        from automation_tool.executor.motion_authoring import (
+            serve_one_motion_authoring_request,
+        )
+
+        buffered = sys.stdin.buffer
+        stream = getattr(buffered, "raw", buffered)
+        raise SystemExit(serve_one_motion_authoring_request(stream, sys.stdout))
+
     port = service_port()
     server = _build_server(port)
 
