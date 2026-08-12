@@ -1,6 +1,10 @@
-"""Module entry used by source runs and the PyInstaller bundle."""
+"""Module entry used by source runs and the PyInstaller bundle.
 
-from automation_tool.executor.cli import main  # pragma: no cover - verified in a child process
+Runs the merged local service: control-plane HTTP and the executor loop in
+one process, speaking the executor's stdin/stdout protocol to the App.
+"""
+
+from automation_tool.local_service import main  # pragma: no cover - verified in a child process
 
 if __name__ == "__main__":  # pragma: no cover - verified in a child process
     main()  # pragma: no cover - verified in a child process

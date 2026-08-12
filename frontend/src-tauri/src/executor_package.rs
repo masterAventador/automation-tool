@@ -180,9 +180,12 @@ impl ExecutorPackageVerifier {
         match self.verify_installed(package_root) {
             Ok(package) => Ok(package),
             Err(error) => {
-                // 正规安装包不可用时才允许开发入口：显式环境变量优先，
-                // debug 构建再回退到仓库 venv 的合并服务。测试自建的
-                // fixture 包因此不受影响——它们的正规校验会先成功。
+                // 只有安装包目录整个不存在（开发态）才允许回退到开发入口：
+                // 显式环境变量优先，debug 构建再回退仓库 venv 的合并服务。
+                // 存在但校验失败（损坏/被篡改）的包必须保持失败。
+                if package_root.exists() {
+                    return Err(error);
+                }
                 if let Some(command) = std::env::var_os("AUTOMATION_TOOL_LOCAL_SERVICE_COMMAND") {
                     let entrypoint = PathBuf::from(command);
                     if entrypoint.is_file() {

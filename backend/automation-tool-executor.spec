@@ -46,7 +46,29 @@ onnxruntime_datas = collect_data_files("onnxruntime", includes=["LICENSE"])
 onnxruntime_binaries = collect_dynamic_libs("onnxruntime")
 onnxruntime_hiddenimports = ["onnxruntime"]
 onnxruntime_metadata = copy_metadata("onnxruntime")
+from PyInstaller.utils.hooks import collect_submodules
+
+# 控制面的 domain 包用字符串惰性导入子模块，静态图追不到，整包收集。
+control_plane_hiddenimports = collect_submodules("automation_tool.control_plane")
+
 executor_hiddenimports = [
+    # 合并服务：控制面 HTTP 与执行器同进程。uvicorn 按字符串装配事件环与
+    # 协议实现，静态图看不见，必须显式列根；控制面装配链同理由入口的
+    # 函数内延迟导入触达。
+    *control_plane_hiddenimports,
+    "automation_tool.local_service",
+    "automation_tool.control_plane.bootstrap.cli",
+    "automation_tool.control_plane.bootstrap.app",
+    "uvicorn",
+    "uvicorn.loops.auto",
+    "uvicorn.loops.asyncio",
+    "uvicorn.protocols.http.auto",
+    "uvicorn.protocols.http.h11_impl",
+    "uvicorn.protocols.websockets.auto",
+    "uvicorn.protocols.websockets.websockets_sansio_impl",
+    "uvicorn.lifespan.on",
+    "aiosqlite",
+    "sqlalchemy.dialects.sqlite.aiosqlite",
     "automation_tool.executor.authentication",
     "automation_tool.executor.bootstrap",
     "automation_tool.executor.command_processor",
@@ -154,6 +176,14 @@ for relative in motion_authoring_resources:
         )
     motion_authoring_datas.append((str(source), str(Path(relative).parent)))
 
+# 控制面启动时读取的契约随包分发（冻结根目录下同相对路径）。
+control_plane_datas = [
+    (
+        str(repository_root / "contracts/publishing/bilibili-open-api.v1.json"),
+        "contracts/publishing",
+    ),
+]
+
 analysis = Analysis(
     [str(source_root / "automation_tool/executor/__main__.py")],
     pathex=[str(source_root)],
@@ -164,6 +194,7 @@ analysis = Analysis(
         *onnxruntime_metadata,
         *silero_vad_datas,
         *motion_authoring_datas,
+        *control_plane_datas,
     ],
     hiddenimports=[
         *playwright_hiddenimports,

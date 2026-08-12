@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Final
 
@@ -28,7 +29,10 @@ class BilibiliPublishingConfigurationError(RuntimeError):
 
 def _contract_path() -> Path:
     configured = os.environ.get(_CONTRACT_ENVIRONMENT)
+    frozen_root = getattr(sys, "_MEIPASS", None)
     candidates = ((Path(configured),) if configured is not None else ()) + (
+        ((Path(frozen_root) / _CONTRACT_RELATIVE,) if frozen_root else ())
+    ) + (
         Path("/app") / _CONTRACT_RELATIVE,
         Path(__file__).resolve().parents[5] / _CONTRACT_RELATIVE,
     )
