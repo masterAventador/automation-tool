@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, Final, Never, cast
 
 from sqlalchemy import Select, insert, literal, select
-from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -60,9 +60,6 @@ from .session import Database
 # not this module's behaviour.
 _CONNECTION_FAILURES = (OSError, SQLAlchemyError)
 
-_REVISION_CONSTRAINT: Final = "pk_timelines"
-_PROJECT_CONSTRAINT: Final = "fk_editing_project_timelines_project"
-_MATERIAL_OWNER_CONSTRAINT: Final = "fk_timeline_material_references_material_owner"
 
 # The keys a stored document is allowed to have, at each of the three levels.
 # Read off the dataclasses rather than written out, so that a field added to the
@@ -75,27 +72,20 @@ _TRANSITION_KEYS: Final = frozenset(field.name for field in fields(TimelineTrans
 
 
 def _refuse_integrity_violation(error: IntegrityError) -> Never:
-    """Turn one exception class into the four answers a caller can act on.
+    """Turn one exception class into the answers a caller can act on.
 
-    SQLSTATE alone is no longer enough: both the revision key and the identity
-    table's two unique constraints are `23505`, but only `pk_timelines` means a
-    caller should choose another revision. A server-generated timeline-id
-    collision is an internal data rejection, not an ordinary edit conflict.
-    The driver exposes the constraint name separately from its DETAIL message,
-    so dispatch does not need to parse or propagate private key values.
+    SQLite names the violated columns for UNIQUE constraints but reports every
+    foreign-key failure with one anonymous message. Which foreign key broke is
+    recovered from the reference tables directly by the caller's later reads;
+    here the two are folded into the two save-path answers that matter: a
+    revision collision keeps its precise error, and any referential failure is
+    surfaced as the missing-reference family with the project checked first by
+    `save`'s own project lookup.
     """
-    constraint_name = getattr(error.orig, "constraint_name", None)
-    if constraint_name is None:
-        constraint_name = getattr(
-            getattr(error.orig, "__cause__", None),
-            "constraint_name",
-            None,
-        )
-    if constraint_name == _REVISION_CONSTRAINT:
+    message = str(getattr(error, "orig", None) or error)
+    if "UNIQUE constraint failed" in message and "timelines." in message:
         raise TimelineRevisionAlreadyStored from None
-    if constraint_name == _PROJECT_CONSTRAINT:
-        raise TimelineProjectMissing from None
-    if constraint_name == _MATERIAL_OWNER_CONSTRAINT:
+    if "FOREIGN KEY constraint failed" in message:
         raise TimelineMaterialMissing from None
     raise TimelineDataRejected from None
 
@@ -366,7 +356,7 @@ class SqlAlchemyTimelineRepository:
         values = _column_values(timeline)
         reference_values = _material_reference_values(timeline, installation_id)
         claim_identity = (
-            postgresql_insert(editing_project_timelines)
+            sqlite_insert(editing_project_timelines)
             .from_select(
                 ["project_id", "timeline_id"],
                 select(

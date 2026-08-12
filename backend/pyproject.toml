@@ -5,9 +5,8 @@ description = "Control Plane and Local Executor for the automation-tool desktop 
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "alembic",
+    "aiosqlite>=0.22.1",
     "argon2-cffi>=25.1.0,<26",
-    "asyncpg",
     "cryptography",
     "fastapi",
     "httpx2",

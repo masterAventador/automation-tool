@@ -116,7 +116,7 @@ def repository_with(
     Database,
 ]:
     database = Database.from_url(
-        "postgresql+asyncpg://unused:unused@127.0.0.1:1/unused",
+        "sqlite+aiosqlite:////nonexistent-automation-tool/unused.db",
         connect_timeout_seconds=0.05,
     )
     session = StubSession(rows)

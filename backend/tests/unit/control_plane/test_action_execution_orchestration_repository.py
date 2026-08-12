@@ -38,7 +38,7 @@ NOW = datetime(2026, 7, 21, 8, 0, tzinfo=UTC)
 
 def database_without_connection() -> Database:
     return Database.from_url(
-        "postgresql+asyncpg://unused:unused@127.0.0.1:1/unused",
+        "sqlite+aiosqlite:////nonexistent-automation-tool/unused.db",
         connect_timeout_seconds=0.01,
     )
 

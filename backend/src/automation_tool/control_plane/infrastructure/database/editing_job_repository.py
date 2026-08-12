@@ -52,17 +52,11 @@ from .session import Database
 # not this module's behaviour.
 _CONNECTION_FAILURES = (OSError, SQLAlchemyError)
 
-# PostgreSQL's SQLSTATE for the violations this table can produce.
-_UNIQUE_VIOLATION: Final = "23505"
-_FOREIGN_KEY_VIOLATION: Final = "23503"
-
 # Which unique rule was broken, since both arrive under `23505`. The names have
 # to match `schema.py` and the migration; a rename that misses one of the three
 # places lands on the fall-through, which claims less rather than claiming
 # something wrong.
-_PRIMARY_KEY: Final = "pk_editing_jobs"
 _QUEUED_INDEX: Final = "uq_editing_jobs_queued_timeline_revision"
-_TIMELINE_FOREIGN_KEY: Final = "fk_editing_jobs_timeline_revision"
 
 # The row split into what an update may rewrite and what it may not. `update`
 # writes only the mutable half, which is what makes the identity columns and
@@ -84,48 +78,21 @@ _MUTABLE_COLUMNS: Final = frozenset({"status", "failure_code", "output_artifact_
 def _refuse_integrity_violation(error: IntegrityError) -> Never:
     """Turn one exception class into the answers a caller can act on.
 
-    A duplicate `job_id` means this job is registered. A second queued render of
-    one revision means the work is already asked for -- a different message and
-    a different next move, even though PostgreSQL reports both under `23505`, so
-    the constraint name is the only thing separating them. The timeline foreign
-    key says the named revision is absent. The project-owner foreign key is a
-    different invariant and falls through to rejected data; treating every
-    `23503` as a missing timeline would guess incorrectly.
-
-    None of the three improves on a retry, which is what keeps all of them away
-    from `EditingJobPersistenceUnavailable`. Anything else -- a NOT NULL
-    violation is `23502`, a CHECK is `23514` -- cannot come from this table as
-    it stands, and neither can a unique violation naming something else, but
-    "the database refused this row" is still what happened and
-    `EditingJobDataRejected` says so without inviting a retry or guessing which
-    rule broke.
-
-    Both lookups go through `getattr`, and for two different measured reasons.
-    `error.orig` can be `None` outright. And the constraint name is not on
-    `error.orig` at all: that object is SQLAlchemy's
-    `AsyncAdapt_asyncpg_dbapi.IntegrityError`, whose attribute surface is
-    `args`, `pgcode` and `sqlstate`; asyncpg's own exception, the one carrying
-    `constraint_name`, is one link down the chain on `__cause__`. Reading it
-    there rather than matching the name inside the driver's message is
-    deliberate -- the message also carries PostgreSQL's DETAIL line, which
-    quotes the offending key values, three of them at once for the composite
-    key. A SQLAlchemy release that stopped chaining would leave this `None` and
-    fall through to the answer that claims least, which is the right way for it
-    to degrade.
+    SQLite names the violated columns for ordinary UNIQUE constraints and the
+    index name for partial unique indexes, which is exactly enough to separate
+    "this job is registered" from "this revision is already queued". Foreign
+    key failures arrive as one anonymous message; the timeline reference is
+    the only one a user path can break (the owner reference would be an
+    internal bug), so that is the claim made.
     """
-    sqlstate = getattr(error.orig, "sqlstate", None)
-    constraint = getattr(
-        getattr(error.orig, "__cause__", None),
-        "constraint_name",
-        None,
-    )
-    if sqlstate == _FOREIGN_KEY_VIOLATION and constraint == _TIMELINE_FOREIGN_KEY:
-        raise EditingJobTimelineRevisionMissing from None
-    if sqlstate == _UNIQUE_VIOLATION:
-        if constraint == _PRIMARY_KEY:
+    message = str(getattr(error, "orig", None) or error)
+    if "UNIQUE constraint failed" in message:
+        if "editing_jobs.job_id" in message:
             raise EditingJobAlreadyRegistered from None
-        if constraint == _QUEUED_INDEX:
+        if _QUEUED_INDEX in message:
             raise EditingJobRevisionAlreadyQueued from None
+    if "FOREIGN KEY constraint failed" in message:
+        raise EditingJobTimelineRevisionMissing from None
     raise EditingJobDataRejected from None
 
 

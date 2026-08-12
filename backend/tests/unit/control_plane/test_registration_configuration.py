@@ -33,7 +33,7 @@ def base64url(value: bytes) -> str:
 
 def database_without_connection() -> Database:
     return Database.from_url(
-        "postgresql+asyncpg://unused:unused@127.0.0.1:1/unused",
+        "sqlite+aiosqlite:////nonexistent-automation-tool/unused.db",
         connect_timeout_seconds=0.01,
     )
 
@@ -106,7 +106,7 @@ def test_default_app_factory_wires_valid_deployment_registration(
     public_key = Ed25519PrivateKey.generate().public_key().public_bytes_raw()
     monkeypatch.setenv(
         "AUTOMATION_TOOL_DATABASE_URL",
-        "postgresql+asyncpg://unused:unused@127.0.0.1:1/unused",
+        "sqlite+aiosqlite:////nonexistent-automation-tool/unused.db",
     )
     monkeypatch.setenv("AUTOMATION_TOOL_DEMO_ENVIRONMENT_ID", "demo-cn-1")
     monkeypatch.setenv("AUTOMATION_TOOL_DEMO_BOOTSTRAP_PUBLIC_KEY", base64url(public_key))
@@ -157,7 +157,7 @@ def test_app_factory_wires_a_provisioned_local_bootstrap(
 ) -> None:
     monkeypatch.setenv(
         "AUTOMATION_TOOL_DATABASE_URL",
-        "postgresql+asyncpg://unused:unused@127.0.0.1:1/unused",
+        "sqlite+aiosqlite:////nonexistent-automation-tool/unused.db",
     )
     monkeypatch.delenv("AUTOMATION_TOOL_DEMO_ENVIRONMENT_ID", raising=False)
     monkeypatch.delenv("AUTOMATION_TOOL_DEMO_BOOTSTRAP_PUBLIC_KEY", raising=False)

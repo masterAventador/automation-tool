@@ -205,11 +205,12 @@ def _positive_finite_stream_seconds(value: object) -> float:
 async def control_plane_lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Own resources that must exist for exactly one application lifespan."""
 
-    # 固定本地 Installation：ID 是常量，不依赖数据库；建行是尽力而为，
+    # 固定本地 Installation：ID 是常量，不依赖数据库；建表与建行是尽力而为，
     # 数据库暂不可用时 App 照常启动并如实报不健康。
     app.state.local_installation_id = local_installation_id()
     if isinstance(app.state.database, Database):
         try:
+            await app.state.database.create_schema()
             await ensure_local_installation(app.state.database)
         except Exception:
             pass

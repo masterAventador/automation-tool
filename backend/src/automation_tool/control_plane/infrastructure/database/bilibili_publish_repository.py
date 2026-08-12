@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from sqlalchemy import insert, select, update
-from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -296,7 +296,7 @@ class SqlAlchemyBilibiliArchivePublishStore:
                 ):
                     raise BilibiliArchivePublishRejected
                 result = await session.execute(
-                    postgresql_insert(bilibili_upload_parts)
+                    sqlite_insert(bilibili_upload_parts)
                     .values(
                         publish_job_id=job_id.uuid,
                         part_number=part_number,
@@ -514,7 +514,7 @@ class SqlAlchemyBilibiliReconciliationStore:
         async def operation() -> BilibiliReconciliationRecord:
             async with self._database.session() as session:
                 await session.execute(
-                    postgresql_insert(bilibili_publish_reconciliations)
+                    sqlite_insert(bilibili_publish_reconciliations)
                     .values(
                         publish_job_id=job_id.uuid,
                         outcome=BilibiliReconciliationOutcome.PENDING.value,

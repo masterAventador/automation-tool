@@ -9,14 +9,18 @@ from automation_tool.control_plane.bootstrap.database import (
 from automation_tool.control_plane.infrastructure.database import Database
 
 
-def test_missing_database_configuration_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_database_configuration_falls_back_to_the_default_sqlite_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
     monkeypatch.delenv("AUTOMATION_TOOL_DATABASE_URL", raising=False)
+    monkeypatch.setenv("AUTOMATION_TOOL_DATA_DIR", str(tmp_path))
 
-    with pytest.raises(DatabaseConfigurationError) as captured:
-        create_app()
+    from automation_tool.control_plane.bootstrap.database import database_url_from_environment
 
-    assert str(captured.value) == "Database configuration is invalid"
-    assert captured.value.__cause__ is None
+    url = database_url_from_environment()
+    assert url.startswith("sqlite+aiosqlite:///")
+    assert str(tmp_path) in url
 
 
 def test_invalid_database_url_does_not_reflect_credentials(
@@ -41,7 +45,7 @@ async def test_valid_database_configuration_builds_a_disposable_adapter(
 ) -> None:
     monkeypatch.setenv(
         "AUTOMATION_TOOL_DATABASE_URL",
-        "postgresql+asyncpg://operator:private-password@127.0.0.1:1/control_plane",
+        "sqlite+aiosqlite:////nonexistent-automation-tool/private-secret-path/control_plane.db",
     )
 
     database = database_from_environment()
@@ -52,7 +56,7 @@ async def test_valid_database_configuration_builds_a_disposable_adapter(
 
 def test_database_connection_failure_is_a_safe_retryable_health_error() -> None:
     database = Database.from_url(
-        "postgresql+asyncpg://operator:private-password@127.0.0.1:1/control_plane",
+        "sqlite+aiosqlite:////nonexistent-automation-tool/private-secret-path/control_plane.db",
         connect_timeout_seconds=0.1,
     )
 

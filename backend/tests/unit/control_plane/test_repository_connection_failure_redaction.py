@@ -53,7 +53,7 @@ def closed_loopback_port() -> int:
 def refused_database() -> Database:
     port = closed_loopback_port()
     return Database.from_url(
-        f"postgresql+asyncpg://{LEAK_ROLE}:unused@127.0.0.1:{port}/{LEAK_DATABASE}",
+        f"sqlite+aiosqlite:////nonexistent-{LEAK_ROLE}/{LEAK_DATABASE}.db",
         connect_timeout_seconds=1.0,
     )
 @pytest.mark.asyncio

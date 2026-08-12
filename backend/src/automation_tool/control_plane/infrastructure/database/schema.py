@@ -2,6 +2,7 @@
 
 from sqlalchemy import (
     CHAR,
+    JSON,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -18,9 +19,9 @@ from sqlalchemy import (
     String,
     Table,
     UniqueConstraint,
+    Uuid,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from automation_tool.control_plane.application.task_target_previews import (
     TASK_TARGET_CONFIRMATION_INTENT_VERSION,
@@ -73,7 +74,7 @@ metadata = MetaData()
 users = Table(
     "users",
     metadata,
-    Column("id", UUID(as_uuid=True), nullable=False),
+    Column("id", Uuid(as_uuid=True), nullable=False),
     Column("login_name", String(length=64), nullable=False),
     Column(
         "status",
@@ -139,7 +140,7 @@ users = Table(
 user_password_credentials = Table(
     "user_password_credentials",
     metadata,
-    Column("user_id", UUID(as_uuid=True), nullable=False),
+    Column("user_id", Uuid(as_uuid=True), nullable=False),
     Column("version", BigInteger(), nullable=False),
     Column("password_hash", String(length=255), nullable=False),
     Column("pepper_version", BigInteger(), nullable=False),
@@ -174,12 +175,12 @@ user_password_credentials = Table(
 account_audit_events = Table(
     "account_audit_events",
     metadata,
-    Column("event_id", UUID(as_uuid=True), nullable=False),
+    Column("event_id", Uuid(as_uuid=True), nullable=False),
     Column("event_type", String(length=32), nullable=False),
     Column("occurred_at", DateTime(timezone=True), nullable=False),
     Column("actor_kind", String(length=16), nullable=False),
-    Column("actor_id", UUID(as_uuid=True), nullable=False),
-    Column("subject_user_id", UUID(as_uuid=True), nullable=True),
+    Column("actor_id", Uuid(as_uuid=True), nullable=False),
+    Column("subject_user_id", Uuid(as_uuid=True), nullable=True),
     Column("outcome", String(length=16), nullable=False),
     Column("reason_code", String(length=64), nullable=False),
     Column("request_id", String(length=128), nullable=False),
@@ -215,7 +216,7 @@ account_audit_events = Table(
         name="ck_account_audit_events_request_id",
     ),
     CheckConstraint(
-        "source_fingerprint is null or octet_length(source_fingerprint) = 32",
+        "source_fingerprint is null or length(source_fingerprint) = 32",
         name="ck_account_audit_events_source_fingerprint",
     ),
     ForeignKeyConstraint(
@@ -230,8 +231,8 @@ account_audit_events = Table(
 account_session_families = Table(
     "account_session_families",
     metadata,
-    Column("id", UUID(as_uuid=True), nullable=False),
-    Column("user_id", UUID(as_uuid=True), nullable=False),
+    Column("id", Uuid(as_uuid=True), nullable=False),
+    Column("user_id", Uuid(as_uuid=True), nullable=False),
     Column("credential_version", BigInteger(), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("absolute_expires_at", DateTime(timezone=True), nullable=False),
@@ -276,9 +277,9 @@ account_session_families = Table(
 account_session_tokens = Table(
     "account_session_tokens",
     metadata,
-    Column("id", UUID(as_uuid=True), nullable=False),
-    Column("family_id", UUID(as_uuid=True), nullable=False),
-    Column("user_id", UUID(as_uuid=True), nullable=False),
+    Column("id", Uuid(as_uuid=True), nullable=False),
+    Column("family_id", Uuid(as_uuid=True), nullable=False),
+    Column("user_id", Uuid(as_uuid=True), nullable=False),
     Column("credential_version", BigInteger(), nullable=False),
     Column("kind", String(length=16), nullable=False),
     Column("secret_digest", LargeBinary(length=32), nullable=False),
@@ -286,7 +287,7 @@ account_session_tokens = Table(
     Column("expires_at", DateTime(timezone=True), nullable=False),
     Column("consumed_at", DateTime(timezone=True), nullable=True),
     Column("revoked_at", DateTime(timezone=True), nullable=True),
-    Column("replaced_by_id", UUID(as_uuid=True), nullable=True),
+    Column("replaced_by_id", Uuid(as_uuid=True), nullable=True),
     CheckConstraint(
         "substring(id::text from 15 for 1) = '4' "
         "and substring(id::text from 20 for 1) in ('8', '9', 'a', 'b')",
@@ -301,7 +302,7 @@ account_session_tokens = Table(
         name="ck_account_session_tokens_kind",
     ),
     CheckConstraint(
-        "octet_length(secret_digest) = 32",
+        "length(secret_digest) = 32",
         name="ck_account_session_tokens_secret_digest_length",
     ),
     CheckConstraint(
@@ -361,7 +362,7 @@ account_login_rate_limits = Table(
         name="ck_account_login_rate_limits_scope_kind",
     ),
     CheckConstraint(
-        "octet_length(scope_fingerprint) = 32",
+        "length(scope_fingerprint) = 32",
         name="ck_account_login_rate_limits_fingerprint_length",
     ),
     CheckConstraint(
@@ -382,11 +383,11 @@ account_login_rate_limits = Table(
 account_recovery_tokens = Table(
     "account_recovery_tokens",
     metadata,
-    Column("id", UUID(as_uuid=True), nullable=False),
-    Column("user_id", UUID(as_uuid=True), nullable=False),
+    Column("id", Uuid(as_uuid=True), nullable=False),
+    Column("user_id", Uuid(as_uuid=True), nullable=False),
     Column("credential_version", BigInteger(), nullable=False),
     Column("secret_digest", LargeBinary(length=32), nullable=False),
-    Column("issued_by_actor_id", UUID(as_uuid=True), nullable=False),
+    Column("issued_by_actor_id", Uuid(as_uuid=True), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("expires_at", DateTime(timezone=True), nullable=False),
     Column("consumed_at", DateTime(timezone=True), nullable=True),
@@ -402,7 +403,7 @@ account_recovery_tokens = Table(
         name="ck_account_recovery_tokens_credential_version_positive",
     ),
     CheckConstraint(
-        "octet_length(secret_digest) = 32",
+        "length(secret_digest) = 32",
         name="ck_account_recovery_tokens_secret_digest_length",
     ),
     CheckConstraint(
@@ -423,9 +424,9 @@ account_recovery_tokens = Table(
 installations = Table(
     "installations",
     metadata,
-    Column("id", UUID(as_uuid=True), nullable=False),
+    Column("id", Uuid(as_uuid=True), nullable=False),
     Column("device_public_key", LargeBinary(length=32), nullable=False),
-    Column("owner_user_id", UUID(as_uuid=True), nullable=True),
+    Column("owner_user_id", Uuid(as_uuid=True), nullable=True),
     Column(
         "status",
         String(length=16),
@@ -447,7 +448,7 @@ installations = Table(
     ),
     Column("revoked_at", DateTime(timezone=True), nullable=True),
     CheckConstraint(
-        "octet_length(device_public_key) = 32",
+        "length(device_public_key) = 32",
         name="ck_installations_device_public_key_length",
     ),
     CheckConstraint(
@@ -487,7 +488,7 @@ Index("ix_installations_owner_user", installations.c.owner_user_id)
 platform_session_health = Table(
     "platform_session_health",
     metadata,
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
     Column("platform", String(length=16), nullable=False),
     Column("state", String(length=16), nullable=False),
     Column("session_revision", BigInteger(), nullable=False),
@@ -525,7 +526,7 @@ platform_session_health = Table(
 platform_session_gates = Table(
     "platform_session_gates",
     metadata,
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
     Column("platform", String(length=16), nullable=False),
     Column("state", String(length=16), nullable=False),
     Column("session_revision", BigInteger(), nullable=False),
@@ -552,14 +553,14 @@ platform_session_gates = Table(
 installation_registration_challenges = Table(
     "installation_registration_challenges",
     metadata,
-    Column("id", UUID(as_uuid=True), nullable=False),
+    Column("id", Uuid(as_uuid=True), nullable=False),
     Column("environment_id", String(length=64), nullable=False),
     Column("bootstrap_fingerprint", LargeBinary(length=32), nullable=False),
     Column("device_public_key", LargeBinary(length=32), nullable=False),
     Column("proof_hash", LargeBinary(length=32), nullable=False),
     Column("expires_at", DateTime(timezone=True), nullable=False),
     Column("consumed_at", DateTime(timezone=True), nullable=True),
-    Column("installation_id", UUID(as_uuid=True), nullable=True),
+    Column("installation_id", Uuid(as_uuid=True), nullable=True),
     Column(
         "created_at",
         DateTime(timezone=True),
@@ -567,11 +568,11 @@ installation_registration_challenges = Table(
         server_default=text("CURRENT_TIMESTAMP"),
     ),
     CheckConstraint(
-        "octet_length(bootstrap_fingerprint) = 32",
+        "length(bootstrap_fingerprint) = 32",
         name="ck_registration_challenges_bootstrap_fingerprint_length",
     ),
     CheckConstraint(
-        "octet_length(device_public_key) = 32",
+        "length(device_public_key) = 32",
         name="ck_registration_challenges_device_public_key_length",
     ),
     CheckConstraint(
@@ -584,7 +585,7 @@ installation_registration_challenges = Table(
         name="ck_registration_challenges_id_uuid_v4",
     ),
     CheckConstraint(
-        "octet_length(proof_hash) = 32",
+        "length(proof_hash) = 32",
         name="ck_registration_challenges_proof_hash_length",
     ),
     CheckConstraint(
@@ -609,13 +610,13 @@ installation_registration_challenges = Table(
 account_installation_binding_challenges = Table(
     "account_installation_binding_challenges",
     metadata,
-    Column("id", UUID(as_uuid=True), nullable=False),
-    Column("user_id", UUID(as_uuid=True), nullable=False),
+    Column("id", Uuid(as_uuid=True), nullable=False),
+    Column("user_id", Uuid(as_uuid=True), nullable=False),
     Column("device_public_key", LargeBinary(length=32), nullable=False),
     Column("proof_hash", LargeBinary(length=32), nullable=False),
     Column("expires_at", DateTime(timezone=True), nullable=False),
     Column("consumed_at", DateTime(timezone=True), nullable=True),
-    Column("installation_id", UUID(as_uuid=True), nullable=True),
+    Column("installation_id", Uuid(as_uuid=True), nullable=True),
     Column(
         "created_at",
         DateTime(timezone=True),
@@ -628,11 +629,11 @@ account_installation_binding_challenges = Table(
         name="ck_account_binding_challenges_id_uuid_v4",
     ),
     CheckConstraint(
-        "octet_length(device_public_key) = 32",
+        "length(device_public_key) = 32",
         name="ck_account_binding_challenges_device_key_length",
     ),
     CheckConstraint(
-        "octet_length(proof_hash) = 32",
+        "length(proof_hash) = 32",
         name="ck_account_binding_challenges_proof_hash_length",
     ),
     CheckConstraint(
@@ -672,13 +673,14 @@ Index(
     account_installation_binding_challenges.c.device_public_key,
     unique=True,
     postgresql_where=account_installation_binding_challenges.c.consumed_at.is_(None),
+    sqlite_where=account_installation_binding_challenges.c.consumed_at.is_(None),
 )
 
 device_credentials = Table(
     "device_credentials",
     metadata,
-    Column("id", UUID(as_uuid=True), nullable=False),
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("id", Uuid(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
     Column("version", BigInteger(), nullable=False),
     Column("scope", String(length=64), nullable=False),
     Column("secret_digest", LargeBinary(length=32), nullable=False),
@@ -696,7 +698,7 @@ device_credentials = Table(
         server_default=text("CURRENT_TIMESTAMP"),
     ),
     Column("revoked_at", DateTime(timezone=True), nullable=True),
-    Column("replaced_by_id", UUID(as_uuid=True), nullable=True),
+    Column("replaced_by_id", Uuid(as_uuid=True), nullable=True),
     CheckConstraint(
         "substring(id::text from 15 for 1) = '4' "
         "and substring(id::text from 20 for 1) in ('8', '9', 'a', 'b')",
@@ -708,7 +710,7 @@ device_credentials = Table(
         name="ck_device_credentials_scope",
     ),
     CheckConstraint(
-        "octet_length(secret_digest) = 32",
+        "length(secret_digest) = 32",
         name="ck_device_credentials_secret_digest_length",
     ),
     CheckConstraint(
@@ -760,15 +762,16 @@ Index(
     device_credentials.c.installation_id,
     unique=True,
     postgresql_where=device_credentials.c.status == "active",
+    sqlite_where=device_credentials.c.status == "active",
 )
 
 tasks = Table(
     "tasks",
     metadata,
-    Column("id", UUID(as_uuid=True), nullable=False),
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("id", Uuid(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
     Column("creation_idempotency_key", String(), nullable=False),
-    Column("current_attempt_id", UUID(as_uuid=True), nullable=True),
+    Column("current_attempt_id", Uuid(as_uuid=True), nullable=True),
     Column(
         "last_event_sequence",
         BigInteger(),
@@ -838,8 +841,8 @@ Index(
 douyin_search_exposure_definitions = Table(
     "douyin_search_exposure_definitions",
     metadata,
-    Column("task_id", UUID(as_uuid=True), nullable=False),
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("task_id", Uuid(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
     Column(
         "template",
         String(length=64),
@@ -870,7 +873,7 @@ douyin_search_exposure_definitions = Table(
     ),
     CheckConstraint(
         f"char_length(search_keyword) between 1 and {MAX_SEARCH_KEYWORD_CHARACTERS} "
-        f"and octet_length(search_keyword) <= {MAX_SEARCH_KEYWORD_CHARACTERS * 4} "
+        f"and length(search_keyword) <= {MAX_SEARCH_KEYWORD_CHARACTERS * 4} "
         "and btrim(search_keyword) = search_keyword "
         "and search_keyword !~ '[[:cntrl:]]'",
         name="ck_douyin_search_exposure_keyword",
@@ -889,7 +892,7 @@ douyin_search_exposure_definitions = Table(
     CheckConstraint(
         "message_template is null or ("
         f"char_length(message_template) between 1 and {MAX_MESSAGE_TEMPLATE_CHARACTERS} "
-        f"and octet_length(message_template) <= {MAX_MESSAGE_TEMPLATE_CHARACTERS * 4} "
+        f"and length(message_template) <= {MAX_MESSAGE_TEMPLATE_CHARACTERS * 4} "
         "and btrim(message_template) = message_template "
         "and message_template !~ '[[:cntrl:]]' "
         "and lower(message_template) not like '%bearer %' "
@@ -933,9 +936,9 @@ douyin_search_exposure_definitions = Table(
 task_targets = Table(
     "task_targets",
     metadata,
-    Column("id", UUID(as_uuid=True), nullable=False),
-    Column("task_id", UUID(as_uuid=True), nullable=False),
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("id", Uuid(as_uuid=True), nullable=False),
+    Column("task_id", Uuid(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
     Column("ordinal", BigInteger(), nullable=False),
     Column("platform_target_id", String(length=MAX_DOUYIN_TARGET_ID_CHARACTERS), nullable=False),
     Column("dedupe_key", String(length=50), nullable=False),
@@ -975,7 +978,7 @@ task_targets = Table(
     ),
     CheckConstraint(
         f"char_length(display_name) between 1 and {MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS} "
-        f"and octet_length(display_name) <= {MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS * 4} "
+        f"and length(display_name) <= {MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS * 4} "
         "and btrim(display_name) = display_name "
         "and display_name !~ '[[:cntrl:]]' "
         "and lower(display_name) not like '%bearer %' "
@@ -1060,9 +1063,9 @@ Index(
 task_target_exclusions = Table(
     "task_target_exclusions",
     metadata,
-    Column("target_id", UUID(as_uuid=True), nullable=False),
-    Column("task_id", UUID(as_uuid=True), nullable=False),
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("target_id", Uuid(as_uuid=True), nullable=False),
+    Column("task_id", Uuid(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
     Column("page_revision", BigInteger(), nullable=False),
     Column("excluded_at", DateTime(timezone=True), nullable=False),
     CheckConstraint(
@@ -1098,8 +1101,8 @@ Index(
 task_target_confirmations = Table(
     "task_target_confirmations",
     metadata,
-    Column("task_id", UUID(as_uuid=True), nullable=False),
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("task_id", Uuid(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
     Column("page_revision", BigInteger(), nullable=False),
     Column("selection_task_revision", BigInteger(), nullable=False),
     Column("confirmed_task_revision", BigInteger(), nullable=False),
@@ -1108,7 +1111,7 @@ task_target_confirmations = Table(
     Column("message_template", String(), nullable=True),
     Column("intent_version", String(length=64), nullable=False),
     Column("intent_fingerprint", LargeBinary(length=32), nullable=False),
-    Column("source_message_id", UUID(as_uuid=True), nullable=False),
+    Column("source_message_id", Uuid(as_uuid=True), nullable=False),
     Column("source_idempotency_key", String(), nullable=False),
     Column("source_fingerprint", LargeBinary(length=32), nullable=False),
     Column("confirmed_at", DateTime(timezone=True), nullable=False),
@@ -1144,7 +1147,7 @@ task_target_confirmations = Table(
     CheckConstraint(
         "message_template is null or ("
         f"char_length(message_template) between 1 and {MAX_MESSAGE_TEMPLATE_CHARACTERS} "
-        f"and octet_length(message_template) <= {MAX_MESSAGE_TEMPLATE_CHARACTERS * 4} "
+        f"and length(message_template) <= {MAX_MESSAGE_TEMPLATE_CHARACTERS * 4} "
         "and btrim(message_template) = message_template "
         "and message_template !~ '[[:cntrl:]]' "
         "and lower(message_template) not like '%bearer %' "
@@ -1162,7 +1165,7 @@ task_target_confirmations = Table(
         name="ck_task_target_confirmations_intent_version",
     ),
     CheckConstraint(
-        "octet_length(intent_fingerprint) = 32",
+        "length(intent_fingerprint) = 32",
         name="ck_task_target_confirmations_intent_fingerprint_length",
     ),
     CheckConstraint(
@@ -1175,7 +1178,7 @@ task_target_confirmations = Table(
         name="ck_task_target_confirmations_idempotency_key",
     ),
     CheckConstraint(
-        "octet_length(source_fingerprint) = 32",
+        "length(source_fingerprint) = 32",
         name="ck_task_target_confirmations_fingerprint_length",
     ),
     CheckConstraint(
@@ -1213,9 +1216,9 @@ _nonterminal_attempt_values = ", ".join(
 execution_attempts = Table(
     "execution_attempts",
     metadata,
-    Column("id", UUID(as_uuid=True), nullable=False),
-    Column("task_id", UUID(as_uuid=True), nullable=False),
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("id", Uuid(as_uuid=True), nullable=False),
+    Column("task_id", Uuid(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
     Column("attempt_number", BigInteger(), nullable=False),
     Column(
         "status",
@@ -1289,6 +1292,7 @@ Index(
     execution_attempts.c.installation_id,
     unique=True,
     postgresql_where=text(f"status in ({_nonterminal_attempt_values})"),
+    sqlite_where=text(f"status in ({_nonterminal_attempt_values})"),
 )
 Index(
     "ix_execution_attempts_installation_updated",
@@ -1314,10 +1318,10 @@ tasks.append_constraint(
 task_actions = Table(
     "task_actions",
     metadata,
-    Column("id", UUID(as_uuid=True), nullable=False),
-    Column("execution_attempt_id", UUID(as_uuid=True), nullable=False),
-    Column("task_id", UUID(as_uuid=True), nullable=False),
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("id", Uuid(as_uuid=True), nullable=False),
+    Column("execution_attempt_id", Uuid(as_uuid=True), nullable=False),
+    Column("task_id", Uuid(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
     Column("ordinal", BigInteger(), nullable=False),
     Column(
         "status",
@@ -1451,11 +1455,11 @@ Index(
 action_risk_authorizations = Table(
     "action_risk_authorizations",
     metadata,
-    Column("action_id", UUID(as_uuid=True), nullable=False),
-    Column("target_id", UUID(as_uuid=True), nullable=False),
-    Column("execution_attempt_id", UUID(as_uuid=True), nullable=False),
-    Column("task_id", UUID(as_uuid=True), nullable=False),
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("action_id", Uuid(as_uuid=True), nullable=False),
+    Column("target_id", Uuid(as_uuid=True), nullable=False),
+    Column("execution_attempt_id", Uuid(as_uuid=True), nullable=False),
+    Column("task_id", Uuid(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
     Column("ordinal", BigInteger(), nullable=False),
     Column("platform", String(length=32), nullable=False),
     Column("action", String(length=32), nullable=False),
@@ -1562,8 +1566,8 @@ action_risk_authorizations = Table(
 action_risk_results = Table(
     "action_risk_results",
     metadata,
-    Column("action_id", UUID(as_uuid=True), nullable=False),
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("action_id", Uuid(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
     Column("platform", String(length=32), nullable=False),
     Column("action", String(length=32), nullable=False),
     Column("outcome", String(length=32), nullable=False),
@@ -1636,14 +1640,14 @@ action_risk_results = Table(
 action_failure_circuits = Table(
     "action_failure_circuits",
     metadata,
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
     Column("platform", String(length=32), nullable=False),
     Column("action", String(length=32), nullable=False),
     Column("consecutive_failures", BigInteger(), nullable=False),
     Column("circuit_open", Boolean(), nullable=False),
     Column("revision", BigInteger(), nullable=False),
-    Column("last_action_id", UUID(as_uuid=True), nullable=False),
-    Column("opened_by_action_id", UUID(as_uuid=True), nullable=True),
+    Column("last_action_id", Uuid(as_uuid=True), nullable=False),
+    Column("opened_by_action_id", Uuid(as_uuid=True), nullable=True),
     Column("opened_at", DateTime(timezone=True), nullable=True),
     Column(
         "created_at",
@@ -1745,8 +1749,8 @@ Index(
 task_events = Table(
     "task_events",
     metadata,
-    Column("task_id", UUID(as_uuid=True), nullable=False),
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("task_id", Uuid(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
     Column("sequence", BigInteger(), nullable=False),
     Column(
         "event_version",
@@ -1757,9 +1761,9 @@ task_events = Table(
     Column("event_type", String(length=64), nullable=False),
     Column("task_revision", BigInteger(), nullable=False),
     Column("task_status", String(length=32), nullable=False),
-    Column("execution_attempt_id", UUID(as_uuid=True), nullable=True),
-    Column("action_id", UUID(as_uuid=True), nullable=True),
-    Column("source_message_id", UUID(as_uuid=True), nullable=True),
+    Column("execution_attempt_id", Uuid(as_uuid=True), nullable=True),
+    Column("action_id", Uuid(as_uuid=True), nullable=True),
+    Column("source_message_id", Uuid(as_uuid=True), nullable=True),
     Column("source_idempotency_key", String(), nullable=False),
     Column("source_fingerprint", LargeBinary(length=32), nullable=False),
     Column("progress_percent", BigInteger(), nullable=True),
@@ -1808,7 +1812,7 @@ task_events = Table(
         name="ck_task_events_source_idempotency_key",
     ),
     CheckConstraint(
-        "octet_length(source_fingerprint) = 32",
+        "length(source_fingerprint) = 32",
         name="ck_task_events_source_fingerprint_length",
     ),
     CheckConstraint(
@@ -1827,7 +1831,7 @@ task_events = Table(
     CheckConstraint(
         "safe_message is null or ("
         f"char_length(safe_message) between 1 and {MAX_SAFE_TASK_EVENT_MESSAGE_CHARACTERS} "
-        "and octet_length(safe_message) <= 4096 "
+        "and length(safe_message) <= 4096 "
         "and safe_message !~ '[[:cntrl:]]' "
         "and lower(safe_message) not like '%bearer %' "
         "and lower(safe_message) not like '%file://%' "
@@ -1888,15 +1892,15 @@ Index(
 task_commands = Table(
     "task_commands",
     metadata,
-    Column("message_id", UUID(as_uuid=True), nullable=False),
-    Column("correlation_id", UUID(as_uuid=True), nullable=False),
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
-    Column("task_id", UUID(as_uuid=True), nullable=False),
-    Column("execution_attempt_id", UUID(as_uuid=True), nullable=False),
+    Column("message_id", Uuid(as_uuid=True), nullable=False),
+    Column("correlation_id", Uuid(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
+    Column("task_id", Uuid(as_uuid=True), nullable=False),
+    Column("execution_attempt_id", Uuid(as_uuid=True), nullable=False),
     Column("sequence", BigInteger(), nullable=False),
     Column("command_type", String(length=32), nullable=False),
-    Column("target_confirmation_message_id", UUID(as_uuid=True), nullable=True),
-    Column("action_id", UUID(as_uuid=True), nullable=True),
+    Column("target_confirmation_message_id", Uuid(as_uuid=True), nullable=True),
+    Column("action_id", Uuid(as_uuid=True), nullable=True),
     Column("task_event_sequence_baseline", BigInteger(), nullable=True),
     Column(
         "status",
@@ -1916,7 +1920,7 @@ task_commands = Table(
     Column("lease_expires_at", DateTime(timezone=True), nullable=True),
     Column("delivered_at", DateTime(timezone=True), nullable=True),
     Column("acknowledged_at", DateTime(timezone=True), nullable=True),
-    Column("response_message_id", UUID(as_uuid=True), nullable=True),
+    Column("response_message_id", Uuid(as_uuid=True), nullable=True),
     Column("response_type", String(length=32), nullable=True),
     Column("deadline_at", DateTime(timezone=True), nullable=False),
     Column(
@@ -2108,9 +2112,9 @@ Index(
 device_sessions = Table(
     "device_sessions",
     metadata,
-    Column("id", UUID(as_uuid=True), nullable=False),
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
-    Column("device_credential_id", UUID(as_uuid=True), nullable=False),
+    Column("id", Uuid(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
+    Column("device_credential_id", Uuid(as_uuid=True), nullable=False),
     Column("credential_version", BigInteger(), nullable=False),
     Column("capability", String(length=32), nullable=False),
     Column("secret_digest", LargeBinary(length=32), nullable=False),
@@ -2132,7 +2136,7 @@ device_sessions = Table(
         name="ck_device_sessions_capability",
     ),
     CheckConstraint(
-        "octet_length(secret_digest) = 32",
+        "length(secret_digest) = 32",
         name="ck_device_sessions_secret_digest_length",
     ),
     CheckConstraint(
@@ -2169,7 +2173,7 @@ Index(
 bilibili_publish_attempts = Table(
     "bilibili_publish_attempts",
     metadata,
-    Column("publish_job_id", UUID(as_uuid=True), nullable=False),
+    Column("publish_job_id", Uuid(as_uuid=True), nullable=False),
     Column("phase", String(length=20), nullable=False),
     Column("request_digest", String(length=64), nullable=False),
     Column("material_file_name", String(length=255), nullable=False),
@@ -2268,7 +2272,7 @@ bilibili_publish_attempts = Table(
 bilibili_publish_reconciliations = Table(
     "bilibili_publish_reconciliations",
     metadata,
-    Column("publish_job_id", UUID(as_uuid=True), nullable=False),
+    Column("publish_job_id", Uuid(as_uuid=True), nullable=False),
     Column("outcome", String(length=16), nullable=False),
     Column("resource_id", String(length=16), nullable=True),
     Column("archive_state", BigInteger(), nullable=True),
@@ -2320,7 +2324,7 @@ Index(
 bilibili_upload_parts = Table(
     "bilibili_upload_parts",
     metadata,
-    Column("publish_job_id", UUID(as_uuid=True), nullable=False),
+    Column("publish_job_id", Uuid(as_uuid=True), nullable=False),
     Column("part_number", BigInteger(), nullable=False),
     Column("size_bytes", BigInteger(), nullable=False),
     Column("completed_at", DateTime(timezone=True), nullable=False),
@@ -2345,8 +2349,8 @@ bilibili_upload_parts = Table(
 editing_projects = Table(
     "editing_projects",
     metadata,
-    Column("project_id", UUID(as_uuid=True), nullable=False),
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("project_id", Uuid(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
     Column("title", String(length=MAX_PROJECT_TITLE_CHARACTERS), nullable=False),
     Column("output_width", Integer(), nullable=False),
     Column("output_height", Integer(), nullable=False),
@@ -2381,8 +2385,8 @@ Index(
 materials = Table(
     "materials",
     metadata,
-    Column("material_id", UUID(as_uuid=True), nullable=False),
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
+    Column("material_id", Uuid(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
     Column("kind", String(length=16), nullable=False),
     # Nullable because the domain says so, not because the value is optional
     # paperwork: an image has no duration and audio has no frame size, and both
@@ -2400,15 +2404,15 @@ materials = Table(
     Column("has_audio", Boolean(), nullable=False),
     Column("audio_loudness_lufs", Double(), nullable=True),
     Column("has_speech", Boolean(), nullable=False),
-    # The three JSONB columns are NOT NULL: "no speech" is an empty array, not
+    # The three JSON columns are NOT NULL: "no speech" is an empty array, not
     # an absent one, which keeps `[]` and NULL from both meaning nothing.
     # PostgreSQL never looks inside these, so their shape is entirely on
     # hydration -- see the migration's docstring.
-    Column("speech_segments_ms", JSONB(), nullable=False),
+    Column("speech_segments_ms", JSON(), nullable=False),
     Column("speech_transcript", String(length=MAX_TRANSCRIPT_CHARACTERS), nullable=True),
-    Column("shot_boundaries_ms", JSONB(), nullable=False),
+    Column("shot_boundaries_ms", JSON(), nullable=False),
     Column("ai_description", String(length=MAX_DESCRIPTION_CHARACTERS), nullable=True),
-    Column("ai_tags", JSONB(), nullable=False),
+    Column("ai_tags", JSON(), nullable=False),
     Column("description_source", String(length=16), nullable=False),
     # The one genuinely optional value here: a material nobody has described
     # yet, and one whose description a person wrote, both leave this NULL.
@@ -2443,8 +2447,8 @@ Index(
 editing_project_timelines = Table(
     "editing_project_timelines",
     metadata,
-    Column("project_id", UUID(as_uuid=True), nullable=False),
-    Column("timeline_id", UUID(as_uuid=True), nullable=False),
+    Column("project_id", Uuid(as_uuid=True), nullable=False),
+    Column("timeline_id", Uuid(as_uuid=True), nullable=False),
     PrimaryKeyConstraint("project_id", name="pk_editing_project_timelines"),
     ForeignKeyConstraint(
         ["project_id"],
@@ -2468,16 +2472,16 @@ editing_project_timelines = Table(
 timelines = Table(
     "timelines",
     metadata,
-    Column("timeline_id", UUID(as_uuid=True), nullable=False),
+    Column("timeline_id", Uuid(as_uuid=True), nullable=False),
     Column("revision", Integer(), nullable=False),
-    Column("project_id", UUID(as_uuid=True), nullable=False),
+    Column("project_id", Uuid(as_uuid=True), nullable=False),
     Column("duration_ms", Integer(), nullable=False),
     # The whole cut as one document: tracks, their clips, and a clip's incoming
     # transition. Not split into a clips table because a revision is an
     # immutable snapshot that the renderer reads whole, and nothing in this
     # release queries across clips. PostgreSQL never looks inside it, so its
     # shape is entirely hydration's problem -- see the migration's docstring.
-    Column("tracks", JSONB(), nullable=False),
+    Column("tracks", JSON(), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     # Composite, because a revision is a snapshot rather than a version counter
     # on one mutable row: every revision of a timeline is its own row and none
@@ -2507,11 +2511,11 @@ timelines = Table(
 timeline_material_references = Table(
     "timeline_material_references",
     metadata,
-    Column("timeline_id", UUID(as_uuid=True), nullable=False),
+    Column("timeline_id", Uuid(as_uuid=True), nullable=False),
     Column("timeline_revision", Integer(), nullable=False),
-    Column("project_id", UUID(as_uuid=True), nullable=False),
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
-    Column("material_id", UUID(as_uuid=True), nullable=False),
+    Column("project_id", Uuid(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
+    Column("material_id", Uuid(as_uuid=True), nullable=False),
     PrimaryKeyConstraint(
         "timeline_id",
         "timeline_revision",
@@ -2546,13 +2550,13 @@ Index(
 editing_jobs = Table(
     "editing_jobs",
     metadata,
-    Column("job_id", UUID(as_uuid=True), nullable=False),
+    Column("job_id", Uuid(as_uuid=True), nullable=False),
     # Carried here as well as on the timeline. The redundancy is deliberate --
     # every read of a job needs its project without a join -- and it is exactly
     # why the two have to be made to agree; see the foreign key below.
-    Column("project_id", UUID(as_uuid=True), nullable=False),
-    Column("installation_id", UUID(as_uuid=True), nullable=False),
-    Column("timeline_id", UUID(as_uuid=True), nullable=False),
+    Column("project_id", Uuid(as_uuid=True), nullable=False),
+    Column("installation_id", Uuid(as_uuid=True), nullable=False),
+    Column("timeline_id", Uuid(as_uuid=True), nullable=False),
     Column("timeline_revision", Integer(), nullable=False),
     # Wide enough for every member of the two enumerations with room to spare.
     # The domain owns the values; a unit test asserts the longest member of each
@@ -2565,7 +2569,7 @@ editing_jobs = Table(
     # neither -- is `EditingJob._validate_facts_match_status`, and hydration is
     # where a stored row has to meet it.
     Column("failure_code", String(length=32), nullable=True),
-    Column("output_artifact_id", UUID(as_uuid=True), nullable=True),
+    Column("output_artifact_id", Uuid(as_uuid=True), nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     PrimaryKeyConstraint("job_id", name="pk_editing_jobs"),
@@ -2610,6 +2614,7 @@ Index(
     editing_jobs.c.timeline_revision,
     unique=True,
     postgresql_where=editing_jobs.c.status == "queued",
+    sqlite_where=editing_jobs.c.status == "queued",
 )
 
 Index(
