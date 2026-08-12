@@ -106,17 +106,6 @@ class ActionAuthorizationClaims:
         )
 
 
-@dataclass(frozen=True, slots=True, repr=False)
-class ParsedActionAuthorizationToken:
-    claims: ActionAuthorizationClaims
-    signing_input: bytes
-    signature: bytes
-    fingerprint: bytes
-
-    def __repr__(self) -> str:
-        return "ParsedActionAuthorizationToken(<redacted>)"
-
-
 def _canonical_utc(value: object) -> datetime | None:
     if type(value) is not datetime or value.tzinfo is None:
         return None
@@ -150,159 +139,11 @@ def action_authorization_idempotency_key(action_id: ProtocolActionId) -> Idempot
     return IdempotencyKey(f"action:{action_id}")
 
 
-def _document(claims: ActionAuthorizationClaims) -> dict[str, object]:
-    if not isinstance(claims, ActionAuthorizationClaims):
-        raise ActionAuthorizationRejected
-    return {
-        "action": claims.action.value,
-        "action_id": str(claims.action_id),
-        "authorized_at": _render_timestamp(claims.authorized_at),
-        "deadline_at": _render_timestamp(claims.deadline_at),
-        "execution_attempt_id": str(claims.execution_attempt_id),
-        "executor_id": str(claims.executor_id),
-        "idempotency_key": str(claims.idempotency_key),
-        "installation_id": str(claims.installation_id),
-        "platform": claims.platform,
-        "target_id": str(claims.target_id),
-        "task_id": str(claims.task_id),
-        "version": claims.version,
-    }
-
-
-def _payload(claims: ActionAuthorizationClaims) -> bytes:
-    try:
-        return json.dumps(
-            _document(claims),
-            ensure_ascii=True,
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode("ascii")
-    except (TypeError, UnicodeEncodeError, ValueError):
-        raise ActionAuthorizationRejected from None
-
-
-def _base64url_encode(value: bytes) -> str:
-    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
-
-
-def _base64url_decode(value: str) -> bytes:
-    if _BASE64URL_PATTERN.fullmatch(value) is None:
-        raise ActionAuthorizationRejected
-    try:
-        decoded = base64.urlsafe_b64decode(value + ("=" * (-len(value) % 4)))
-    except (ValueError, binascii.Error):
-        raise ActionAuthorizationRejected from None
-    if _base64url_encode(decoded) != value:
-        raise ActionAuthorizationRejected
-    return decoded
-
-
-def _payload_segment(claims: ActionAuthorizationClaims) -> str:
-    return _base64url_encode(_payload(claims))
-
-
-def action_authorization_signing_input(claims: ActionAuthorizationClaims) -> bytes:
-    try:
-        framed = f"{ACTION_AUTHORIZATION_TOKEN_PREFIX}.{_payload_segment(claims)}".encode("ascii")
-    except (UnicodeEncodeError, ValueError):
-        raise ActionAuthorizationRejected from None
-    return _SIGNING_DOMAIN + framed
-
-
-def encode_action_authorization_token(
-    claims: ActionAuthorizationClaims,
-    signature: bytes,
-) -> str:
-    if (
-        not isinstance(claims, ActionAuthorizationClaims)
-        or type(signature) is not bytes
-        or len(signature) != _SIGNATURE_BYTES
-    ):
-        raise ActionAuthorizationRejected
-    payload_segment = _payload_segment(claims)
-    token = f"{ACTION_AUTHORIZATION_TOKEN_PREFIX}.{payload_segment}.{_base64url_encode(signature)}"
-    return token
-
-
-def _unique_object(pairs: Iterable[tuple[str, object]]) -> dict[str, object]:
-    result: dict[str, object] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ActionAuthorizationRejected
-        result[key] = value
-    return result
-
-
-def _claims(payload: bytes) -> ActionAuthorizationClaims:
-    try:
-        document = json.loads(payload, object_pairs_hook=_unique_object)
-        if not isinstance(document, dict) or set(document) != _CLAIM_NAMES:
-            raise ActionAuthorizationRejected
-        claims = ActionAuthorizationClaims(
-            version=document["version"],
-            action_id=ProtocolActionId(document["action_id"]),
-            target_id=ProtocolTargetId(document["target_id"]),
-            execution_attempt_id=ProtocolExecutionAttemptId(document["execution_attempt_id"]),
-            task_id=ProtocolTaskId(document["task_id"]),
-            installation_id=ProtocolInstallationId(document["installation_id"]),
-            executor_id=ProtocolExecutorId(document["executor_id"]),
-            platform=document["platform"],
-            action=DouyinSearchExposureAction(document["action"]),
-            idempotency_key=IdempotencyKey(document["idempotency_key"]),
-            authorized_at=_parse_timestamp(document["authorized_at"]),
-            deadline_at=_parse_timestamp(document["deadline_at"]),
-        )
-    except (
-        ActionAuthorizationRejected,
-        json.JSONDecodeError,
-        KeyError,
-        TypeError,
-        UnicodeDecodeError,
-        ValueError,
-    ):
-        raise ActionAuthorizationRejected from None
-    if _payload(claims) != payload:
-        raise ActionAuthorizationRejected
-    return claims
-
-
-def parse_action_authorization_token(value: object) -> ParsedActionAuthorizationToken:
-    try:
-        if type(value) is not str:
-            raise ActionAuthorizationRejected
-        token_bytes = value.encode("ascii")
-        if not 1 <= len(token_bytes) <= MAX_ACTION_AUTHORIZATION_TOKEN_BYTES:
-            raise ActionAuthorizationRejected
-        prefix, payload_segment, signature_segment = value.split(".")
-        if prefix != ACTION_AUTHORIZATION_TOKEN_PREFIX:
-            raise ActionAuthorizationRejected
-        payload = _base64url_decode(payload_segment)
-        signature = _base64url_decode(signature_segment)
-        if len(signature) != _SIGNATURE_BYTES:
-            raise ActionAuthorizationRejected
-        claims = _claims(payload)
-        signing_input = action_authorization_signing_input(claims)
-        return ParsedActionAuthorizationToken(
-            claims=claims,
-            signing_input=signing_input,
-            signature=signature,
-            fingerprint=hashlib.sha256(token_bytes).digest(),
-        )
-    except (ActionAuthorizationRejected, UnicodeEncodeError, ValueError):
-        raise ActionAuthorizationRejected from None
-
-
 __all__ = [
     "ACTION_AUTHORIZATION_CLOCK_SKEW",
     "ACTION_AUTHORIZATION_MAX_LIFETIME",
-    "ACTION_AUTHORIZATION_TOKEN_PREFIX",
     "ACTION_AUTHORIZATION_VERSION",
-    "MAX_ACTION_AUTHORIZATION_TOKEN_BYTES",
     "ActionAuthorizationClaims",
     "ActionAuthorizationRejected",
-    "ParsedActionAuthorizationToken",
     "action_authorization_idempotency_key",
-    "action_authorization_signing_input",
-    "encode_action_authorization_token",
-    "parse_action_authorization_token",
 ]

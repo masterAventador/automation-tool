@@ -9,13 +9,9 @@ from typing import cast
 from uuid import UUID
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from automation_tool.executor import ledger as ledger_module
-from automation_tool.executor.action_authorization import (
-    ActionAuthorizationExpectation,
-    Ed25519ActionAuthorizationVerifier,
-)
+from automation_tool.executor.action_authorization import ActionAuthorizationExpectation
 from automation_tool.executor.action_gate import (
     ActionGateLimited,
     ActionGateRejected,
@@ -41,13 +37,9 @@ from automation_tool.protocol import (
     ProtocolTargetId,
     ProtocolTaskId,
     action_authorization_idempotency_key,
-    action_authorization_signing_input,
-    encode_action_authorization_token,
-    parse_action_authorization_token,
 )
 
 NOW = datetime(2026, 7, 20, 3, 0, tzinfo=UTC)
-PRIVATE_KEY = bytes(range(32))
 INSTALLATION_ID = ProtocolInstallationId("123e4567-e89b-42d3-a456-426614174005")
 EXECUTOR_ID = ProtocolExecutorId("123e4567-e89b-42d3-a456-426614174006")
 ATTEMPT_ID = ProtocolExecutionAttemptId("123e4567-e89b-42d3-a456-426614174007")
@@ -81,10 +73,9 @@ def authorization(
     index: int,
     *,
     task_id: ProtocolTaskId = TASK_ID,
-) -> tuple[str, ActionAuthorizationExpectation]:
+) -> ActionAuthorizationExpectation:
     action_id = ProtocolActionId(resource_id(index, str))
-    claims = ActionAuthorizationClaims(
-        version=ACTION_AUTHORIZATION_VERSION,
+    return ActionAuthorizationExpectation(
         action_id=action_id,
         target_id=ProtocolTargetId(resource_id(index + 100, str)),
         execution_attempt_id=ATTEMPT_ID,
@@ -94,25 +85,6 @@ def authorization(
         platform="douyin",
         action=DouyinSearchExposureAction.COMMENT,
         idempotency_key=action_authorization_idempotency_key(action_id),
-        authorized_at=NOW,
-        deadline_at=NOW + timedelta(minutes=5),
-    )
-    token = encode_action_authorization_token(
-        claims,
-        Ed25519PrivateKey.from_private_bytes(PRIVATE_KEY).sign(
-            action_authorization_signing_input(claims)
-        ),
-    )
-    return token, ActionAuthorizationExpectation(
-        action_id=claims.action_id,
-        target_id=claims.target_id,
-        execution_attempt_id=claims.execution_attempt_id,
-        task_id=claims.task_id,
-        installation_id=claims.installation_id,
-        executor_id=claims.executor_id,
-        platform=claims.platform,
-        action=claims.action,
-        idempotency_key=claims.idempotency_key,
     )
 
 
@@ -128,10 +100,8 @@ def action_gate(
         installation_id=str(INSTALLATION_ID),
         executor_id=str(EXECUTOR_ID),
     )
-    public_key = Ed25519PrivateKey.from_private_bytes(PRIVATE_KEY).public_key().public_bytes_raw()
     return ExecutorActionGate(
         ledger=ledger,
-        verifier=Ed25519ActionAuthorizationVerifier(public_key=public_key, clock=clock),
         policy=LocalActionHardPolicy(
             minimum_interval=minimum_interval,
             task_action_limit=task_action_limit,
@@ -218,14 +188,14 @@ def test_gate_enforces_local_interval_task_limit_and_exact_replay_durably(
 ) -> None:
     clock = MutableClock()
     gate = action_gate(tmp_path / "state", clock)
-    first_token, first_expected = authorization(1)
-    second_token, second_expected = authorization(2)
-    third_token, third_expected = authorization(3)
+    first_expected = authorization(1)
+    second_expected = authorization(2)
+    third_expected = authorization(3)
     other_task = ProtocolTaskId(resource_id(900, str))
-    fourth_token, fourth_expected = authorization(4, task_id=other_task)
+    fourth_expected = authorization(4, task_id=other_task)
 
-    first = gate.admit(token=first_token, expected=first_expected)
-    replay = gate.admit(token=first_token, expected=first_expected)
+    first = gate.admit(expected=first_expected)
+    replay = gate.admit(expected=first_expected)
     weakened = action_gate(
         tmp_path / "state",
         clock,
@@ -236,13 +206,13 @@ def test_gate_enforces_local_interval_task_limit_and_exact_replay_durably(
     assert weakened._policy.task_action_limit == 2
     clock.value = NOW + timedelta(seconds=29)
     with pytest.raises(ActionGateLimited) as interval:
-        weakened.admit(token=second_token, expected=second_expected)
+        weakened.admit(expected=second_expected)
     clock.value = NOW + timedelta(seconds=30)
-    second = weakened.admit(token=second_token, expected=second_expected)
+    second = weakened.admit(expected=second_expected)
     clock.value = NOW + timedelta(seconds=60)
     with pytest.raises(ActionGateLimited) as task_limit:
-        weakened.admit(token=third_token, expected=third_expected)
-    fourth = weakened.admit(token=fourth_token, expected=fourth_expected)
+        weakened.admit(expected=third_expected)
+    fourth = weakened.admit(expected=fourth_expected)
 
     assert first.task_action_ordinal == 1
     assert first.replayed is False
@@ -264,16 +234,16 @@ def test_emergency_stop_latch_survives_restart_and_needs_local_revision_to_clear
     gate = action_gate(state_directory, clock)
     stopped = gate.engage_emergency_stop()
     replay = gate.engage_emergency_stop()
-    token, expected = authorization(10)
+    expected = authorization(10)
 
     restarted = action_gate(state_directory, clock)
     with pytest.raises(ActionGateLimited) as limited:
-        restarted.admit(token=token, expected=expected)
+        restarted.admit(expected=expected)
     with pytest.raises(ActionGateRejected):
         restarted.clear_emergency_stop(expected_revision=stopped.revision + 1)
     clock.value = NOW + timedelta(seconds=1)
     cleared = restarted.clear_emergency_stop(expected_revision=stopped.revision)
-    admission = restarted.admit(token=token, expected=expected)
+    admission = restarted.admit(expected=expected)
 
     assert stopped.engaged is True
     assert stopped.revision == 1
@@ -290,7 +260,7 @@ def test_gate_constructor_clock_and_boundary_failures_are_fixed_and_redacted(
     state_directory = tmp_path / "state"
     clock = MutableClock()
     gate = action_gate(state_directory, clock)
-    token, expected = authorization(20)
+    expected = authorization(20)
 
     assert gate._ledger.installation_id == str(INSTALLATION_ID)
     assert gate._ledger.executor_id == str(EXECUTOR_ID)
@@ -303,13 +273,11 @@ def test_gate_constructor_clock_and_boundary_failures_are_fixed_and_redacted(
         ExecutorActionAdmissionLimited("private")  # type: ignore[arg-type]
     for field, invalid in (
         ("ledger", object()),
-        ("verifier", object()),
         ("policy", object()),
         ("clock", object()),
     ):
         values: dict[str, object] = {
             "ledger": gate._ledger,
-            "verifier": gate._verifier,
             "policy": gate._policy,
             "clock": clock,
         }
@@ -317,10 +285,6 @@ def test_gate_constructor_clock_and_boundary_failures_are_fixed_and_redacted(
         with pytest.raises(ActionGateRejected):
             ExecutorActionGate(**values)  # type: ignore[arg-type]
 
-    with pytest.raises(ActionGateRejected) as invalid_token:
-        gate.admit(token="private", expected=expected)
-    assert invalid_token.value.__cause__ is None
-    assert "private" not in str(invalid_token.value)
     with pytest.raises(ActionGateRejected):
         gate.admission(ProtocolTargetId(resource_id(21, str)))
     with pytest.raises(ActionGateRejected):
@@ -336,7 +300,7 @@ def test_gate_constructor_clock_and_boundary_failures_are_fixed_and_redacted(
         with pytest.raises(ActionGateRejected):
             gate.engage_emergency_stop()
     clock.value = NOW
-    assert gate.admit(token=token, expected=expected).task_action_ordinal == 1
+    assert gate.admit(expected=expected).task_action_ordinal == 1
 
 
 def test_ledger_rejects_invalid_local_admission_stop_inputs_and_broken_utc(
@@ -344,13 +308,26 @@ def test_ledger_rejects_invalid_local_admission_stop_inputs_and_broken_utc(
 ) -> None:
     clock = MutableClock()
     gate = action_gate(tmp_path / "state", clock)
-    token, _expected = authorization(25)
-    parsed = parse_action_authorization_token(token)
+    expected = authorization(25)
+    claims = ActionAuthorizationClaims(
+        version=ACTION_AUTHORIZATION_VERSION,
+        action_id=expected.action_id,
+        target_id=expected.target_id,
+        execution_attempt_id=expected.execution_attempt_id,
+        task_id=expected.task_id,
+        installation_id=expected.installation_id,
+        executor_id=expected.executor_id,
+        platform=expected.platform,
+        action=expected.action,
+        idempotency_key=expected.idempotency_key,
+        authorized_at=NOW,
+        deadline_at=NOW + timedelta(minutes=5),
+    )
 
     with pytest.raises(ExecutorLedgerRejected):
         gate._ledger.admit_action(
-            claims=parsed.claims,
-            authorization_fingerprint=parsed.fingerprint,
+            claims=claims,
+            authorization_fingerprint=b"f" * 32,
             admitted_at=cast(datetime, "private"),
             minimum_interval_seconds=30,
             task_action_limit=2,
@@ -390,7 +367,7 @@ def test_concurrent_local_admission_has_one_winner_and_exact_replays_do_not_reco
                 clock,
                 minimum_interval=timedelta(seconds=1),
                 task_action_limit=1,
-            ).admit(token=candidate[0], expected=candidate[1])
+            ).admit(expected=candidate)
         except Exception as error:
             return error
 
@@ -405,7 +382,7 @@ def test_concurrent_local_admission_has_one_winner_and_exact_replays_do_not_reco
     )
     winner = winners[0]
     selected = next(
-        candidate for candidate in candidates if str(candidate[1].action_id) == winner.action_id
+        candidate for candidate in candidates if str(candidate.action_id) == winner.action_id
     )
     replays = tuple(admit(selected) for _ in range(3))
     assert all(
@@ -419,8 +396,8 @@ def test_corrupt_or_conflicting_local_facts_fail_closed_without_being_rewritten(
     state_directory = tmp_path / "state"
     clock = MutableClock()
     gate = action_gate(state_directory, clock)
-    token, expected = authorization(50)
-    admitted = gate.admit(token=token, expected=expected)
+    expected = authorization(50)
+    admitted = gate.admit(expected=expected)
 
     with sqlite3.connect(gate._ledger.database_path) as connection:
         connection.execute(
@@ -428,7 +405,7 @@ def test_corrupt_or_conflicting_local_facts_fail_closed_without_being_rewritten(
             (bytes(reversed(admitted.authorization_fingerprint)),),
         )
     with pytest.raises(ActionGateRejected):
-        gate.admit(token=token, expected=expected)
+        gate.admit(expected=expected)
 
     with sqlite3.connect(gate._ledger.database_path) as connection:
         connection.execute(
@@ -452,13 +429,13 @@ def test_local_clock_rollback_cannot_bypass_interval_or_reengage_after_clear(
 ) -> None:
     clock = MutableClock(NOW + timedelta(seconds=30))
     gate = action_gate(tmp_path / "state", clock)
-    first_token, first_expected = authorization(60)
-    second_token, second_expected = authorization(61)
-    gate.admit(token=first_token, expected=first_expected)
+    first_expected = authorization(60)
+    second_expected = authorization(61)
+    gate.admit(expected=first_expected)
 
     clock.value = NOW
     with pytest.raises(ActionGateRejected):
-        gate.admit(token=second_token, expected=second_expected)
+        gate.admit(expected=second_expected)
     stopped = gate.engage_emergency_stop()
     clock.value = NOW + timedelta(seconds=31)
     gate.clear_emergency_stop(expected_revision=stopped.revision)
@@ -470,8 +447,8 @@ def test_local_clock_rollback_cannot_bypass_interval_or_reengage_after_clear(
 def test_local_value_objects_reject_corrupt_shapes_and_hide_identifiers(tmp_path: Path) -> None:
     clock = MutableClock()
     gate = action_gate(tmp_path / "state", clock)
-    token, expected = authorization(70)
-    admission = gate.admit(token=token, expected=expected)
+    expected = authorization(70)
+    admission = gate.admit(expected=expected)
     stop = gate.engage_emergency_stop()
 
     admission_changes: tuple[dict[str, object], ...] = (

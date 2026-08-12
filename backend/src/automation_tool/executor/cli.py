@@ -15,7 +15,6 @@ from typing import BinaryIO, TextIO
 
 from automation_tool.executor.action_authorization import (
     ActionAuthorizationVerificationRejected,
-    Ed25519ActionAuthorizationVerifier,
 )
 from automation_tool.executor.action_gate import (
     ActionGateRejected,
@@ -151,31 +150,32 @@ def run_executor(stdin: BinaryIO, stdout: TextIO, stderr: TextIO) -> int:
                 ledger.engage_action_emergency_stop(changed_at=datetime.now(UTC))
             browser_authority = BrowserLaunchAuthority()
             metadata = RuntimeMetadata.detect()
-            action_operation = None
             if bootstrap.action_runtime is not None:
-                action_gate = ExecutorActionGate(
-                    ledger=ledger,
-                    verifier=Ed25519ActionAuthorizationVerifier(
-                        public_key=(bootstrap.action_runtime.authorization_public_key_bytes()),
-                        clock=metadata,
+                action_policy = LocalActionHardPolicy(
+                    minimum_interval=timedelta(
+                        seconds=bootstrap.action_runtime.minimum_interval_seconds
                     ),
-                    policy=LocalActionHardPolicy(
-                        minimum_interval=timedelta(
-                            seconds=bootstrap.action_runtime.minimum_interval_seconds
-                        ),
-                        task_action_limit=bootstrap.action_runtime.task_action_limit,
-                    ),
-                    clock=metadata,
+                    task_action_limit=bootstrap.action_runtime.task_action_limit,
                 )
-                action_operation = ProductionDouyinActionOperation(
-                    ledger=ledger,
-                    action_gate=action_gate,
-                    browser_authority=browser_authority,
-                    clock=metadata,
-                    runtime_factory=lambda: BrowserRuntime(
-                        diagnostics=recovery_diagnostics,
-                    ),
+            else:
+                action_policy = LocalActionHardPolicy(
+                    minimum_interval=timedelta(seconds=5),
+                    task_action_limit=20,
                 )
+            action_gate = ExecutorActionGate(
+                ledger=ledger,
+                policy=action_policy,
+                clock=metadata,
+            )
+            action_operation = ProductionDouyinActionOperation(
+                ledger=ledger,
+                action_gate=action_gate,
+                browser_authority=browser_authority,
+                clock=metadata,
+                runtime_factory=lambda: BrowserRuntime(
+                    diagnostics=recovery_diagnostics,
+                ),
+            )
             command_processor = ExecutorCommandProcessor(
                 ledger=ledger,
                 installation_id=str(bootstrap.installation_id),

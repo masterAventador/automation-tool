@@ -1,22 +1,19 @@
-"""App-session protected current Installation access probe."""
+"""Current Installation access for the single-machine demo deployment.
+
+The device-identity mechanism was removed: business requests are not
+authenticated per device any more. Every request resolves to the one fixed
+local installation ensured at startup.
+"""
 
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Request, Response, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 
 from automation_tool.control_plane.api.errors import AppError
-from automation_tool.control_plane.application.device_sessions import (
-    DeviceSessionCapability,
-    DeviceSessionRejected,
-    DeviceSessionService,
-    InvalidDeviceSession,
-)
-from automation_tool.control_plane.domain import InstallationId, InvalidResourceId
+from automation_tool.control_plane.domain import InstallationId
 
 router = APIRouter(prefix="/api/v1/installations", tags=["installations"])
-_bearer = HTTPBearer(auto_error=False, scheme_name="AppSession")
 
 
 class InstallationAccessResponse(BaseModel):
@@ -26,47 +23,16 @@ class InstallationAccessResponse(BaseModel):
     status: Literal["active"]
 
 
-def _session_token(
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
-) -> str:
-    if credentials is None or credentials.scheme.lower() != "bearer":
-        raise _access_denied()
-    return credentials.credentials
-
-
-def _service(request: Request) -> DeviceSessionService:
-    service = request.app.state.device_session_service
-    if not isinstance(service, DeviceSessionService):
+async def require_current_installation_access(request: Request) -> InstallationId:
+    """Return the fixed local Installation scope for this deployment."""
+    installation_id = getattr(request.app.state, "local_installation_id", None)
+    if type(installation_id) is not InstallationId:
         raise AppError(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             code="installation_access_unavailable",
             message="Installation access check is unavailable",
             retryable=True,
         )
-    return service
-
-
-def _access_denied() -> AppError:
-    return AppError(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        code="installation_access_denied",
-        message="Installation access is unavailable",
-    )
-
-
-async def require_current_installation_access(
-    session_token: Annotated[str, Depends(_session_token)],
-    service: Annotated[DeviceSessionService, Depends(_service)],
-) -> InstallationId:
-    """Authenticate one App business request and return its Installation scope."""
-    try:
-        authenticated = await service.authenticate(
-            session_token=session_token,
-            required_capability=DeviceSessionCapability.APP_CONTROL_PLANE,
-        )
-        installation_id = InstallationId.parse(authenticated.installation_id)
-    except (DeviceSessionRejected, InvalidDeviceSession, InvalidResourceId):
-        raise _access_denied() from None
     return installation_id
 
 

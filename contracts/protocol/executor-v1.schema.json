@@ -73,13 +73,6 @@
           ],
           "title": "Public Handle"
         },
-        "signed_authority": {
-          "maxLength": 2048,
-          "minLength": 1,
-          "pattern": "^ataa1\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
-          "title": "Signed Authority",
-          "type": "string"
-        },
         "source": {
           "const": "general_search_author",
           "title": "Source",
@@ -98,7 +91,6 @@
         "action_id",
         "target_id",
         "action",
-        "signed_authority",
         "platform_target_id",
         "display_name",
         "public_handle",

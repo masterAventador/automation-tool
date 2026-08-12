@@ -489,15 +489,6 @@ class DouyinActionCommandPayload(_ProtocolModel):
     action_id: ProtocolActionId
     target_id: ProtocolTargetId
     action: DouyinSearchExposureAction
-    signed_authority: Annotated[
-        str,
-        Field(
-            strict=True,
-            min_length=1,
-            max_length=2048,
-            pattern=r"^ataa1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
-        ),
-    ]
     platform_target_id: Annotated[
         str,
         Field(strict=True, min_length=1, max_length=MAX_DOUYIN_TARGET_ID_CHARACTERS),

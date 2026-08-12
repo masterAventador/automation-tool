@@ -1,7 +1,7 @@
 //! Linearized lifecycle for one verified Local Executor process.
 
 use crate::executor_bootstrap::{
-    ExecutorActionRuntimeInput, ExecutorBootstrapError, ExecutorBootstrapErrorCode,
+    ExecutorBootstrapError, ExecutorBootstrapErrorCode,
     ExecutorBootstrapInput, LocalExecutorEvent, LocalPlatformCommand, LocalPlatformCommandResult,
     LocalSessionToken,
 };
@@ -142,7 +142,6 @@ pub struct ExecutorLaunchConfiguration {
     heartbeat_interval_seconds: u8,
     local_emergency_stop: bool,
     capture_successful_diagnostics: bool,
-    action_runtime: Option<ExecutorActionRuntimeInput>,
 }
 
 impl ExecutorLaunchConfiguration {
@@ -212,10 +211,6 @@ impl ExecutorLaunchConfiguration {
         heartbeat_interval_seconds: u8,
         local_emergency_stop: bool,
     ) -> Result<Self, ExecutorManagerError> {
-        let action_runtime = ExecutorActionRuntimeInput::from_compile_time_configuration()
-            .map_err(|_| {
-                ExecutorManagerError::new(ExecutorManagerErrorCode::ConfigurationInvalid)
-            })?;
         let bootstrap = if local_emergency_stop {
             ExecutorBootstrapInput::new_emergency_report(
                 &websocket_url,
@@ -247,7 +242,6 @@ impl ExecutorLaunchConfiguration {
             heartbeat_interval_seconds,
             local_emergency_stop,
             capture_successful_diagnostics: false,
-            action_runtime,
         })
     }
 
@@ -291,12 +285,7 @@ impl ExecutorLaunchConfiguration {
         };
         input
             .map(|input| {
-                let input =
-                    input.with_capture_successful_diagnostics(self.capture_successful_diagnostics);
-                match self.action_runtime.clone() {
-                    Some(action_runtime) => input.with_action_runtime(action_runtime),
-                    None => input,
-                }
+                input.with_capture_successful_diagnostics(self.capture_successful_diagnostics)
             })
             .map_err(|_| ExecutorManagerError::new(ExecutorManagerErrorCode::ConfigurationInvalid))
     }

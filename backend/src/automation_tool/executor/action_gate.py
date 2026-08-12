@@ -8,17 +8,19 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
-from automation_tool.executor.action_authorization import (
-    ActionAuthorizationExpectation,
-    Ed25519ActionAuthorizationVerifier,
-)
+from automation_tool.executor.action_authorization import ActionAuthorizationExpectation
 from automation_tool.executor.ledger import (
     ExecutorActionAdmissionLimited,
     ExecutorLedger,
     LocalActionAdmission,
     LocalActionEmergencyStop,
 )
-from automation_tool.protocol import ProtocolActionId
+from automation_tool.protocol import (
+    ACTION_AUTHORIZATION_MAX_LIFETIME,
+    ACTION_AUTHORIZATION_VERSION,
+    ActionAuthorizationClaims,
+    ProtocolActionId,
+)
 
 _MAXIMUM_LOCAL_ACTION_INTERVAL = timedelta(hours=1)
 _MAXIMUM_LOCAL_TASK_ACTIONS = 100
@@ -68,22 +70,20 @@ class ActionGateClock(Protocol):
 
 
 class ExecutorActionGate:
-    """Require both signed authority and installation-local durable permission."""
+    """Require installation-local durable permission for every platform action."""
 
-    __slots__ = ("_clock", "_ledger", "_policy", "_verifier")
+    __slots__ = ("_clock", "_ledger", "_policy")
 
     def __init__(
         self,
         *,
         ledger: ExecutorLedger,
-        verifier: Ed25519ActionAuthorizationVerifier,
         policy: LocalActionHardPolicy,
         clock: ActionGateClock,
     ) -> None:
         try:
             if (
                 not isinstance(ledger, ExecutorLedger)
-                or not isinstance(verifier, Ed25519ActionAuthorizationVerifier)
                 or not isinstance(policy, LocalActionHardPolicy)
                 or not isinstance(clock, ActionGateClock)
             ):
@@ -93,7 +93,6 @@ class ExecutorActionGate:
                 task_action_limit=policy.task_action_limit,
             )
             self._ledger = ledger
-            self._verifier = verifier
             self._policy = LocalActionHardPolicy(
                 minimum_interval=timedelta(seconds=binding.minimum_interval_seconds),
                 task_action_limit=binding.task_action_limit,
@@ -108,12 +107,25 @@ class ExecutorActionGate:
     def admit(
         self,
         *,
-        token: str,
         expected: ActionAuthorizationExpectation,
     ) -> LocalActionAdmission:
         try:
-            claims = self._verifier.verify(token=token, expected=expected)
-            fingerprint = hashlib.sha256(token.encode("ascii")).digest()
+            now = self._now()
+            claims = ActionAuthorizationClaims(
+                version=ACTION_AUTHORIZATION_VERSION,
+                action_id=expected.action_id,
+                target_id=expected.target_id,
+                execution_attempt_id=expected.execution_attempt_id,
+                task_id=expected.task_id,
+                installation_id=expected.installation_id,
+                executor_id=expected.executor_id,
+                platform=expected.platform,
+                action=expected.action,
+                idempotency_key=expected.idempotency_key,
+                authorized_at=now,
+                deadline_at=now + ACTION_AUTHORIZATION_MAX_LIFETIME,
+            )
+            fingerprint = hashlib.sha256(str(expected.action_id).encode("ascii")).digest()
             return self._ledger.admit_action(
                 claims=claims,
                 authorization_fingerprint=fingerprint,

@@ -190,23 +190,6 @@ class FakeRegistry(ExecutorConnectionRegistry):
         self.sent.append(str(values["source"]))
 
 
-@dataclass(frozen=True)
-class FakeIssuedAuthority:
-    token: str = "ataa1.Y2Fub25pY2Fs.c2lnbmF0dXJl"
-
-
-class FakeActionAuthorityIssuer:
-    @staticmethod
-    def issue(
-        *,
-        authorization: ActionRiskAuthorization,
-        executor_id: ExecutorId,
-    ) -> FakeIssuedAuthority:
-        assert authorization.action_id == ACTION_ID
-        assert executor_id == EXECUTOR_ID
-        return FakeIssuedAuthority()
-
-
 def pending_command() -> PendingTaskCommand:
     return PendingTaskCommand(
         message_id=MESSAGE_ID,
@@ -331,14 +314,13 @@ async def test_pending_offer_is_claimed_sent_and_only_marked_delivered() -> None
 
 
 @pytest.mark.asyncio
-async def test_action_command_is_signed_and_typed_at_the_real_delivery_boundary() -> None:
+async def test_action_command_is_typed_at_the_real_delivery_boundary() -> None:
     repository = FakeRepository(action_command())
     registry = FakeRegistry()
     service = TaskCommandDeliveryService(
         repository=repository,
         registry=registry,
         clock=MutableClock(),
-        action_authority_issuer=FakeActionAuthorityIssuer(),
     )
 
     result = await service.dispatch_current(
@@ -353,7 +335,6 @@ async def test_action_command_is_signed_and_typed_at_the_real_delivery_boundary(
     assert str(parsed.payload.action_id) == str(ACTION_ID)
     assert str(parsed.payload.target_id) == str(TARGET_ID)
     assert parsed.payload.message_template == "您好 {{target_display_name}}"
-    assert parsed.payload.signed_authority == FakeIssuedAuthority().token
 
 
 def test_action_command_context_and_wire_fail_closed_on_inconsistent_authority() -> None:
@@ -423,24 +404,7 @@ def test_action_command_context_and_wire_fail_closed_on_inconsistent_authority()
                 inconsistent,
                 executor_id=EXECUTOR_ID,
                 sent_at=NOW,
-                action_authority_issuer=FakeActionAuthorityIssuer(),
             )
-
-    with pytest.raises(TaskCommandDeliveryRejected):
-        delivery_module._command_wire(command, executor_id=EXECUTOR_ID, sent_at=NOW)
-
-    class InvalidIssuer:
-        @staticmethod
-        def issue(**values: object) -> object:
-            return object()
-
-    with pytest.raises(TaskCommandDeliveryRejected):
-        delivery_module._command_wire(
-            command,
-            executor_id=EXECUTOR_ID,
-            sent_at=NOW,
-            action_authority_issuer=InvalidIssuer(),
-        )
 
     discovery_payload = DouyinDiscoveryCommandPayload.model_validate(
         {
@@ -455,7 +419,6 @@ def test_action_command_context_and_wire_fail_closed_on_inconsistent_authority()
             replace(command, discovery_payload=discovery_payload),
             executor_id=EXECUTOR_ID,
             sent_at=NOW,
-            action_authority_issuer=FakeActionAuthorityIssuer(),
         )
 
 

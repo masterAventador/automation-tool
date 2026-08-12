@@ -1,152 +1,6 @@
 {
   "components": {
     "schemas": {
-      "AccountDeviceListResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "devices": {
-            "items": {
-              "$ref": "#/components/schemas/AccountDeviceResponse"
-            },
-            "title": "Devices",
-            "type": "array"
-          }
-        },
-        "required": [
-          "devices"
-        ],
-        "title": "AccountDeviceListResponse",
-        "type": "object"
-      },
-      "AccountDeviceResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "createdAt": {
-            "format": "date-time",
-            "title": "Createdat",
-            "type": "string"
-          },
-          "installationId": {
-            "title": "Installationid",
-            "type": "string"
-          },
-          "revision": {
-            "title": "Revision",
-            "type": "integer"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "updatedAt": {
-            "format": "date-time",
-            "title": "Updatedat",
-            "type": "string"
-          }
-        },
-        "required": [
-          "installationId",
-          "status",
-          "revision",
-          "createdAt",
-          "updatedAt"
-        ],
-        "title": "AccountDeviceResponse",
-        "type": "object"
-      },
-      "AccountLoginRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "loginName": {
-            "maxLength": 64,
-            "minLength": 3,
-            "title": "Loginname",
-            "type": "string"
-          },
-          "password": {
-            "format": "password",
-            "maxLength": 128,
-            "minLength": 12,
-            "title": "Password",
-            "type": "string",
-            "writeOnly": true
-          }
-        },
-        "required": [
-          "loginName",
-          "password"
-        ],
-        "title": "AccountLoginRequest",
-        "type": "object"
-      },
-      "AccountProjectionResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "loginName": {
-            "title": "Loginname",
-            "type": "string"
-          },
-          "status": {
-            "$ref": "#/components/schemas/AccountStatus"
-          },
-          "userId": {
-            "title": "Userid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "userId",
-          "loginName",
-          "status"
-        ],
-        "title": "AccountProjectionResponse",
-        "type": "object"
-      },
-      "AccountSessionResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "accessExpiresAt": {
-            "format": "date-time",
-            "title": "Accessexpiresat",
-            "type": "string"
-          },
-          "accessToken": {
-            "title": "Accesstoken",
-            "type": "string"
-          },
-          "account": {
-            "$ref": "#/components/schemas/AccountProjectionResponse"
-          },
-          "refreshExpiresAt": {
-            "format": "date-time",
-            "title": "Refreshexpiresat",
-            "type": "string"
-          },
-          "refreshToken": {
-            "title": "Refreshtoken",
-            "type": "string"
-          }
-        },
-        "required": [
-          "accessToken",
-          "refreshToken",
-          "accessExpiresAt",
-          "refreshExpiresAt",
-          "account"
-        ],
-        "title": "AccountSessionResponse",
-        "type": "object"
-      },
-      "AccountStatus": {
-        "description": "Persisted customer account lifecycle.",
-        "enum": [
-          "active",
-          "locked",
-          "disabled"
-        ],
-        "title": "AccountStatus",
-        "type": "string"
-      },
       "ActionResultEvidence": {
         "enum": [
           "awaiting_execution",
@@ -447,106 +301,6 @@
           "credentialRotation"
         ],
         "title": "BilibiliPublishResponse",
-        "type": "object"
-      },
-      "BindingChallengeRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "devicePublicKey": {
-            "maxLength": 43,
-            "minLength": 43,
-            "title": "Devicepublickey",
-            "type": "string"
-          }
-        },
-        "required": [
-          "devicePublicKey"
-        ],
-        "title": "BindingChallengeRequest",
-        "type": "object"
-      },
-      "BindingChallengeResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "challengeId": {
-            "format": "uuid",
-            "title": "Challengeid",
-            "type": "string"
-          },
-          "expiresAt": {
-            "format": "date-time",
-            "title": "Expiresat",
-            "type": "string"
-          },
-          "signingPayload": {
-            "title": "Signingpayload",
-            "type": "string"
-          }
-        },
-        "required": [
-          "challengeId",
-          "signingPayload",
-          "expiresAt"
-        ],
-        "title": "BindingChallengeResponse",
-        "type": "object"
-      },
-      "BindingCompletionRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "challengeId": {
-            "format": "uuid",
-            "title": "Challengeid",
-            "type": "string"
-          },
-          "signature": {
-            "maxLength": 86,
-            "minLength": 86,
-            "title": "Signature",
-            "type": "string"
-          },
-          "signingPayload": {
-            "maxLength": 2731,
-            "minLength": 1,
-            "title": "Signingpayload",
-            "type": "string"
-          }
-        },
-        "required": [
-          "challengeId",
-          "signingPayload",
-          "signature"
-        ],
-        "title": "BindingCompletionRequest",
-        "type": "object"
-      },
-      "BindingResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "deviceCredential": {
-            "$ref": "#/components/schemas/IssuedCredentialResponse"
-          },
-          "installationId": {
-            "format": "uuid",
-            "title": "Installationid",
-            "type": "string"
-          },
-          "revision": {
-            "title": "Revision",
-            "type": "integer"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "installationId",
-          "status",
-          "revision",
-          "deviceCredential"
-        ],
-        "title": "BindingResponse",
         "type": "object"
       },
       "DescriptionSource": {
@@ -1698,30 +1452,6 @@
         "title": "InstallationRegistrationResponse",
         "type": "object"
       },
-      "IssuedCredentialResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "credential": {
-            "title": "Credential",
-            "type": "string"
-          },
-          "scope": {
-            "title": "Scope",
-            "type": "string"
-          },
-          "version": {
-            "title": "Version",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "credential",
-          "version",
-          "scope"
-        ],
-        "title": "IssuedCredentialResponse",
-        "type": "object"
-      },
       "IssuedDeviceCredentialResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1764,51 +1494,6 @@
         ],
         "title": "OriginalAudioMode",
         "type": "string"
-      },
-      "PasswordChangeRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "currentPassword": {
-            "format": "password",
-            "maxLength": 128,
-            "minLength": 12,
-            "title": "Currentpassword",
-            "type": "string",
-            "writeOnly": true
-          },
-          "newPassword": {
-            "format": "password",
-            "maxLength": 128,
-            "minLength": 12,
-            "title": "Newpassword",
-            "type": "string",
-            "writeOnly": true
-          }
-        },
-        "required": [
-          "currentPassword",
-          "newPassword"
-        ],
-        "title": "PasswordChangeRequest",
-        "type": "object"
-      },
-      "PasswordRecoveryRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "newPassword": {
-            "format": "password",
-            "maxLength": 128,
-            "minLength": 12,
-            "title": "Newpassword",
-            "type": "string",
-            "writeOnly": true
-          }
-        },
-        "required": [
-          "newPassword"
-        ],
-        "title": "PasswordRecoveryRequest",
-        "type": "object"
       },
       "PlatformSessionLogoutPrepareResponse": {
         "additionalProperties": false,
@@ -3183,22 +2868,6 @@
       }
     },
     "securitySchemes": {
-      "AccountAccessToken": {
-        "scheme": "bearer",
-        "type": "http"
-      },
-      "AccountRecoveryToken": {
-        "scheme": "bearer",
-        "type": "http"
-      },
-      "AccountRefreshToken": {
-        "scheme": "bearer",
-        "type": "http"
-      },
-      "AppSession": {
-        "scheme": "bearer",
-        "type": "http"
-      },
       "DemoBootstrap": {
         "scheme": "bearer",
         "type": "http"
@@ -3215,345 +2884,6 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/api/v1/account-installations": {
-      "get": {
-        "operationId": "listAccountInstallations",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AccountDeviceListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "AccountAccessToken": []
-          }
-        ],
-        "summary": "List Account Installations",
-        "tags": [
-          "account-devices"
-        ]
-      }
-    },
-    "/api/v1/account-installations/binding-challenges": {
-      "post": {
-        "operationId": "issueAccountInstallationBindingChallenge",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BindingChallengeRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BindingChallengeResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "AccountAccessToken": []
-          }
-        ],
-        "summary": "Issue Binding Challenge",
-        "tags": [
-          "account-installations"
-        ]
-      }
-    },
-    "/api/v1/account-installations/bindings": {
-      "post": {
-        "operationId": "completeAccountInstallationBinding",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BindingCompletionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BindingResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "AccountAccessToken": []
-          }
-        ],
-        "summary": "Complete Binding",
-        "tags": [
-          "account-installations"
-        ]
-      }
-    },
-    "/api/v1/account-installations/{installation_id}": {
-      "delete": {
-        "operationId": "revokeAccountInstallation",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "installation_id",
-            "required": true,
-            "schema": {
-              "title": "Installation Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "expectedRevision",
-            "required": true,
-            "schema": {
-              "minimum": 1,
-              "title": "Expectedrevision",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AccountDeviceResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "AccountAccessToken": []
-          }
-        ],
-        "summary": "Revoke Account Installation",
-        "tags": [
-          "account-devices"
-        ]
-      }
-    },
-    "/api/v1/account-password/changes": {
-      "post": {
-        "operationId": "changeAccountPassword",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PasswordChangeRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "AccountAccessToken": []
-          }
-        ],
-        "summary": "Change Account Password",
-        "tags": [
-          "account-sessions"
-        ]
-      }
-    },
-    "/api/v1/account-password/recovery": {
-      "post": {
-        "operationId": "recoverAccountPassword",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PasswordRecoveryRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "AccountRecoveryToken": []
-          }
-        ],
-        "summary": "Recover Account Password",
-        "tags": [
-          "account-sessions"
-        ]
-      }
-    },
-    "/api/v1/account-sessions": {
-      "post": {
-        "operationId": "loginAccountSession",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AccountLoginRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AccountSessionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Login Account Session",
-        "tags": [
-          "account-sessions"
-        ]
-      }
-    },
-    "/api/v1/account-sessions/current": {
-      "delete": {
-        "operationId": "logoutAccountSession",
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "AccountRefreshToken": []
-          }
-        ],
-        "summary": "Logout Account Session",
-        "tags": [
-          "account-sessions"
-        ]
-      }
-    },
-    "/api/v1/account-sessions/refresh": {
-      "post": {
-        "operationId": "refreshAccountSession",
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AccountSessionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "AccountRefreshToken": []
-          }
-        ],
-        "summary": "Refresh Account Session",
-        "tags": [
-          "account-sessions"
-        ]
-      }
-    },
     "/api/v1/device-credentials/revocations": {
       "post": {
         "operationId": "revokeDeviceCredential",
@@ -3688,11 +3018,6 @@
             "description": "Request validation failed"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Get Editing Job",
         "tags": [
           "editing-jobs"
@@ -3753,11 +3078,6 @@
             "description": "Request validation failed"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Reconcile Editing Job",
         "tags": [
           "editing-jobs"
@@ -3803,11 +3123,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Find Editing Material By Digest",
         "tags": [
           "editing-materials"
@@ -3847,11 +3162,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Register Editing Material",
         "tags": [
           "editing-materials"
@@ -3915,11 +3225,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "List Editing Materials",
         "tags": [
           "editing-materials"
@@ -3961,11 +3266,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Apply Smart Edit Material Writeback",
         "tags": [
           "editing-materials"
@@ -4001,11 +3301,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Delete Editing Material",
         "tags": [
           "editing-materials"
@@ -4046,11 +3341,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Get Editing Material",
         "tags": [
           "editing-materials"
@@ -4118,11 +3408,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Update Editing Material Description",
         "tags": [
           "editing-materials"
@@ -4185,11 +3470,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "List Editing Projects",
         "tags": [
           "editing-projects"
@@ -4229,11 +3509,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Create Editing Project",
         "tags": [
           "editing-projects"
@@ -4276,11 +3551,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Get Editing Project",
         "tags": [
           "editing-projects"
@@ -4352,11 +3622,6 @@
             "description": "Request validation failed"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "List Editing Jobs",
         "tags": [
           "editing-jobs"
@@ -4417,11 +3682,6 @@
             "description": "Request validation failed"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Submit Editing Job",
         "tags": [
           "editing-jobs"
@@ -4464,11 +3724,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Get Editing Project Timeline",
         "tags": [
           "editing-timelines"
@@ -4529,11 +3784,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Save Editing Project Timeline",
         "tags": [
           "editing-timelines"
@@ -4622,11 +3872,6 @@
             "description": "Successful Response"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Get Current Installation Access",
         "tags": [
           "installations"
@@ -4694,11 +3939,6 @@
             "description": "Successful Response"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Get Douyin Platform Session",
         "tags": [
           "platform-sessions"
@@ -4720,11 +3960,6 @@
             "description": "Successful Response"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Prepare Douyin Platform Session Logout",
         "tags": [
           "platform-sessions"
@@ -4777,11 +4012,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Prepare Bilibili Publish",
         "tags": [
           "publishing"
@@ -4828,11 +4058,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Cancel Bilibili Publish Session",
         "tags": [
           "publishing"
@@ -4886,11 +4111,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Submit Bilibili Publish",
         "tags": [
           "publishing"
@@ -4954,11 +4174,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Upload Bilibili Publish Video",
         "tags": [
           "publishing"
@@ -5021,11 +4236,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "List Tasks",
         "tags": [
           "tasks"
@@ -5076,11 +4286,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Create Task",
         "tags": [
           "tasks"
@@ -5123,11 +4328,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Get Task",
         "tags": [
           "tasks"
@@ -5189,11 +4389,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Cancel Task",
         "tags": [
           "tasks"
@@ -5245,11 +4440,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Start Task Discovery",
         "tags": [
           "tasks"
@@ -5311,11 +4501,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Emergency Stop Task",
         "tags": [
           "tasks"
@@ -5375,11 +4560,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Stream Task Events",
         "tags": [
           "tasks"
@@ -5441,11 +4621,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Pause Task",
         "tags": [
           "tasks"
@@ -5507,11 +4682,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Resume Task",
         "tags": [
           "tasks"
@@ -5583,11 +4753,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Get Task Target Preview",
         "tags": [
           "tasks"
@@ -5649,11 +4814,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Confirm Task Target Preview",
         "tags": [
           "tasks"
@@ -5715,11 +4875,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Replace Task Target Exclusions",
         "tags": [
           "tasks"
@@ -5762,11 +4917,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Get Task Target Results",
         "tags": [
           "tasks"
@@ -5809,11 +4959,6 @@
             "description": "Successful Response"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Get Workbench Metrics",
         "tags": [
           "workbench"
@@ -5835,11 +4980,6 @@
             "description": "Successful Response"
           }
         },
-        "security": [
-          {
-            "AppSession": []
-          }
-        ],
         "summary": "Get Workbench Status",
         "tags": [
           "workbench"

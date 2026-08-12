@@ -106,7 +106,6 @@ def action_command(
                 "action_id": ACTION_ID,
                 "target_id": TARGET_ID,
                 "action": "comment",
-                "signed_authority": AUTHORITY,
                 "platform_target_id": "douyin-user-1",
                 "display_name": PRIVATE_DISPLAY_NAME,
                 "public_handle": "target-one",

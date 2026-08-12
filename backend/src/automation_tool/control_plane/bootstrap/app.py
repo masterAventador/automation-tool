@@ -130,6 +130,10 @@ from automation_tool.control_plane.bootstrap.editing_projects import (
 from automation_tool.control_plane.bootstrap.editing_timelines import (
     timeline_service as build_timeline_service,
 )
+from automation_tool.control_plane.bootstrap.local_installation import (
+    ensure_local_installation,
+)
+from automation_tool.control_plane.domain.local_installation import local_installation_id
 from automation_tool.control_plane.bootstrap.local_provisioning import (
     LocalRegistrationBootstrap,
 )
@@ -201,6 +205,14 @@ def _positive_finite_stream_seconds(value: object) -> float:
 async def control_plane_lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Own resources that must exist for exactly one application lifespan."""
 
+    # 固定本地 Installation：ID 是常量，不依赖数据库；建行是尽力而为，
+    # 数据库暂不可用时 App 照常启动并如实报不健康。
+    app.state.local_installation_id = local_installation_id()
+    if isinstance(app.state.database, Database):
+        try:
+            await ensure_local_installation(app.state.database)
+        except Exception:
+            pass
     app.state.lifecycle_state = "running"
     try:
         yield
@@ -304,10 +316,8 @@ def create_app(
             resolved_database,
             require_installation_owner=False,
         )
-    if resolved_executor_connection_service is None and resolved_device_session_service is not None:
-        resolved_executor_connection_service = ExecutorConnectionService(
-            resolved_device_session_service
-        )
+    if resolved_executor_connection_service is None:
+        resolved_executor_connection_service = ExecutorConnectionService()
     if resolved_platform_session_health_service is None and isinstance(resolved_database, Database):
         resolved_platform_session_health_service = build_platform_session_health_service(
             resolved_database
@@ -336,9 +346,6 @@ def create_app(
         resolved_task_command_delivery_service = build_task_command_delivery_service(
             resolved_database,
             resolved_executor_connection_registry,
-            action_authority_issuer=(
-                None if action_execution_runtime is None else action_execution_runtime.issuer
-            ),
         )
     if resolved_task_control_service is None and isinstance(resolved_database, Database):
         resolved_task_control_service = build_task_control_service(resolved_database)

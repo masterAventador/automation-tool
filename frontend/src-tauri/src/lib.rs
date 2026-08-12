@@ -2733,33 +2733,10 @@ async fn register_installation_from_local_handoff(
     vault: &ProductionDeviceCredentialVault,
     handoff: &ProductionLocalRegistrationHandoffStore,
 ) -> Result<(), ControlPlaneCommandError> {
-    let Ok(now) = local_registration::current_unix_seconds() else {
-        return Ok(());
-    };
-    let registrar = ProductionInstallationRegistrar {
-        client,
-        identity,
-        vault,
-    };
-    match local_registration::ensure_installation_registered(&registrar, handoff, now).await {
-        // The service already holds an Installation for this device public key,
-        // which only happens when an accepted registration never reached the
-        // vault. Retrying cannot clear it, so it gets its own diagnostic rather
-        // than hiding inside a generic rejection.
-        local_registration::InstallationRegistrationOutcome::Conflict => {
-            Err(ControlPlaneCommandError {
-                code: "installation_conflict",
-                retryable: false,
-            })
-        }
-        // Every other outcome leaves the App exactly as registered as it was.
-        // A machine with no local Control Plane has always started this way, so
-        // an absent, expired or refused grant must not block startup.
-        local_registration::InstallationRegistrationOutcome::AlreadyRegistered
-        | local_registration::InstallationRegistrationOutcome::Registered
-        | local_registration::InstallationRegistrationOutcome::NotAttempted
-        | local_registration::InstallationRegistrationOutcome::Failed => Ok(()),
-    }
+    // 设备身份注册机制已删除：服务端固定使用本地 Installation，
+    // 客户端不再注册设备，也不可能出现安装记录冲突。
+    let _ = (client, identity, vault, handoff);
+    Ok(())
 }
 
 fn map_control_plane_error(error: control_plane::ControlPlaneError) -> ControlPlaneCommandError {

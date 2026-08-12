@@ -69,21 +69,6 @@ class SystemTaskCommandDeliveryClock:
         return datetime.now(UTC)
 
 
-@runtime_checkable
-class IssuedActionAuthority(Protocol):
-    token: str
-
-
-@runtime_checkable
-class ActionAuthorityIssuer(Protocol):
-    def issue(
-        self,
-        *,
-        authorization: ActionRiskAuthorization,
-        executor_id: ExecutorId,
-    ) -> object: ...
-
-
 def _aware_utc(value: object) -> datetime:
     if not isinstance(value, datetime) or value.utcoffset() is None:
         raise TaskCommandDeliveryRejected
@@ -294,16 +279,11 @@ class TaskCommandDeliveryService:
         acknowledgement_timeout: timedelta = timedelta(seconds=5),
         maximum_batch_size: int = 32,
         id_source: Callable[[], object] = uuid4,
-        action_authority_issuer: ActionAuthorityIssuer | None = None,
     ) -> None:
         if (
             not isinstance(repository, TaskCommandRepository)
             or not isinstance(registry, ExecutorConnectionRegistry)
             or not callable(id_source)
-            or (
-                action_authority_issuer is not None
-                and not isinstance(action_authority_issuer, ActionAuthorityIssuer)
-            )
             or type(maximum_batch_size) is not int
             or not 1 <= maximum_batch_size <= 256
         ):
@@ -316,7 +296,6 @@ class TaskCommandDeliveryService:
         self._acknowledgement_timeout = _positive_seconds(acknowledgement_timeout)
         self._maximum_batch_size = maximum_batch_size
         self._id_source = id_source
-        self._action_authority_issuer = action_authority_issuer
 
     def _now(self) -> datetime:
         try:
@@ -422,7 +401,6 @@ class TaskCommandDeliveryService:
                 command,
                 executor_id=executor_id,
                 sent_at=claimed_at,
-                action_authority_issuer=self._action_authority_issuer,
             )
             try:
                 await self._registry.send_current(
@@ -481,7 +459,6 @@ def _command_wire(
     *,
     executor_id: ExecutorId,
     sent_at: datetime,
-    action_authority_issuer: ActionAuthorityIssuer | None = None,
 ) -> str:
     try:
         payload: dict[str, object]
@@ -490,16 +467,9 @@ def _command_wire(
                 command.action_id is None
                 or command.action_context is None
                 or command.action_context.authorization.action_id != command.action_id
-                or action_authority_issuer is None
             ):
                 raise ValueError
             context = command.action_context
-            authority = action_authority_issuer.issue(
-                authorization=context.authorization,
-                executor_id=executor_id,
-            )
-            if not isinstance(authority, IssuedActionAuthority):
-                raise ValueError
             template = context.message_template
             payload = DouyinActionCommandPayload.model_validate(
                 {
@@ -507,7 +477,6 @@ def _command_wire(
                     "action_id": str(context.authorization.action_id),
                     "target_id": str(context.authorization.target_id),
                     "action": context.authorization.action.value,
-                    "signed_authority": authority.token,
                     "platform_target_id": context.candidate.platform_target_id,
                     "display_name": context.candidate.summary.display_name,
                     "public_handle": context.candidate.summary.public_handle,
@@ -567,7 +536,6 @@ def _command_wire(
 
 
 __all__ = [
-    "ActionAuthorityIssuer",
     "ActionCommandContext",
     "CommandDeliveryResult",
     "PendingTaskCommand",

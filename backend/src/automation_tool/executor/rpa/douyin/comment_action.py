@@ -279,19 +279,14 @@ class DouyinCommentActionExecution:
     def run(
         self,
         *,
-        token: str,
         intent: DouyinCommentActionIntent,
     ) -> DouyinCommentActionReceipt:
-        if (
-            self._executed
-            or type(token) is not str
-            or not isinstance(intent, DouyinCommentActionIntent)
-        ):
+        if self._executed or not isinstance(intent, DouyinCommentActionIntent):
             raise DouyinCommentActionRejected
         self._executed = True
         expected = intent.authorization
         try:
-            self._action_gate.admit(token=token, expected=expected)
+            self._action_gate.admit(expected=expected)
         except ActionGateLimited as error:
             return _empty_receipt(expected, _limit_evidence(error.reason))
         except ActionGateRejected:

@@ -56,10 +56,6 @@ enum ControlPlaneOperation {
     PrepareDouyinPlatformSessionLogout,
     IssueInstallationRegistrationChallenge,
     CompleteInstallationRegistration,
-    IssueAccountInstallationBindingChallenge,
-    CompleteAccountInstallationBinding,
-    ListAccountInstallations,
-    RevokeAccountInstallation,
     RotateDeviceCredential,
     RevokeDeviceCredential,
     ExchangeDeviceSession,
@@ -99,11 +95,6 @@ enum ControlPlaneOperation {
     ResumeTask,
     CancelTask,
     EmergencyStopTask,
-    LoginAccountSession,
-    RefreshAccountSession,
-    LogoutAccountSession,
-    ChangeAccountPassword,
-    RecoverAccountPassword,
     PrepareBilibiliPublish,
     UploadBilibiliPublishVideo,
     SubmitBilibiliPublish,
@@ -127,7 +118,6 @@ impl ControlPlaneOperation {
             | Self::GetWorkbenchStatus
             | Self::GetWorkbenchMetrics
             | Self::GetDouyinPlatformSession
-            | Self::ListAccountInstallations
             | Self::FindEditingMaterialByDigest
             | Self::ListEditingMaterials
             | Self::GetEditingMaterial
@@ -143,8 +133,6 @@ impl ControlPlaneOperation {
             | Self::StreamTaskEvents => "GET",
             Self::IssueInstallationRegistrationChallenge
             | Self::CompleteInstallationRegistration
-            | Self::IssueAccountInstallationBindingChallenge
-            | Self::CompleteAccountInstallationBinding
             | Self::RotateDeviceCredential
             | Self::RevokeDeviceCredential
             | Self::ExchangeDeviceSession
@@ -160,10 +148,6 @@ impl ControlPlaneOperation {
             | Self::ResumeTask
             | Self::CancelTask
             | Self::EmergencyStopTask
-            | Self::LoginAccountSession
-            | Self::RefreshAccountSession
-            | Self::ChangeAccountPassword
-            | Self::RecoverAccountPassword
             | Self::PrepareBilibiliPublish
             | Self::SubmitBilibiliPublish => "POST",
             Self::ReconcileEditingJob => "PATCH",
@@ -171,9 +155,7 @@ impl ControlPlaneOperation {
             | Self::SaveEditingProjectTimeline
             | Self::ReplaceTaskTargetExclusions
             | Self::UploadBilibiliPublishVideo => "PUT",
-            Self::LogoutAccountSession
-            | Self::RevokeAccountInstallation
-            | Self::DeleteEditingMaterial
+            Self::DeleteEditingMaterial
             | Self::CancelBilibiliPublishSession => "DELETE",
         }
     }
@@ -193,12 +175,6 @@ impl ControlPlaneOperation {
                 "/api/v1/installations/registration-challenges"
             }
             Self::CompleteInstallationRegistration => "/api/v1/installations",
-            Self::IssueAccountInstallationBindingChallenge => {
-                "/api/v1/account-installations/binding-challenges"
-            }
-            Self::CompleteAccountInstallationBinding => "/api/v1/account-installations/bindings",
-            Self::ListAccountInstallations => "/api/v1/account-installations",
-            Self::RevokeAccountInstallation => "/api/v1/account-installations/{installation_id}",
             Self::RotateDeviceCredential => "/api/v1/device-credentials/rotations",
             Self::RevokeDeviceCredential => "/api/v1/device-credentials/revocations",
             Self::ExchangeDeviceSession => "/api/v1/device-sessions",
@@ -241,11 +217,6 @@ impl ControlPlaneOperation {
             Self::ResumeTask => "/api/v1/tasks/{task_id}/resume",
             Self::CancelTask => "/api/v1/tasks/{task_id}/cancel",
             Self::EmergencyStopTask => "/api/v1/tasks/{task_id}/emergency-stop",
-            Self::LoginAccountSession => "/api/v1/account-sessions",
-            Self::RefreshAccountSession => "/api/v1/account-sessions/refresh",
-            Self::LogoutAccountSession => "/api/v1/account-sessions/current",
-            Self::ChangeAccountPassword => "/api/v1/account-password/changes",
-            Self::RecoverAccountPassword => "/api/v1/account-password/recovery",
             Self::PrepareBilibiliPublish => "/api/v1/publishing/bilibili/jobs/{publish_job_id}",
             Self::UploadBilibiliPublishVideo => {
                 "/api/v1/publishing/bilibili/jobs/{publish_job_id}/video"
@@ -281,8 +252,6 @@ impl ControlPlaneOperation {
             | Self::GetTaskTargetPreview
             | Self::ReplaceTaskTargetExclusions
             | Self::PrepareDouyinPlatformSessionLogout
-            | Self::ListAccountInstallations
-            | Self::RevokeAccountInstallation
             | Self::RevokeDeviceCredential
             | Self::ListTasks
             | Self::GetTask
@@ -290,27 +259,20 @@ impl ControlPlaneOperation {
             | Self::StreamTaskEvents => 200,
             Self::IssueInstallationRegistrationChallenge
             | Self::CompleteInstallationRegistration
-            | Self::IssueAccountInstallationBindingChallenge
-            | Self::CompleteAccountInstallationBinding
             | Self::RotateDeviceCredential
             | Self::ExchangeDeviceSession
             | Self::RegisterEditingMaterial
             | Self::CreateEditingProject
             | Self::SaveEditingProjectTimeline
             | Self::SubmitEditingJob
-            | Self::CreateTask
-            | Self::LoginAccountSession
-            | Self::RefreshAccountSession => 201,
+            | Self::CreateTask => 201,
             Self::StartTaskDiscovery
             | Self::ConfirmTaskTargetPreview
             | Self::PauseTask
             | Self::ResumeTask
             | Self::CancelTask
             | Self::EmergencyStopTask => 202,
-            Self::LogoutAccountSession
-            | Self::ChangeAccountPassword
-            | Self::RecoverAccountPassword
-            | Self::DeleteEditingMaterial
+            Self::DeleteEditingMaterial
             | Self::CancelBilibiliPublishSession => 204,
             Self::PrepareBilibiliPublish => 201,
             Self::UploadBilibiliPublishVideo => 200,
@@ -336,17 +298,9 @@ impl ControlPlaneOperation {
         matches!(
             self,
             Self::CompleteInstallationRegistration
-                | Self::IssueAccountInstallationBindingChallenge
-                | Self::CompleteAccountInstallationBinding
-                | Self::RevokeAccountInstallation
                 | Self::RotateDeviceCredential
                 | Self::RevokeDeviceCredential
                 | Self::ExchangeDeviceSession
-                | Self::LoginAccountSession
-                | Self::RefreshAccountSession
-                | Self::LogoutAccountSession
-                | Self::ChangeAccountPassword
-                | Self::RecoverAccountPassword
                 | Self::CreateEditingProject
                 | Self::SaveEditingProjectTimeline
                 | Self::SubmitEditingJob
@@ -1311,19 +1265,13 @@ impl ControlPlaneClient {
     where
         S: SecretStore,
     {
-        let credential = required_credential(vault)?;
-        let request_body = serde_json::to_value(DeviceSessionRequest { capability })
-            .map_err(|_| ControlPlaneError::new(ControlPlaneErrorCode::ProtocolInvalid, false))?;
-        let response_body = self
-            .execute(
-                ControlPlaneOperation::ExchangeDeviceSession,
-                Some(credential.as_str()),
-                Some(&request_body),
-                None,
-                None,
-            )
-            .await?;
-        parse_device_session(&response_body, capability)
+        // 设备身份机制已删除：本地部署不再向服务端交换设备会话，
+        // 这里只需要一个形状合法的占位 bearer，服务端不校验其内容。
+        let _ = vault;
+        Ok(DeviceSession {
+            token: Zeroizing::new(format!("atds1.{}", "A".repeat(43))),
+            capability,
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2947,18 +2895,6 @@ fn request_path(
             Ok(format!("/api/v1/editing-jobs/{job_id}"))
         }
         (
-            ControlPlaneOperation::RevokeAccountInstallation,
-            Some(ControlPlaneRequestTarget::AccountDevice {
-                installation_id,
-                expected_revision,
-            }),
-        ) if expected_revision > 0 => {
-            require_canonical_uuid_v4(installation_id)?;
-            Ok(format!(
-                "/api/v1/account-installations/{installation_id}?expectedRevision={expected_revision}"
-            ))
-        }
-        (
             ControlPlaneOperation::ListTasks,
             Some(ControlPlaneRequestTarget::List { cursor, limit }),
         ) if (1..=100).contains(&limit) => {
@@ -3081,7 +3017,6 @@ fn request_path(
             | ControlPlaneOperation::ResumeTask
             | ControlPlaneOperation::CancelTask
             | ControlPlaneOperation::EmergencyStopTask
-            | ControlPlaneOperation::RevokeAccountInstallation
             | ControlPlaneOperation::PrepareBilibiliPublish
             | ControlPlaneOperation::UploadBilibiliPublishVideo
             | ControlPlaneOperation::SubmitBilibiliPublish
@@ -3188,27 +3123,6 @@ fn validate_response_metadata(
             // credential never reached the vault, and it needs its own
             // diagnostic: no retry can resolve it, only a new device identity.
             ControlPlaneErrorCode::InstallationConflict
-        } else if metadata.status == 401
-            && matches!(operation, ControlPlaneOperation::LoginAccountSession)
-        {
-            ControlPlaneErrorCode::AuthenticationInvalid
-        } else if metadata.status == 401
-            && matches!(operation, ControlPlaneOperation::RecoverAccountPassword)
-        {
-            ControlPlaneErrorCode::RecoveryInvalid
-        } else if metadata.status == 401
-            && matches!(
-                operation,
-                ControlPlaneOperation::RefreshAccountSession
-                    | ControlPlaneOperation::LogoutAccountSession
-                    | ControlPlaneOperation::ChangeAccountPassword
-                    | ControlPlaneOperation::IssueAccountInstallationBindingChallenge
-                    | ControlPlaneOperation::CompleteAccountInstallationBinding
-                    | ControlPlaneOperation::ListAccountInstallations
-                    | ControlPlaneOperation::RevokeAccountInstallation
-            )
-        {
-            ControlPlaneErrorCode::AccountSessionInvalid
         } else if metadata.status == 401
             && matches!(
                 operation,
@@ -6345,30 +6259,6 @@ mod tests {
                 201,
             ),
             (
-                ControlPlaneOperation::IssueAccountInstallationBindingChallenge,
-                "POST",
-                "/api/v1/account-installations/binding-challenges",
-                201,
-            ),
-            (
-                ControlPlaneOperation::CompleteAccountInstallationBinding,
-                "POST",
-                "/api/v1/account-installations/bindings",
-                201,
-            ),
-            (
-                ControlPlaneOperation::ListAccountInstallations,
-                "GET",
-                "/api/v1/account-installations",
-                200,
-            ),
-            (
-                ControlPlaneOperation::RevokeAccountInstallation,
-                "DELETE",
-                "/api/v1/account-installations/{installation_id}",
-                200,
-            ),
-            (
                 ControlPlaneOperation::RotateDeviceCredential,
                 "POST",
                 "/api/v1/device-credentials/rotations",
@@ -6561,36 +6451,6 @@ mod tests {
                 202,
             ),
             (
-                ControlPlaneOperation::LoginAccountSession,
-                "POST",
-                "/api/v1/account-sessions",
-                201,
-            ),
-            (
-                ControlPlaneOperation::RefreshAccountSession,
-                "POST",
-                "/api/v1/account-sessions/refresh",
-                201,
-            ),
-            (
-                ControlPlaneOperation::LogoutAccountSession,
-                "DELETE",
-                "/api/v1/account-sessions/current",
-                204,
-            ),
-            (
-                ControlPlaneOperation::ChangeAccountPassword,
-                "POST",
-                "/api/v1/account-password/changes",
-                204,
-            ),
-            (
-                ControlPlaneOperation::RecoverAccountPassword,
-                "POST",
-                "/api/v1/account-password/recovery",
-                204,
-            ),
-            (
                 ControlPlaneOperation::PrepareBilibiliPublish,
                 "POST",
                 "/api/v1/publishing/bilibili/jobs/{publish_job_id}",
@@ -6655,22 +6515,6 @@ mod tests {
             (
                 ControlPlaneOperation::CompleteInstallationRegistration,
                 "completeInstallationRegistration",
-            ),
-            (
-                ControlPlaneOperation::IssueAccountInstallationBindingChallenge,
-                "issueAccountInstallationBindingChallenge",
-            ),
-            (
-                ControlPlaneOperation::CompleteAccountInstallationBinding,
-                "completeAccountInstallationBinding",
-            ),
-            (
-                ControlPlaneOperation::ListAccountInstallations,
-                "listAccountInstallations",
-            ),
-            (
-                ControlPlaneOperation::RevokeAccountInstallation,
-                "revokeAccountInstallation",
             ),
             (
                 ControlPlaneOperation::RotateDeviceCredential,
@@ -6769,26 +6613,6 @@ mod tests {
             (
                 ControlPlaneOperation::EmergencyStopTask,
                 "emergencyStopTask",
-            ),
-            (
-                ControlPlaneOperation::LoginAccountSession,
-                "loginAccountSession",
-            ),
-            (
-                ControlPlaneOperation::RefreshAccountSession,
-                "refreshAccountSession",
-            ),
-            (
-                ControlPlaneOperation::LogoutAccountSession,
-                "logoutAccountSession",
-            ),
-            (
-                ControlPlaneOperation::ChangeAccountPassword,
-                "changeAccountPassword",
-            ),
-            (
-                ControlPlaneOperation::RecoverAccountPassword,
-                "recoverAccountPassword",
             ),
             (
                 ControlPlaneOperation::PrepareBilibiliPublish,
@@ -7312,7 +7136,7 @@ mod tests {
     #[test]
     fn editing_client_crosses_the_real_http_boundary_with_exact_contracts() {
         let device_credential = opaque_bearer("atdc1");
-        let session_token = opaque_bearer("atds1");
+        let session_token = format!("atds1.{}", "A".repeat(43));
         let timeline_body = serde_json::json!({
             "durationMs": 3000,
             "tracks": [{
@@ -7358,7 +7182,6 @@ mod tests {
             "updatedAt": "2026-08-01T00:00:00Z"
         });
         let (origin, server) = spawn_http_contract_server(vec![
-            device_session_exchange(&device_credential, &session_token),
             ExpectedHttpExchange {
                 method: "GET",
                 path: "/api/v1/editing-projects?limit=20&cursor=YWJj".to_owned(),
@@ -7367,7 +7190,6 @@ mod tests {
                 status: 200,
                 response: serde_json::json!({"items": [], "nextCursor": null}),
             },
-            device_session_exchange(&device_credential, &session_token),
             ExpectedHttpExchange {
                 method: "PUT",
                 path: format!("/api/v1/editing-projects/{IDENTIFIER}/timeline"),
@@ -7376,7 +7198,6 @@ mod tests {
                 status: 201,
                 response: timeline_response,
             },
-            device_session_exchange(&device_credential, &session_token),
             ExpectedHttpExchange {
                 method: "POST",
                 path: format!("/api/v1/editing-projects/{IDENTIFIER}/jobs"),
@@ -7385,7 +7206,6 @@ mod tests {
                 status: 201,
                 response: job_response.clone(),
             },
-            device_session_exchange(&device_credential, &session_token),
             ExpectedHttpExchange {
                 method: "GET",
                 path: "/api/v1/editing-jobs/3d594650-b5f4-4498-8e38-0cf85d6dfa72".to_owned(),
@@ -7394,7 +7214,6 @@ mod tests {
                 status: 200,
                 response: job_response.clone(),
             },
-            device_session_exchange(&device_credential, &session_token),
             ExpectedHttpExchange {
                 method: "PATCH",
                 path: "/api/v1/editing-jobs/3d594650-b5f4-4498-8e38-0cf85d6dfa72".to_owned(),
@@ -7451,7 +7270,7 @@ mod tests {
     #[test]
     fn editing_material_client_finds_registers_and_deletes_exact_path_free_facts() {
         let device_credential = opaque_bearer("atdc1");
-        let session_token = opaque_bearer("atds1");
+        let session_token = format!("atds1.{}", "A".repeat(43));
         let material_id = "623e4567-e89b-42d3-a456-426614174105";
         let digest = "cd".repeat(32);
         let material = serde_json::json!({
@@ -7476,7 +7295,6 @@ mod tests {
         described_material["aiDescription"] = serde_json::json!("人工挑选的开场镜头");
         described_material["descriptionSource"] = serde_json::json!("user");
         let (origin, server) = spawn_http_contract_server(vec![
-            device_session_exchange(&device_credential, &session_token),
             ExpectedHttpExchange {
                 method: "GET",
                 path: format!("/api/v1/editing-materials?contentDigest={digest}"),
@@ -7485,7 +7303,6 @@ mod tests {
                 status: 200,
                 response: material.clone(),
             },
-            device_session_exchange(&device_credential, &session_token),
             ExpectedHttpExchange {
                 method: "POST",
                 path: "/api/v1/editing-materials".to_owned(),
@@ -7494,7 +7311,6 @@ mod tests {
                 status: 201,
                 response: material.clone(),
             },
-            device_session_exchange(&device_credential, &session_token),
             ExpectedHttpExchange {
                 method: "GET",
                 path: "/api/v1/editing-materials/library?limit=50&cursor=next_page".to_owned(),
@@ -7506,7 +7322,6 @@ mod tests {
                     "nextCursor": null
                 }),
             },
-            device_session_exchange(&device_credential, &session_token),
             ExpectedHttpExchange {
                 method: "PUT",
                 path: format!("/api/v1/editing-materials/{material_id}/description"),
@@ -7518,7 +7333,6 @@ mod tests {
                 status: 200,
                 response: described_material,
             },
-            device_session_exchange(&device_credential, &session_token),
             ExpectedHttpExchange {
                 method: "DELETE",
                 path: format!("/api/v1/editing-materials/{material_id}"),
@@ -7527,7 +7341,6 @@ mod tests {
                 status: 204,
                 response: serde_json::json!({}),
             },
-            device_session_exchange(&device_credential, &session_token),
             ExpectedHttpExchange {
                 method: "GET",
                 path: format!("/api/v1/editing-materials?contentDigest={digest}"),
@@ -7594,7 +7407,7 @@ mod tests {
     #[test]
     fn editing_timeline_get_rejects_a_cross_project_snapshot() {
         let device_credential = opaque_bearer("atdc1");
-        let session_token = opaque_bearer("atds1");
+        let session_token = format!("atds1.{}", "A".repeat(43));
         let foreign_project_id = "8e48954d-2df1-4168-8f33-b62c5772845c";
         let response = serde_json::json!({
             "timelineId": "0a48954d-2df1-4168-8f33-b62c5772845a",
@@ -7620,7 +7433,6 @@ mod tests {
             "createdAt": "2026-08-01T00:00:00Z"
         });
         let (origin, server) = spawn_http_contract_server(vec![
-            device_session_exchange(&device_credential, &session_token),
             ExpectedHttpExchange {
                 method: "GET",
                 path: format!("/api/v1/editing-projects/{IDENTIFIER}/timeline"),
@@ -7856,35 +7668,8 @@ mod tests {
         );
         assert!(!installation_busy.retryable());
 
-        for (operation, expected_code) in [
-            (
-                ControlPlaneOperation::LoginAccountSession,
-                ControlPlaneErrorCode::AuthenticationInvalid,
-            ),
-            (
-                ControlPlaneOperation::RecoverAccountPassword,
-                ControlPlaneErrorCode::RecoveryInvalid,
-            ),
-            (
-                ControlPlaneOperation::RefreshAccountSession,
-                ControlPlaneErrorCode::AccountSessionInvalid,
-            ),
-        ] {
-            let account_error = validate_response_metadata(
-                operation,
-                "f831a58a-a54c-4bd9-8f3e-0383c4df609d",
-                &ResponseMetadata {
-                    status: 401,
-                    ..valid.clone()
-                },
-            )
-            .expect_err("account 401 classification");
-            assert_eq!(account_error.code(), expected_code);
-            assert!(!account_error.retryable());
-        }
-
         validate_response_metadata(
-            ControlPlaneOperation::LogoutAccountSession,
+            ControlPlaneOperation::DeleteEditingMaterial,
             "f831a58a-a54c-4bd9-8f3e-0383c4df609d",
             &ResponseMetadata {
                 status: 204,
@@ -7893,7 +7678,7 @@ mod tests {
                 cache_control: Some("no-store".to_owned()),
             },
         )
-        .expect("secret-free empty account response metadata");
+        .expect("secret-free empty response metadata");
 
         for status in [200, 201] {
             validate_response_metadata(
@@ -9156,16 +8941,9 @@ mod tests {
     fn transport_failure_marks_only_stateful_or_issuing_operations_uncertain() {
         for operation in [
             ControlPlaneOperation::CompleteInstallationRegistration,
-            ControlPlaneOperation::IssueAccountInstallationBindingChallenge,
-            ControlPlaneOperation::CompleteAccountInstallationBinding,
             ControlPlaneOperation::RotateDeviceCredential,
             ControlPlaneOperation::RevokeDeviceCredential,
             ControlPlaneOperation::ExchangeDeviceSession,
-            ControlPlaneOperation::LoginAccountSession,
-            ControlPlaneOperation::RefreshAccountSession,
-            ControlPlaneOperation::LogoutAccountSession,
-            ControlPlaneOperation::ChangeAccountPassword,
-            ControlPlaneOperation::RecoverAccountPassword,
             ControlPlaneOperation::SubmitBilibiliPublish,
         ] {
             let error = transport_error(operation);

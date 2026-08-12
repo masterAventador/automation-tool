@@ -1,12 +1,8 @@
-"""Fail-closed deployment configuration for server-side action execution."""
+"""Deployment configuration for server-side action execution."""
 
 from __future__ import annotations
 
-import base64
-import binascii
-import re
 from dataclasses import dataclass
-from typing import Final
 
 from pydantic import ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -16,21 +12,11 @@ from automation_tool.control_plane.application.action_execution_orchestration im
     ActionExecutionOrchestrationService,
     SystemActionExecutionOrchestrationClock,
 )
-from automation_tool.control_plane.bootstrap.runtime_secrets import (
-    RuntimeSecretError,
-    RuntimeSecretName,
-    runtime_secret,
-)
 from automation_tool.control_plane.infrastructure.database import (
     Database,
     SqlAlchemyActionExecutionOrchestrationRepository,
 )
-from automation_tool.control_plane.infrastructure.security import (
-    Ed25519ActionAuthorizationIssuer,
-)
 from automation_tool.protocol import ACTION_AUTHORIZATION_MAX_LIFETIME
-
-_BASE64URL_PATTERN: Final = re.compile(r"[A-Za-z0-9_-]+")
 
 
 class ActionExecutionConfigurationError(RuntimeError):
@@ -41,79 +27,43 @@ class ActionExecutionConfigurationError(RuntimeError):
 class _ActionExecutionSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AUTOMATION_TOOL_", extra="ignore")
 
-    action_minimum_interval_seconds: int | None = None
-    action_task_limit: int | None = None
-    action_daily_limit: int | None = None
-    action_consecutive_failure_threshold: int | None = None
+    action_minimum_interval_seconds: int = 5
+    action_task_limit: int = 20
+    action_daily_limit: int = 100
+    action_consecutive_failure_threshold: int = 3
 
 
 @dataclass(frozen=True, slots=True, repr=False)
 class ActionExecutionRuntime:
     service: ActionExecutionOrchestrationService
-    issuer: Ed25519ActionAuthorizationIssuer
 
     def __repr__(self) -> str:
         return "ActionExecutionRuntime(<redacted>)"
 
 
-def _private_key(source: str) -> bytes:
-    if _BASE64URL_PATTERN.fullmatch(source) is None:
-        raise ActionExecutionConfigurationError
-    try:
-        decoded = base64.urlsafe_b64decode(source + ("=" * (-len(source) % 4)))
-    except (ValueError, binascii.Error):
-        raise ActionExecutionConfigurationError from None
-    canonical = base64.urlsafe_b64encode(decoded).rstrip(b"=").decode("ascii")
-    if canonical != source or len(decoded) != 32 or decoded == bytes(32):
-        raise ActionExecutionConfigurationError
-    return decoded
-
-
 def action_execution_runtime_from_environment(
     database: Database,
-) -> ActionExecutionRuntime | None:
-    """Build action execution only when the complete server-owned policy is present."""
+) -> ActionExecutionRuntime:
+    """Build action execution with environment-tunable limits (defaults apply)."""
 
     try:
         settings = _ActionExecutionSettings()
-        private_key = runtime_secret(RuntimeSecretName.ACTION_AUTHORIZATION_PRIVATE_KEY)
-    except (RuntimeSecretError, ValidationError):
-        raise ActionExecutionConfigurationError from None
-    values = (
-        private_key,
-        settings.action_minimum_interval_seconds,
-        settings.action_task_limit,
-        settings.action_daily_limit,
-        settings.action_consecutive_failure_threshold,
-    )
-    if all(value is None for value in values):
-        return None
-    if any(value is None for value in values):
-        raise ActionExecutionConfigurationError
-    try:
         limits = ActionExecutionLimits(
-            minimum_interval_seconds=settings.action_minimum_interval_seconds,  # type: ignore[arg-type]
-            task_action_limit=settings.action_task_limit,  # type: ignore[arg-type]
-            daily_action_limit=settings.action_daily_limit,  # type: ignore[arg-type]
-            consecutive_failure_threshold=(
-                settings.action_consecutive_failure_threshold  # type: ignore[arg-type]
-            ),
+            minimum_interval_seconds=settings.action_minimum_interval_seconds,
+            task_action_limit=settings.action_task_limit,
+            daily_action_limit=settings.action_daily_limit,
+            consecutive_failure_threshold=settings.action_consecutive_failure_threshold,
         )
         clock = SystemActionExecutionOrchestrationClock()
-        issuer = Ed25519ActionAuthorizationIssuer(
-            private_key=_private_key(private_key or ""),
-            clock=clock,
-            authorization_lifetime=ACTION_AUTHORIZATION_MAX_LIFETIME,
-        )
         service = ActionExecutionOrchestrationService(
             repository=SqlAlchemyActionExecutionOrchestrationRepository(database),
             limits=limits,
             clock=clock,
             command_lifetime=ACTION_AUTHORIZATION_MAX_LIFETIME,
         )
-    except Exception:
+    except (ValidationError, Exception):
         raise ActionExecutionConfigurationError from None
-    return ActionExecutionRuntime(service=service, issuer=issuer)
+    return ActionExecutionRuntime(service=service)
 
 
 __all__ = [

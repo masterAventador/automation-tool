@@ -26,7 +26,6 @@ def payload(**overrides: object) -> dict[str, object]:
         "action_id": "123e4567-e89b-42d3-a456-426614174001",
         "target_id": "223e4567-e89b-42d3-a456-426614174001",
         "action": DouyinSearchExposureAction.COMMENT.value,
-        "signed_authority": "ataa1.Y2Fub25pY2Fs.c2lnbmF0dXJl",
         "platform_target_id": "douyin-user-1",
         "display_name": "目标一",
         "public_handle": "target-one",
@@ -66,7 +65,6 @@ def test_action_command_is_exact_typed_and_parses_through_the_formal_entry() -> 
     assert isinstance(parsed.payload, DouyinActionCommandPayload)
     assert parsed.payload.action is DouyinSearchExposureAction.COMMENT
     assert parsed.payload.message_template == "你好 {{target_display_name}}"
-    assert parsed.payload.signed_authority.startswith("ataa1.")
     assert "token" not in parsed.payload.model_dump(mode="json")
 
 
@@ -74,7 +72,6 @@ def test_action_command_is_exact_typed_and_parses_through_the_formal_entry() -> 
     "overrides",
     [
         {"action_version": "latest"},
-        {"signed_authority": "Bearer private"},
         {"action": "browse"},
         {"message_template_version": None},
         {"message_template": None},

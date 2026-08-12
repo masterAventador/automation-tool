@@ -7,13 +7,9 @@ from typing import Any, cast
 from uuid import UUID
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-from automation_tool.executor.action_authorization import (
-    ActionAuthorizationExpectation,
-    Ed25519ActionAuthorizationVerifier,
-)
+from automation_tool.executor.action_authorization import ActionAuthorizationExpectation
 from automation_tool.executor.action_gate import (
     ActionGateLimited,
     ExecutorActionGate,
@@ -33,8 +29,6 @@ from automation_tool.executor.rpa.douyin.direct_message_action import (
 from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
 from automation_tool.executor.side_effect_ledger import SideEffectState
 from automation_tool.protocol import (
-    ACTION_AUTHORIZATION_VERSION,
-    ActionAuthorizationClaims,
     ActionMessageTemplate,
     DouyinCandidateSummary,
     DouyinSearchExposureAction,
@@ -45,12 +39,9 @@ from automation_tool.protocol import (
     ProtocolTargetId,
     ProtocolTaskId,
     action_authorization_idempotency_key,
-    action_authorization_signing_input,
-    encode_action_authorization_token,
 )
 
 NOW = datetime(2026, 7, 20, 8, 0, tzinfo=UTC)
-PRIVATE_KEY = bytes(range(32))
 INSTALLATION_ID = ProtocolInstallationId("123e4567-e89b-42d3-a456-426614174005")
 EXECUTOR_ID = ProtocolExecutorId("123e4567-e89b-42d3-a456-426614174006")
 ATTEMPT_ID = ProtocolExecutionAttemptId("123e4567-e89b-42d3-a456-426614174007")
@@ -184,10 +175,9 @@ def authorization(
     *,
     action: DouyinSearchExposureAction = DouyinSearchExposureAction.DIRECT_MESSAGE,
     task_id: ProtocolTaskId = TASK_ID,
-) -> tuple[str, ActionAuthorizationExpectation]:
+) -> ActionAuthorizationExpectation:
     action_id = ProtocolActionId(resource_id(index, str))
-    claims = ActionAuthorizationClaims(
-        version=ACTION_AUTHORIZATION_VERSION,
+    return ActionAuthorizationExpectation(
         action_id=action_id,
         target_id=ProtocolTargetId(resource_id(index + 100, str)),
         execution_attempt_id=ATTEMPT_ID,
@@ -197,25 +187,6 @@ def authorization(
         platform="douyin",
         action=action,
         idempotency_key=action_authorization_idempotency_key(action_id),
-        authorized_at=NOW - timedelta(seconds=1),
-        deadline_at=NOW + timedelta(minutes=4),
-    )
-    token = encode_action_authorization_token(
-        claims,
-        Ed25519PrivateKey.from_private_bytes(PRIVATE_KEY).sign(
-            action_authorization_signing_input(claims)
-        ),
-    )
-    return token, ActionAuthorizationExpectation(
-        action_id=claims.action_id,
-        target_id=claims.target_id,
-        execution_attempt_id=claims.execution_attempt_id,
-        task_id=claims.task_id,
-        installation_id=claims.installation_id,
-        executor_id=claims.executor_id,
-        platform=claims.platform,
-        action=claims.action,
-        idempotency_key=claims.idempotency_key,
     )
 
 
@@ -234,12 +205,6 @@ def dependencies(
     )
     gate = ExecutorActionGate(
         ledger=ledger,
-        verifier=Ed25519ActionAuthorizationVerifier(
-            public_key=Ed25519PrivateKey.from_private_bytes(PRIVATE_KEY)
-            .public_key()
-            .public_bytes_raw(),
-            clock=clock,
-        ),
         policy=LocalActionHardPolicy(
             minimum_interval=minimum_interval, task_action_limit=task_action_limit
         ),
@@ -264,7 +229,6 @@ def execute(
     gate: ExecutorActionGate,
     ledger: ExecutorLedger,
     clock: Clock,
-    token: str,
     action_intent: DouyinDirectMessageActionIntent,
 ) -> DouyinDirectMessageActionReceipt:
     return DouyinDirectMessageActionExecution(
@@ -272,11 +236,11 @@ def execute(
         action_gate=gate,
         ledger=ledger,
         clock=clock,
-    ).run(token=token, intent=action_intent)
+    ).run(intent=action_intent)
 
 
 def test_direct_message_action_admits_prepares_clicks_once_and_verifies(tmp_path: Path) -> None:
-    token, expected = authorization(1)
+    expected = authorization(1)
     gate, ledger, clock = dependencies(tmp_path / "state")
     page = Page()
     action_intent = DouyinDirectMessageActionIntent(
@@ -285,7 +249,7 @@ def test_direct_message_action_admits_prepares_clicks_once_and_verifies(tmp_path
         target_summary=DouyinCandidateSummary(display_name="目标账号", public_handle=None),
     )
 
-    receipt = execute(page, gate, ledger, clock, token, action_intent)
+    receipt = execute(page, gate, ledger, clock, action_intent)
 
     assert receipt.state is DouyinDirectMessageActionState.VERIFIED
     assert receipt.evidence is DouyinDirectMessageActionEvidence.MESSAGE_CONFIRMED
@@ -305,11 +269,11 @@ def test_direct_message_action_admits_prepares_clicks_once_and_verifies(tmp_path
 def test_profile_entry_is_recoverable_and_send_remains_the_only_dispatch(
     tmp_path: Path,
 ) -> None:
-    token, expected = authorization(2)
+    expected = authorization(2)
     gate, ledger, clock = dependencies(tmp_path / "entry")
     page = Page(visible_selectors={MESSAGE_ENTRY})
 
-    receipt = execute(page, gate, ledger, clock, token, intent(expected))
+    receipt = execute(page, gate, ledger, clock, intent(expected))
 
     assert receipt.evidence is DouyinDirectMessageActionEvidence.MESSAGE_CONFIRMED
     assert page.entry_clicks == 1
@@ -334,29 +298,29 @@ def test_entry_failure_stays_prepared_and_can_resume_from_conversation(
     failure: BaseException,
     evidence: DouyinDirectMessageActionEvidence,
 ) -> None:
-    token, expected = authorization(3)
+    expected = authorization(3)
     gate, ledger, clock = dependencies(tmp_path / evidence.value)
     profile = Page(visible_selectors={MESSAGE_ENTRY})
     profile.entry_click_failure = failure
 
-    first = execute(profile, gate, ledger, clock, token, intent(expected))
+    first = execute(profile, gate, ledger, clock, intent(expected))
     assert first.evidence is evidence
     assert first.side_effect_state is SideEffectState.PREPARED
     assert profile.entry_clicks == 1 and profile.clicks == 0
 
     resumed = Page()
-    second = execute(resumed, gate, ledger, clock, token, intent(expected))
+    second = execute(resumed, gate, ledger, clock, intent(expected))
     assert second.evidence is DouyinDirectMessageActionEvidence.MESSAGE_CONFIRMED
     assert resumed.entry_clicks == 0 and resumed.clicks == 1
 
 
 def test_entry_without_conversation_anchor_times_out_before_send(tmp_path: Path) -> None:
-    token, expected = authorization(4)
+    expected = authorization(4)
     gate, ledger, clock = dependencies(tmp_path / "conversation-timeout")
     page = Page(visible_selectors={MESSAGE_ENTRY})
     page.after_entry_selectors = {MESSAGE_ENTRY}
 
-    receipt = execute(page, gate, ledger, clock, token, intent(expected))
+    receipt = execute(page, gate, ledger, clock, intent(expected))
 
     assert receipt.evidence is DouyinDirectMessageActionEvidence.READY_TIMED_OUT
     assert receipt.side_effect_state is SideEffectState.PREPARED
@@ -378,12 +342,12 @@ def test_permission_change_after_entry_preserves_the_exact_reason(
     selector: str,
     evidence: DouyinDirectMessageActionEvidence,
 ) -> None:
-    token, expected = authorization(5)
+    expected = authorization(5)
     gate, ledger, clock = dependencies(tmp_path / evidence.value)
     page = Page(visible_selectors={MESSAGE_ENTRY})
     page.after_entry_selectors = {selector}
 
-    receipt = execute(page, gate, ledger, clock, token, intent(expected))
+    receipt = execute(page, gate, ledger, clock, intent(expected))
 
     assert receipt.evidence is evidence
     assert receipt.side_effect_state is SideEffectState.PREPARED
@@ -391,21 +355,21 @@ def test_permission_change_after_entry_preserves_the_exact_reason(
 
 
 def test_verified_and_uncertain_replays_never_touch_the_page(tmp_path: Path) -> None:
-    token, expected = authorization(10)
+    expected = authorization(10)
     gate, ledger, clock = dependencies(tmp_path / "verified")
     action_intent = intent(expected)
     first_page = Page()
-    assert execute(first_page, gate, ledger, clock, token, action_intent).completed
+    assert execute(first_page, gate, ledger, clock, action_intent).completed
 
     replay_page = Page()
-    replay = execute(replay_page, gate, ledger, clock, token, action_intent)
+    replay = execute(replay_page, gate, ledger, clock, action_intent)
     assert replay.evidence is DouyinDirectMessageActionEvidence.REPLAY_VERIFIED
     assert replay.replayed is True
     assert replay.side_effect_state is SideEffectState.VERIFIED
     assert replay_page.requested_selectors == []
     assert replay_page.clicks == 0
 
-    uncertain_token, uncertain_expected = authorization(11)
+    uncertain_expected = authorization(11)
     uncertain_gate, uncertain_ledger, uncertain_clock = dependencies(tmp_path / "uncertain")
     failing_page = Page()
     failing_page.click_failure = RuntimeError("private click failure")
@@ -414,7 +378,6 @@ def test_verified_and_uncertain_replays_never_touch_the_page(tmp_path: Path) -> 
         uncertain_gate,
         uncertain_ledger,
         uncertain_clock,
-        uncertain_token,
         intent(uncertain_expected),
     )
     assert first_uncertain.state is DouyinDirectMessageActionState.OUTCOME_UNCERTAIN
@@ -428,7 +391,6 @@ def test_verified_and_uncertain_replays_never_touch_the_page(tmp_path: Path) -> 
         uncertain_gate,
         uncertain_ledger,
         uncertain_clock,
-        uncertain_token,
         intent(uncertain_expected),
     )
     assert uncertain_replay.evidence is DouyinDirectMessageActionEvidence.REPLAY_UNCERTAIN
@@ -438,27 +400,26 @@ def test_verified_and_uncertain_replays_never_touch_the_page(tmp_path: Path) -> 
 
 
 def test_prepared_retry_can_dispatch_once_but_changed_copy_is_rejected(tmp_path: Path) -> None:
-    token, expected = authorization(20)
+    expected = authorization(20)
     gate, ledger, clock = dependencies(tmp_path / "retry")
     blocked = Page(visible_selectors={MESSAGE_INPUT, MESSAGE_SEND, BLOCKING_DIALOG})
-    first = execute(blocked, gate, ledger, clock, token, intent(expected))
+    first = execute(blocked, gate, ledger, clock, intent(expected))
     assert first.evidence is DouyinDirectMessageActionEvidence.READY_DIALOG_BLOCKED
     assert first.side_effect_state is SideEffectState.PREPARED
     assert blocked.filled == [] and blocked.clicks == 0
 
     ready = Page()
-    second = execute(ready, gate, ledger, clock, token, intent(expected))
+    second = execute(ready, gate, ledger, clock, intent(expected))
     assert second.evidence is DouyinDirectMessageActionEvidence.MESSAGE_CONFIRMED
     assert ready.clicks == 1
 
-    other_token, other_expected = authorization(21)
+    other_expected = authorization(21)
     other_gate, other_ledger, other_clock = dependencies(tmp_path / "changed")
     first_copy = execute(
         Page(visible_selectors={BLOCKING_DIALOG}),
         other_gate,
         other_ledger,
         other_clock,
-        other_token,
         intent(other_expected, "第一版私信"),
     )
     assert first_copy.side_effect_state is SideEffectState.PREPARED
@@ -468,7 +429,6 @@ def test_prepared_retry_can_dispatch_once_but_changed_copy_is_rejected(tmp_path:
         other_gate,
         other_ledger,
         other_clock,
-        other_token,
         intent(other_expected, "第二版私信"),
     )
     assert changed.evidence is DouyinDirectMessageActionEvidence.LEDGER_UNAVAILABLE
@@ -513,9 +473,9 @@ def test_ready_failures_remain_prepared_without_fill_or_click(
     page: Page,
     evidence: DouyinDirectMessageActionEvidence,
 ) -> None:
-    token, expected = authorization(30)
+    expected = authorization(30)
     gate, ledger, clock = dependencies(tmp_path / evidence.value)
-    receipt = execute(page, gate, ledger, clock, token, intent(expected))
+    receipt = execute(page, gate, ledger, clock, intent(expected))
     assert receipt.state is DouyinDirectMessageActionState.NOT_DISPATCHED
     assert receipt.evidence is evidence
     assert receipt.side_effect_state is SideEffectState.PREPARED
@@ -527,17 +487,17 @@ def test_fill_or_pre_dispatch_drift_never_acquires_dispatch_permission(
     tmp_path: Path,
     failure: BaseException,
 ) -> None:
-    token, expected = authorization(40)
+    expected = authorization(40)
     gate, ledger, clock = dependencies(tmp_path / type(failure).__name__)
     page = Page()
     page.fill_failure = failure
-    receipt = execute(page, gate, ledger, clock, token, intent(expected))
+    receipt = execute(page, gate, ledger, clock, intent(expected))
     assert receipt.evidence is DouyinDirectMessageActionEvidence.PREPARE_UNAVAILABLE
     assert page.clicks == 0
     persisted = ledger.get_side_effect(str(expected.action_id))
     assert persisted is not None and persisted.state is SideEffectState.PREPARED
 
-    drift_token, drift_expected = authorization(41)
+    drift_expected = authorization(41)
     drift_gate, drift_ledger, drift_clock = dependencies(
         tmp_path / f"drift-{type(failure).__name__}"
     )
@@ -548,7 +508,6 @@ def test_fill_or_pre_dispatch_drift_never_acquires_dispatch_permission(
         drift_gate,
         drift_ledger,
         drift_clock,
-        drift_token,
         intent(drift_expected),
     )
     assert drifted.evidence is DouyinDirectMessageActionEvidence.PREPARE_UNAVAILABLE
@@ -559,7 +518,7 @@ def test_dispatch_permission_failure_occurs_after_fill_but_before_click(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    token, expected = authorization(50)
+    expected = authorization(50)
     gate, ledger, clock = dependencies(tmp_path / "state")
     page = Page()
 
@@ -567,7 +526,7 @@ def test_dispatch_permission_failure_occurs_after_fill_but_before_click(
         raise RuntimeError("private ledger failure")
 
     monkeypatch.setattr(ExecutorLedger, "begin_side_effect_dispatch", reject_dispatch)
-    receipt = execute(page, gate, ledger, clock, token, intent(expected))
+    receipt = execute(page, gate, ledger, clock, intent(expected))
     assert receipt.evidence is DouyinDirectMessageActionEvidence.DISPATCH_PERMISSION_REJECTED
     assert page.filled == ["固定私信内容"] and page.clicks == 0
 
@@ -576,7 +535,7 @@ def test_dispatch_race_loser_observes_persisted_state_without_click(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    token, expected = authorization(51)
+    expected = authorization(51)
     gate, ledger, clock = dependencies(tmp_path / "state")
     page = Page()
     original = ExecutorLedger.begin_side_effect_dispatch
@@ -586,7 +545,7 @@ def test_dispatch_race_loser_observes_persisted_state_without_click(
         return original(opened, **cast(Any, kwargs))
 
     monkeypatch.setattr(ExecutorLedger, "begin_side_effect_dispatch", lose_dispatch)
-    receipt = execute(page, gate, ledger, clock, token, intent(expected))
+    receipt = execute(page, gate, ledger, clock, intent(expected))
     assert receipt.evidence is DouyinDirectMessageActionEvidence.REPLAY_UNCERTAIN
     assert receipt.side_effect_state is SideEffectState.DISPATCHED
     assert receipt.replayed is True
@@ -608,11 +567,11 @@ def test_click_failure_is_settled_uncertain_and_never_retried(
     click_failure: BaseException,
     evidence: DouyinDirectMessageActionEvidence,
 ) -> None:
-    token, expected = authorization(60)
+    expected = authorization(60)
     gate, ledger, clock = dependencies(tmp_path / evidence.value)
     page = Page()
     page.click_failure = click_failure
-    receipt = execute(page, gate, ledger, clock, token, intent(expected))
+    receipt = execute(page, gate, ledger, clock, intent(expected))
     assert receipt.state is DouyinDirectMessageActionState.OUTCOME_UNCERTAIN
     assert receipt.evidence is evidence
     assert receipt.side_effect_state is SideEffectState.UNCERTAIN
@@ -665,12 +624,12 @@ def test_unconfirmed_post_click_state_is_uncertain(
     url: str,
     evidence: DouyinDirectMessageActionEvidence,
 ) -> None:
-    token, expected = authorization(70)
+    expected = authorization(70)
     gate, ledger, clock = dependencies(tmp_path / evidence.value)
     page = Page()
     page.after_click_selectors = selectors
     page.after_click_url = url
-    receipt = execute(page, gate, ledger, clock, token, intent(expected))
+    receipt = execute(page, gate, ledger, clock, intent(expected))
     assert receipt.state is DouyinDirectMessageActionState.OUTCOME_UNCERTAIN
     assert receipt.evidence is evidence
     assert receipt.side_effect_state is SideEffectState.UNCERTAIN
@@ -681,14 +640,14 @@ def test_page_and_verification_failures_have_closed_stage_specific_receipts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    token, expected = authorization(80)
+    expected = authorization(80)
     gate, ledger, clock = dependencies(tmp_path / "ready-page")
     failed_ready = Page()
     failed_ready.locator_failure = True
-    ready_receipt = execute(failed_ready, gate, ledger, clock, token, intent(expected))
+    ready_receipt = execute(failed_ready, gate, ledger, clock, intent(expected))
     assert ready_receipt.evidence is DouyinDirectMessageActionEvidence.READY_PAGE_UNAVAILABLE
 
-    final_token, final_expected = authorization(81)
+    final_expected = authorization(81)
     final_gate, final_ledger, final_clock = dependencies(tmp_path / "final-page")
     failed_final = Page()
     failed_final.after_click_selectors = {FINAL_CONFIRMATION}
@@ -705,7 +664,6 @@ def test_page_and_verification_failures_have_closed_stage_specific_receipts(
         final_gate,
         final_ledger,
         final_clock,
-        final_token,
         intent(final_expected),
     )
     assert final_receipt.evidence is DouyinDirectMessageActionEvidence.VERIFICATION_UNAVAILABLE
@@ -716,7 +674,7 @@ def test_uncertain_receipt_keeps_dispatched_fact_when_settlement_is_unavailable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    token, expected = authorization(90)
+    expected = authorization(90)
     gate, ledger, clock = dependencies(tmp_path / "state")
     page = Page()
     page.click_failure = RuntimeError("private")
@@ -725,7 +683,7 @@ def test_uncertain_receipt_keeps_dispatched_fact_when_settlement_is_unavailable(
         raise RuntimeError("private settlement")
 
     monkeypatch.setattr(ExecutorLedger, "mark_side_effect_uncertain", reject_settlement)
-    receipt = execute(page, gate, ledger, clock, token, intent(expected))
+    receipt = execute(page, gate, ledger, clock, intent(expected))
     assert receipt.state is DouyinDirectMessageActionState.OUTCOME_UNCERTAIN
     assert receipt.side_effect_state is SideEffectState.DISPATCHED
     assert receipt.side_effect_revision == 2
@@ -754,7 +712,7 @@ def test_local_gate_limits_return_no_effect_receipts_before_dom_access(
     reason: LocalActionLimitReason,
     evidence: DouyinDirectMessageActionEvidence,
 ) -> None:
-    token, expected = authorization(100)
+    expected = authorization(100)
     gate, ledger, clock = dependencies(tmp_path / reason.value)
     page = Page()
 
@@ -762,24 +720,17 @@ def test_local_gate_limits_return_no_effect_receipts_before_dom_access(
         raise ActionGateLimited(reason)
 
     monkeypatch.setattr(ExecutorActionGate, "admit", limited)
-    receipt = execute(page, gate, ledger, clock, token, intent(expected))
+    receipt = execute(page, gate, ledger, clock, intent(expected))
     assert receipt.evidence is evidence
     assert receipt.side_effect_state is None
     assert page.requested_selectors == []
 
 
-def test_invalid_token_and_ledger_prepare_failure_never_access_dom(
+def test_ledger_prepare_failure_never_accesses_dom(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    token, expected = authorization(110)
-    gate, ledger, clock = dependencies(tmp_path / "invalid-token")
-    rejected_page = Page()
-    rejected = execute(rejected_page, gate, ledger, clock, token + "x", intent(expected))
-    assert rejected.evidence is DouyinDirectMessageActionEvidence.ADMISSION_REJECTED
-    assert rejected_page.requested_selectors == []
-
-    other_token, other_expected = authorization(111)
+    other_expected = authorization(111)
     other_gate, other_ledger, other_clock = dependencies(tmp_path / "ledger")
     ledger_page = Page()
 
@@ -792,7 +743,6 @@ def test_invalid_token_and_ledger_prepare_failure_never_access_dom(
         other_gate,
         other_ledger,
         other_clock,
-        other_token,
         intent(other_expected),
     )
     assert unavailable.evidence is DouyinDirectMessageActionEvidence.LEDGER_UNAVAILABLE
@@ -813,11 +763,11 @@ def test_invalid_execution_clock_fails_before_prepared_and_dom(
     tmp_path: Path,
     invalid_time: object,
 ) -> None:
-    token, expected = authorization(115)
+    expected = authorization(115)
     clock = SequenceClock([NOW, NOW, invalid_time])
     gate, ledger, _ = dependencies(tmp_path / type(invalid_time).__name__, clock=clock)
     page = Page()
-    receipt = execute(page, gate, ledger, clock, token, intent(expected))
+    receipt = execute(page, gate, ledger, clock, intent(expected))
     assert receipt.evidence is DouyinDirectMessageActionEvidence.LEDGER_UNAVAILABLE
     assert ledger.get_side_effect(str(expected.action_id)) is None
     assert page.requested_selectors == []
@@ -826,7 +776,7 @@ def test_invalid_execution_clock_fails_before_prepared_and_dom(
 def test_intent_execution_and_receipt_contracts_are_closed_and_redacted(
     tmp_path: Path,
 ) -> None:
-    token, expected = authorization(120)
+    expected = authorization(120)
     gate, ledger, clock = dependencies(tmp_path / "state")
     valid_intent = intent(expected, "您好 {{target_display_name}}")
     execution = DouyinDirectMessageActionExecution(
@@ -837,12 +787,12 @@ def test_intent_execution_and_receipt_contracts_are_closed_and_redacted(
     )
     assert repr(valid_intent) == "DouyinDirectMessageActionIntent(<redacted>)"
     assert repr(execution) == "DouyinDirectMessageActionExecution(<redacted>)"
-    receipt = execution.run(token=token, intent=valid_intent)
+    receipt = execution.run(intent=valid_intent)
     assert "目标账号" not in repr(receipt)
     with pytest.raises(DouyinDirectMessageActionRejected):
-        execution.run(token=token, intent=valid_intent)
+        execution.run(intent=valid_intent)
 
-    _, comment = authorization(121, action=DouyinSearchExposureAction.COMMENT)
+    comment = authorization(121, action=DouyinSearchExposureAction.COMMENT)
     for values in (
         {
             "authorization": comment,

@@ -1,5 +1,5 @@
 use automation_tool_desktop_lib::executor_bootstrap::{
-    ExecutorActionRuntimeInput, ExecutorBootstrapInput, LocalExecutorEvent, LocalSessionToken,
+    ExecutorBootstrapInput, LocalExecutorEvent, LocalSessionToken,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hmac::{Hmac, KeyInit, Mac};
@@ -8,7 +8,6 @@ use sha2::Sha256;
 use std::path::Path;
 
 const CONTROL_PLANE_SESSION: &str = "atds1.private-control-plane-session";
-const ACTION_PUBLIC_KEY: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 const AUTHENTICATION_DOMAIN: &[u8] = b"automation-tool.local-executor-event.v1\0";
 #[cfg(not(windows))]
 const STATE_DIRECTORY: &str = "/private/tmp/automation-tool-executor-bootstrap-test";
@@ -101,47 +100,6 @@ fn bootstrap_writes_a_fresh_256_bit_token_only_to_the_stdin_document() {
     assert_eq!(first_document["crash_recovery"], false);
     assert!(!format!("{first:?}").contains(first_token));
     assert!(!format!("{first:?}").contains(CONTROL_PLANE_SESSION));
-}
-
-#[test]
-fn bootstrap_carries_one_complete_trusted_action_runtime_configuration() {
-    let configured = input().with_action_runtime(
-        ExecutorActionRuntimeInput::new(ACTION_PUBLIC_KEY, 30, 20).expect("valid action runtime"),
-    );
-    let token = LocalSessionToken::generate().expect("random local session");
-    let mut stdin = Vec::new();
-
-    token
-        .write_bootstrap(&mut stdin, &configured)
-        .expect("action runtime bootstrap");
-    let document: Value = serde_json::from_slice(&stdin).expect("bootstrap JSON");
-
-    assert_eq!(
-        document["action_runtime"]["authorization_public_key"],
-        ACTION_PUBLIC_KEY
-    );
-    assert_eq!(document["action_runtime"]["minimum_interval_seconds"], 30);
-    assert_eq!(document["action_runtime"]["task_action_limit"], 20);
-}
-
-#[test]
-fn action_runtime_rejects_noncanonical_keys_and_out_of_range_hard_limits() {
-    for (public_key, minimum_interval_seconds, task_action_limit) in [
-        ("", 30, 20),
-        ("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", 30, 20),
-        ("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", 30, 20),
-        (ACTION_PUBLIC_KEY, 0, 20),
-        (ACTION_PUBLIC_KEY, 3601, 20),
-        (ACTION_PUBLIC_KEY, 30, 0),
-        (ACTION_PUBLIC_KEY, 30, 101),
-    ] {
-        assert!(ExecutorActionRuntimeInput::new(
-            public_key,
-            minimum_interval_seconds,
-            task_action_limit,
-        )
-        .is_err());
-    }
 }
 
 #[test]

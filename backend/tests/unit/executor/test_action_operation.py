@@ -7,9 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from automation_tool.executor.action_authorization import Ed25519ActionAuthorizationVerifier
 from automation_tool.executor.action_gate import ExecutorActionGate, LocalActionHardPolicy
 from automation_tool.executor.action_operation import (
     DouyinActionOperationRejected,
@@ -37,8 +35,6 @@ from automation_tool.executor.rpa.douyin.direct_message_action import (
 )
 from automation_tool.executor.side_effect_ledger import SideEffectState
 from automation_tool.protocol import (
-    ACTION_AUTHORIZATION_VERSION,
-    ActionAuthorizationClaims,
     DouyinSearchExposureAction,
     ProtocolActionId,
     ProtocolExecutionAttemptId,
@@ -48,12 +44,9 @@ from automation_tool.protocol import (
     ProtocolTaskId,
     TaskActionCommandEnvelope,
     action_authorization_idempotency_key,
-    action_authorization_signing_input,
-    encode_action_authorization_token,
 )
 
 NOW = datetime(2026, 7, 21, 10, 0, tzinfo=UTC)
-PRIVATE_KEY = bytes(range(32))
 INSTALLATION_ID = ProtocolInstallationId("123e4567-e89b-42d3-a456-426614174003")
 EXECUTOR_ID = ProtocolExecutorId("123e4567-e89b-42d3-a456-426614174004")
 TASK_ID = ProtocolTaskId("123e4567-e89b-42d3-a456-426614174005")
@@ -139,8 +132,7 @@ class FakeComment:
     def __init__(self) -> None:
         self.intents: list[DouyinCommentActionIntent] = []
 
-    def run(self, *, token: str, intent: DouyinCommentActionIntent) -> DouyinCommentActionReceipt:
-        assert token.startswith("ataa1.")
+    def run(self, *, intent: DouyinCommentActionIntent) -> DouyinCommentActionReceipt:
         self.intents.append(intent)
         return DouyinCommentActionReceipt(
             action_id=ACTION_ID,
@@ -160,10 +152,8 @@ class FakeDirectMessage:
     def run(
         self,
         *,
-        token: str,
         intent: DouyinDirectMessageActionIntent,
     ) -> DouyinDirectMessageActionReceipt:
-        assert token.startswith("ataa1.")
         self.intents.append(intent)
         return DouyinDirectMessageActionReceipt(
             action_id=ACTION_ID,
@@ -178,29 +168,7 @@ class FakeDirectMessage:
 
 def command(
     action: DouyinSearchExposureAction,
-    *,
-    token: str | None = None,
 ) -> TaskActionCommandEnvelope:
-    claims = ActionAuthorizationClaims(
-        version=ACTION_AUTHORIZATION_VERSION,
-        action_id=ACTION_ID,
-        target_id=TARGET_ID,
-        execution_attempt_id=ATTEMPT_ID,
-        task_id=TASK_ID,
-        installation_id=INSTALLATION_ID,
-        executor_id=EXECUTOR_ID,
-        platform="douyin",
-        action=action,
-        idempotency_key=action_authorization_idempotency_key(ACTION_ID),
-        authorized_at=NOW - timedelta(seconds=1),
-        deadline_at=NOW + timedelta(minutes=4),
-    )
-    authority = token or encode_action_authorization_token(
-        claims,
-        Ed25519PrivateKey.from_private_bytes(PRIVATE_KEY).sign(
-            action_authorization_signing_input(claims)
-        ),
-    )
     template = (
         None if action is DouyinSearchExposureAction.BROWSE else "您好 {{target_display_name}}"
     )
@@ -222,7 +190,6 @@ def command(
                     "action_id": str(ACTION_ID),
                     "target_id": str(TARGET_ID),
                     "action": action.value,
-                    "signed_authority": authority,
                     "platform_target_id": "creator-001",
                     "display_name": "目标一",
                     "public_handle": "target-one",
@@ -273,12 +240,6 @@ def operation(
     clock = Clock()
     gate = ExecutorActionGate(
         ledger=ledger,
-        verifier=Ed25519ActionAuthorizationVerifier(
-            public_key=(
-                Ed25519PrivateKey.from_private_bytes(PRIVATE_KEY).public_key().public_bytes_raw()
-            ),
-            clock=clock,
-        ),
         policy=LocalActionHardPolicy(
             minimum_interval=timedelta(seconds=1),
             task_action_limit=100,
@@ -362,14 +323,6 @@ def test_production_operation_routes_browse_comment_and_direct_message(tmp_path:
 def test_operation_maps_gate_browser_and_profile_failures_without_side_effects(
     tmp_path: Path,
 ) -> None:
-    invalid_operation, _gate, _ledger = operation(
-        tmp_path / "invalid-token",
-        browse=completed_browse(),
-        runtime=FakeRuntime(FakePage()),
-    )
-    invalid = command(DouyinSearchExposureAction.BROWSE, token="ataa1.YQ.YQ")
-    assert invalid_operation.run(invalid).evidence.value == "admission_rejected"
-
     limited_operation, gate, _ledger = operation(
         tmp_path / "limited",
         browse=completed_browse(),

@@ -19,9 +19,7 @@ use crate::browser_profiles::{
 };
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use crate::control_plane::ExecutorConnectionMaterial;
-use crate::executor_bootstrap::{
-    ExecutorActionRuntimeInput, LocalPlatformCommand, LocalPlatformCommandResult,
-};
+use crate::executor_bootstrap::{LocalPlatformCommand, LocalPlatformCommandResult};
 #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
 use crate::executor_manager::ExecutorLaunchConfiguration;
 use crate::executor_manager::{
@@ -461,23 +459,6 @@ impl ExecutorPlatformService {
     }
 
     pub fn startup_environment_state(&self) -> ExecutorStartupState {
-        match ExecutorActionRuntimeInput::from_compile_time_configuration() {
-            Ok(Some(_)) => crate::app_logging::record(
-                crate::app_logging::DesktopLogEvent::StartupExecutorConfigurationReady,
-            ),
-            Ok(None) => {
-                crate::app_logging::record(
-                    crate::app_logging::DesktopLogEvent::StartupExecutorConfigurationRejected,
-                );
-                return ExecutorStartupState::ConfigurationRequired;
-            }
-            Err(_) => {
-                crate::app_logging::record(
-                    crate::app_logging::DesktopLogEvent::StartupExecutorConfigurationRejected,
-                );
-                return ExecutorStartupState::Unavailable;
-            }
-        }
         if self.manager.status().is_err() {
             crate::app_logging::record(
                 crate::app_logging::DesktopLogEvent::StartupExecutorManagerStatusRejected,
@@ -1327,21 +1308,6 @@ mod tests {
             .expect("reconciliation gate")
             .is_none());
         assert!(!record_path.exists());
-    }
-
-    #[test]
-    fn startup_diagnostic_reports_missing_action_trust_without_starting_executor() {
-        let app_data = TemporaryAppData::new();
-        let service = ExecutorPlatformService::initialize(&app_data.0).expect("initialize service");
-
-        assert_eq!(
-            service.startup_environment_state(),
-            ExecutorStartupState::ConfigurationRequired
-        );
-        assert_eq!(
-            service.status().expect("manager status").state(),
-            crate::executor_manager::ExecutorManagerState::Stopped
-        );
     }
 
     /// PB-07 遗留项：租约的**拒绝**分支。

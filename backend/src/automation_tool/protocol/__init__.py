@@ -46,7 +46,6 @@ def __getattr__(name: str) -> Any:
 __all__ = [
     "ACTION_AUTHORIZATION_CLOCK_SKEW",
     "ACTION_AUTHORIZATION_MAX_LIFETIME",
-    "ACTION_AUTHORIZATION_TOKEN_PREFIX",
     "ACTION_AUTHORIZATION_VERSION",
     "ACTION_MESSAGE_TEMPLATE_VERSION",
     "ACTION_RESULT_EVIDENCE_VERSION",
@@ -65,7 +64,6 @@ __all__ = [
     "MAXIMUM_COMPATIBLE_DESKTOP_APP_VERSION",
     "MAXIMUM_COMPATIBLE_EXECUTOR_PROTOCOL",
     "MAXIMUM_COMPATIBLE_EXECUTOR_RUNTIME_VERSION",
-    "MAX_ACTION_AUTHORIZATION_TOKEN_BYTES",
     "MAX_ACTION_MESSAGE_TEMPLATE_CHARACTERS",
     "MAX_CANDIDATE_DISPLAY_NAME_CHARACTERS",
     "MAX_CANDIDATE_PUBLIC_HANDLE_CHARACTERS",
@@ -109,7 +107,6 @@ __all__ = [
     "ExecutorProtocolError",
     "IdempotencyKey",
     "MessageId",
-    "ParsedActionAuthorizationToken",
     "PlatformSessionHealthEnvelope",
     "PlatformSessionHealthPayload",
     "PlatformSessionState",
@@ -127,8 +124,5 @@ __all__ = [
     "TaskDiscoveryCompletedEnvelope",
     "TaskEventEnvelope",
     "action_authorization_idempotency_key",
-    "action_authorization_signing_input",
-    "encode_action_authorization_token",
-    "parse_action_authorization_token",
     "parse_executor_message",
 ]

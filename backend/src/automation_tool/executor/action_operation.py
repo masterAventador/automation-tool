@@ -212,10 +212,7 @@ class ProductionDouyinActionOperation:
             raise DouyinActionOperationRejected
         expected = _expectation(command)
         try:
-            self._action_gate.admit(
-                token=command.payload.signed_authority,
-                expected=expected,
-            )
+            self._action_gate.admit(expected=expected)
         except ActionGateLimited:
             return _failure(command, ActionResultEvidence.LOCAL_SAFETY_LIMIT)
         except ActionGateRejected:
@@ -290,7 +287,7 @@ class ProductionDouyinActionOperation:
             self._action_gate,
             self._ledger,
             self._clock,
-        ).run(token=command.payload.signed_authority, intent=intent)
+        ).run(intent=intent)
         return comment_action_result(receipt)
 
     def _direct_message(
@@ -318,7 +315,7 @@ class ProductionDouyinActionOperation:
             self._action_gate,
             self._ledger,
             self._clock,
-        ).run(token=command.payload.signed_authority, intent=intent)
+        ).run(intent=intent)
         return direct_message_action_result(receipt)
 
 

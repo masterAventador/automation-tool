@@ -3,22 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Annotated, Final
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from automation_tool.control_plane.application.device_sessions import (
-    AuthenticatedDeviceSession,
-    DeviceSessionCapability,
-    DeviceSessionRejected,
-    DeviceSessionService,
-    InvalidDeviceSession,
-    ParsedDeviceSession,
-    parse_device_session,
-)
+from automation_tool.control_plane.application.device_sessions import ParsedDeviceSession
+from automation_tool.control_plane.domain.local_installation import local_installation_id
 from automation_tool.control_plane.domain import (
     ExecutorConnectionId,
     ExecutorId,
@@ -81,7 +74,7 @@ class AuthorizedExecutorConnection:
     credential_id: UUID
     credential_version: int
     session_expires_at: datetime
-    _presented_session: ParsedDeviceSession = field(repr=False)
+    _presented_session: ParsedDeviceSession | None = field(repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,30 +99,31 @@ class BoundExecutorConnection:
 
 
 class ExecutorConnectionService:
-    """Bind one live WebSocket to its authenticated installation and Executor."""
+    """Bind one live WebSocket to the single local installation.
 
-    def __init__(self, device_sessions: DeviceSessionService) -> None:
-        self._device_sessions = device_sessions
+    The device-identity mechanism was removed: the loopback Executor presents
+    an opaque token whose only job is to be a well-formed bearer.
+    """
+
+    def __init__(self) -> None:
+        pass
 
     async def authorize(self, session_token: object) -> AuthorizedExecutorConnection:
-        try:
-            presented = parse_device_session(session_token)
-            authenticated = await self._device_sessions.authenticate_parsed(
-                presented_session=presented,
-                required_capability=DeviceSessionCapability.EXECUTOR_CONNECT,
-            )
-            installation_id = InstallationId.parse(authenticated.installation_id)
-            return AuthorizedExecutorConnection(
-                installation_id=installation_id,
-                session_id=authenticated.session_id,
-                credential_id=authenticated.credential_id,
-                credential_version=authenticated.credential_version,
-                session_expires_at=authenticated.expires_at,
-                _presented_session=presented,
-            )
-        except (InvalidDeviceSession, DeviceSessionRejected, InvalidResourceId):
-            pass
-        raise ExecutorConnectionRejected
+        if (
+            not isinstance(session_token, str)
+            or not 16 <= len(session_token) <= 512
+            or any(character.isspace() for character in session_token)
+        ):
+            raise ExecutorConnectionRejected
+        now = datetime.now(UTC)
+        return AuthorizedExecutorConnection(
+            installation_id=local_installation_id(),
+            session_id=uuid4(),
+            credential_id=uuid4(),
+            credential_version=1,
+            session_expires_at=now + timedelta(days=365),
+            _presented_session=None,
+        )
 
     def bind_hello(
         self,
@@ -229,32 +223,8 @@ class ExecutorConnectionService:
         raise ExecutorConnectionRejected
 
     async def reauthorize(self, bound: BoundExecutorConnection) -> None:
-        authorization = bound._authorization
-        try:
-            authenticated = await self._device_sessions.authenticate_parsed(
-                presented_session=authorization._presented_session,
-                required_capability=DeviceSessionCapability.EXECUTOR_CONNECT,
-            )
-            if not _same_authorization(authenticated, authorization):
-                raise ValueError
-            return
-        except (DeviceSessionRejected, ValueError):
-            pass
-        raise ExecutorConnectionRejected
-
-
-def _same_authorization(
-    authenticated: AuthenticatedDeviceSession,
-    expected: AuthorizedExecutorConnection,
-) -> bool:
-    return (
-        authenticated.session_id == expected.session_id
-        and authenticated.installation_id == expected.installation_id.uuid
-        and authenticated.credential_id == expected.credential_id
-        and authenticated.credential_version == expected.credential_version
-        and authenticated.capability is DeviceSessionCapability.EXECUTOR_CONNECT
-        and authenticated.expires_at == expected.session_expires_at
-    )
+        """设备身份机制已删除：连接存续期内始终有效。"""
+        del bound
 
 
 __all__ = [
