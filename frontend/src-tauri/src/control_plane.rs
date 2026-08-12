@@ -1132,26 +1132,22 @@ impl ControlPlaneClient {
     where
         S: SecretStore,
     {
-        let app_session = self
-            .exchange_device_session(vault, DeviceSessionCapability::AppControlPlane)
-            .await?;
-        let access_body = self
-            .execute(
-                ControlPlaneOperation::GetCurrentInstallationAccess,
-                Some(app_session.token()),
-                None,
-                None,
-                None,
-            )
-            .await?;
-        let installation_id = parse_installation_access(&access_body)?;
-        let executor_session = self
-            .exchange_device_session(vault, DeviceSessionCapability::ExecutorConnect)
-            .await?;
+        // 设备身份机制已删除：连接材料完全本地生成，不需要控制面在线。
+        // 这正是合并 sidecar 能在控制面启动前就被拉起的原因。
+        let _ = vault;
+        let mut seed = [0u8; 32];
+        getrandom::fill(&mut seed)
+            .map_err(|_| ControlPlaneError::new(ControlPlaneErrorCode::TransportUnavailable, true))?;
+        let mut token = String::with_capacity(70);
+        token.push_str("atds1.");
+        for byte in seed {
+            use std::fmt::Write;
+            let _ = write!(token, "{byte:02x}");
+        }
         Ok(ExecutorConnectionMaterial {
             websocket_url: self.executor_websocket_url.clone(),
-            session_token: executor_session.into_token(),
-            installation_id,
+            session_token: Zeroizing::new(token),
+            installation_id: "aa11aa11-aa11-4a11-8a11-aa11aa11aa11".to_owned(),
         })
     }
 

@@ -75,6 +75,18 @@ pub struct VerifiedExecutorPackage {
 }
 
 impl VerifiedExecutorPackage {
+    /// 开发模式入口：`AUTOMATION_TOOL_LOCAL_SERVICE_COMMAND` 指向的可执行文件
+    /// 直接作为本地服务，跳过安装包 Manifest 校验（正式包不会设置该变量）。
+    pub fn for_development_entrypoint(entrypoint: PathBuf) -> Self {
+        Self {
+            version: Version::new(0, 1, 0),
+            build_id: "development".to_owned(),
+            entrypoint_path: entrypoint,
+            file_count: 1,
+            package_size: 0,
+        }
+    }
+
     pub fn version(&self) -> &Version {
         &self.version
     }
@@ -162,6 +174,49 @@ impl ExecutorPackageVerifier {
     }
 
     pub fn verify_current(
+        &self,
+        package_root: &Path,
+    ) -> Result<VerifiedExecutorPackage, ExecutorPackageError> {
+        match self.verify_installed(package_root) {
+            Ok(package) => Ok(package),
+            Err(error) => {
+                // 正规安装包不可用时才允许开发入口：显式环境变量优先，
+                // debug 构建再回退到仓库 venv 的合并服务。测试自建的
+                // fixture 包因此不受影响——它们的正规校验会先成功。
+                if let Some(command) = std::env::var_os("AUTOMATION_TOOL_LOCAL_SERVICE_COMMAND") {
+                    let entrypoint = PathBuf::from(command);
+                    if entrypoint.is_file() {
+                        return Ok(VerifiedExecutorPackage::for_development_entrypoint(
+                            entrypoint,
+                        ));
+                    }
+                }
+                #[cfg(debug_assertions)]
+                {
+                    let venv_entrypoint = if cfg!(windows) {
+                        concat!(
+                            env!("CARGO_MANIFEST_DIR"),
+                            "/../../backend/.venv/Scripts/automation-tool-local-service.exe"
+                        )
+                    } else {
+                        concat!(
+                            env!("CARGO_MANIFEST_DIR"),
+                            "/../../backend/.venv/bin/automation-tool-local-service"
+                        )
+                    };
+                    let entrypoint = PathBuf::from(venv_entrypoint);
+                    if entrypoint.is_file() {
+                        return Ok(VerifiedExecutorPackage::for_development_entrypoint(
+                            entrypoint,
+                        ));
+                    }
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn verify_installed(
         &self,
         package_root: &Path,
     ) -> Result<VerifiedExecutorPackage, ExecutorPackageError> {

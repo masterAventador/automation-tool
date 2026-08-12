@@ -5461,6 +5461,19 @@ pub fn run() {
                 app.manage(local_registration_handoff);
             }
             app_logging::record(app_logging::DesktopLogEvent::CredentialsInitialized);
+            // 双击即用：App 启动即拉起合并本地服务（控制面 HTTP + 执行器同进程），
+            // 不再要求任何手动启动的后端。失败不阻塞窗口——启动页会如实报不可用，
+            // 用户点「重新检查」时 ensure_executor_running 会再试。
+            #[cfg(any(not(feature = "desktop-e2e"), feature = "control-plane-e2e"))]
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let client = handle.state::<control_plane::ControlPlaneClient>();
+                    let vault = handle.state::<ProductionDeviceCredentialVault>();
+                    let platform = handle.state::<executor_platform::ExecutorPlatformService>();
+                    let _ = ensure_executor_running(&client, &vault, &platform).await;
+                });
+            }
             app_logging::record(app_logging::DesktopLogEvent::AppSetupCompleted);
             Ok(())
         });
