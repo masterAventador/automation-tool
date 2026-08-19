@@ -47,6 +47,7 @@ _AriaRole = Literal[
     "listitem",
     "dialog",
     "img",
+    "status",
 ]
 _GOAL_ROLES: Final = frozenset(
     {
@@ -61,6 +62,8 @@ _GOAL_ROLES: Final = frozenset(
         "listitem",
         "dialog",
         "img",
+        # toast/live region：评论、私信这类不产生导航的动作用它证明结果。
+        "status",
     }
 )
 _RELATIVE_POSITIONS: Final = frozenset({"above", "below", "left_of", "right_of", "inside"})

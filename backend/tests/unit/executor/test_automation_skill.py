@@ -121,6 +121,22 @@ class TestAcceptance:
         assert skill.steps[2].external is True
         assert skill.external_step_count == 1
 
+    def test_a_status_toast_is_a_speakable_outcome(self) -> None:
+        """评论这类不产生导航的外部动作，其结果证据是 toast——
+        role=status 必须在封闭词汇表内，否则该结果永远无法被技能表达。"""
+        document = copy.deepcopy(golden())
+        document["steps"][2]["postconditions"] = [
+            {"kind": "element_visible", "role": "status", "name": "评论成功"}
+        ]
+        document["successEvidence"] = [
+            {"kind": "element_visible", "role": "status", "name": "评论成功"}
+        ]
+
+        skill = parse_automation_skill(document)
+
+        assert skill.steps[2].postconditions[0].role == "status"
+        assert skill.success_evidence[0].role == "status"
+
     def test_the_contract_file_pins_the_same_closed_vocabularies(self) -> None:
         document = json.loads(CONTRACT.read_text(encoding="utf-8"))
 

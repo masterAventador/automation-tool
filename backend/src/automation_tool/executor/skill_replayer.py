@@ -117,6 +117,7 @@ def replay_skill(
     page: ReplayPage,
     *,
     parameters: dict[str, str],
+    on_external_dispatch: Callable[[], None] | None = None,
 ) -> ReplayOutcome:
     if skill.external_step_count > skill.max_external_steps:
         # A published skill can never reach here (SA-03 lint), but a replay must
@@ -178,6 +179,12 @@ def replay_skill(
             external_performed += 1
             if external_performed > skill.max_external_steps:
                 fail("replay would exceed the external side-effect boundary")
+            # The caller's side-effect ledger registers the dispatch here —
+            # before the action is attempted. A hook exception propagates raw
+            # (never as ReplayFailed): nothing external has been tried yet,
+            # and the refusal is the ledger's, not the skill's.
+            if on_external_dispatch is not None:
+                on_external_dispatch()
             # The *attempt* is what makes the outcome uncertain: a driver that
             # dies mid-click cannot say whether the platform saw it, so the
             # flag must flip before the action, not after it returns.

@@ -141,6 +141,41 @@ class TestDeterministicReplay:
         assert page.side_effects == []
 
 
+class TestExternalDispatchHook:
+    """业务层的副作用台账要在外部动作真正发生之前登记 dispatch——
+    回放器是唯一知道「哪一步是外部步」的地方，所以接缝开在这里。"""
+
+    def test_the_hook_runs_once_and_before_the_external_action(self) -> None:
+        page = FakePage()
+        observed: list[int] = []
+
+        replay_skill(
+            skill(),
+            page,
+            parameters={"caption": "x"},
+            on_external_dispatch=lambda: observed.append(len(page.side_effects)),
+        )
+
+        # 恰好一次（一个外部步），且此刻只有两个内部动作发生过——发布还没点。
+        assert observed == [2]
+
+    def test_a_refusing_hook_propagates_raw_with_nothing_external_done(self) -> None:
+        class DispatchRefused(Exception):
+            pass
+
+        page = FakePage()
+
+        def refuse() -> None:
+            raise DispatchRefused
+
+        with pytest.raises(DispatchRefused):
+            replay_skill(
+                skill(), page, parameters={"caption": "x"}, on_external_dispatch=refuse
+            )
+        # 钩子异常必须原样穿透（不是 ReplayFailed），且外部动作未被尝试。
+        assert ("click", "发布", None) not in page.side_effects
+
+
 class TestSafetyProperties:
     def test_a_missing_anchor_stops_at_its_checkpoint(self) -> None:
         page = FakePage(missing={"上传视频"})

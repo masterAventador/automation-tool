@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -155,6 +156,7 @@ class SkillOrchestrator:
         *,
         parameters: dict[str, str],
         context: PageContext | None = None,
+        on_external_dispatch: Callable[[], None] | None = None,
     ) -> SkillExecutionReport:
         records = sorted(
             (
@@ -178,7 +180,14 @@ class SkillOrchestrator:
 
         skill = self._registry.at(skill_id, version).skill
         try:
-            outcome = replay_skill(skill, page, parameters=parameters)
+            # A hook exception propagates raw (see replay_skill): the ledger's
+            # refusal is not a skill failure and must not enter the stats.
+            outcome = replay_skill(
+                skill,
+                page,
+                parameters=parameters,
+                on_external_dispatch=on_external_dispatch,
+            )
         except ReplayFailed as failure:
             self._stats.record(skill_id, version, succeeded=False)
             decision = decide_handback(skill, failure)

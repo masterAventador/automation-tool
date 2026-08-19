@@ -1,0 +1,112 @@
+{
+  "skill": {
+    "schemaVersion": 1,
+    "skillId": "89628f94-6c21-4585-8739-75a4b0ca923d",
+    "version": 1,
+    "parentVersion": null,
+    "platform": "douyin",
+    "domain": "www.douyin.com",
+    "pathPattern": "/video",
+    "entryFingerprint": {
+      "kind": "dom_outline_v1",
+      "sha256": "89628f946c217585073975a4b0ca923dc56d88c6801b9e1208e9ba2f53674cb0"
+    },
+    "language": "zh-CN",
+    "viewport": {
+      "width": 1280,
+      "height": 800
+    },
+    "riskLevel": "high",
+    "sideEffectBoundary": {
+      "maxExternalSteps": 1
+    },
+    "steps": [
+      {
+        "index": 1,
+        "goal": {
+          "role": "textbox",
+          "name": "留下你的精彩评论",
+          "nearText": null,
+          "relativePosition": null
+        },
+        "action": {
+          "kind": "click"
+        },
+        "preconditions": [],
+        "postconditions": [
+          {
+            "kind": "element_visible",
+            "role": "textbox",
+            "name": "留下你的精彩评论"
+          }
+        ],
+        "timeoutSeconds": 10,
+        "external": false,
+        "checkpoint": true
+      },
+      {
+        "index": 2,
+        "goal": {
+          "role": "textbox",
+          "name": "留下你的精彩评论",
+          "nearText": null,
+          "relativePosition": null
+        },
+        "action": {
+          "kind": "fill",
+          "value": {
+            "parameter": "comment_message"
+          }
+        },
+        "preconditions": [],
+        "postconditions": [],
+        "timeoutSeconds": 10,
+        "external": false,
+        "checkpoint": true
+      },
+      {
+        "index": 3,
+        "goal": {
+          "role": "button",
+          "name": "发表评论",
+          "nearText": null,
+          "relativePosition": null
+        },
+        "action": {
+          "kind": "click"
+        },
+        "preconditions": [
+          {
+            "kind": "element_visible",
+            "role": "button",
+            "name": "发表评论"
+          }
+        ],
+        "postconditions": [
+          {
+            "kind": "element_visible",
+            "role": "status",
+            "name": "评论成功"
+          }
+        ],
+        "timeoutSeconds": 15,
+        "external": true,
+        "checkpoint": false
+      }
+    ],
+    "successEvidence": [
+      {
+        "kind": "element_visible",
+        "role": "status",
+        "name": "评论成功"
+      }
+    ]
+  },
+  "approval": {
+    "reviewer": "aventador",
+    "decision": "approved",
+    "reviewedAt": "2026-08-19T00:00:00Z"
+  },
+  "publicKey": "8bba5703fab278e3977869eb2d32eac44a9ff8c31a1e5b284894716123b741a3",
+  "signature": "e3c8a09df352a73629ae4201164848395f5650ddc7f387f92539229bf9f7e532aac90487ecd2e39e082135b48c9376cff5f645b90ac0c058fcccf140127e4a0d"
+}

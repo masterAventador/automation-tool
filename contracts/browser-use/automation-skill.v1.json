@@ -25,7 +25,8 @@
     "menuitem",
     "listitem",
     "dialog",
-    "img"
+    "img",
+    "status"
   ],
   "relativePositions": ["above", "below", "left_of", "right_of", "inside"],
   "riskLevels": ["low", "medium", "high"],

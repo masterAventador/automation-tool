@@ -344,6 +344,13 @@ class TestHolds:
             is False
         )
 
+    def test_a_status_toast_is_inside_the_closed_vocabulary(self) -> None:
+        # 评论/私信的结果证据是 [role=status] toast；status 不在词汇表内时
+        # 这里会炸 ValueError 而不是回答可见性。
+        page = ScriptedPage(visibilities=[True])
+        assert adapter(page).holds("element_visible", role="status", name="评论成功")
+        assert page.role_queries[-1] == ("status", "评论成功", True)
+
     def test_element_absent_holds_only_with_zero_visible_matches(self) -> None:
         gone = ScriptedPage(visibilities=[False])
         assert adapter(gone).holds("element_absent", role="dialog", name="活动弹窗")

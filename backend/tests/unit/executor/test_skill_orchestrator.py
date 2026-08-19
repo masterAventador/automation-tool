@@ -177,6 +177,42 @@ class TestExecutionMatrix:
         # failures v2 is proven-failing and v1 gets its first chance.
         assert routed == [2, 2, 2, 1]
 
+    def test_the_dispatch_hook_reaches_the_replayer(self) -> None:
+        candidate = candidate_v1()
+        orchestrator = SkillOrchestrator(registry_with(candidate))
+        seen: list[bool] = []
+
+        report = orchestrator.execute(
+            skill_id_of(candidate),
+            FakePage(),
+            parameters=PARAMETERS,
+            on_external_dispatch=lambda: seen.append(True),
+        )
+
+        assert report.kind is SkillExecutionKind.REPLAYED
+        assert seen == [True]
+
+    def test_a_hook_exception_is_not_recorded_as_a_skill_failure(self) -> None:
+        class DispatchRefused(Exception):
+            pass
+
+        candidate = candidate_v1()
+        orchestrator = SkillOrchestrator(registry_with(candidate))
+
+        def refuse() -> None:
+            raise DispatchRefused
+
+        with pytest.raises(DispatchRefused):
+            orchestrator.execute(
+                skill_id_of(candidate),
+                FakePage(),
+                parameters=PARAMETERS,
+                on_external_dispatch=refuse,
+            )
+
+        # 台账拒绝不是技能的错：不能污染路由统计。
+        assert orchestrator.stats.snapshot() == {}
+
     def test_a_success_keeps_the_proven_version_on_top(self) -> None:
         first, second = candidate_v1(), candidate_v2()
         orchestrator = SkillOrchestrator(registry_with(first, second))

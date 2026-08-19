@@ -73,9 +73,12 @@ def _lint(skill: AutomationSkill) -> None:
     if not any(step.checkpoint for step in skill.steps):
         _reject("a publishable skill must declare at least one checkpoint")
     if skill.external_step_count and not any(
-        evidence.kind == "url_matches" for evidence in skill.success_evidence
+        evidence.kind in {"url_matches", "element_visible"}
+        for evidence in skill.success_evidence
     ):
-        _reject("a skill with an external step must prove its outcome by URL")
+        # 导航型动作以 URL 证明结果；评论/私信这类不导航的动作以可见元素
+        # （toast、已发布条目）证明。click_point_v1 只是记录，不算结果证据。
+        _reject("a skill with an external step must prove its outcome")
 
 
 def _valid_approval(approval: object) -> dict[str, object]:

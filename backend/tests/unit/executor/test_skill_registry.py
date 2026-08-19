@@ -136,6 +136,31 @@ class TestSignAndVerify:
         with pytest.raises(SkillPublicationRejected, match="checkpoint"):
             _sign(candidate)
 
+    def test_element_evidence_proves_a_non_navigating_external_outcome(self) -> None:
+        """评论、私信这类外部动作不产生导航——路径还是 /video/<id>，
+        URL 证据无从谈起；可见元素（toast、已发布条目）就是它们的结果证明。
+        外部步仍必须有结果证据，只是 url_matches 与 element_visible 任一即可。"""
+        candidate = _candidate()
+        candidate["steps"][2]["postconditions"] = [
+            {"kind": "element_visible", "role": "listitem", "name": "已发布"}
+        ]
+        candidate["successEvidence"] = [
+            {"kind": "element_visible", "role": "listitem", "name": "已发布"}
+        ]
+
+        record = _registry().publish(_sign(candidate))
+
+        assert record.version == 1
+
+    def test_lint_still_refuses_an_external_step_without_outcome_evidence(self) -> None:
+        candidate = _candidate()
+        candidate["steps"][2]["postconditions"] = []
+        candidate["successEvidence"] = [
+            {"kind": "click_point_v1", "stepIndex": 3, "x": 640, "y": 720}
+        ]
+        with pytest.raises(SkillPublicationRejected, match="outcome"):
+            _sign(candidate)
+
 
 class TestImmutableRegistry:
     def test_first_publish_creates_version_one(self) -> None:
