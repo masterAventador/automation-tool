@@ -151,6 +151,7 @@ motion_authoring_resources = [
     # 评论等技能动作只能落「待技能录制」。
     "contracts/browser-use/skill-publisher.v1.json",
     "contracts/browser-use/seed-skills/douyin-comment.v1.json",
+    "contracts/browser-use/seed-skills/douyin-direct-message.v1.json",
     "vendor/hyperframes/skills/hyperframes-core/references/minimal-composition.md",
     "vendor/hyperframes/skills/hyperframes-core/references/determinism-rules.md",
 ]

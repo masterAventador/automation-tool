@@ -1,8 +1,9 @@
 """Read-only reconciliation for dispatched Douyin comment and message effects.
 
-评论侧的确认已切到语义证据（与技能 successEvidence 同一事实：「评论成功」
-toast 可见），不再依赖写死选择器的 Page Object；私信侧仍走页面对象，随
-私信流程切技能时一并替换。"""
+确认走语义证据——与对应技能 successEvidence 同一事实（「评论成功」/
+「私信发送成功」toast 可见），不依赖任何写死选择器的 Page Object。
+toast 不可见只说明「结果未获证明」（FINAL_TIMED_OUT）；页面读取异常才是
+PAGE_UNAVAILABLE。只读对账不冒充更精确的诊断。"""
 
 from __future__ import annotations
 
@@ -21,15 +22,11 @@ from automation_tool.executor.rpa.douyin.comment_action import (
 from automation_tool.executor.rpa.douyin.direct_message_action import (
     direct_message_action_verification_fingerprint,
 )
-from automation_tool.executor.rpa.douyin.direct_message_page import (
-    DouyinDirectMessagePage,
-    DouyinDirectMessagePageEvidence,
-    DouyinDirectMessagePageObservation,
-    DouyinDirectMessagePageState,
-)
 from automation_tool.executor.rpa.douyin.skills import (
     DOUYIN_COMMENT_SUCCESS_NAME,
     DOUYIN_COMMENT_SUCCESS_ROLE,
+    DOUYIN_DIRECT_MESSAGE_SUCCESS_NAME,
+    DOUYIN_DIRECT_MESSAGE_SUCCESS_ROLE,
 )
 from automation_tool.executor.side_effect_ledger import LocalSideEffect, SideEffectState
 from automation_tool.protocol import (
@@ -39,7 +36,6 @@ from automation_tool.protocol import (
 )
 
 DOUYIN_SIDE_EFFECT_RECOVERY_VERSION = "douyin.side-effect-recovery.v1"
-_FINAL_TIMEOUT_MILLISECONDS = 10_000
 _CONFIRMATION_TIMEOUT_SECONDS = 10
 
 
@@ -81,26 +77,14 @@ class DouyinSideEffectRecoveryEvidence(StrEnum):
     ALREADY_UNCERTAIN = "already_uncertain"
     COMMENT_CONFIRMED = "comment_confirmed"
     MESSAGE_CONFIRMED = "message_confirmed"
-    LOGIN_REQUIRED = "login_required"
-    DIALOG_BLOCKED = "dialog_blocked"
-    MESSAGING_NOT_ALLOWED = "messaging_not_allowed"
-    FOLLOW_REQUIRED = "follow_required"
     FINAL_TIMED_OUT = "final_timed_out"
-    PAGE_VERSION_UNKNOWN = "page_version_unknown"
-    CONFLICTING_ANCHORS = "conflicting_anchors"
     PAGE_UNAVAILABLE = "page_unavailable"
     VERIFICATION_UNAVAILABLE = "verification_unavailable"
 
 
 _UNCONFIRMED_EVIDENCE = frozenset(
     {
-        DouyinSideEffectRecoveryEvidence.LOGIN_REQUIRED,
-        DouyinSideEffectRecoveryEvidence.DIALOG_BLOCKED,
-        DouyinSideEffectRecoveryEvidence.MESSAGING_NOT_ALLOWED,
-        DouyinSideEffectRecoveryEvidence.FOLLOW_REQUIRED,
         DouyinSideEffectRecoveryEvidence.FINAL_TIMED_OUT,
-        DouyinSideEffectRecoveryEvidence.PAGE_VERSION_UNKNOWN,
-        DouyinSideEffectRecoveryEvidence.CONFLICTING_ANCHORS,
         DouyinSideEffectRecoveryEvidence.PAGE_UNAVAILABLE,
         DouyinSideEffectRecoveryEvidence.VERIFICATION_UNAVAILABLE,
     }
@@ -321,18 +305,17 @@ class DouyinSideEffectRecovery:
 
     def _recover_message(self, effect: LocalSideEffect) -> DouyinSideEffectRecoveryReceipt:
         try:
-            page = DouyinDirectMessagePage(cast(BrowserWindow, self._window))
-            observation = page.wait_for_final(timeout_milliseconds=_FINAL_TIMEOUT_MILLISECONDS)
+            page = self._confirmation_page_factory(cast(BrowserWindow, self._window))
+            confirmed = page.holds(
+                "element_visible",
+                role=DOUYIN_DIRECT_MESSAGE_SUCCESS_ROLE,
+                name=DOUYIN_DIRECT_MESSAGE_SUCCESS_NAME,
+            )
         except Exception:
             return self._settle_uncertain(effect, DouyinSideEffectRecoveryEvidence.PAGE_UNAVAILABLE)
-        failure = _message_failure(observation)
-        if failure is not None:
-            return self._settle_uncertain(effect, failure)
-        try:
-            page.final_confirmation()
-        except Exception:
+        if not confirmed:
             return self._settle_uncertain(
-                effect, DouyinSideEffectRecoveryEvidence.VERIFICATION_UNAVAILABLE
+                effect, DouyinSideEffectRecoveryEvidence.FINAL_TIMED_OUT
             )
         return self._verify(
             effect,
@@ -420,42 +403,6 @@ class DouyinSideEffectRecovery:
             return value.astimezone(UTC)
         except Exception:
             raise DouyinSideEffectRecoveryRejected from None
-
-
-def _message_failure(
-    observation: DouyinDirectMessagePageObservation,
-) -> DouyinSideEffectRecoveryEvidence | None:
-    if observation.state is DouyinDirectMessagePageState.CONFIRMED:
-        return None
-    if observation.state is DouyinDirectMessagePageState.LOGIN_REQUIRED:
-        return DouyinSideEffectRecoveryEvidence.LOGIN_REQUIRED
-    if observation.state is DouyinDirectMessagePageState.DIALOG_BLOCKED:
-        return DouyinSideEffectRecoveryEvidence.DIALOG_BLOCKED
-    if observation.state is DouyinDirectMessagePageState.PERMISSION_DENIED:
-        return (
-            DouyinSideEffectRecoveryEvidence.FOLLOW_REQUIRED
-            if observation.evidence is DouyinDirectMessagePageEvidence.FOLLOW_REQUIRED
-            else DouyinSideEffectRecoveryEvidence.MESSAGING_NOT_ALLOWED
-        )
-    if observation.state in {
-        DouyinDirectMessagePageState.PROFILE_READY,
-        DouyinDirectMessagePageState.CONVERSATION_READY,
-    }:
-        return DouyinSideEffectRecoveryEvidence.FINAL_TIMED_OUT
-    return {
-        DouyinDirectMessagePageEvidence.REQUIRED_ANCHOR_MISSING: (
-            DouyinSideEffectRecoveryEvidence.FINAL_TIMED_OUT
-        ),
-        DouyinDirectMessagePageEvidence.PAGE_VERSION_UNKNOWN: (
-            DouyinSideEffectRecoveryEvidence.PAGE_VERSION_UNKNOWN
-        ),
-        DouyinDirectMessagePageEvidence.CONFLICTING_ANCHORS: (
-            DouyinSideEffectRecoveryEvidence.CONFLICTING_ANCHORS
-        ),
-        DouyinDirectMessagePageEvidence.PAGE_UNAVAILABLE: (
-            DouyinSideEffectRecoveryEvidence.PAGE_UNAVAILABLE
-        ),
-    }.get(observation.evidence, DouyinSideEffectRecoveryEvidence.PAGE_UNAVAILABLE)
 
 
 def _existing_receipt(

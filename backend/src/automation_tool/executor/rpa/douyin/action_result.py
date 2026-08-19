@@ -85,20 +85,15 @@ _DIRECT_FAILURES = {
     DouyinDirectMessageActionEvidence.LOCAL_TASK_ACTION_LIMIT: (
         ActionResultEvidence.LOCAL_SAFETY_LIMIT
     ),
-    DouyinDirectMessageActionEvidence.READY_LOGIN_REQUIRED: ActionResultEvidence.LOGIN_REQUIRED,
-    DouyinDirectMessageActionEvidence.READY_DIALOG_BLOCKED: ActionResultEvidence.DIALOG_BLOCKED,
-    DouyinDirectMessageActionEvidence.READY_MESSAGING_NOT_ALLOWED: (
-        ActionResultEvidence.MESSAGING_NOT_ALLOWED
-    ),
-    DouyinDirectMessageActionEvidence.READY_FOLLOW_REQUIRED: ActionResultEvidence.FOLLOW_REQUIRED,
-    DouyinDirectMessageActionEvidence.READY_TIMED_OUT: ActionResultEvidence.TIMED_OUT,
-    DouyinDirectMessageActionEvidence.READY_PAGE_VERSION_UNKNOWN: (
+    DouyinDirectMessageActionEvidence.SKILL_AWAITING_RECORDING: (
         ActionResultEvidence.PAGE_VERSION_UNKNOWN
     ),
-    DouyinDirectMessageActionEvidence.READY_CONFLICTING_ANCHORS: (
-        ActionResultEvidence.CONFLICTING_ANCHORS
+    DouyinDirectMessageActionEvidence.SKILL_RECOVERY_PENDING: (
+        ActionResultEvidence.PAGE_VERSION_UNKNOWN
     ),
-    DouyinDirectMessageActionEvidence.READY_PAGE_UNAVAILABLE: ActionResultEvidence.PAGE_UNAVAILABLE,
+    DouyinDirectMessageActionEvidence.PREPARE_UNAVAILABLE: (
+        ActionResultEvidence.PAGE_UNAVAILABLE
+    ),
 }
 _BROWSE_FAILURES = {
     DouyinBrowseExecutionEvidence.LOGIN_REQUIRED: ActionResultEvidence.LOGIN_REQUIRED,
@@ -118,10 +113,6 @@ _BROWSE_FAILURES = {
 
 
 def _uncertain_evidence(value: object) -> ActionResultEvidence:
-    if value is DouyinDirectMessageActionEvidence.DISPATCH_TIMED_OUT:
-        return ActionResultEvidence.DISPATCH_TIMED_OUT
-    if value is DouyinDirectMessageActionEvidence.DISPATCH_UNAVAILABLE:
-        return ActionResultEvidence.DISPATCH_UNAVAILABLE
     if value in {
         DouyinCommentActionEvidence.REPLAY_UNCERTAIN,
         DouyinDirectMessageActionEvidence.REPLAY_UNCERTAIN,

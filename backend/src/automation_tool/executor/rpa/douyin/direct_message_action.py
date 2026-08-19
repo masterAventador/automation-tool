@@ -1,16 +1,20 @@
-"""Single-shot Douyin direct-message execution behind signed and durable local authority."""
+"""抖音私信动作：闸门+台账外层，页面层由自愈式技能编排器驱动。
+
+与评论动作同构（见 comment_action 模块说明）。私信特有的一点：权限受限
+（暂时无法私信/关注后才能私信）的页面没有可达的私信入口——技能回放在
+外部步之前失败，如实落为 ``SKILL_RECOVERY_PENDING``，没有任何东西被发出。
+"""
 
 from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Protocol, cast, runtime_checkable
-
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from automation_tool.executor.action_authorization import ActionAuthorizationExpectation
 from automation_tool.executor.action_gate import (
@@ -21,14 +25,18 @@ from automation_tool.executor.action_gate import (
 )
 from automation_tool.executor.browser_runtime import BrowserWindow
 from automation_tool.executor.ledger import ExecutorLedger
-from automation_tool.executor.rpa.douyin.direct_message_page import (
-    DOUYIN_DIRECT_MESSAGE_PAGE_SELECTOR_VERSION,
-    DouyinDirectMessagePage,
-    DouyinDirectMessagePageEvidence,
-    DouyinDirectMessagePageObservation,
-    DouyinDirectMessagePageState,
+from automation_tool.executor.rpa.douyin.skills import (
+    DOUYIN_DIRECT_MESSAGE_PARAMETER,
+    DOUYIN_DIRECT_MESSAGE_SKILL_ID,
+    default_orchestrator,
 )
 from automation_tool.executor.side_effect_ledger import LocalSideEffect, SideEffectState
+from automation_tool.executor.skill_orchestrator import (
+    SkillExecutionKind,
+    SkillOrchestrator,
+)
+from automation_tool.executor.skill_replay_page import PlaywrightReplayPage
+from automation_tool.executor.skill_replayer import ReplayPage
 from automation_tool.protocol import (
     ACTION_MESSAGE_TEMPLATE_VERSION,
     ActionMessageTemplate,
@@ -38,17 +46,16 @@ from automation_tool.protocol import (
     ProtocolTargetId,
 )
 
-DOUYIN_DIRECT_MESSAGE_ACTION_EXECUTION_VERSION = "douyin.direct-message-action-execution.v1"
+DOUYIN_DIRECT_MESSAGE_ACTION_EXECUTION_VERSION = "douyin.direct-message-action-execution.v2"
+DOUYIN_DIRECT_MESSAGE_VERIFICATION_VERSION = "douyin.direct-message-skill.v1"
 _EFFECT_FINGERPRINT_DOMAIN = "automation-tool.douyin.direct-message-effect.v1"
 _VERIFICATION_FINGERPRINT_DOMAIN = b"automation-tool.douyin.direct-message-verification.v1\0"
-_PAGE_READY_TIMEOUT_MILLISECONDS = 10_000
-_ACTION_TIMEOUT_MILLISECONDS = 15_000
-_FINAL_TIMEOUT_MILLISECONDS = 10_000
+_REPLAY_PAGE_TIMEOUT_SECONDS = 15
 
 
 class DouyinDirectMessageActionRejected(RuntimeError):
     def __init__(self) -> None:
-        super().__init__("douyin direct-message action execution is unavailable")
+        super().__init__("douyin direct message action execution is unavailable")
 
 
 class DouyinDirectMessageActionState(StrEnum):
@@ -63,29 +70,11 @@ class DouyinDirectMessageActionEvidence(StrEnum):
     LOCAL_MINIMUM_INTERVAL = "local_minimum_interval"
     LOCAL_TASK_ACTION_LIMIT = "local_task_action_limit"
     LEDGER_UNAVAILABLE = "ledger_unavailable"
-    READY_LOGIN_REQUIRED = "ready_login_required"
-    READY_DIALOG_BLOCKED = "ready_dialog_blocked"
-    READY_MESSAGING_NOT_ALLOWED = "ready_messaging_not_allowed"
-    READY_FOLLOW_REQUIRED = "ready_follow_required"
-    READY_TIMED_OUT = "ready_timed_out"
-    READY_PAGE_VERSION_UNKNOWN = "ready_page_version_unknown"
-    READY_CONFLICTING_ANCHORS = "ready_conflicting_anchors"
-    READY_PAGE_UNAVAILABLE = "ready_page_unavailable"
-    STALE_CONFIRMATION = "stale_confirmation"
-    ENTER_CONVERSATION_TIMED_OUT = "enter_conversation_timed_out"
-    ENTER_CONVERSATION_UNAVAILABLE = "enter_conversation_unavailable"
+    SKILL_AWAITING_RECORDING = "skill_awaiting_recording"
+    SKILL_RECOVERY_PENDING = "skill_recovery_pending"
     PREPARE_UNAVAILABLE = "prepare_unavailable"
     DISPATCH_PERMISSION_REJECTED = "dispatch_permission_rejected"
-    DISPATCH_TIMED_OUT = "dispatch_timed_out"
-    DISPATCH_UNAVAILABLE = "dispatch_unavailable"
-    FINAL_LOGIN_REQUIRED = "final_login_required"
-    FINAL_DIALOG_BLOCKED = "final_dialog_blocked"
-    FINAL_MESSAGING_NOT_ALLOWED = "final_messaging_not_allowed"
-    FINAL_FOLLOW_REQUIRED = "final_follow_required"
-    FINAL_TIMED_OUT = "final_timed_out"
-    FINAL_PAGE_VERSION_UNKNOWN = "final_page_version_unknown"
-    FINAL_CONFLICTING_ANCHORS = "final_conflicting_anchors"
-    FINAL_PAGE_UNAVAILABLE = "final_page_unavailable"
+    SKILL_RECONCILE_REQUIRED = "skill_reconcile_required"
     VERIFICATION_UNAVAILABLE = "verification_unavailable"
     MESSAGE_CONFIRMED = "message_confirmed"
     REPLAY_VERIFIED = "replay_verified"
@@ -103,33 +92,15 @@ _NO_EFFECT_EVIDENCE = frozenset(
 )
 _PREPARED_EVIDENCE = frozenset(
     {
-        DouyinDirectMessageActionEvidence.READY_LOGIN_REQUIRED,
-        DouyinDirectMessageActionEvidence.READY_DIALOG_BLOCKED,
-        DouyinDirectMessageActionEvidence.READY_MESSAGING_NOT_ALLOWED,
-        DouyinDirectMessageActionEvidence.READY_FOLLOW_REQUIRED,
-        DouyinDirectMessageActionEvidence.READY_TIMED_OUT,
-        DouyinDirectMessageActionEvidence.READY_PAGE_VERSION_UNKNOWN,
-        DouyinDirectMessageActionEvidence.READY_CONFLICTING_ANCHORS,
-        DouyinDirectMessageActionEvidence.READY_PAGE_UNAVAILABLE,
-        DouyinDirectMessageActionEvidence.STALE_CONFIRMATION,
-        DouyinDirectMessageActionEvidence.ENTER_CONVERSATION_TIMED_OUT,
-        DouyinDirectMessageActionEvidence.ENTER_CONVERSATION_UNAVAILABLE,
+        DouyinDirectMessageActionEvidence.SKILL_AWAITING_RECORDING,
+        DouyinDirectMessageActionEvidence.SKILL_RECOVERY_PENDING,
         DouyinDirectMessageActionEvidence.PREPARE_UNAVAILABLE,
         DouyinDirectMessageActionEvidence.DISPATCH_PERMISSION_REJECTED,
     }
 )
 _POST_DISPATCH_EVIDENCE = frozenset(
     {
-        DouyinDirectMessageActionEvidence.DISPATCH_TIMED_OUT,
-        DouyinDirectMessageActionEvidence.DISPATCH_UNAVAILABLE,
-        DouyinDirectMessageActionEvidence.FINAL_LOGIN_REQUIRED,
-        DouyinDirectMessageActionEvidence.FINAL_DIALOG_BLOCKED,
-        DouyinDirectMessageActionEvidence.FINAL_MESSAGING_NOT_ALLOWED,
-        DouyinDirectMessageActionEvidence.FINAL_FOLLOW_REQUIRED,
-        DouyinDirectMessageActionEvidence.FINAL_TIMED_OUT,
-        DouyinDirectMessageActionEvidence.FINAL_PAGE_VERSION_UNKNOWN,
-        DouyinDirectMessageActionEvidence.FINAL_CONFLICTING_ANCHORS,
-        DouyinDirectMessageActionEvidence.FINAL_PAGE_UNAVAILABLE,
+        DouyinDirectMessageActionEvidence.SKILL_RECONCILE_REQUIRED,
         DouyinDirectMessageActionEvidence.VERIFICATION_UNAVAILABLE,
         DouyinDirectMessageActionEvidence.REPLAY_UNCERTAIN,
     }
@@ -255,20 +226,26 @@ class DouyinDirectMessageActionClock(Protocol):
     def now(self) -> datetime: ...
 
 
-class _ConversationEntry(Protocol):
-    def click(self, *, timeout: float) -> None: ...
+class _DispatchRefused(Exception):
+    """台账拒绝进入 dispatch——外部动作尚未尝试。"""
 
 
-class _MessageInput(Protocol):
-    def fill(self, value: str, *, timeout: float) -> None: ...
+class _EffectSettled(Exception):
+    """dispatch 登记时发现效果已被此前的尝试定论。"""
+
+    def __init__(self, receipt: DouyinDirectMessageActionReceipt) -> None:
+        super().__init__("the side effect is already settled")
+        self.receipt = receipt
 
 
-class _MessageSend(Protocol):
-    def click(self, *, timeout: float) -> None: ...
+def _default_replay_page(window: BrowserWindow) -> ReplayPage:
+    return PlaywrightReplayPage(
+        window.playwright_page, action_timeout_seconds=_REPLAY_PAGE_TIMEOUT_SECONDS
+    )
 
 
 class DouyinDirectMessageActionExecution:
-    """Execute one confirmed direct message without ever redispatching an admitted action."""
+    """Execute one confirmed direct message without ever redispatching it."""
 
     def __init__(
         self,
@@ -277,18 +254,24 @@ class DouyinDirectMessageActionExecution:
         action_gate: ExecutorActionGate,
         ledger: ExecutorLedger,
         clock: DouyinDirectMessageActionClock,
+        orchestrator: SkillOrchestrator | None = None,
+        replay_page_factory: Callable[[BrowserWindow], ReplayPage] | None = None,
     ) -> None:
         if (
             not isinstance(window, BrowserWindow)
             or not isinstance(action_gate, ExecutorActionGate)
             or not isinstance(ledger, ExecutorLedger)
             or not isinstance(clock, DouyinDirectMessageActionClock)
+            or not (orchestrator is None or isinstance(orchestrator, SkillOrchestrator))
+            or not (replay_page_factory is None or callable(replay_page_factory))
         ):
             raise DouyinDirectMessageActionRejected
-        self._page = DouyinDirectMessagePage(window)
+        self._window = window
         self._action_gate = action_gate
         self._ledger = ledger
         self._clock = clock
+        self._orchestrator = orchestrator
+        self._replay_page_factory = replay_page_factory or _default_replay_page
         self._executed = False
 
     def __repr__(self) -> str:
@@ -299,10 +282,7 @@ class DouyinDirectMessageActionExecution:
         *,
         intent: DouyinDirectMessageActionIntent,
     ) -> DouyinDirectMessageActionReceipt:
-        if (
-            self._executed
-            or not isinstance(intent, DouyinDirectMessageActionIntent)
-        ):
+        if self._executed or not isinstance(intent, DouyinDirectMessageActionIntent):
             raise DouyinDirectMessageActionRejected
         self._executed = True
         expected = intent.authorization
@@ -311,7 +291,9 @@ class DouyinDirectMessageActionExecution:
         except ActionGateLimited as error:
             return _empty_receipt(expected, _limit_evidence(error.reason))
         except ActionGateRejected:
-            return _empty_receipt(expected, DouyinDirectMessageActionEvidence.ADMISSION_REJECTED)
+            return _empty_receipt(
+                expected, DouyinDirectMessageActionEvidence.ADMISSION_REJECTED
+            )
 
         fingerprint = _effect_fingerprint(intent)
         try:
@@ -321,85 +303,94 @@ class DouyinDirectMessageActionExecution:
                 prepared_at=self._now(),
             )
         except Exception:
-            return _empty_receipt(expected, DouyinDirectMessageActionEvidence.LEDGER_UNAVAILABLE)
+            return _empty_receipt(
+                expected, DouyinDirectMessageActionEvidence.LEDGER_UNAVAILABLE
+            )
         replay = _receipt_for_existing(expected, prepared)
         if replay is not None:
             return replay
 
-        ready = self._page.wait_for_profile_ready(
-            timeout_milliseconds=_PAGE_READY_TIMEOUT_MILLISECONDS
-        )
-        ready_failure = _ready_evidence(ready)
-        if ready_failure is not None:
-            return _prepared_receipt(expected, ready_failure)
-
-        if ready.state is DouyinDirectMessagePageState.PROFILE_READY:
-            try:
-                entry = cast(_ConversationEntry, self._page.enter_conversation())
-                entry.click(timeout=_ACTION_TIMEOUT_MILLISECONDS)
-            except PlaywrightTimeoutError:
-                return _prepared_receipt(
-                    expected,
-                    DouyinDirectMessageActionEvidence.ENTER_CONVERSATION_TIMED_OUT,
-                )
-            except Exception:
-                return _prepared_receipt(
-                    expected,
-                    DouyinDirectMessageActionEvidence.ENTER_CONVERSATION_UNAVAILABLE,
-                )
-            conversation = self._page.wait_for_conversation_ready(
-                timeout_milliseconds=_PAGE_READY_TIMEOUT_MILLISECONDS
-            )
-            conversation_failure = _conversation_evidence(conversation)
-            if conversation_failure is not None:
-                return _prepared_receipt(expected, conversation_failure)
-
         try:
-            message_input = cast(_MessageInput, self._page.message_input())
-            message_input.fill(intent._rendered_message, timeout=_ACTION_TIMEOUT_MILLISECONDS)
-            message_send = cast(_MessageSend, self._page.message_send())
+            orchestrator = (
+                self._orchestrator if self._orchestrator is not None else default_orchestrator()
+            )
+            page = self._replay_page_factory(self._window)
         except Exception:
             return _prepared_receipt(
                 expected, DouyinDirectMessageActionEvidence.PREPARE_UNAVAILABLE
             )
 
+        dispatched_effects: list[LocalSideEffect] = []
+
+        def begin_dispatch() -> None:
+            # 回放器在外部步之前调它：台账先记 DISPATCHED，平台才可能看到动作。
+            try:
+                effect = self._ledger.begin_side_effect_dispatch(
+                    action_id=str(expected.action_id),
+                    effect_fingerprint=fingerprint,
+                    dispatched_at=self._now(),
+                )
+            except Exception as error:
+                raise _DispatchRefused from error
+            settled = _receipt_for_existing(expected, effect)
+            if settled is not None:
+                raise _EffectSettled(settled)
+            dispatched_effects.append(effect)
+
         try:
-            dispatched = self._ledger.begin_side_effect_dispatch(
-                action_id=str(expected.action_id),
-                effect_fingerprint=fingerprint,
-                dispatched_at=self._now(),
+            report = orchestrator.execute(
+                DOUYIN_DIRECT_MESSAGE_SKILL_ID,
+                page,
+                parameters={DOUYIN_DIRECT_MESSAGE_PARAMETER: intent._rendered_message},
+                on_external_dispatch=begin_dispatch,
             )
-        except Exception:
+        except _DispatchRefused:
             return _prepared_receipt(
                 expected, DouyinDirectMessageActionEvidence.DISPATCH_PERMISSION_REJECTED
             )
-        replay = _receipt_for_existing(expected, dispatched)
-        if replay is not None:
-            return replay
-
-        try:
-            message_send.click(timeout=_ACTION_TIMEOUT_MILLISECONDS)
-        except PlaywrightTimeoutError:
-            return self._uncertain(
-                expected,
-                fingerprint,
-                DouyinDirectMessageActionEvidence.DISPATCH_TIMED_OUT,
-                dispatched,
-            )
+        except _EffectSettled as settled:
+            return settled.receipt
         except Exception:
+            # 编排器/页面适配层的基础设施异常（不是回放失败）。dispatch 已
+            # 登记则结果不确定，只能对账；否则页面未被外部触碰。
+            if dispatched_effects:
+                return self._uncertain(
+                    expected,
+                    fingerprint,
+                    DouyinDirectMessageActionEvidence.SKILL_RECONCILE_REQUIRED,
+                    dispatched_effects[0],
+                )
+            return _prepared_receipt(
+                expected, DouyinDirectMessageActionEvidence.PREPARE_UNAVAILABLE
+            )
+
+        if report.kind is SkillExecutionKind.NO_ROUTE:
+            return _prepared_receipt(
+                expected, DouyinDirectMessageActionEvidence.SKILL_AWAITING_RECORDING
+            )
+        if report.kind is SkillExecutionKind.RECOVERY_PENDING:
+            return _prepared_receipt(
+                expected, DouyinDirectMessageActionEvidence.SKILL_RECOVERY_PENDING
+            )
+        if report.kind is SkillExecutionKind.RECONCILE_REQUIRED:
+            if not dispatched_effects:
+                return _prepared_receipt(
+                    expected, DouyinDirectMessageActionEvidence.PREPARE_UNAVAILABLE
+                )
             return self._uncertain(
                 expected,
                 fingerprint,
-                DouyinDirectMessageActionEvidence.DISPATCH_UNAVAILABLE,
-                dispatched,
+                DouyinDirectMessageActionEvidence.SKILL_RECONCILE_REQUIRED,
+                dispatched_effects[0],
             )
 
-        final = self._page.wait_for_final(timeout_milliseconds=_FINAL_TIMEOUT_MILLISECONDS)
-        final_failure = _final_evidence(final)
-        if final_failure is not None:
-            return self._uncertain(expected, fingerprint, final_failure, dispatched)
+        # REPLAYED：回放完成且结果证据成立。
+        if not dispatched_effects:
+            # 路由到的技能没有外部步——什么都没发出去，不能谎称已发送。
+            return _prepared_receipt(
+                expected, DouyinDirectMessageActionEvidence.PREPARE_UNAVAILABLE
+            )
         try:
-            self._page.final_confirmation()
             verified = self._ledger.verify_side_effect(
                 action_id=str(expected.action_id),
                 effect_fingerprint=fingerprint,
@@ -413,7 +404,7 @@ class DouyinDirectMessageActionExecution:
                 expected,
                 fingerprint,
                 DouyinDirectMessageActionEvidence.VERIFICATION_UNAVAILABLE,
-                dispatched,
+                dispatched_effects[0],
             )
         return _effect_receipt(
             expected,
@@ -488,8 +479,8 @@ def direct_message_action_verification_fingerprint(effect_fingerprint: bytes) ->
         _VERIFICATION_FINGERPRINT_DOMAIN
         + effect_fingerprint
         + b"\0"
-        + DOUYIN_DIRECT_MESSAGE_PAGE_SELECTOR_VERSION.encode("ascii")
-        + b"\0final_confirmation_visible"
+        + DOUYIN_DIRECT_MESSAGE_VERIFICATION_VERSION.encode("ascii")
+        + b"\0success_evidence_visible"
     ).digest()
 
 
@@ -505,88 +496,6 @@ def _limit_evidence(reason: LocalActionLimitReason) -> DouyinDirectMessageAction
             DouyinDirectMessageActionEvidence.LOCAL_TASK_ACTION_LIMIT
         ),
     }[reason]
-
-
-def _ready_evidence(
-    observation: DouyinDirectMessagePageObservation,
-) -> DouyinDirectMessageActionEvidence | None:
-    if observation.state in {
-        DouyinDirectMessagePageState.PROFILE_READY,
-        DouyinDirectMessagePageState.CONVERSATION_READY,
-    }:
-        return None
-    if observation.state is DouyinDirectMessagePageState.CONFIRMED:
-        return DouyinDirectMessageActionEvidence.STALE_CONFIRMATION
-    if observation.state is DouyinDirectMessagePageState.LOGIN_REQUIRED:
-        return DouyinDirectMessageActionEvidence.READY_LOGIN_REQUIRED
-    if observation.state is DouyinDirectMessagePageState.DIALOG_BLOCKED:
-        return DouyinDirectMessageActionEvidence.READY_DIALOG_BLOCKED
-    if observation.state is DouyinDirectMessagePageState.PERMISSION_DENIED:
-        return (
-            DouyinDirectMessageActionEvidence.READY_FOLLOW_REQUIRED
-            if observation.evidence is DouyinDirectMessagePageEvidence.FOLLOW_REQUIRED
-            else DouyinDirectMessageActionEvidence.READY_MESSAGING_NOT_ALLOWED
-        )
-    return {
-        DouyinDirectMessagePageEvidence.REQUIRED_ANCHOR_MISSING: (
-            DouyinDirectMessageActionEvidence.READY_TIMED_OUT
-        ),
-        DouyinDirectMessagePageEvidence.PAGE_VERSION_UNKNOWN: (
-            DouyinDirectMessageActionEvidence.READY_PAGE_VERSION_UNKNOWN
-        ),
-        DouyinDirectMessagePageEvidence.CONFLICTING_ANCHORS: (
-            DouyinDirectMessageActionEvidence.READY_CONFLICTING_ANCHORS
-        ),
-        DouyinDirectMessagePageEvidence.PAGE_UNAVAILABLE: (
-            DouyinDirectMessageActionEvidence.READY_PAGE_UNAVAILABLE
-        ),
-    }.get(observation.evidence, DouyinDirectMessageActionEvidence.READY_PAGE_UNAVAILABLE)
-
-
-def _conversation_evidence(
-    observation: DouyinDirectMessagePageObservation,
-) -> DouyinDirectMessageActionEvidence | None:
-    if observation.state is DouyinDirectMessagePageState.CONVERSATION_READY:
-        return None
-    if observation.state is DouyinDirectMessagePageState.PROFILE_READY:
-        return DouyinDirectMessageActionEvidence.READY_TIMED_OUT
-    return _ready_evidence(observation)
-
-
-def _final_evidence(
-    observation: DouyinDirectMessagePageObservation,
-) -> DouyinDirectMessageActionEvidence | None:
-    if observation.state is DouyinDirectMessagePageState.CONFIRMED:
-        return None
-    if observation.state is DouyinDirectMessagePageState.LOGIN_REQUIRED:
-        return DouyinDirectMessageActionEvidence.FINAL_LOGIN_REQUIRED
-    if observation.state is DouyinDirectMessagePageState.DIALOG_BLOCKED:
-        return DouyinDirectMessageActionEvidence.FINAL_DIALOG_BLOCKED
-    if observation.state is DouyinDirectMessagePageState.PERMISSION_DENIED:
-        return (
-            DouyinDirectMessageActionEvidence.FINAL_FOLLOW_REQUIRED
-            if observation.evidence is DouyinDirectMessagePageEvidence.FOLLOW_REQUIRED
-            else DouyinDirectMessageActionEvidence.FINAL_MESSAGING_NOT_ALLOWED
-        )
-    if observation.state in {
-        DouyinDirectMessagePageState.PROFILE_READY,
-        DouyinDirectMessagePageState.CONVERSATION_READY,
-    }:
-        return DouyinDirectMessageActionEvidence.FINAL_TIMED_OUT
-    return {
-        DouyinDirectMessagePageEvidence.REQUIRED_ANCHOR_MISSING: (
-            DouyinDirectMessageActionEvidence.FINAL_TIMED_OUT
-        ),
-        DouyinDirectMessagePageEvidence.PAGE_VERSION_UNKNOWN: (
-            DouyinDirectMessageActionEvidence.FINAL_PAGE_VERSION_UNKNOWN
-        ),
-        DouyinDirectMessagePageEvidence.CONFLICTING_ANCHORS: (
-            DouyinDirectMessageActionEvidence.FINAL_CONFLICTING_ANCHORS
-        ),
-        DouyinDirectMessagePageEvidence.PAGE_UNAVAILABLE: (
-            DouyinDirectMessageActionEvidence.FINAL_PAGE_UNAVAILABLE
-        ),
-    }.get(observation.evidence, DouyinDirectMessageActionEvidence.FINAL_PAGE_UNAVAILABLE)
 
 
 def _receipt_for_existing(
@@ -663,6 +572,7 @@ def _effect_receipt(
 
 __all__ = [
     "DOUYIN_DIRECT_MESSAGE_ACTION_EXECUTION_VERSION",
+    "DOUYIN_DIRECT_MESSAGE_VERIFICATION_VERSION",
     "DouyinDirectMessageActionClock",
     "DouyinDirectMessageActionEvidence",
     "DouyinDirectMessageActionExecution",

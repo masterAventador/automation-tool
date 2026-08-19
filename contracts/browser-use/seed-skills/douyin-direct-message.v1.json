@@ -1,0 +1,112 @@
+{
+  "skill": {
+    "schemaVersion": 1,
+    "skillId": "761d13fa-26c4-4413-a0a0-6f55dbf92a0d",
+    "version": 1,
+    "parentVersion": null,
+    "platform": "douyin",
+    "domain": "www.douyin.com",
+    "pathPattern": "/user",
+    "entryFingerprint": {
+      "kind": "dom_outline_v1",
+      "sha256": "761d13fa26c4d413e0a06f55dbf92a0dd6d08b539885915de72bd22f54b816de"
+    },
+    "language": "zh-CN",
+    "viewport": {
+      "width": 1280,
+      "height": 800
+    },
+    "riskLevel": "high",
+    "sideEffectBoundary": {
+      "maxExternalSteps": 1
+    },
+    "steps": [
+      {
+        "index": 1,
+        "goal": {
+          "role": "button",
+          "name": "私信",
+          "nearText": null,
+          "relativePosition": null
+        },
+        "action": {
+          "kind": "click"
+        },
+        "preconditions": [],
+        "postconditions": [
+          {
+            "kind": "element_visible",
+            "role": "textbox",
+            "name": "发送私信"
+          }
+        ],
+        "timeoutSeconds": 10,
+        "external": false,
+        "checkpoint": true
+      },
+      {
+        "index": 2,
+        "goal": {
+          "role": "textbox",
+          "name": "发送私信",
+          "nearText": null,
+          "relativePosition": null
+        },
+        "action": {
+          "kind": "fill",
+          "value": {
+            "parameter": "direct_message"
+          }
+        },
+        "preconditions": [],
+        "postconditions": [],
+        "timeoutSeconds": 10,
+        "external": false,
+        "checkpoint": true
+      },
+      {
+        "index": 3,
+        "goal": {
+          "role": "button",
+          "name": "发送私信",
+          "nearText": null,
+          "relativePosition": null
+        },
+        "action": {
+          "kind": "click"
+        },
+        "preconditions": [
+          {
+            "kind": "element_visible",
+            "role": "button",
+            "name": "发送私信"
+          }
+        ],
+        "postconditions": [
+          {
+            "kind": "element_visible",
+            "role": "status",
+            "name": "私信发送成功"
+          }
+        ],
+        "timeoutSeconds": 15,
+        "external": true,
+        "checkpoint": false
+      }
+    ],
+    "successEvidence": [
+      {
+        "kind": "element_visible",
+        "role": "status",
+        "name": "私信发送成功"
+      }
+    ]
+  },
+  "approval": {
+    "reviewer": "aventador",
+    "decision": "approved",
+    "reviewedAt": "2026-08-19T00:00:00Z"
+  },
+  "publicKey": "8bba5703fab278e3977869eb2d32eac44a9ff8c31a1e5b284894716123b741a3",
+  "signature": "fd164068488b8f7d8dc6450a5ed8cc68afdbfc882a52f7081d79c4f7d5142cc7cc84d330bab3d4bebca9d95951f1a6eb570f6ea4b9ab083325f791cad54d8309"
+}

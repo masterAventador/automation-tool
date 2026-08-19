@@ -42,6 +42,7 @@ APPROVAL = {
 
 SANDBOX_PARAMETERS = {
     "comment_message": "沙箱回放占位内容",
+    "direct_message": "沙箱回放占位内容",
 }
 
 
@@ -142,8 +143,75 @@ def douyin_comment_candidate() -> dict[str, object]:
     }
 
 
+def douyin_direct_message_candidate() -> dict[str, object]:
+    """抖音主页私信：点私信入口 → 填内容 → 点发送，toast 证明结果。
+
+    步骤 2 与 3 目标同名（发送私信），靠 role（textbox / button）区分——
+    语义回放页按 role+name 精确匹配。"""
+    domain = "www.douyin.com"
+    entry_path = "/user"
+    goal_names = ["私信", "发送私信", "发送私信"]
+    fingerprint = _fingerprint(domain, entry_path, goal_names)
+    return {
+        "schemaVersion": 1,
+        "skillId": _deterministic_uuid(fingerprint),
+        "version": 1,
+        "parentVersion": None,
+        "platform": "douyin",
+        "domain": domain,
+        "pathPattern": entry_path,
+        "entryFingerprint": {"kind": "dom_outline_v1", "sha256": fingerprint},
+        "language": "zh-CN",
+        "viewport": {"width": 1280, "height": 800},
+        "riskLevel": "high",
+        "sideEffectBoundary": {"maxExternalSteps": 1},
+        "steps": [
+            {
+                "index": 1,
+                "goal": _goal("button", "私信"),
+                "action": {"kind": "click"},
+                "preconditions": [],
+                "postconditions": [
+                    _condition("element_visible", "textbox", "发送私信")
+                ],
+                "timeoutSeconds": 10,
+                "external": False,
+                "checkpoint": True,
+            },
+            {
+                "index": 2,
+                "goal": _goal("textbox", "发送私信"),
+                "action": {"kind": "fill", "value": {"parameter": "direct_message"}},
+                "preconditions": [],
+                "postconditions": [],
+                "timeoutSeconds": 10,
+                "external": False,
+                "checkpoint": True,
+            },
+            {
+                "index": 3,
+                "goal": _goal("button", "发送私信"),
+                "action": {"kind": "click"},
+                "preconditions": [
+                    _condition("element_visible", "button", "发送私信")
+                ],
+                "postconditions": [
+                    _condition("element_visible", "status", "私信发送成功")
+                ],
+                "timeoutSeconds": 15,
+                "external": True,
+                "checkpoint": False,
+            },
+        ],
+        "successEvidence": [
+            {"kind": "element_visible", "role": "status", "name": "私信发送成功"}
+        ],
+    }
+
+
 SEEDS: dict[str, dict[str, object]] = {
     "douyin-comment.v1.json": douyin_comment_candidate(),
+    "douyin-direct-message.v1.json": douyin_direct_message_candidate(),
 }
 
 

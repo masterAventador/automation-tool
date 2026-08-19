@@ -10,6 +10,10 @@ from automation_tool.executor.rpa.douyin.skills import (
     DOUYIN_COMMENT_SKILL_ID,
     DOUYIN_COMMENT_SUCCESS_NAME,
     DOUYIN_COMMENT_SUCCESS_ROLE,
+    DOUYIN_DIRECT_MESSAGE_PARAMETER,
+    DOUYIN_DIRECT_MESSAGE_SKILL_ID,
+    DOUYIN_DIRECT_MESSAGE_SUCCESS_NAME,
+    DOUYIN_DIRECT_MESSAGE_SUCCESS_ROLE,
     default_orchestrator,
 )
 from automation_tool.executor.skill_orchestrator import load_seed_registry
@@ -39,6 +43,26 @@ class TestCommittedSeeds:
             evidence.kind == "element_visible"
             and evidence.role == DOUYIN_COMMENT_SUCCESS_ROLE
             and evidence.name == DOUYIN_COMMENT_SUCCESS_NAME
+            for evidence in skill.success_evidence
+        )
+
+    def test_the_direct_message_seed_verifies_and_matches_its_constant(self) -> None:
+        registry = load_seed_registry()
+
+        skill = registry.at(DOUYIN_DIRECT_MESSAGE_SKILL_ID, 1).skill
+
+        assert skill.platform == "douyin"
+        assert skill.domain == "www.douyin.com"
+        assert skill.external_step_count == 1
+        assert any(
+            step.action.kind == "fill"
+            and step.action.parameter == DOUYIN_DIRECT_MESSAGE_PARAMETER
+            for step in skill.steps
+        )
+        assert any(
+            evidence.kind == "element_visible"
+            and evidence.role == DOUYIN_DIRECT_MESSAGE_SUCCESS_ROLE
+            and evidence.name == DOUYIN_DIRECT_MESSAGE_SUCCESS_NAME
             for evidence in skill.success_evidence
         )
 

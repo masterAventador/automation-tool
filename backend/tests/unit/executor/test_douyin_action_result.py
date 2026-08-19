@@ -182,7 +182,7 @@ def test_direct_message_failure_and_uncertain_are_not_reported_as_success() -> N
             action_id=ACTION_ID,
             target_id=TARGET_ID,
             state=DouyinDirectMessageActionState.NOT_DISPATCHED,
-            evidence=DouyinDirectMessageActionEvidence.READY_FOLLOW_REQUIRED,
+            evidence=DouyinDirectMessageActionEvidence.SKILL_RECOVERY_PENDING,
             side_effect_state=SideEffectState.PREPARED,
             side_effect_revision=1,
             replayed=False,
@@ -193,17 +193,20 @@ def test_direct_message_failure_and_uncertain_are_not_reported_as_success() -> N
             action_id=ACTION_ID,
             target_id=TARGET_ID,
             state=DouyinDirectMessageActionState.OUTCOME_UNCERTAIN,
-            evidence=DouyinDirectMessageActionEvidence.DISPATCH_TIMED_OUT,
+            evidence=DouyinDirectMessageActionEvidence.SKILL_RECONCILE_REQUIRED,
             side_effect_state=SideEffectState.DISPATCHED,
             side_effect_revision=2,
             replayed=False,
         )
     )
 
-    assert (failed.message_type, failed.evidence.value) == ("step.failed", "follow_required")
+    assert (failed.message_type, failed.evidence.value) == (
+        "step.failed",
+        "page_version_unknown",
+    )
     assert (uncertain.message_type, uncertain.evidence.value) == (
         "task.outcome_uncertain",
-        "dispatch_timed_out",
+        "final_state_unconfirmed",
     )
 
 
@@ -294,23 +297,19 @@ def test_comment_uncertain_receipts_never_collapse_to_failure_or_success(
         (DouyinDirectMessageActionEvidence.LOCAL_EMERGENCY_STOP, "local_safety_limit"),
         (DouyinDirectMessageActionEvidence.LOCAL_MINIMUM_INTERVAL, "local_safety_limit"),
         (DouyinDirectMessageActionEvidence.LOCAL_TASK_ACTION_LIMIT, "local_safety_limit"),
-        (DouyinDirectMessageActionEvidence.READY_LOGIN_REQUIRED, "login_required"),
-        (DouyinDirectMessageActionEvidence.READY_DIALOG_BLOCKED, "dialog_blocked"),
         (
-            DouyinDirectMessageActionEvidence.READY_MESSAGING_NOT_ALLOWED,
-            "messaging_not_allowed",
-        ),
-        (DouyinDirectMessageActionEvidence.READY_FOLLOW_REQUIRED, "follow_required"),
-        (DouyinDirectMessageActionEvidence.READY_TIMED_OUT, "timed_out"),
-        (
-            DouyinDirectMessageActionEvidence.READY_PAGE_VERSION_UNKNOWN,
+            DouyinDirectMessageActionEvidence.SKILL_AWAITING_RECORDING,
             "page_version_unknown",
         ),
         (
-            DouyinDirectMessageActionEvidence.READY_CONFLICTING_ANCHORS,
-            "conflicting_anchors",
+            DouyinDirectMessageActionEvidence.SKILL_RECOVERY_PENDING,
+            "page_version_unknown",
         ),
-        (DouyinDirectMessageActionEvidence.READY_PAGE_UNAVAILABLE, "page_unavailable"),
+        (DouyinDirectMessageActionEvidence.PREPARE_UNAVAILABLE, "page_unavailable"),
+        (
+            DouyinDirectMessageActionEvidence.DISPATCH_PERMISSION_REJECTED,
+            "executor_reported_failure",
+        ),
         (DouyinDirectMessageActionEvidence.LEDGER_UNAVAILABLE, "executor_reported_failure"),
     ),
 )
@@ -330,9 +329,15 @@ def test_direct_message_failure_receipts_map_to_closed_safe_evidence(
 @pytest.mark.parametrize(
     ("evidence", "expected"),
     (
-        (DouyinDirectMessageActionEvidence.DISPATCH_UNAVAILABLE, "dispatch_unavailable"),
+        (
+            DouyinDirectMessageActionEvidence.SKILL_RECONCILE_REQUIRED,
+            "final_state_unconfirmed",
+        ),
+        (
+            DouyinDirectMessageActionEvidence.VERIFICATION_UNAVAILABLE,
+            "final_state_unconfirmed",
+        ),
         (DouyinDirectMessageActionEvidence.REPLAY_UNCERTAIN, "recovery_unconfirmed"),
-        (DouyinDirectMessageActionEvidence.FINAL_LOGIN_REQUIRED, "final_state_unconfirmed"),
     ),
 )
 def test_direct_message_uncertain_receipts_remain_uncertain(
