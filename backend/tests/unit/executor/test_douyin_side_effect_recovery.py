@@ -196,6 +196,19 @@ def seed(
     return opened, action_id, fingerprint
 
 
+class CommentConfirmation:
+    """评论对账的语义确认桩：以 COMMENT_FINAL 是否可见回答「评论成功」toast。"""
+
+    def __init__(self, page: Page) -> None:
+        self.page = page
+
+    def holds(self, kind: str, *, role=None, name=None, pattern=None) -> bool:
+        if self.page.locator_failure:
+            raise RuntimeError("private page failure")
+        assert (kind, role, name) == ("element_visible", "status", "评论成功")
+        return COMMENT_FINAL in self.page.visible_selectors
+
+
 def recover(
     opened: ExecutorLedger,
     action_id: ProtocolActionId,
@@ -207,6 +220,7 @@ def recover(
         window=BrowserWindow._for_runtime(object(), cast(Any, page)),
         ledger=opened,
         clock=Clock() if clock is None else clock,
+        confirmation_page_factory=lambda _window: CommentConfirmation(page),
     ).run(action_id=action_id)
 
 
@@ -264,6 +278,9 @@ def test_dispatched_effect_is_read_only_verified_from_final_page_fact(
 @pytest.mark.parametrize(
     ("action", "url", "selectors", "locator_failure", "evidence"),
     (
+        # 评论对账走语义确认：toast 不可见即 FINAL_TIMED_OUT（登录弹窗、
+        # 拦截弹窗、页面漂移在这一步都表现为「结果未获证明」），页面读取
+        # 异常才是 PAGE_UNAVAILABLE。
         (
             DouyinSearchExposureAction.COMMENT,
             COMMENT_URL,
@@ -276,28 +293,7 @@ def test_dispatched_effect_is_read_only_verified_from_final_page_fact(
             COMMENT_URL,
             {LOGIN_DIALOG},
             False,
-            DouyinSideEffectRecoveryEvidence.LOGIN_REQUIRED,
-        ),
-        (
-            DouyinSearchExposureAction.COMMENT,
-            COMMENT_URL,
-            {BLOCKING_DIALOG},
-            False,
-            DouyinSideEffectRecoveryEvidence.DIALOG_BLOCKED,
-        ),
-        (
-            DouyinSearchExposureAction.COMMENT,
-            "https://www.douyin.com/live",
-            set(),
-            False,
-            DouyinSideEffectRecoveryEvidence.PAGE_VERSION_UNKNOWN,
-        ),
-        (
-            DouyinSearchExposureAction.COMMENT,
-            COMMENT_URL,
-            {COMMENT_INPUT, SECOND_COMMENT_INPUT, COMMENT_SUBMIT},
-            False,
-            DouyinSideEffectRecoveryEvidence.CONFLICTING_ANCHORS,
+            DouyinSideEffectRecoveryEvidence.FINAL_TIMED_OUT,
         ),
         (
             DouyinSearchExposureAction.COMMENT,
@@ -457,46 +453,31 @@ def test_non_dispatched_or_terminal_fact_returns_without_dom_access(
     assert page.requested_selectors == []
 
 
-@pytest.mark.parametrize(
-    ("module_path", "action", "url", "final_selector"),
-    (
-        (
-            "automation_tool.executor.rpa.douyin.comment_page.DouyinCommentPage",
-            DouyinSearchExposureAction.COMMENT,
-            COMMENT_URL,
-            COMMENT_FINAL,
-        ),
-        (
-            "automation_tool.executor.rpa.douyin.direct_message_page.DouyinDirectMessagePage",
-            DouyinSearchExposureAction.DIRECT_MESSAGE,
-            MESSAGE_URL,
-            MESSAGE_FINAL,
-        ),
-    ),
-)
 def test_page_observation_exception_settles_uncertain(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    module_path: str,
-    action: DouyinSearchExposureAction,
-    url: str,
-    final_selector: str,
 ) -> None:
+    # 评论侧的页面读取异常已由语义桩的 locator_failure 行覆盖；这里保留
+    # 私信侧的观察异常路径（私信页对象在下一片切技能）。
     opened, action_id, _ = seed(
-        tmp_path / action.value,
+        tmp_path / "message",
         40,
-        action=action,
+        action=DouyinSearchExposureAction.DIRECT_MESSAGE,
         state=SideEffectState.DISPATCHED,
     )
 
     def reject_wait(*args: object, **kwargs: object) -> object:
         raise RuntimeError("private page failure")
 
-    monkeypatch.setattr(f"{module_path}.wait_for_final", reject_wait)
+    monkeypatch.setattr(
+        "automation_tool.executor.rpa.douyin.direct_message_page."
+        "DouyinDirectMessagePage.wait_for_final",
+        reject_wait,
+    )
     receipt = recover(
         opened,
         action_id,
-        Page(url=url, visible_selectors={final_selector}),
+        Page(url=MESSAGE_URL, visible_selectors={MESSAGE_FINAL}),
     )
     assert receipt.evidence is DouyinSideEffectRecoveryEvidence.PAGE_UNAVAILABLE
     assert receipt.side_effect_state is SideEffectState.UNCERTAIN
@@ -513,13 +494,10 @@ def test_final_recheck_and_verification_failure_never_dispatch(
         state=SideEffectState.DISPATCHED,
     )
 
-    def reject_final(*args: object, **kwargs: object) -> object:
-        raise RuntimeError("private final drift")
+    def reject_comment_verify(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("private ledger failure")
 
-    monkeypatch.setattr(
-        "automation_tool.executor.rpa.douyin.comment_page.DouyinCommentPage.final_confirmation",
-        reject_final,
-    )
+    monkeypatch.setattr(ExecutorLedger, "verify_side_effect", reject_comment_verify)
     drifted = recover(
         opened,
         action_id,
@@ -527,6 +505,7 @@ def test_final_recheck_and_verification_failure_never_dispatch(
     )
     assert drifted.evidence is DouyinSideEffectRecoveryEvidence.VERIFICATION_UNAVAILABLE
     assert drifted.side_effect_state is SideEffectState.UNCERTAIN
+    monkeypatch.undo()
 
     second, second_id, _ = seed(
         tmp_path / "verify",

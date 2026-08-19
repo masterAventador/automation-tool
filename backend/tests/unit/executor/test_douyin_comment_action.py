@@ -1,20 +1,24 @@
+"""抖音评论动作：闸门+台账外层不变，页面层由自愈式技能编排器驱动。
+
+流程：admit → 台账 prepare（幂等回放）→ 技能路由+回放（外部步前钩子登记
+dispatch）→ 结果证据成立则 verify。技能缺席/回放失败不再有任何写死选择器
+兜底——如实落为「待技能录制/修复」，外部步之后的失败只做对账。
+
+这组测试用仓库里真实签名的种子技能 + 真实编排器 + 脚本化语义页面，
+台账与闸门都是真实实现（tmp 目录 SQLite）。"""
+
 from __future__ import annotations
 
-from dataclasses import replace
-from datetime import UTC, datetime, timedelta, timezone, tzinfo
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 from typing import Any, cast
-from uuid import UUID
 
 import pytest
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from automation_tool.executor.action_authorization import ActionAuthorizationExpectation
 from automation_tool.executor.action_gate import (
-    ActionGateLimited,
     ExecutorActionGate,
     LocalActionHardPolicy,
-    LocalActionLimitReason,
 )
 from automation_tool.executor.browser_runtime import BrowserWindow
 from automation_tool.executor.ledger import ExecutorLedger
@@ -26,8 +30,13 @@ from automation_tool.executor.rpa.douyin.comment_action import (
     DouyinCommentActionRejected,
     DouyinCommentActionState,
 )
-from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
+from automation_tool.executor.rpa.douyin.skills import DOUYIN_COMMENT_SKILL_ID
 from automation_tool.executor.side_effect_ledger import SideEffectState
+from automation_tool.executor.skill_orchestrator import (
+    SkillOrchestrator,
+    load_seed_registry,
+)
+from automation_tool.executor.skill_registry import SkillRegistry
 from automation_tool.protocol import (
     ActionMessageTemplate,
     DouyinCandidateSummary,
@@ -41,139 +50,80 @@ from automation_tool.protocol import (
     action_authorization_idempotency_key,
 )
 
-NOW = datetime(2026, 7, 20, 8, 0, tzinfo=UTC)
+NOW = datetime(2026, 8, 19, 8, 0, tzinfo=UTC)
 INSTALLATION_ID = ProtocolInstallationId("123e4567-e89b-42d3-a456-426614174005")
 EXECUTOR_ID = ProtocolExecutorId("123e4567-e89b-42d3-a456-426614174006")
 ATTEMPT_ID = ProtocolExecutionAttemptId("123e4567-e89b-42d3-a456-426614174007")
 TASK_ID = ProtocolTaskId("123e4567-e89b-42d3-a456-426614174008")
-VIDEO_URL = "https://www.douyin.com/video/7351234567890123456"
-COMMENT_INPUT = 'textarea[aria-label="留下你的精彩评论"]'
-COMMENT_SUBMIT = 'button[aria-label="发表评论"]'
-FINAL_CONFIRMATION = '[role="status"]:has-text("评论成功")'
-LOGIN_DIALOG = '[role="dialog"]:has-text("扫码登录")'
-BLOCKING_DIALOG = '[role="dialog"]'
-SECOND_COMMENT_INPUT = 'textarea[placeholder="留下你的精彩评论"]'
+
+COMMENT_INPUT = "留下你的精彩评论"
+COMMENT_SUBMIT = "发表评论"
+SUCCESS_TOAST = "评论成功"
 
 
 class Clock:
-    def __init__(self, value: object = NOW) -> None:
+    def __init__(self, value: datetime = NOW) -> None:
         self.value = value
 
     def now(self) -> datetime:
-        return cast(datetime, self.value)
+        return self.value
 
 
-class SequenceClock(Clock):
-    def __init__(self, values: list[object]) -> None:
-        self.values = iter(values)
+class FakeReplayPage:
+    """脚本化语义页面：锚点按名字可寻，条件按名字成立。"""
 
-    def now(self) -> datetime:
-        value = next(self.values)
-        if isinstance(value, BaseException):
-            raise value
-        return cast(datetime, value)
+    def __init__(
+        self, *, missing: set[str] | None = None, failing: set[str] | None = None
+    ) -> None:
+        self.missing = missing or set()
+        self.failing = failing or set()
+        self.side_effects: list[tuple[str, str, str | None]] = []
+        self.filled: list[str] = []
 
+    def find(
+        self,
+        role: str,
+        name: str,
+        *,
+        near_text: str | None = None,
+        relative_position: str | None = None,
+    ) -> object | None:
+        return None if name in self.missing else (role, name)
 
-class BrokenTimezone(tzinfo):
-    def utcoffset(self, value: datetime | None) -> timedelta | None:
-        raise RuntimeError("private timezone failure")
+    def holds(self, kind: str, *, role=None, name=None, pattern=None) -> bool:
+        return (pattern or name) not in self.failing
 
-    def dst(self, value: datetime | None) -> timedelta | None:
-        return None
+    def act(self, kind: str, handle: object, value: str | None) -> None:
+        _role, name = cast(tuple[str, str], handle)
+        self.side_effects.append((kind, name, value))
+        if kind == "fill" and value is not None:
+            self.filled.append(value)
 
-    def tzname(self, value: datetime | None) -> str | None:
-        return None
-
-
-class Locator:
-    def __init__(self, selector: str, page: Page) -> None:
-        self.selector = selector
-        self.page = page
+    def current_path(self) -> str:
+        return "/video"
 
     @property
-    def first(self) -> Locator:
-        return self
-
-    def locator(self, selector: str) -> Locator:
-        """Every element this page models is on screen, so the filter keeps them all."""
-        assert selector == VISIBLE_MATCH_ENGINE
-        return self
-
-    def count(self) -> int:
-        if self.page.locator_failure:
-            raise RuntimeError("private locator failure")
+    def submit_clicks(self) -> int:
         return sum(
-            selector in self.page.visible_selectors for selector in self.selector.split(", ")
+            1 for kind, name, _ in self.side_effects if (kind, name) == ("click", COMMENT_SUBMIT)
         )
 
-    def wait_for(self, *, state: str, timeout: float) -> None:
-        assert state == "visible"
-        assert timeout > 0
 
-    def fill(self, value: str, *, timeout: float) -> None:
-        assert timeout > 0
-        if self.page.fill_failure is not None:
-            raise self.page.fill_failure
-        self.page.filled.append(value)
-        if self.page.after_fill_selectors is not None:
-            self.page.visible_selectors = self.page.after_fill_selectors
-
-    def click(self, *, timeout: float) -> None:
-        assert timeout > 0
-        self.page.clicks += 1
-        if self.page.click_failure is not None:
-            raise self.page.click_failure
-        self.page.visible_selectors = self.page.after_click_selectors
-        if self.page.after_click_url is not None:
-            self.page.url = self.page.after_click_url
+def resource_id(index: int) -> str:
+    return f"123e4567-e89b-42d3-a456-4266141{74100 + index:05d}"[:36]
 
 
-class Page:
-    def __init__(
-        self,
-        *,
-        url: str = VIDEO_URL,
-        visible_selectors: set[str] | None = None,
-    ) -> None:
-        self.url = url
-        self.visible_selectors = (
-            {COMMENT_INPUT, COMMENT_SUBMIT} if visible_selectors is None else visible_selectors
-        )
-        self.filled: list[str] = []
-        self.clicks = 0
-        self.requested_selectors: list[str] = []
-        self.locator_failure = False
-        self.fill_failure: BaseException | None = None
-        self.click_failure: BaseException | None = None
-        self.after_fill_selectors: set[str] | None = None
-        self.after_click_selectors = {FINAL_CONFIRMATION}
-        self.after_click_url: str | None = None
-
-    def locator(self, selector: str) -> Locator:
-        self.requested_selectors.append(selector)
-        return Locator(selector, self)
-
-
-def resource_id(index: int, kind: type[str]) -> str:
-    return kind(str(UUID(f"423e4567-e89b-42d3-a456-{index:012d}")))
-
-
-def authorization(
-    index: int,
-    *,
-    action: DouyinSearchExposureAction = DouyinSearchExposureAction.COMMENT,
-    task_id: ProtocolTaskId = TASK_ID,
-) -> ActionAuthorizationExpectation:
-    action_id = ProtocolActionId(resource_id(index, str))
+def authorization(index: int) -> ActionAuthorizationExpectation:
+    action_id = ProtocolActionId(f"123e4567-e89b-42d3-a456-4266142{index:05d}")
     return ActionAuthorizationExpectation(
         action_id=action_id,
-        target_id=ProtocolTargetId(resource_id(index + 100, str)),
+        target_id=ProtocolTargetId(f"123e4567-e89b-42d3-a456-4266143{index:05d}"),
         execution_attempt_id=ATTEMPT_ID,
-        task_id=task_id,
+        task_id=TASK_ID,
         installation_id=INSTALLATION_ID,
         executor_id=EXECUTOR_ID,
         platform="douyin",
-        action=action,
+        action=DouyinSearchExposureAction.COMMENT,
         idempotency_key=action_authorization_idempotency_key(action_id),
     )
 
@@ -212,524 +162,294 @@ def intent(
     )
 
 
+def seeded_orchestrator() -> SkillOrchestrator:
+    # 每个用例新建（统计独立），但装载的是仓库里真实提交的种子。
+    return SkillOrchestrator(load_seed_registry())
+
+
+def empty_orchestrator() -> SkillOrchestrator:
+    return SkillOrchestrator(SkillRegistry(trusted_public_key=b"\x01" * 32))
+
+
 def execute(
-    page: Page,
+    page: FakeReplayPage,
     gate: ExecutorActionGate,
     ledger: ExecutorLedger,
     clock: Clock,
     action_intent: DouyinCommentActionIntent,
+    *,
+    orchestrator: SkillOrchestrator | None = None,
 ) -> DouyinCommentActionReceipt:
     return DouyinCommentActionExecution(
-        window=BrowserWindow._for_runtime(object(), cast(Any, page)),
+        window=BrowserWindow._for_runtime(object(), cast(Any, object())),
         action_gate=gate,
         ledger=ledger,
         clock=clock,
+        orchestrator=orchestrator if orchestrator is not None else seeded_orchestrator(),
+        replay_page_factory=lambda _window: page,
     ).run(intent=action_intent)
 
 
-def test_comment_action_admits_prepares_clicks_once_and_verifies(tmp_path: Path) -> None:
-    expected = authorization(1)
-    gate, ledger, clock = dependencies(tmp_path / "state")
-    page = Page()
-    action_intent = DouyinCommentActionIntent(
-        authorization=expected,
-        message_template=ActionMessageTemplate(source="您好 {{target_display_name}} 内容很有启发"),
-        target_summary=DouyinCandidateSummary(display_name="目标账号", public_handle=None),
-    )
-
-    receipt = execute(page, gate, ledger, clock, action_intent)
-
-    assert receipt.state is DouyinCommentActionState.VERIFIED
-    assert receipt.evidence is DouyinCommentActionEvidence.COMMENT_CONFIRMED
-    assert receipt.side_effect_state is SideEffectState.VERIFIED
-    assert receipt.replayed is False
-    assert page.filled == ["您好 目标账号 内容很有启发"]
-    assert page.clicks == 1
-    persisted = ledger.get_side_effect(str(expected.action_id))
-    assert persisted is not None
-    assert persisted.state is SideEffectState.VERIFIED
-    assert len(persisted.effect_fingerprint) == 32
-    assert "您好" not in ledger.database_path.read_bytes().decode("utf-8", errors="ignore")
-    assert receipt.completed is True and receipt.circuit_open is False
-    assert str(expected.action_id) not in repr(receipt)
-
-
-def test_verified_and_uncertain_replays_never_touch_the_page(tmp_path: Path) -> None:
-    expected = authorization(10)
-    gate, ledger, clock = dependencies(tmp_path / "verified")
-    action_intent = intent(expected)
-    first_page = Page()
-    assert execute(first_page, gate, ledger, clock, action_intent).completed
-
-    replay_page = Page()
-    replay = execute(replay_page, gate, ledger, clock, action_intent)
-    assert replay.evidence is DouyinCommentActionEvidence.REPLAY_VERIFIED
-    assert replay.replayed is True
-    assert replay.side_effect_state is SideEffectState.VERIFIED
-    assert replay_page.requested_selectors == []
-    assert replay_page.clicks == 0
-
-    uncertain_expected = authorization(11)
-    uncertain_gate, uncertain_ledger, uncertain_clock = dependencies(tmp_path / "uncertain")
-    failing_page = Page()
-    failing_page.click_failure = RuntimeError("private click failure")
-    first_uncertain = execute(
-        failing_page,
-        uncertain_gate,
-        uncertain_ledger,
-        uncertain_clock,
-        intent(uncertain_expected),
-    )
-    assert first_uncertain.state is DouyinCommentActionState.OUTCOME_UNCERTAIN
-    assert first_uncertain.evidence is DouyinCommentActionEvidence.DISPATCH_UNAVAILABLE
-    assert first_uncertain.side_effect_state is SideEffectState.UNCERTAIN
-    assert failing_page.clicks == 1
-
-    uncertain_replay_page = Page()
-    uncertain_replay = execute(
-        uncertain_replay_page,
-        uncertain_gate,
-        uncertain_ledger,
-        uncertain_clock,
-        intent(uncertain_expected),
-    )
-    assert uncertain_replay.evidence is DouyinCommentActionEvidence.REPLAY_UNCERTAIN
-    assert uncertain_replay.replayed is True
-    assert uncertain_replay_page.requested_selectors == []
-    assert uncertain_replay_page.clicks == 0
-
-
-def test_prepared_retry_can_dispatch_once_but_changed_copy_is_rejected(tmp_path: Path) -> None:
-    expected = authorization(20)
-    gate, ledger, clock = dependencies(tmp_path / "retry")
-    blocked = Page(visible_selectors={COMMENT_INPUT, COMMENT_SUBMIT, BLOCKING_DIALOG})
-    first = execute(blocked, gate, ledger, clock, intent(expected))
-    assert first.evidence is DouyinCommentActionEvidence.READY_DIALOG_BLOCKED
-    assert first.side_effect_state is SideEffectState.PREPARED
-    assert blocked.filled == [] and blocked.clicks == 0
-
-    ready = Page()
-    second = execute(ready, gate, ledger, clock, intent(expected))
-    assert second.evidence is DouyinCommentActionEvidence.COMMENT_CONFIRMED
-    assert ready.clicks == 1
-
-    other_expected = authorization(21)
-    other_gate, other_ledger, other_clock = dependencies(tmp_path / "changed")
-    first_copy = execute(
-        Page(visible_selectors={BLOCKING_DIALOG}),
-        other_gate,
-        other_ledger,
-        other_clock,
-        intent(other_expected, "第一版评论"),
-    )
-    assert first_copy.side_effect_state is SideEffectState.PREPARED
-    changed_page = Page()
-    changed = execute(
-        changed_page,
-        other_gate,
-        other_ledger,
-        other_clock,
-        intent(other_expected, "第二版评论"),
-    )
-    assert changed.evidence is DouyinCommentActionEvidence.LEDGER_UNAVAILABLE
-    assert changed_page.requested_selectors == [] and changed_page.clicks == 0
-
-
-@pytest.mark.parametrize(
-    ("page", "evidence"),
-    (
-        (
-            Page(visible_selectors={COMMENT_INPUT, COMMENT_SUBMIT, LOGIN_DIALOG}),
-            DouyinCommentActionEvidence.READY_LOGIN_REQUIRED,
-        ),
-        (
-            Page(visible_selectors=set()),
-            DouyinCommentActionEvidence.READY_TIMED_OUT,
-        ),
-        (
-            Page(url="https://www.douyin.com/live"),
-            DouyinCommentActionEvidence.READY_PAGE_VERSION_UNKNOWN,
-        ),
-        (
-            Page(visible_selectors={COMMENT_INPUT, SECOND_COMMENT_INPUT, COMMENT_SUBMIT}),
-            DouyinCommentActionEvidence.READY_CONFLICTING_ANCHORS,
-        ),
-        (
-            Page(visible_selectors={FINAL_CONFIRMATION}),
-            DouyinCommentActionEvidence.STALE_CONFIRMATION,
-        ),
-    ),
-)
-def test_ready_failures_remain_prepared_without_fill_or_click(
-    tmp_path: Path,
-    page: Page,
-    evidence: DouyinCommentActionEvidence,
-) -> None:
-    expected = authorization(30)
-    gate, ledger, clock = dependencies(tmp_path / evidence.value)
-    receipt = execute(page, gate, ledger, clock, intent(expected))
-    assert receipt.state is DouyinCommentActionState.NOT_DISPATCHED
-    assert receipt.evidence is evidence
-    assert receipt.side_effect_state is SideEffectState.PREPARED
-    assert page.filled == [] and page.clicks == 0
-
-
-@pytest.mark.parametrize("failure", (RuntimeError("private"), PlaywrightTimeoutError("private")))
-def test_fill_or_pre_dispatch_drift_never_acquires_dispatch_permission(
-    tmp_path: Path,
-    failure: BaseException,
-) -> None:
-    expected = authorization(40)
-    gate, ledger, clock = dependencies(tmp_path / type(failure).__name__)
-    page = Page()
-    page.fill_failure = failure
-    receipt = execute(page, gate, ledger, clock, intent(expected))
-    assert receipt.evidence is DouyinCommentActionEvidence.PREPARE_UNAVAILABLE
-    assert page.clicks == 0
-    persisted = ledger.get_side_effect(str(expected.action_id))
-    assert persisted is not None and persisted.state is SideEffectState.PREPARED
-
-    drift_expected = authorization(41)
-    drift_gate, drift_ledger, drift_clock = dependencies(
-        tmp_path / f"drift-{type(failure).__name__}"
-    )
-    drift = Page()
-    drift.after_fill_selectors = set()
-    drifted = execute(
-        drift,
-        drift_gate,
-        drift_ledger,
-        drift_clock,
-        intent(drift_expected),
-    )
-    assert drifted.evidence is DouyinCommentActionEvidence.PREPARE_UNAVAILABLE
-    assert drift.clicks == 0
-
-
-def test_dispatch_permission_failure_occurs_after_fill_but_before_click(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    expected = authorization(50)
-    gate, ledger, clock = dependencies(tmp_path / "state")
-    page = Page()
-
-    def reject_dispatch(*args: object, **kwargs: object) -> object:
-        raise RuntimeError("private ledger failure")
-
-    monkeypatch.setattr(ExecutorLedger, "begin_side_effect_dispatch", reject_dispatch)
-    receipt = execute(page, gate, ledger, clock, intent(expected))
-    assert receipt.evidence is DouyinCommentActionEvidence.DISPATCH_PERMISSION_REJECTED
-    assert page.filled == ["固定评论内容"] and page.clicks == 0
-
-
-def test_dispatch_race_loser_observes_persisted_state_without_click(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    expected = authorization(51)
-    gate, ledger, clock = dependencies(tmp_path / "state")
-    page = Page()
-    original = ExecutorLedger.begin_side_effect_dispatch
-
-    def lose_dispatch(opened: ExecutorLedger, **kwargs: object) -> object:
-        original(opened, **cast(Any, kwargs))
-        return original(opened, **cast(Any, kwargs))
-
-    monkeypatch.setattr(ExecutorLedger, "begin_side_effect_dispatch", lose_dispatch)
-    receipt = execute(page, gate, ledger, clock, intent(expected))
-    assert receipt.evidence is DouyinCommentActionEvidence.REPLAY_UNCERTAIN
-    assert receipt.side_effect_state is SideEffectState.DISPATCHED
-    assert receipt.replayed is True
-    assert page.clicks == 0
-
-
-@pytest.mark.parametrize(
-    ("click_failure", "evidence"),
-    (
-        (
-            PlaywrightTimeoutError("private timeout"),
-            DouyinCommentActionEvidence.DISPATCH_TIMED_OUT,
-        ),
-        (RuntimeError("private failure"), DouyinCommentActionEvidence.DISPATCH_UNAVAILABLE),
-    ),
-)
-def test_click_failure_is_settled_uncertain_and_never_retried(
-    tmp_path: Path,
-    click_failure: BaseException,
-    evidence: DouyinCommentActionEvidence,
-) -> None:
-    expected = authorization(60)
-    gate, ledger, clock = dependencies(tmp_path / evidence.value)
-    page = Page()
-    page.click_failure = click_failure
-    receipt = execute(page, gate, ledger, clock, intent(expected))
-    assert receipt.state is DouyinCommentActionState.OUTCOME_UNCERTAIN
-    assert receipt.evidence is evidence
-    assert receipt.side_effect_state is SideEffectState.UNCERTAIN
-    assert page.clicks == 1
-
-
-@pytest.mark.parametrize(
-    ("selectors", "url", "evidence"),
-    (
-        (
-            {COMMENT_INPUT, COMMENT_SUBMIT, LOGIN_DIALOG},
-            VIDEO_URL,
-            DouyinCommentActionEvidence.FINAL_LOGIN_REQUIRED,
-        ),
-        (
-            {COMMENT_INPUT, COMMENT_SUBMIT, BLOCKING_DIALOG},
-            VIDEO_URL,
-            DouyinCommentActionEvidence.FINAL_DIALOG_BLOCKED,
-        ),
-        (
-            {COMMENT_INPUT, COMMENT_SUBMIT},
-            VIDEO_URL,
-            DouyinCommentActionEvidence.FINAL_TIMED_OUT,
-        ),
-        (
-            {COMMENT_INPUT, COMMENT_SUBMIT},
-            "https://www.douyin.com/live",
-            DouyinCommentActionEvidence.FINAL_PAGE_VERSION_UNKNOWN,
-        ),
-        (
-            {COMMENT_INPUT, SECOND_COMMENT_INPUT, COMMENT_SUBMIT},
-            VIDEO_URL,
-            DouyinCommentActionEvidence.FINAL_CONFLICTING_ANCHORS,
-        ),
-    ),
-)
-def test_unconfirmed_post_click_state_is_uncertain(
-    tmp_path: Path,
-    selectors: set[str],
-    url: str,
-    evidence: DouyinCommentActionEvidence,
-) -> None:
-    expected = authorization(70)
-    gate, ledger, clock = dependencies(tmp_path / evidence.value)
-    page = Page()
-    page.after_click_selectors = selectors
-    page.after_click_url = url
-    receipt = execute(page, gate, ledger, clock, intent(expected))
-    assert receipt.state is DouyinCommentActionState.OUTCOME_UNCERTAIN
-    assert receipt.evidence is evidence
-    assert receipt.side_effect_state is SideEffectState.UNCERTAIN
-    assert page.clicks == 1
-
-
-def test_page_and_verification_failures_have_closed_stage_specific_receipts(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    expected = authorization(80)
-    gate, ledger, clock = dependencies(tmp_path / "ready-page")
-    failed_ready = Page()
-    failed_ready.locator_failure = True
-    ready_receipt = execute(failed_ready, gate, ledger, clock, intent(expected))
-    assert ready_receipt.evidence is DouyinCommentActionEvidence.READY_PAGE_UNAVAILABLE
-
-    final_expected = authorization(81)
-    final_gate, final_ledger, final_clock = dependencies(tmp_path / "final-page")
-    failed_final = Page()
-    failed_final.after_click_selectors = {FINAL_CONFIRMATION}
-
-    def reject_final(_page: object) -> object:
-        raise RuntimeError("private final drift")
-
-    monkeypatch.setattr(
-        "automation_tool.executor.rpa.douyin.comment_page.DouyinCommentPage.final_confirmation",
-        reject_final,
-    )
-    final_receipt = execute(
-        failed_final,
-        final_gate,
-        final_ledger,
-        final_clock,
-        intent(final_expected),
-    )
-    assert final_receipt.evidence is DouyinCommentActionEvidence.VERIFICATION_UNAVAILABLE
-    assert final_receipt.side_effect_state is SideEffectState.UNCERTAIN
-
-
-def test_uncertain_receipt_keeps_dispatched_fact_when_settlement_is_unavailable(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    expected = authorization(90)
-    gate, ledger, clock = dependencies(tmp_path / "state")
-    page = Page()
-    page.click_failure = RuntimeError("private")
-
-    def reject_settlement(*args: object, **kwargs: object) -> object:
-        raise RuntimeError("private settlement")
-
-    monkeypatch.setattr(ExecutorLedger, "mark_side_effect_uncertain", reject_settlement)
-    receipt = execute(page, gate, ledger, clock, intent(expected))
-    assert receipt.state is DouyinCommentActionState.OUTCOME_UNCERTAIN
-    assert receipt.side_effect_state is SideEffectState.DISPATCHED
-    assert receipt.side_effect_revision == 2
-
-
-@pytest.mark.parametrize(
-    ("reason", "evidence"),
-    (
-        (
-            LocalActionLimitReason.EMERGENCY_STOP,
-            DouyinCommentActionEvidence.LOCAL_EMERGENCY_STOP,
-        ),
-        (
-            LocalActionLimitReason.MINIMUM_INTERVAL,
-            DouyinCommentActionEvidence.LOCAL_MINIMUM_INTERVAL,
-        ),
-        (
-            LocalActionLimitReason.TASK_ACTION_LIMIT,
-            DouyinCommentActionEvidence.LOCAL_TASK_ACTION_LIMIT,
-        ),
-    ),
-)
-def test_local_gate_limits_return_no_effect_receipts_before_dom_access(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    reason: LocalActionLimitReason,
-    evidence: DouyinCommentActionEvidence,
-) -> None:
-    expected = authorization(100)
-    gate, ledger, clock = dependencies(tmp_path / reason.value)
-    page = Page()
-
-    def limited(*args: object, **kwargs: object) -> object:
-        raise ActionGateLimited(reason)
-
-    monkeypatch.setattr(ExecutorActionGate, "admit", limited)
-    receipt = execute(page, gate, ledger, clock, intent(expected))
-    assert receipt.evidence is evidence
-    assert receipt.side_effect_state is None
-    assert page.requested_selectors == []
-
-
-def test_ledger_prepare_failure_never_accesses_dom(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    other_expected = authorization(111)
-    other_gate, other_ledger, other_clock = dependencies(tmp_path / "ledger")
-    ledger_page = Page()
-
-    def reject_prepare(*args: object, **kwargs: object) -> object:
-        raise RuntimeError("private")
-
-    monkeypatch.setattr(ExecutorLedger, "prepare_side_effect", reject_prepare)
-    unavailable = execute(
-        ledger_page,
-        other_gate,
-        other_ledger,
-        other_clock,
-        intent(other_expected),
-    )
-    assert unavailable.evidence is DouyinCommentActionEvidence.LEDGER_UNAVAILABLE
-    assert ledger_page.requested_selectors == []
-
-
-@pytest.mark.parametrize(
-    "invalid_time",
-    (
-        None,
-        NOW.replace(tzinfo=None),
-        NOW.astimezone(timezone(timedelta(hours=1))),
-        NOW.replace(tzinfo=BrokenTimezone()),
-        RuntimeError("private clock failure"),
-    ),
-)
-def test_invalid_execution_clock_fails_before_prepared_and_dom(
-    tmp_path: Path,
-    invalid_time: object,
-) -> None:
-    expected = authorization(115)
-    clock = SequenceClock([NOW, NOW, invalid_time])
-    gate, ledger, _ = dependencies(tmp_path / type(invalid_time).__name__, clock=clock)
-    page = Page()
-    receipt = execute(page, gate, ledger, clock, intent(expected))
-    assert receipt.evidence is DouyinCommentActionEvidence.LEDGER_UNAVAILABLE
-    assert ledger.get_side_effect(str(expected.action_id)) is None
-    assert page.requested_selectors == []
-
-
-def test_intent_execution_and_receipt_contracts_are_closed_and_redacted(
-    tmp_path: Path,
-) -> None:
-    expected = authorization(120)
-    gate, ledger, clock = dependencies(tmp_path / "state")
-    valid_intent = intent(expected, "您好 {{target_display_name}}")
-    execution = DouyinCommentActionExecution(
-        window=BrowserWindow._for_runtime(object(), cast(Any, Page())),
-        action_gate=gate,
-        ledger=ledger,
-        clock=clock,
-    )
-    assert repr(valid_intent) == "DouyinCommentActionIntent(<redacted>)"
-    assert repr(execution) == "DouyinCommentActionExecution(<redacted>)"
-    receipt = execution.run(intent=valid_intent)
-    assert "目标账号" not in repr(receipt)
-    with pytest.raises(DouyinCommentActionRejected):
-        execution.run(intent=valid_intent)
-
-    direct_message = authorization(121, action=DouyinSearchExposureAction.DIRECT_MESSAGE)
-    for values in (
-        {
-            "authorization": direct_message,
-            "message_template": ActionMessageTemplate(source="固定内容"),
-            "target_summary": DouyinCandidateSummary(display_name="目标账号", public_handle=None),
-        },
-        {
-            "authorization": expected,
-            "message_template": ActionMessageTemplate(source="x" * 477 + "{{target_display_name}}"),
-            "target_summary": DouyinCandidateSummary(display_name="目" * 80, public_handle=None),
-        },
-        {
-            "authorization": expected,
-            "message_template": ActionMessageTemplate(source="您好 {{target_display_name}}"),
-            "target_summary": DouyinCandidateSummary(
-                display_name="{{target_display_name}}", public_handle=None
+class TestSkillDrivenHappyPath:
+    def test_replay_dispatches_once_verifies_and_keeps_the_message_out_of_the_ledger(
+        self, tmp_path: Path
+    ) -> None:
+        expected = authorization(1)
+        gate, ledger, clock = dependencies(tmp_path / "state")
+        page = FakeReplayPage()
+        action_intent = DouyinCommentActionIntent(
+            authorization=expected,
+            message_template=ActionMessageTemplate(
+                source="您好 {{target_display_name}} 内容很有启发"
             ),
-        },
-    ):
-        with pytest.raises(DouyinCommentActionRejected):
-            DouyinCommentActionIntent(**values)
+            target_summary=DouyinCandidateSummary(display_name="目标账号", public_handle=None),
+        )
 
-    for values in (
-        {"window": object(), "action_gate": gate, "ledger": ledger, "clock": clock},
-        {
-            "window": BrowserWindow._for_runtime(object(), cast(Any, Page())),
-            "action_gate": object(),
-            "ledger": ledger,
-            "clock": clock,
-        },
-        {
-            "window": BrowserWindow._for_runtime(object(), cast(Any, Page())),
-            "action_gate": gate,
-            "ledger": object(),
-            "clock": clock,
-        },
-        {
-            "window": BrowserWindow._for_runtime(object(), cast(Any, Page())),
-            "action_gate": gate,
-            "ledger": ledger,
-            "clock": object(),
-        },
-    ):
-        with pytest.raises(DouyinCommentActionRejected):
-            DouyinCommentActionExecution(**values)  # type: ignore[arg-type]
+        receipt = execute(page, gate, ledger, clock, action_intent)
 
-    for changes in (
-        {"action_id": cast(ProtocolActionId, str(expected.action_id))},
-        {"target_id": cast(ProtocolTargetId, str(expected.target_id))},
-        {"state": cast(DouyinCommentActionState, "verified")},
-        {"evidence": DouyinCommentActionEvidence.REPLAY_VERIFIED},
-        {"side_effect_state": SideEffectState.DISPATCHED},
-        {"side_effect_revision": 2},
-        {"replayed": True},
-        {"execution_version": "private"},
-    ):
+        assert receipt.state is DouyinCommentActionState.VERIFIED
+        assert receipt.evidence is DouyinCommentActionEvidence.COMMENT_CONFIRMED
+        assert receipt.side_effect_state is SideEffectState.VERIFIED
+        assert receipt.side_effect_revision == 3
+        assert receipt.replayed is False
+        # 模板已渲染、以运行时参数进入回放；发表恰好点了一次。
+        assert page.filled == ["您好 目标账号 内容很有启发"]
+        assert page.submit_clicks == 1
+        persisted = ledger.get_side_effect(str(expected.action_id))
+        assert persisted is not None and persisted.state is SideEffectState.VERIFIED
+        # 评论正文不落台账。
+        assert "您好" not in ledger.database_path.read_bytes().decode(
+            "utf-8", errors="ignore"
+        )
+        assert str(expected.action_id) not in repr(receipt)
+
+    def test_the_dispatch_is_registered_before_the_external_click(
+        self, tmp_path: Path
+    ) -> None:
+        expected = authorization(2)
+        gate, ledger, clock = dependencies(tmp_path / "state")
+
+        observed: list[SideEffectState] = []
+
+        class ObservingPage(FakeReplayPage):
+            def act(self, kind: str, handle: object, value: str | None) -> None:
+                _role, name = cast(tuple[str, str], handle)
+                if (kind, name) == ("click", COMMENT_SUBMIT):
+                    effect = ledger.get_side_effect(str(expected.action_id))
+                    assert effect is not None
+                    observed.append(effect.state)
+                super().act(kind, handle, value)
+
+        receipt = execute(ObservingPage(), gate, ledger, clock, intent(expected))
+
+        assert receipt.completed is True
+        # 点击发生时台账已是 DISPATCHED——不是点完才补记。
+        assert observed == [SideEffectState.DISPATCHED]
+
+
+class TestHonestSkillStates:
+    def test_no_published_skill_lands_awaiting_recording(self, tmp_path: Path) -> None:
+        expected = authorization(3)
+        gate, ledger, clock = dependencies(tmp_path / "state")
+        page = FakeReplayPage()
+
+        receipt = execute(
+            page, gate, ledger, clock, intent(expected), orchestrator=empty_orchestrator()
+        )
+
+        assert receipt.state is DouyinCommentActionState.NOT_DISPATCHED
+        assert receipt.evidence is DouyinCommentActionEvidence.SKILL_AWAITING_RECORDING
+        assert receipt.side_effect_state is SideEffectState.PREPARED
+        assert receipt.side_effect_revision == 1
+        assert page.side_effects == []
+
+    def test_a_pre_dispatch_replay_failure_lands_recovery_pending(
+        self, tmp_path: Path
+    ) -> None:
+        expected = authorization(4)
+        gate, ledger, clock = dependencies(tmp_path / "state")
+        page = FakeReplayPage(missing={COMMENT_INPUT})
+
+        receipt = execute(page, gate, ledger, clock, intent(expected))
+
+        assert receipt.state is DouyinCommentActionState.NOT_DISPATCHED
+        assert receipt.evidence is DouyinCommentActionEvidence.SKILL_RECOVERY_PENDING
+        assert receipt.side_effect_state is SideEffectState.PREPARED
+        # 外部步从未尝试：台账停在 PREPARED，页面上没有发表点击。
+        persisted = ledger.get_side_effect(str(expected.action_id))
+        assert persisted is not None and persisted.state is SideEffectState.PREPARED
+        assert page.submit_clicks == 0
+
+    def test_a_post_dispatch_failure_reconciles_and_never_resends(
+        self, tmp_path: Path
+    ) -> None:
+        expected = authorization(5)
+        gate, ledger, clock = dependencies(tmp_path / "state")
+        # 发表点击成功，但「评论成功」toast 一直没出现——结果不确定。
+        page = FakeReplayPage(failing={SUCCESS_TOAST})
+
+        receipt = execute(page, gate, ledger, clock, intent(expected))
+
+        assert receipt.state is DouyinCommentActionState.OUTCOME_UNCERTAIN
+        assert receipt.evidence is DouyinCommentActionEvidence.SKILL_RECONCILE_REQUIRED
+        assert receipt.side_effect_state is SideEffectState.UNCERTAIN
+        assert receipt.side_effect_revision == 3
+        assert page.submit_clicks == 1
+
+
+class TestLedgerBracket:
+    def test_a_refused_dispatch_stops_before_any_external_click(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        expected = authorization(6)
+        gate, ledger, clock = dependencies(tmp_path / "state")
+        page = FakeReplayPage()
+
+        def reject_dispatch(*args: object, **kwargs: object) -> object:
+            raise RuntimeError("private ledger failure")
+
+        monkeypatch.setattr(ExecutorLedger, "begin_side_effect_dispatch", reject_dispatch)
+        receipt = execute(page, gate, ledger, clock, intent(expected))
+
+        assert receipt.evidence is DouyinCommentActionEvidence.DISPATCH_PERMISSION_REJECTED
+        assert receipt.side_effect_state is SideEffectState.PREPARED
+        # 填充已发生（内部步），但外部点击没有。
+        assert page.filled == ["固定评论内容"]
+        assert page.submit_clicks == 0
+
+    def test_a_failed_verification_settles_uncertain(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        expected = authorization(7)
+        gate, ledger, clock = dependencies(tmp_path / "state")
+        page = FakeReplayPage()
+
+        def reject_verify(*args: object, **kwargs: object) -> object:
+            raise RuntimeError("private verification failure")
+
+        monkeypatch.setattr(ExecutorLedger, "verify_side_effect", reject_verify)
+        receipt = execute(page, gate, ledger, clock, intent(expected))
+
+        assert receipt.state is DouyinCommentActionState.OUTCOME_UNCERTAIN
+        assert receipt.evidence is DouyinCommentActionEvidence.VERIFICATION_UNAVAILABLE
+        assert receipt.side_effect_state is SideEffectState.UNCERTAIN
+
+    def test_an_unavailable_ledger_yields_no_effect(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        expected = authorization(8)
+        gate, ledger, clock = dependencies(tmp_path / "state")
+        page = FakeReplayPage()
+
+        def reject_prepare(*args: object, **kwargs: object) -> object:
+            raise RuntimeError("private ledger failure")
+
+        monkeypatch.setattr(ExecutorLedger, "prepare_side_effect", reject_prepare)
+        receipt = execute(page, gate, ledger, clock, intent(expected))
+
+        assert receipt.evidence is DouyinCommentActionEvidence.LEDGER_UNAVAILABLE
+        assert receipt.side_effect_state is None
+        assert page.side_effects == []
+
+
+class TestIdempotency:
+    def test_a_verified_effect_replays_without_touching_the_page(
+        self, tmp_path: Path
+    ) -> None:
+        expected = authorization(9)
+        gate, ledger, clock = dependencies(tmp_path / "state")
+        first = execute(FakeReplayPage(), gate, ledger, clock, intent(expected))
+        assert first.completed is True
+
+        untouched = FakeReplayPage()
+        second = execute(untouched, gate, ledger, clock, intent(expected))
+
+        assert second.state is DouyinCommentActionState.VERIFIED
+        assert second.evidence is DouyinCommentActionEvidence.REPLAY_VERIFIED
+        assert second.replayed is True
+        assert untouched.side_effects == []
+
+    def test_an_uncertain_effect_replays_without_touching_the_page(
+        self, tmp_path: Path
+    ) -> None:
+        expected = authorization(10)
+        gate, ledger, clock = dependencies(tmp_path / "state")
+        first = execute(
+            FakeReplayPage(failing={SUCCESS_TOAST}), gate, ledger, clock, intent(expected)
+        )
+        assert first.state is DouyinCommentActionState.OUTCOME_UNCERTAIN
+
+        untouched = FakeReplayPage()
+        second = execute(untouched, gate, ledger, clock, intent(expected))
+
+        assert second.evidence is DouyinCommentActionEvidence.REPLAY_UNCERTAIN
+        assert second.replayed is True
+        assert untouched.side_effects == []
+
+    def test_a_changed_copy_for_the_same_action_is_refused(self, tmp_path: Path) -> None:
+        expected = authorization(11)
+        gate, ledger, clock = dependencies(tmp_path / "state")
+        first = execute(
+            FakeReplayPage(missing={COMMENT_INPUT}), gate, ledger, clock,
+            intent(expected, "第一版评论"),
+        )
+        assert first.side_effect_state is SideEffectState.PREPARED
+
+        untouched = FakeReplayPage()
+        changed = execute(untouched, gate, ledger, clock, intent(expected, "第二版评论"))
+
+        assert changed.evidence is DouyinCommentActionEvidence.LEDGER_UNAVAILABLE
+        assert untouched.side_effects == []
+
+
+class TestLocalLimits:
+    def test_the_minimum_interval_blocks_a_second_action_without_effect(
+        self, tmp_path: Path
+    ) -> None:
+        gate, ledger, clock = dependencies(
+            tmp_path / "state", minimum_interval=timedelta(minutes=5)
+        )
+        first = execute(FakeReplayPage(), gate, ledger, clock, intent(authorization(12)))
+        assert first.completed is True
+
+        untouched = FakeReplayPage()
+        limited = execute(untouched, gate, ledger, clock, intent(authorization(13)))
+
+        assert limited.state is DouyinCommentActionState.NOT_DISPATCHED
+        assert limited.evidence is DouyinCommentActionEvidence.LOCAL_MINIMUM_INTERVAL
+        assert limited.side_effect_state is None
+        assert untouched.side_effects == []
+
+
+class TestGuards:
+    def test_the_execution_runs_exactly_once(self, tmp_path: Path) -> None:
+        expected = authorization(14)
+        gate, ledger, clock = dependencies(tmp_path / "state")
+        execution = DouyinCommentActionExecution(
+            window=BrowserWindow._for_runtime(object(), cast(Any, object())),
+            action_gate=gate,
+            ledger=ledger,
+            clock=clock,
+            orchestrator=seeded_orchestrator(),
+            replay_page_factory=lambda _window: FakeReplayPage(),
+        )
+        assert execution.run(intent=intent(expected)).completed is True
         with pytest.raises(DouyinCommentActionRejected):
-            replace(receipt, **changes)
+            execution.run(intent=intent(expected))
+
+    def test_receipt_invariants_refuse_impossible_combinations(self) -> None:
+        with pytest.raises(DouyinCommentActionRejected):
+            DouyinCommentActionReceipt(
+                action_id=ProtocolActionId("123e4567-e89b-42d3-a456-426614200001"),
+                target_id=ProtocolTargetId("123e4567-e89b-42d3-a456-426614200002"),
+                state=DouyinCommentActionState.VERIFIED,
+                evidence=DouyinCommentActionEvidence.SKILL_AWAITING_RECORDING,
+                side_effect_state=SideEffectState.VERIFIED,
+                side_effect_revision=3,
+                replayed=False,
+            )
+
+    def test_the_wired_skill_is_the_committed_comment_seed(self) -> None:
+        # 动作层路由的就是仓库里那份种子——常量漂移在这里红。
+        registry = load_seed_registry()
+        assert registry.at(DOUYIN_COMMENT_SKILL_ID, 1).skill.platform == "douyin"

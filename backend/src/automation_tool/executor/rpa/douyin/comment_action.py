@@ -1,16 +1,27 @@
-"""Single-shot Douyin comment execution behind signed and durable local authority."""
+"""抖音评论动作：闸门+台账外层，页面层由自愈式技能编排器驱动。
+
+写死选择器的 Page Object 已删除。页面交互完全由已签名的技能回放完成
+（路由 SA-06 → 回放 SA-04 → 失败按 SA-05 接管决策），台账在外部步之前
+经回放器的 dispatch 钩子登记，回放的结果证据成立即 verify。
+
+诚实状态，不装成功：
+
+* 没有可路由的技能 → ``SKILL_AWAITING_RECORDING``（待技能录制）；
+* 外部步之前回放失败 → ``SKILL_RECOVERY_PENDING``（待技能修复/录制，
+  真正的 Browser Use 续跑需要视觉模型凭据与真实登录态）；
+* 外部步之后失败 → ``SKILL_RECONCILE_REQUIRED``，只对账、绝不重发。
+"""
 
 from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Protocol, cast, runtime_checkable
-
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from automation_tool.executor.action_authorization import ActionAuthorizationExpectation
 from automation_tool.executor.action_gate import (
@@ -21,14 +32,18 @@ from automation_tool.executor.action_gate import (
 )
 from automation_tool.executor.browser_runtime import BrowserWindow
 from automation_tool.executor.ledger import ExecutorLedger
-from automation_tool.executor.rpa.douyin.comment_page import (
-    DOUYIN_COMMENT_PAGE_SELECTOR_VERSION,
-    DouyinCommentPage,
-    DouyinCommentPageEvidence,
-    DouyinCommentPageObservation,
-    DouyinCommentPageState,
+from automation_tool.executor.rpa.douyin.skills import (
+    DOUYIN_COMMENT_MESSAGE_PARAMETER,
+    DOUYIN_COMMENT_SKILL_ID,
+    default_orchestrator,
 )
 from automation_tool.executor.side_effect_ledger import LocalSideEffect, SideEffectState
+from automation_tool.executor.skill_orchestrator import (
+    SkillExecutionKind,
+    SkillOrchestrator,
+)
+from automation_tool.executor.skill_replay_page import PlaywrightReplayPage
+from automation_tool.executor.skill_replayer import ReplayPage
 from automation_tool.protocol import (
     ACTION_MESSAGE_TEMPLATE_VERSION,
     ActionMessageTemplate,
@@ -38,12 +53,11 @@ from automation_tool.protocol import (
     ProtocolTargetId,
 )
 
-DOUYIN_COMMENT_ACTION_EXECUTION_VERSION = "douyin.comment-action-execution.v1"
+DOUYIN_COMMENT_ACTION_EXECUTION_VERSION = "douyin.comment-action-execution.v2"
+DOUYIN_COMMENT_VERIFICATION_VERSION = "douyin.comment-skill.v1"
 _EFFECT_FINGERPRINT_DOMAIN = "automation-tool.douyin.comment-effect.v1"
 _VERIFICATION_FINGERPRINT_DOMAIN = b"automation-tool.douyin.comment-verification.v1\0"
-_PAGE_READY_TIMEOUT_MILLISECONDS = 10_000
-_ACTION_TIMEOUT_MILLISECONDS = 15_000
-_FINAL_TIMEOUT_MILLISECONDS = 10_000
+_REPLAY_PAGE_TIMEOUT_SECONDS = 15
 
 
 class DouyinCommentActionRejected(RuntimeError):
@@ -63,23 +77,11 @@ class DouyinCommentActionEvidence(StrEnum):
     LOCAL_MINIMUM_INTERVAL = "local_minimum_interval"
     LOCAL_TASK_ACTION_LIMIT = "local_task_action_limit"
     LEDGER_UNAVAILABLE = "ledger_unavailable"
-    READY_LOGIN_REQUIRED = "ready_login_required"
-    READY_DIALOG_BLOCKED = "ready_dialog_blocked"
-    READY_TIMED_OUT = "ready_timed_out"
-    READY_PAGE_VERSION_UNKNOWN = "ready_page_version_unknown"
-    READY_CONFLICTING_ANCHORS = "ready_conflicting_anchors"
-    READY_PAGE_UNAVAILABLE = "ready_page_unavailable"
-    STALE_CONFIRMATION = "stale_confirmation"
+    SKILL_AWAITING_RECORDING = "skill_awaiting_recording"
+    SKILL_RECOVERY_PENDING = "skill_recovery_pending"
     PREPARE_UNAVAILABLE = "prepare_unavailable"
     DISPATCH_PERMISSION_REJECTED = "dispatch_permission_rejected"
-    DISPATCH_TIMED_OUT = "dispatch_timed_out"
-    DISPATCH_UNAVAILABLE = "dispatch_unavailable"
-    FINAL_LOGIN_REQUIRED = "final_login_required"
-    FINAL_DIALOG_BLOCKED = "final_dialog_blocked"
-    FINAL_TIMED_OUT = "final_timed_out"
-    FINAL_PAGE_VERSION_UNKNOWN = "final_page_version_unknown"
-    FINAL_CONFLICTING_ANCHORS = "final_conflicting_anchors"
-    FINAL_PAGE_UNAVAILABLE = "final_page_unavailable"
+    SKILL_RECONCILE_REQUIRED = "skill_reconcile_required"
     VERIFICATION_UNAVAILABLE = "verification_unavailable"
     COMMENT_CONFIRMED = "comment_confirmed"
     REPLAY_VERIFIED = "replay_verified"
@@ -97,27 +99,15 @@ _NO_EFFECT_EVIDENCE = frozenset(
 )
 _PREPARED_EVIDENCE = frozenset(
     {
-        DouyinCommentActionEvidence.READY_LOGIN_REQUIRED,
-        DouyinCommentActionEvidence.READY_DIALOG_BLOCKED,
-        DouyinCommentActionEvidence.READY_TIMED_OUT,
-        DouyinCommentActionEvidence.READY_PAGE_VERSION_UNKNOWN,
-        DouyinCommentActionEvidence.READY_CONFLICTING_ANCHORS,
-        DouyinCommentActionEvidence.READY_PAGE_UNAVAILABLE,
-        DouyinCommentActionEvidence.STALE_CONFIRMATION,
+        DouyinCommentActionEvidence.SKILL_AWAITING_RECORDING,
+        DouyinCommentActionEvidence.SKILL_RECOVERY_PENDING,
         DouyinCommentActionEvidence.PREPARE_UNAVAILABLE,
         DouyinCommentActionEvidence.DISPATCH_PERMISSION_REJECTED,
     }
 )
 _POST_DISPATCH_EVIDENCE = frozenset(
     {
-        DouyinCommentActionEvidence.DISPATCH_TIMED_OUT,
-        DouyinCommentActionEvidence.DISPATCH_UNAVAILABLE,
-        DouyinCommentActionEvidence.FINAL_LOGIN_REQUIRED,
-        DouyinCommentActionEvidence.FINAL_DIALOG_BLOCKED,
-        DouyinCommentActionEvidence.FINAL_TIMED_OUT,
-        DouyinCommentActionEvidence.FINAL_PAGE_VERSION_UNKNOWN,
-        DouyinCommentActionEvidence.FINAL_CONFLICTING_ANCHORS,
-        DouyinCommentActionEvidence.FINAL_PAGE_UNAVAILABLE,
+        DouyinCommentActionEvidence.SKILL_RECONCILE_REQUIRED,
         DouyinCommentActionEvidence.VERIFICATION_UNAVAILABLE,
         DouyinCommentActionEvidence.REPLAY_UNCERTAIN,
     }
@@ -241,12 +231,22 @@ class DouyinCommentActionClock(Protocol):
     def now(self) -> datetime: ...
 
 
-class _CommentInput(Protocol):
-    def fill(self, value: str, *, timeout: float) -> None: ...
+class _DispatchRefused(Exception):
+    """台账拒绝进入 dispatch——外部动作尚未尝试。"""
 
 
-class _CommentSubmit(Protocol):
-    def click(self, *, timeout: float) -> None: ...
+class _EffectSettled(Exception):
+    """dispatch 登记时发现效果已被此前的尝试定论。"""
+
+    def __init__(self, receipt: DouyinCommentActionReceipt) -> None:
+        super().__init__("the side effect is already settled")
+        self.receipt = receipt
+
+
+def _default_replay_page(window: BrowserWindow) -> ReplayPage:
+    return PlaywrightReplayPage(
+        window.playwright_page, action_timeout_seconds=_REPLAY_PAGE_TIMEOUT_SECONDS
+    )
 
 
 class DouyinCommentActionExecution:
@@ -259,18 +259,24 @@ class DouyinCommentActionExecution:
         action_gate: ExecutorActionGate,
         ledger: ExecutorLedger,
         clock: DouyinCommentActionClock,
+        orchestrator: SkillOrchestrator | None = None,
+        replay_page_factory: Callable[[BrowserWindow], ReplayPage] | None = None,
     ) -> None:
         if (
             not isinstance(window, BrowserWindow)
             or not isinstance(action_gate, ExecutorActionGate)
             or not isinstance(ledger, ExecutorLedger)
             or not isinstance(clock, DouyinCommentActionClock)
+            or not (orchestrator is None or isinstance(orchestrator, SkillOrchestrator))
+            or not (replay_page_factory is None or callable(replay_page_factory))
         ):
             raise DouyinCommentActionRejected
-        self._page = DouyinCommentPage(window)
+        self._window = window
         self._action_gate = action_gate
         self._ledger = ledger
         self._clock = clock
+        self._orchestrator = orchestrator
+        self._replay_page_factory = replay_page_factory or _default_replay_page
         self._executed = False
 
     def __repr__(self) -> str:
@@ -305,55 +311,82 @@ class DouyinCommentActionExecution:
         if replay is not None:
             return replay
 
-        ready = self._page.wait_for_ready(timeout_milliseconds=_PAGE_READY_TIMEOUT_MILLISECONDS)
-        ready_failure = _ready_evidence(ready)
-        if ready_failure is not None:
-            return _prepared_receipt(expected, ready_failure)
-
         try:
-            comment_input = cast(_CommentInput, self._page.comment_input())
-            comment_input.fill(intent._rendered_message, timeout=_ACTION_TIMEOUT_MILLISECONDS)
-            comment_submit = cast(_CommentSubmit, self._page.comment_submit())
+            orchestrator = (
+                self._orchestrator if self._orchestrator is not None else default_orchestrator()
+            )
+            page = self._replay_page_factory(self._window)
         except Exception:
             return _prepared_receipt(expected, DouyinCommentActionEvidence.PREPARE_UNAVAILABLE)
 
+        dispatched_effects: list[LocalSideEffect] = []
+
+        def begin_dispatch() -> None:
+            # 回放器在外部步之前调它：台账先记 DISPATCHED，平台才可能看到动作。
+            try:
+                effect = self._ledger.begin_side_effect_dispatch(
+                    action_id=str(expected.action_id),
+                    effect_fingerprint=fingerprint,
+                    dispatched_at=self._now(),
+                )
+            except Exception as error:
+                raise _DispatchRefused from error
+            settled = _receipt_for_existing(expected, effect)
+            if settled is not None:
+                raise _EffectSettled(settled)
+            dispatched_effects.append(effect)
+
         try:
-            dispatched = self._ledger.begin_side_effect_dispatch(
-                action_id=str(expected.action_id),
-                effect_fingerprint=fingerprint,
-                dispatched_at=self._now(),
+            report = orchestrator.execute(
+                DOUYIN_COMMENT_SKILL_ID,
+                page,
+                parameters={DOUYIN_COMMENT_MESSAGE_PARAMETER: intent._rendered_message},
+                on_external_dispatch=begin_dispatch,
             )
-        except Exception:
+        except _DispatchRefused:
             return _prepared_receipt(
                 expected, DouyinCommentActionEvidence.DISPATCH_PERMISSION_REJECTED
             )
-        replay = _receipt_for_existing(expected, dispatched)
-        if replay is not None:
-            return replay
-
-        try:
-            comment_submit.click(timeout=_ACTION_TIMEOUT_MILLISECONDS)
-        except PlaywrightTimeoutError:
-            return self._uncertain(
-                expected,
-                fingerprint,
-                DouyinCommentActionEvidence.DISPATCH_TIMED_OUT,
-                dispatched,
-            )
+        except _EffectSettled as settled:
+            return settled.receipt
         except Exception:
+            # 编排器/页面适配层的基础设施异常（不是回放失败）。dispatch 已
+            # 登记则结果不确定，只能对账；否则页面未被外部触碰。
+            if dispatched_effects:
+                return self._uncertain(
+                    expected,
+                    fingerprint,
+                    DouyinCommentActionEvidence.SKILL_RECONCILE_REQUIRED,
+                    dispatched_effects[0],
+                )
+            return _prepared_receipt(expected, DouyinCommentActionEvidence.PREPARE_UNAVAILABLE)
+
+        if report.kind is SkillExecutionKind.NO_ROUTE:
+            return _prepared_receipt(
+                expected, DouyinCommentActionEvidence.SKILL_AWAITING_RECORDING
+            )
+        if report.kind is SkillExecutionKind.RECOVERY_PENDING:
+            return _prepared_receipt(
+                expected, DouyinCommentActionEvidence.SKILL_RECOVERY_PENDING
+            )
+        if report.kind is SkillExecutionKind.RECONCILE_REQUIRED:
+            if not dispatched_effects:
+                # 回放器断言 dispatched 必经钩子；到不了这里才算防御。
+                return _prepared_receipt(
+                    expected, DouyinCommentActionEvidence.PREPARE_UNAVAILABLE
+                )
             return self._uncertain(
                 expected,
                 fingerprint,
-                DouyinCommentActionEvidence.DISPATCH_UNAVAILABLE,
-                dispatched,
+                DouyinCommentActionEvidence.SKILL_RECONCILE_REQUIRED,
+                dispatched_effects[0],
             )
 
-        final = self._page.wait_for_final(timeout_milliseconds=_FINAL_TIMEOUT_MILLISECONDS)
-        final_failure = _final_evidence(final)
-        if final_failure is not None:
-            return self._uncertain(expected, fingerprint, final_failure, dispatched)
+        # REPLAYED：回放完成且结果证据成立。
+        if not dispatched_effects:
+            # 路由到的技能没有外部步——什么都没发出去，不能谎称已评论。
+            return _prepared_receipt(expected, DouyinCommentActionEvidence.PREPARE_UNAVAILABLE)
         try:
-            self._page.final_confirmation()
             verified = self._ledger.verify_side_effect(
                 action_id=str(expected.action_id),
                 effect_fingerprint=fingerprint,
@@ -365,7 +398,7 @@ class DouyinCommentActionExecution:
                 expected,
                 fingerprint,
                 DouyinCommentActionEvidence.VERIFICATION_UNAVAILABLE,
-                dispatched,
+                dispatched_effects[0],
             )
         return _effect_receipt(
             expected,
@@ -440,8 +473,8 @@ def comment_action_verification_fingerprint(effect_fingerprint: bytes) -> bytes:
         _VERIFICATION_FINGERPRINT_DOMAIN
         + effect_fingerprint
         + b"\0"
-        + DOUYIN_COMMENT_PAGE_SELECTOR_VERSION.encode("ascii")
-        + b"\0final_confirmation_visible"
+        + DOUYIN_COMMENT_VERIFICATION_VERSION.encode("ascii")
+        + b"\0success_evidence_visible"
     ).digest()
 
 
@@ -455,60 +488,6 @@ def _limit_evidence(reason: LocalActionLimitReason) -> DouyinCommentActionEviden
             DouyinCommentActionEvidence.LOCAL_TASK_ACTION_LIMIT
         ),
     }[reason]
-
-
-def _ready_evidence(
-    observation: DouyinCommentPageObservation,
-) -> DouyinCommentActionEvidence | None:
-    if observation.state is DouyinCommentPageState.READY:
-        return None
-    if observation.state is DouyinCommentPageState.CONFIRMED:
-        return DouyinCommentActionEvidence.STALE_CONFIRMATION
-    if observation.state is DouyinCommentPageState.LOGIN_REQUIRED:
-        return DouyinCommentActionEvidence.READY_LOGIN_REQUIRED
-    if observation.state is DouyinCommentPageState.DIALOG_BLOCKED:
-        return DouyinCommentActionEvidence.READY_DIALOG_BLOCKED
-    return {
-        DouyinCommentPageEvidence.REQUIRED_ANCHOR_MISSING: (
-            DouyinCommentActionEvidence.READY_TIMED_OUT
-        ),
-        DouyinCommentPageEvidence.PAGE_VERSION_UNKNOWN: (
-            DouyinCommentActionEvidence.READY_PAGE_VERSION_UNKNOWN
-        ),
-        DouyinCommentPageEvidence.CONFLICTING_ANCHORS: (
-            DouyinCommentActionEvidence.READY_CONFLICTING_ANCHORS
-        ),
-        DouyinCommentPageEvidence.PAGE_UNAVAILABLE: (
-            DouyinCommentActionEvidence.READY_PAGE_UNAVAILABLE
-        ),
-    }.get(observation.evidence, DouyinCommentActionEvidence.READY_PAGE_UNAVAILABLE)
-
-
-def _final_evidence(
-    observation: DouyinCommentPageObservation,
-) -> DouyinCommentActionEvidence | None:
-    if observation.state is DouyinCommentPageState.CONFIRMED:
-        return None
-    if observation.state is DouyinCommentPageState.LOGIN_REQUIRED:
-        return DouyinCommentActionEvidence.FINAL_LOGIN_REQUIRED
-    if observation.state is DouyinCommentPageState.DIALOG_BLOCKED:
-        return DouyinCommentActionEvidence.FINAL_DIALOG_BLOCKED
-    if observation.state is DouyinCommentPageState.READY:
-        return DouyinCommentActionEvidence.FINAL_TIMED_OUT
-    return {
-        DouyinCommentPageEvidence.REQUIRED_ANCHOR_MISSING: (
-            DouyinCommentActionEvidence.FINAL_TIMED_OUT
-        ),
-        DouyinCommentPageEvidence.PAGE_VERSION_UNKNOWN: (
-            DouyinCommentActionEvidence.FINAL_PAGE_VERSION_UNKNOWN
-        ),
-        DouyinCommentPageEvidence.CONFLICTING_ANCHORS: (
-            DouyinCommentActionEvidence.FINAL_CONFLICTING_ANCHORS
-        ),
-        DouyinCommentPageEvidence.PAGE_UNAVAILABLE: (
-            DouyinCommentActionEvidence.FINAL_PAGE_UNAVAILABLE
-        ),
-    }.get(observation.evidence, DouyinCommentActionEvidence.FINAL_PAGE_UNAVAILABLE)
 
 
 def _receipt_for_existing(
@@ -585,6 +564,7 @@ def _effect_receipt(
 
 __all__ = [
     "DOUYIN_COMMENT_ACTION_EXECUTION_VERSION",
+    "DOUYIN_COMMENT_VERIFICATION_VERSION",
     "DouyinCommentActionClock",
     "DouyinCommentActionEvidence",
     "DouyinCommentActionExecution",

@@ -6,7 +6,6 @@ from typing import Any, cast
 import pytest
 
 from automation_tool.executor.rpa.douyin import (
-    comment_page,
     direct_message_page,
     profile_page,
     publish_page,
@@ -23,9 +22,6 @@ from automation_tool.executor.rpa.douyin.page_anchors import (
 SELECTORS = ('[data-e2e="captcha-container"]', 'iframe[src*="/verifycenter/captcha/"]')
 ENGINE_PREFIX = re.compile(r"^\s*[a-zA-Z_][a-zA-Z0-9_-]*\s*=")
 COMMA_JOINED_GROUPS = (
-    comment_page._COMMENT_INPUT_SELECTORS,
-    comment_page._COMMENT_SUBMIT_SELECTORS,
-    comment_page._FINAL_CONFIRMATION_SELECTORS,
     direct_message_page._MESSAGE_ENTRY_SELECTORS,
     direct_message_page._MESSAGE_INPUT_SELECTORS,
     direct_message_page._MESSAGE_SEND_SELECTORS,

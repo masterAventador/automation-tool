@@ -66,14 +66,15 @@ _COMMENT_FAILURES = {
     DouyinCommentActionEvidence.LOCAL_EMERGENCY_STOP: ActionResultEvidence.LOCAL_SAFETY_LIMIT,
     DouyinCommentActionEvidence.LOCAL_MINIMUM_INTERVAL: ActionResultEvidence.LOCAL_SAFETY_LIMIT,
     DouyinCommentActionEvidence.LOCAL_TASK_ACTION_LIMIT: ActionResultEvidence.LOCAL_SAFETY_LIMIT,
-    DouyinCommentActionEvidence.READY_LOGIN_REQUIRED: ActionResultEvidence.LOGIN_REQUIRED,
-    DouyinCommentActionEvidence.READY_DIALOG_BLOCKED: ActionResultEvidence.DIALOG_BLOCKED,
-    DouyinCommentActionEvidence.READY_TIMED_OUT: ActionResultEvidence.TIMED_OUT,
-    DouyinCommentActionEvidence.READY_PAGE_VERSION_UNKNOWN: (
+    # 待录制/待修复：自动化尚不能安全驱动这个页面。wire 层既有语义即
+    # page_version_unknown（前端显示「页面版本无法安全识别」）。
+    DouyinCommentActionEvidence.SKILL_AWAITING_RECORDING: (
         ActionResultEvidence.PAGE_VERSION_UNKNOWN
     ),
-    DouyinCommentActionEvidence.READY_CONFLICTING_ANCHORS: ActionResultEvidence.CONFLICTING_ANCHORS,
-    DouyinCommentActionEvidence.READY_PAGE_UNAVAILABLE: ActionResultEvidence.PAGE_UNAVAILABLE,
+    DouyinCommentActionEvidence.SKILL_RECOVERY_PENDING: (
+        ActionResultEvidence.PAGE_VERSION_UNKNOWN
+    ),
+    DouyinCommentActionEvidence.PREPARE_UNAVAILABLE: ActionResultEvidence.PAGE_UNAVAILABLE,
 }
 _DIRECT_FAILURES = {
     DouyinDirectMessageActionEvidence.ADMISSION_REJECTED: ActionResultEvidence.ADMISSION_REJECTED,
@@ -117,15 +118,9 @@ _BROWSE_FAILURES = {
 
 
 def _uncertain_evidence(value: object) -> ActionResultEvidence:
-    if value in {
-        DouyinCommentActionEvidence.DISPATCH_TIMED_OUT,
-        DouyinDirectMessageActionEvidence.DISPATCH_TIMED_OUT,
-    }:
+    if value is DouyinDirectMessageActionEvidence.DISPATCH_TIMED_OUT:
         return ActionResultEvidence.DISPATCH_TIMED_OUT
-    if value in {
-        DouyinCommentActionEvidence.DISPATCH_UNAVAILABLE,
-        DouyinDirectMessageActionEvidence.DISPATCH_UNAVAILABLE,
-    }:
+    if value is DouyinDirectMessageActionEvidence.DISPATCH_UNAVAILABLE:
         return ActionResultEvidence.DISPATCH_UNAVAILABLE
     if value in {
         DouyinCommentActionEvidence.REPLAY_UNCERTAIN,

@@ -8,6 +8,8 @@ from __future__ import annotations
 from automation_tool.executor.rpa.douyin.skills import (
     DOUYIN_COMMENT_MESSAGE_PARAMETER,
     DOUYIN_COMMENT_SKILL_ID,
+    DOUYIN_COMMENT_SUCCESS_NAME,
+    DOUYIN_COMMENT_SUCCESS_ROLE,
     default_orchestrator,
 )
 from automation_tool.executor.skill_orchestrator import load_seed_registry
@@ -30,9 +32,14 @@ class TestCommittedSeeds:
             and step.action.parameter == DOUYIN_COMMENT_MESSAGE_PARAMETER
             for step in skill.steps
         )
-        # 外部步的结果由可见证据证明（评论不产生导航）。
+        # 外部步的结果由可见证据证明（评论不产生导航），且对账用的常量
+        # 必须与种子文档的 successEvidence 完全一致——两处漂移会让对账
+        # 验证一个技能从不承诺的事实。
         assert any(
-            evidence.kind == "element_visible" for evidence in skill.success_evidence
+            evidence.kind == "element_visible"
+            and evidence.role == DOUYIN_COMMENT_SUCCESS_ROLE
+            and evidence.name == DOUYIN_COMMENT_SUCCESS_NAME
+            for evidence in skill.success_evidence
         )
 
     def test_the_default_orchestrator_is_shared_so_stats_accumulate(self) -> None:

@@ -147,6 +147,10 @@ motion_authoring_resources = [
     # a checkout being green proves nothing about the package
     # (REVIEW-2026-08-06 SA#5).
     "contracts/browser-use/automation-skill.v1.json",
+    # 自愈式自动化的信任锚与签名种子技能：运行时验证签名后装载，缺了
+    # 评论等技能动作只能落「待技能录制」。
+    "contracts/browser-use/skill-publisher.v1.json",
+    "contracts/browser-use/seed-skills/douyin-comment.v1.json",
     "vendor/hyperframes/skills/hyperframes-core/references/minimal-composition.md",
     "vendor/hyperframes/skills/hyperframes-core/references/determinism-rules.md",
 ]

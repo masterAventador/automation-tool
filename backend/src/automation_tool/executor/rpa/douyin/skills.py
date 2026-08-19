@@ -21,6 +21,10 @@ from automation_tool.executor.skill_orchestrator import (
 # scripts/sign_seed_skills.py 由指纹确定性推导出的 id：同一份步骤永远同一个 id。
 DOUYIN_COMMENT_SKILL_ID: Final = "89628f94-6c21-4585-8739-75a4b0ca923d"
 DOUYIN_COMMENT_MESSAGE_PARAMETER: Final = "comment_message"
+# 评论的结果证据（种子技能 successEvidence 的同一事实）：副作用对账复用它
+# 判断「评论成功」toast。测试锁定这两个常量与提交的种子文档一致。
+DOUYIN_COMMENT_SUCCESS_ROLE: Final = "status"
+DOUYIN_COMMENT_SUCCESS_NAME: Final = "评论成功"
 
 
 @lru_cache(maxsize=1)
@@ -35,5 +39,7 @@ def default_orchestrator() -> SkillOrchestrator:
 __all__ = [
     "DOUYIN_COMMENT_MESSAGE_PARAMETER",
     "DOUYIN_COMMENT_SKILL_ID",
+    "DOUYIN_COMMENT_SUCCESS_NAME",
+    "DOUYIN_COMMENT_SUCCESS_ROLE",
     "default_orchestrator",
 ]

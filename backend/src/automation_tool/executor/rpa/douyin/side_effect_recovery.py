@@ -1,7 +1,12 @@
-"""Read-only reconciliation for dispatched Douyin comment and message effects."""
+"""Read-only reconciliation for dispatched Douyin comment and message effects.
+
+评论侧的确认已切到语义证据（与技能 successEvidence 同一事实：「评论成功」
+toast 可见），不再依赖写死选择器的 Page Object；私信侧仍走页面对象，随
+私信流程切技能时一并替换。"""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -13,12 +18,6 @@ from automation_tool.executor.ledger import ExecutorLedger
 from automation_tool.executor.rpa.douyin.comment_action import (
     comment_action_verification_fingerprint,
 )
-from automation_tool.executor.rpa.douyin.comment_page import (
-    DouyinCommentPage,
-    DouyinCommentPageEvidence,
-    DouyinCommentPageObservation,
-    DouyinCommentPageState,
-)
 from automation_tool.executor.rpa.douyin.direct_message_action import (
     direct_message_action_verification_fingerprint,
 )
@@ -27,6 +26,10 @@ from automation_tool.executor.rpa.douyin.direct_message_page import (
     DouyinDirectMessagePageEvidence,
     DouyinDirectMessagePageObservation,
     DouyinDirectMessagePageState,
+)
+from automation_tool.executor.rpa.douyin.skills import (
+    DOUYIN_COMMENT_SUCCESS_NAME,
+    DOUYIN_COMMENT_SUCCESS_ROLE,
 )
 from automation_tool.executor.side_effect_ledger import LocalSideEffect, SideEffectState
 from automation_tool.protocol import (
@@ -37,6 +40,28 @@ from automation_tool.protocol import (
 
 DOUYIN_SIDE_EFFECT_RECOVERY_VERSION = "douyin.side-effect-recovery.v1"
 _FINAL_TIMEOUT_MILLISECONDS = 10_000
+_CONFIRMATION_TIMEOUT_SECONDS = 10
+
+
+class _ConfirmationPage(Protocol):
+    """评论确认只需要语义可见性问答（ReplayPage 的 holds 子集）。"""
+
+    def holds(
+        self,
+        kind: str,
+        *,
+        role: str | None = None,
+        name: str | None = None,
+        pattern: str | None = None,
+    ) -> bool: ...
+
+
+def _default_confirmation_page(window: BrowserWindow) -> _ConfirmationPage:
+    from automation_tool.executor.skill_replay_page import PlaywrightReplayPage
+
+    return PlaywrightReplayPage(
+        window.playwright_page, action_timeout_seconds=_CONFIRMATION_TIMEOUT_SECONDS
+    )
 
 
 class DouyinSideEffectRecoveryRejected(RuntimeError):
@@ -200,16 +225,22 @@ class DouyinSideEffectRecovery:
         window: BrowserWindow,
         ledger: ExecutorLedger,
         clock: DouyinSideEffectRecoveryClock,
+        confirmation_page_factory: Callable[[BrowserWindow], _ConfirmationPage]
+        | None = None,
     ) -> None:
         if (
             not isinstance(window, BrowserWindow)
             or not isinstance(ledger, ExecutorLedger)
             or not isinstance(clock, DouyinSideEffectRecoveryClock)
+            or not (confirmation_page_factory is None or callable(confirmation_page_factory))
         ):
             raise DouyinSideEffectRecoveryRejected
         self._window: BrowserWindow | None = window
         self._ledger = ledger
         self._clock = clock
+        self._confirmation_page_factory = (
+            confirmation_page_factory or _default_confirmation_page
+        )
         self._executed = False
 
     @classmethod
@@ -229,6 +260,7 @@ class DouyinSideEffectRecovery:
         recovery._window = None
         recovery._ledger = ledger
         recovery._clock = clock
+        recovery._confirmation_page_factory = _default_confirmation_page
         recovery._executed = False
         return recovery
 
@@ -265,19 +297,21 @@ class DouyinSideEffectRecovery:
         return self._recover_message(effect)
 
     def _recover_comment(self, effect: LocalSideEffect) -> DouyinSideEffectRecoveryReceipt:
+        # 语义确认：验证的就是评论技能 successEvidence 承诺的那个事实。
+        # toast 不可见只说明「结果未获证明」——登录弹窗、拦截弹窗、页面
+        # 漂移在只读对账里都归于此，不冒充更精确的诊断。
         try:
-            page = DouyinCommentPage(cast(BrowserWindow, self._window))
-            observation = page.wait_for_final(timeout_milliseconds=_FINAL_TIMEOUT_MILLISECONDS)
+            page = self._confirmation_page_factory(cast(BrowserWindow, self._window))
+            confirmed = page.holds(
+                "element_visible",
+                role=DOUYIN_COMMENT_SUCCESS_ROLE,
+                name=DOUYIN_COMMENT_SUCCESS_NAME,
+            )
         except Exception:
             return self._settle_uncertain(effect, DouyinSideEffectRecoveryEvidence.PAGE_UNAVAILABLE)
-        failure = _comment_failure(observation)
-        if failure is not None:
-            return self._settle_uncertain(effect, failure)
-        try:
-            page.final_confirmation()
-        except Exception:
+        if not confirmed:
             return self._settle_uncertain(
-                effect, DouyinSideEffectRecoveryEvidence.VERIFICATION_UNAVAILABLE
+                effect, DouyinSideEffectRecoveryEvidence.FINAL_TIMED_OUT
             )
         return self._verify(
             effect,
@@ -386,33 +420,6 @@ class DouyinSideEffectRecovery:
             return value.astimezone(UTC)
         except Exception:
             raise DouyinSideEffectRecoveryRejected from None
-
-
-def _comment_failure(
-    observation: DouyinCommentPageObservation,
-) -> DouyinSideEffectRecoveryEvidence | None:
-    if observation.state is DouyinCommentPageState.CONFIRMED:
-        return None
-    if observation.state is DouyinCommentPageState.LOGIN_REQUIRED:
-        return DouyinSideEffectRecoveryEvidence.LOGIN_REQUIRED
-    if observation.state is DouyinCommentPageState.DIALOG_BLOCKED:
-        return DouyinSideEffectRecoveryEvidence.DIALOG_BLOCKED
-    if observation.state is DouyinCommentPageState.READY:
-        return DouyinSideEffectRecoveryEvidence.FINAL_TIMED_OUT
-    return {
-        DouyinCommentPageEvidence.REQUIRED_ANCHOR_MISSING: (
-            DouyinSideEffectRecoveryEvidence.FINAL_TIMED_OUT
-        ),
-        DouyinCommentPageEvidence.PAGE_VERSION_UNKNOWN: (
-            DouyinSideEffectRecoveryEvidence.PAGE_VERSION_UNKNOWN
-        ),
-        DouyinCommentPageEvidence.CONFLICTING_ANCHORS: (
-            DouyinSideEffectRecoveryEvidence.CONFLICTING_ANCHORS
-        ),
-        DouyinCommentPageEvidence.PAGE_UNAVAILABLE: (
-            DouyinSideEffectRecoveryEvidence.PAGE_UNAVAILABLE
-        ),
-    }.get(observation.evidence, DouyinSideEffectRecoveryEvidence.PAGE_UNAVAILABLE)
 
 
 def _message_failure(

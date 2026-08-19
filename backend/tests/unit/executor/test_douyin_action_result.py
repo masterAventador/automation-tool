@@ -247,12 +247,15 @@ def test_recovery_only_reports_dispatched_terminal_facts() -> None:
         (DouyinCommentActionEvidence.LOCAL_EMERGENCY_STOP, "local_safety_limit"),
         (DouyinCommentActionEvidence.LOCAL_MINIMUM_INTERVAL, "local_safety_limit"),
         (DouyinCommentActionEvidence.LOCAL_TASK_ACTION_LIMIT, "local_safety_limit"),
-        (DouyinCommentActionEvidence.READY_LOGIN_REQUIRED, "login_required"),
-        (DouyinCommentActionEvidence.READY_DIALOG_BLOCKED, "dialog_blocked"),
-        (DouyinCommentActionEvidence.READY_TIMED_OUT, "timed_out"),
-        (DouyinCommentActionEvidence.READY_PAGE_VERSION_UNKNOWN, "page_version_unknown"),
-        (DouyinCommentActionEvidence.READY_CONFLICTING_ANCHORS, "conflicting_anchors"),
-        (DouyinCommentActionEvidence.READY_PAGE_UNAVAILABLE, "page_unavailable"),
+        # 待录制/待修复：自动化尚不能安全驱动这个页面——wire 层的既有语义
+        # 就是 page_version_unknown（前端显示「页面版本无法安全识别」）。
+        (DouyinCommentActionEvidence.SKILL_AWAITING_RECORDING, "page_version_unknown"),
+        (DouyinCommentActionEvidence.SKILL_RECOVERY_PENDING, "page_version_unknown"),
+        (DouyinCommentActionEvidence.PREPARE_UNAVAILABLE, "page_unavailable"),
+        (
+            DouyinCommentActionEvidence.DISPATCH_PERMISSION_REJECTED,
+            "executor_reported_failure",
+        ),
         (DouyinCommentActionEvidence.LEDGER_UNAVAILABLE, "executor_reported_failure"),
     ),
 )
@@ -269,10 +272,9 @@ def test_comment_failure_receipts_map_to_closed_safe_evidence(
 @pytest.mark.parametrize(
     ("evidence", "expected"),
     (
-        (DouyinCommentActionEvidence.DISPATCH_TIMED_OUT, "dispatch_timed_out"),
-        (DouyinCommentActionEvidence.DISPATCH_UNAVAILABLE, "dispatch_unavailable"),
+        (DouyinCommentActionEvidence.SKILL_RECONCILE_REQUIRED, "final_state_unconfirmed"),
+        (DouyinCommentActionEvidence.VERIFICATION_UNAVAILABLE, "final_state_unconfirmed"),
         (DouyinCommentActionEvidence.REPLAY_UNCERTAIN, "recovery_unconfirmed"),
-        (DouyinCommentActionEvidence.FINAL_LOGIN_REQUIRED, "final_state_unconfirmed"),
     ),
 )
 def test_comment_uncertain_receipts_never_collapse_to_failure_or_success(
