@@ -344,21 +344,22 @@ def test_operation_maps_gate_browser_and_profile_failures_without_side_effects(
     )
     assert failed_runtime.closed is True
 
-    login_browse = FakeBrowse(
+    pending_browse = FakeBrowse(
         DouyinBrowseExecutionObservation(
-            state=DouyinBrowseExecutionState.LOGIN_REQUIRED,
-            evidence=DouyinBrowseExecutionEvidence.LOGIN_REQUIRED,
+            state=DouyinBrowseExecutionState.UNKNOWN,
+            evidence=DouyinBrowseExecutionEvidence.PAGE_VERSION_UNKNOWN,
         )
     )
     comment_operation, _gate, _ledger = operation(
-        tmp_path / "login",
-        browse=login_browse,
+        tmp_path / "pending-skill",
+        browse=pending_browse,
         runtime=FakeRuntime(FakePage()),
         profile_entry=FakeEntry(),
         comment=FakeComment(),
     )
+    # 浏览技能待录制/修复 → 页面无法安全识别，评论动作如实失败。
     assert comment_operation.run(command(DouyinSearchExposureAction.COMMENT)).evidence.value == (
-        "login_required"
+        "page_version_unknown"
     )
 
     missing_entry_operation, _gate, _ledger = operation(

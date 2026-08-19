@@ -1,0 +1,134 @@
+{
+  "skill": {
+    "schemaVersion": 1,
+    "skillId": "3d3b3c4a-a0c6-4912-838c-0b3d6e5e5fd1",
+    "version": 1,
+    "parentVersion": null,
+    "platform": "douyin",
+    "domain": "www.douyin.com",
+    "pathPattern": "/",
+    "entryFingerprint": {
+      "kind": "dom_outline_v1",
+      "sha256": "3d3b3c4aa0c64912c38c0b3d6e5e5fd133b3af898d894fb9ff39747b74983254"
+    },
+    "language": "zh-CN",
+    "viewport": {
+      "width": 1280,
+      "height": 800
+    },
+    "riskLevel": "medium",
+    "sideEffectBoundary": {
+      "maxExternalSteps": 0
+    },
+    "steps": [
+      {
+        "index": 1,
+        "goal": {
+          "role": "textbox",
+          "name": "搜索",
+          "nearText": null,
+          "relativePosition": null
+        },
+        "action": {
+          "kind": "click"
+        },
+        "preconditions": [],
+        "postconditions": [],
+        "timeoutSeconds": 10,
+        "external": false,
+        "checkpoint": true
+      },
+      {
+        "index": 2,
+        "goal": {
+          "role": "textbox",
+          "name": "搜索",
+          "nearText": null,
+          "relativePosition": null
+        },
+        "action": {
+          "kind": "fill",
+          "value": {
+            "parameter": "search_keyword"
+          }
+        },
+        "preconditions": [],
+        "postconditions": [],
+        "timeoutSeconds": 10,
+        "external": false,
+        "checkpoint": false
+      },
+      {
+        "index": 3,
+        "goal": {
+          "role": "button",
+          "name": "搜索",
+          "nearText": null,
+          "relativePosition": null
+        },
+        "action": {
+          "kind": "click"
+        },
+        "preconditions": [],
+        "postconditions": [
+          {
+            "kind": "url_prefix_matches",
+            "pattern": "/search"
+          }
+        ],
+        "timeoutSeconds": 30,
+        "external": false,
+        "checkpoint": false
+      },
+      {
+        "index": 4,
+        "goal": {
+          "role": "textbox",
+          "name": "搜索",
+          "nearText": null,
+          "relativePosition": null
+        },
+        "action": {
+          "kind": "scroll",
+          "direction": "down"
+        },
+        "preconditions": [],
+        "postconditions": [],
+        "timeoutSeconds": 10,
+        "external": false,
+        "checkpoint": false
+      },
+      {
+        "index": 5,
+        "goal": {
+          "role": "textbox",
+          "name": "搜索",
+          "nearText": null,
+          "relativePosition": null
+        },
+        "action": {
+          "kind": "scroll",
+          "direction": "down"
+        },
+        "preconditions": [],
+        "postconditions": [],
+        "timeoutSeconds": 10,
+        "external": false,
+        "checkpoint": false
+      }
+    ],
+    "successEvidence": [
+      {
+        "kind": "url_prefix_matches",
+        "pattern": "/search"
+      }
+    ]
+  },
+  "approval": {
+    "reviewer": "aventador",
+    "decision": "approved",
+    "reviewedAt": "2026-08-19T00:00:00Z"
+  },
+  "publicKey": "8bba5703fab278e3977869eb2d32eac44a9ff8c31a1e5b284894716123b741a3",
+  "signature": "ac664afbf87d3c3ae0009c34c84f2a34454b332ea2b1d38c4b3b7024db199ea5689432af64726b5e4bcc1893076b5bd8228799a3363fd3212916825dec44950c"
+}

@@ -152,6 +152,8 @@ motion_authoring_resources = [
     "contracts/browser-use/skill-publisher.v1.json",
     "contracts/browser-use/seed-skills/douyin-comment.v1.json",
     "contracts/browser-use/seed-skills/douyin-direct-message.v1.json",
+    "contracts/browser-use/seed-skills/douyin-search.v1.json",
+    "contracts/browser-use/seed-skills/douyin-browse-profile.v1.json",
     "vendor/hyperframes/skills/hyperframes-core/references/minimal-composition.md",
     "vendor/hyperframes/skills/hyperframes-core/references/determinism-rules.md",
 ]

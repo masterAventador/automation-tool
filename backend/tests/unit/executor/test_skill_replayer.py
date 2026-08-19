@@ -141,6 +141,32 @@ class TestDeterministicReplay:
         assert page.side_effects == []
 
 
+class TestUrlPrefixEvidence:
+    """搜索结果路径随关键词变化（/search/<kw>），结果证据只能是前缀匹配。"""
+
+    def _skill_with_prefix_evidence(self):
+        document = raw()
+        cleaned = clean_trajectory(document)
+        cleaned["successEvidence"] = [
+            {"kind": "url_prefix_matches", "pattern": "/creator-micro"}
+        ]
+        return parse_automation_skill(cleaned)
+
+    def test_a_matching_prefix_proves_the_outcome(self) -> None:
+        page = FakePage(path="/creator-micro/content/manage")
+        outcome = replay_skill(
+            self._skill_with_prefix_evidence(), page, parameters={"caption": "x"}
+        )
+        assert outcome.passed is True
+
+    def test_a_non_matching_prefix_is_a_failure(self) -> None:
+        page = FakePage(path="/somewhere-else")
+        with pytest.raises(ReplayFailed, match="success evidence"):
+            replay_skill(
+                self._skill_with_prefix_evidence(), page, parameters={"caption": "x"}
+            )
+
+
 class TestExternalDispatchHook:
     """业务层的副作用台账要在外部动作真正发生之前登记 dispatch——
     回放器是唯一知道「哪一步是外部步」的地方，所以接缝开在这里。"""

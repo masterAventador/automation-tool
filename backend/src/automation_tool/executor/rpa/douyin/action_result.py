@@ -96,12 +96,8 @@ _DIRECT_FAILURES = {
     ),
 }
 _BROWSE_FAILURES = {
-    DouyinBrowseExecutionEvidence.LOGIN_REQUIRED: ActionResultEvidence.LOGIN_REQUIRED,
-    DouyinBrowseExecutionEvidence.BLOCKING_DIALOG: ActionResultEvidence.DIALOG_BLOCKED,
     DouyinBrowseExecutionEvidence.NAVIGATION_TIMED_OUT: ActionResultEvidence.TIMED_OUT,
-    DouyinBrowseExecutionEvidence.PROFILE_READY_TIMED_OUT: ActionResultEvidence.TIMED_OUT,
     DouyinBrowseExecutionEvidence.PAGE_VERSION_UNKNOWN: ActionResultEvidence.PAGE_VERSION_UNKNOWN,
-    DouyinBrowseExecutionEvidence.CONFLICTING_ANCHORS: ActionResultEvidence.CONFLICTING_ANCHORS,
     DouyinBrowseExecutionEvidence.PAGE_UNAVAILABLE: ActionResultEvidence.PAGE_UNAVAILABLE,
     DouyinBrowseExecutionEvidence.CANCELLATION_UNAVAILABLE: (
         ActionResultEvidence.EXECUTOR_REPORTED_FAILURE

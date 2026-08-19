@@ -57,8 +57,8 @@ def test_browse_observations_map_to_closed_success_and_failure_facts() -> None:
         action_id=ACTION_ID,
         target_id=TARGET_ID,
         observation=DouyinBrowseExecutionObservation(
-            state=DouyinBrowseExecutionState.LOGIN_REQUIRED,
-            evidence=DouyinBrowseExecutionEvidence.LOGIN_REQUIRED,
+            state=DouyinBrowseExecutionState.UNKNOWN,
+            evidence=DouyinBrowseExecutionEvidence.PAGE_VERSION_UNKNOWN,
         ),
     )
 
@@ -66,9 +66,10 @@ def test_browse_observations_map_to_closed_success_and_failure_facts() -> None:
         "step.completed",
         "profile_visible",
     )
+    # 技能待录制/修复 → 页面无法安全识别，动作如实失败。
     assert (failed.message_type, failed.evidence.value) == (
         "step.failed",
-        "login_required",
+        "page_version_unknown",
     )
 
 

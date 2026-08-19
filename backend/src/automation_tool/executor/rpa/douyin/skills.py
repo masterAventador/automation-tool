@@ -31,6 +31,11 @@ DOUYIN_DIRECT_MESSAGE_PARAMETER: Final = "direct_message"
 DOUYIN_DIRECT_MESSAGE_SUCCESS_ROLE: Final = "status"
 DOUYIN_DIRECT_MESSAGE_SUCCESS_NAME: Final = "私信发送成功"
 
+DOUYIN_SEARCH_SKILL_ID: Final = "3d3b3c4a-a0c6-4912-838c-0b3d6e5e5fd1"
+DOUYIN_SEARCH_KEYWORD_PARAMETER: Final = "search_keyword"
+
+DOUYIN_BROWSE_PROFILE_SKILL_ID: Final = "b4359ce7-fd15-4e56-8a36-4462de3ecb71"
+
 
 @lru_cache(maxsize=1)
 def default_orchestrator() -> SkillOrchestrator:
@@ -42,6 +47,7 @@ def default_orchestrator() -> SkillOrchestrator:
 
 
 __all__ = [
+    "DOUYIN_BROWSE_PROFILE_SKILL_ID",
     "DOUYIN_COMMENT_MESSAGE_PARAMETER",
     "DOUYIN_COMMENT_SKILL_ID",
     "DOUYIN_COMMENT_SUCCESS_NAME",
@@ -50,5 +56,7 @@ __all__ = [
     "DOUYIN_DIRECT_MESSAGE_SKILL_ID",
     "DOUYIN_DIRECT_MESSAGE_SUCCESS_NAME",
     "DOUYIN_DIRECT_MESSAGE_SUCCESS_ROLE",
+    "DOUYIN_SEARCH_KEYWORD_PARAMETER",
+    "DOUYIN_SEARCH_SKILL_ID",
     "default_orchestrator",
 ]

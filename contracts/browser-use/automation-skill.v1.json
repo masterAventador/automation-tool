@@ -12,8 +12,8 @@
   "actionKinds": ["click", "fill", "press_key", "scroll", "wait"],
   "pressKeys": ["Enter", "Escape", "Tab", "ArrowDown", "ArrowUp"],
   "scrollDirections": ["up", "down"],
-  "conditionKinds": ["element_visible", "element_absent", "url_matches"],
-  "evidenceKinds": ["url_matches", "element_visible", "click_point_v1"],
+  "conditionKinds": ["element_visible", "element_absent", "url_matches", "url_prefix_matches"],
+  "evidenceKinds": ["url_matches", "url_prefix_matches", "element_visible", "click_point_v1"],
   "goalRoles": [
     "button",
     "link",

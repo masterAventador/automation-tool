@@ -1,7 +1,13 @@
-"""Single-shot, bounded Douyin search execution over the versioned Page Object."""
+"""抖音搜索执行：goto 首页（代码）+ 搜索技能回放（自愈式自动化）。
+
+写死选择器的搜索页对象已删除。登录/风控的前置把关在 discovery 的平台
+会话健康检查里；技能不可路由或回放失败时如实报 PAGE_VERSION_UNKNOWN
+（待技能录制/修复），不猜测页面上发生了什么。搜索没有外部副作用（只是
+导航），不经过动作闸门与副作用台账。"""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, cast
@@ -9,23 +15,23 @@ from typing import Protocol, cast
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from automation_tool.executor.browser_runtime import BrowserWindow
-from automation_tool.executor.rpa.douyin.page_version import (
-    DOUYIN_HOME_URL,
-    douyin_search_results_url,
+from automation_tool.executor.rpa.douyin.page_version import DOUYIN_HOME_URL
+from automation_tool.executor.rpa.douyin.skills import (
+    DOUYIN_SEARCH_KEYWORD_PARAMETER,
+    DOUYIN_SEARCH_SKILL_ID,
+    default_orchestrator,
 )
-from automation_tool.executor.rpa.douyin.search_page import (
-    DouyinSearchPage,
-    DouyinSearchPageEvidence,
-    DouyinSearchPageObservation,
-    DouyinSearchPageState,
+from automation_tool.executor.skill_orchestrator import (
+    SkillExecutionKind,
+    SkillOrchestrator,
 )
+from automation_tool.executor.skill_replay_page import PlaywrightReplayPage
+from automation_tool.executor.skill_replayer import ReplayPage
 from automation_tool.protocol import DouyinSearchInput
 
-DOUYIN_SEARCH_EXECUTION_VERSION = "douyin.search-execution.v1"
+DOUYIN_SEARCH_EXECUTION_VERSION = "douyin.search-execution.v2"
 _NAVIGATION_TIMEOUT_MILLISECONDS = 30_000
-_PAGE_READY_TIMEOUT_MILLISECONDS = 10_000
-_ACTION_TIMEOUT_MILLISECONDS = 15_000
-_RESULT_URL_TIMEOUT_MILLISECONDS = 30_000
+_REPLAY_PAGE_TIMEOUT_SECONDS = 15
 
 
 class DouyinSearchExecutionRejected(RuntimeError):
@@ -37,23 +43,15 @@ class DouyinSearchExecutionRejected(RuntimeError):
 
 class DouyinSearchExecutionState(StrEnum):
     SUCCEEDED = "succeeded"
-    LOGIN_REQUIRED = "login_required"
-    DIALOG_BLOCKED = "dialog_blocked"
     TIMED_OUT = "timed_out"
     UNKNOWN = "unknown"
 
 
 class DouyinSearchExecutionEvidence(StrEnum):
     RESULTS_READY = "results_ready"
-    LOGIN_REQUIRED = "login_required"
-    BLOCKING_DIALOG = "blocking_dialog"
     NAVIGATION_TIMED_OUT = "navigation_timed_out"
-    HOME_READY_TIMED_OUT = "home_ready_timed_out"
-    ACTION_TIMED_OUT = "action_timed_out"
-    RESULT_URL_TIMED_OUT = "result_url_timed_out"
-    RESULTS_READY_TIMED_OUT = "results_ready_timed_out"
+    # 待技能录制/修复：自动化尚不能安全驱动这个页面。
     PAGE_VERSION_UNKNOWN = "page_version_unknown"
-    CONFLICTING_ANCHORS = "conflicting_anchors"
     PAGE_UNAVAILABLE = "page_unavailable"
 
 
@@ -61,30 +59,16 @@ _ALLOWED_OBSERVATIONS = frozenset(
     {
         (DouyinSearchExecutionState.SUCCEEDED, DouyinSearchExecutionEvidence.RESULTS_READY),
         (
-            DouyinSearchExecutionState.LOGIN_REQUIRED,
-            DouyinSearchExecutionEvidence.LOGIN_REQUIRED,
+            DouyinSearchExecutionState.TIMED_OUT,
+            DouyinSearchExecutionEvidence.NAVIGATION_TIMED_OUT,
         ),
         (
-            DouyinSearchExecutionState.DIALOG_BLOCKED,
-            DouyinSearchExecutionEvidence.BLOCKING_DIALOG,
+            DouyinSearchExecutionState.UNKNOWN,
+            DouyinSearchExecutionEvidence.PAGE_VERSION_UNKNOWN,
         ),
-        *(
-            (DouyinSearchExecutionState.TIMED_OUT, evidence)
-            for evidence in (
-                DouyinSearchExecutionEvidence.NAVIGATION_TIMED_OUT,
-                DouyinSearchExecutionEvidence.HOME_READY_TIMED_OUT,
-                DouyinSearchExecutionEvidence.ACTION_TIMED_OUT,
-                DouyinSearchExecutionEvidence.RESULT_URL_TIMED_OUT,
-                DouyinSearchExecutionEvidence.RESULTS_READY_TIMED_OUT,
-            )
-        ),
-        *(
-            (DouyinSearchExecutionState.UNKNOWN, evidence)
-            for evidence in (
-                DouyinSearchExecutionEvidence.PAGE_VERSION_UNKNOWN,
-                DouyinSearchExecutionEvidence.CONFLICTING_ANCHORS,
-                DouyinSearchExecutionEvidence.PAGE_UNAVAILABLE,
-            )
+        (
+            DouyinSearchExecutionState.UNKNOWN,
+            DouyinSearchExecutionEvidence.PAGE_UNAVAILABLE,
         ),
     }
 )
@@ -122,27 +106,39 @@ class DouyinSearchExecutionObservation:
         )
 
 
-class _ActionLocator(Protocol):
-    def fill(self, value: str, *, timeout: float) -> None: ...
-
-    def click(self, *, timeout: float, no_wait_after: bool) -> None: ...
-
-
 class _SearchPage(Protocol):
     def goto(self, url: str, *, wait_until: str, timeout: float) -> object: ...
 
-    def wait_for_url(self, url: str, *, wait_until: str, timeout: float) -> None: ...
+
+def _default_replay_page(window: BrowserWindow) -> ReplayPage:
+    return PlaywrightReplayPage(
+        window.playwright_page, action_timeout_seconds=_REPLAY_PAGE_TIMEOUT_SECONDS
+    )
 
 
 class DouyinSearchExecution:
     """Execute exactly one search without retries or unrelated page actions."""
 
-    def __init__(self, window: BrowserWindow, search: DouyinSearchInput) -> None:
-        if not isinstance(window, BrowserWindow) or not isinstance(search, DouyinSearchInput):
+    def __init__(
+        self,
+        window: BrowserWindow,
+        search: DouyinSearchInput,
+        *,
+        orchestrator: SkillOrchestrator | None = None,
+        replay_page_factory: Callable[[BrowserWindow], ReplayPage] | None = None,
+    ) -> None:
+        if (
+            not isinstance(window, BrowserWindow)
+            or not isinstance(search, DouyinSearchInput)
+            or not (orchestrator is None or isinstance(orchestrator, SkillOrchestrator))
+            or not (replay_page_factory is None or callable(replay_page_factory))
+        ):
             raise DouyinSearchExecutionRejected
+        self._window = window
         self._page = cast(_SearchPage, window.playwright_page)
-        self._search_page = DouyinSearchPage(window)
         self._search = search
+        self._orchestrator = orchestrator
+        self._replay_page_factory = replay_page_factory or _default_replay_page
         self._executed = False
 
     def __repr__(self) -> str:
@@ -166,95 +162,33 @@ class DouyinSearchExecution:
         except Exception:
             return _unavailable()
 
-        home = self._search_page.wait_for_home_ready(
-            timeout_milliseconds=_PAGE_READY_TIMEOUT_MILLISECONDS
-        )
-        if home.state is not DouyinSearchPageState.HOME_READY:
-            return _from_page_observation(
-                home,
-                timeout_evidence=DouyinSearchExecutionEvidence.HOME_READY_TIMED_OUT,
-            )
-
         try:
-            search_input = cast(_ActionLocator, self._search_page.search_input())
-            search_submit = cast(_ActionLocator, self._search_page.search_submit())
-            search_input.fill(self._search.keyword, timeout=_ACTION_TIMEOUT_MILLISECONDS)
-            search_submit.click(
-                timeout=_ACTION_TIMEOUT_MILLISECONDS,
-                no_wait_after=True,
+            orchestrator = (
+                self._orchestrator if self._orchestrator is not None else default_orchestrator()
             )
-        except PlaywrightTimeoutError:
+            report = orchestrator.execute(
+                DOUYIN_SEARCH_SKILL_ID,
+                self._replay_page_factory(self._window),
+                parameters={DOUYIN_SEARCH_KEYWORD_PARAMETER: self._search.keyword},
+            )
+        except Exception:
+            return _unavailable()
+
+        if report.kind is SkillExecutionKind.REPLAYED:
             return _result(
-                DouyinSearchExecutionState.TIMED_OUT,
-                DouyinSearchExecutionEvidence.ACTION_TIMED_OUT,
+                DouyinSearchExecutionState.SUCCEEDED,
+                DouyinSearchExecutionEvidence.RESULTS_READY,
             )
-        except Exception:
-            return _unavailable()
-
-        expected_url = douyin_search_results_url(self._search.keyword)
-        try:
-            self._page.wait_for_url(
-                expected_url,
-                wait_until="domcontentloaded",
-                timeout=_RESULT_URL_TIMEOUT_MILLISECONDS,
-            )
-        except PlaywrightTimeoutError:
+        if report.kind in {
+            SkillExecutionKind.NO_ROUTE,
+            SkillExecutionKind.RECOVERY_PENDING,
+        }:
             return _result(
-                DouyinSearchExecutionState.TIMED_OUT,
-                DouyinSearchExecutionEvidence.RESULT_URL_TIMED_OUT,
+                DouyinSearchExecutionState.UNKNOWN,
+                DouyinSearchExecutionEvidence.PAGE_VERSION_UNKNOWN,
             )
-        except Exception:
-            return _unavailable()
-
-        results = self._search_page.wait_for_results_ready(
-            timeout_milliseconds=_PAGE_READY_TIMEOUT_MILLISECONDS
-        )
-        if results.state is not DouyinSearchPageState.RESULTS_READY:
-            return _from_page_observation(
-                results,
-                timeout_evidence=DouyinSearchExecutionEvidence.RESULTS_READY_TIMED_OUT,
-            )
-        try:
-            self._search_page.result_list()
-        except Exception:
-            return _unavailable()
-        return _result(
-            DouyinSearchExecutionState.SUCCEEDED,
-            DouyinSearchExecutionEvidence.RESULTS_READY,
-        )
-
-
-def _from_page_observation(
-    observation: DouyinSearchPageObservation,
-    *,
-    timeout_evidence: DouyinSearchExecutionEvidence,
-) -> DouyinSearchExecutionObservation:
-    if observation.state is DouyinSearchPageState.LOGIN_REQUIRED:
-        return _result(
-            DouyinSearchExecutionState.LOGIN_REQUIRED,
-            DouyinSearchExecutionEvidence.LOGIN_REQUIRED,
-        )
-    if observation.state is DouyinSearchPageState.DIALOG_BLOCKED:
-        return _result(
-            DouyinSearchExecutionState.DIALOG_BLOCKED,
-            DouyinSearchExecutionEvidence.BLOCKING_DIALOG,
-        )
-    evidence = {
-        DouyinSearchPageEvidence.REQUIRED_ANCHOR_MISSING: timeout_evidence,
-        DouyinSearchPageEvidence.PAGE_VERSION_UNKNOWN: (
-            DouyinSearchExecutionEvidence.PAGE_VERSION_UNKNOWN
-        ),
-        DouyinSearchPageEvidence.CONFLICTING_ANCHORS: (
-            DouyinSearchExecutionEvidence.CONFLICTING_ANCHORS
-        ),
-        DouyinSearchPageEvidence.PAGE_UNAVAILABLE: DouyinSearchExecutionEvidence.PAGE_UNAVAILABLE,
-    }.get(observation.evidence, DouyinSearchExecutionEvidence.PAGE_UNAVAILABLE)
-    state = (
-        DouyinSearchExecutionState.TIMED_OUT
-        if evidence is timeout_evidence
-        else DouyinSearchExecutionState.UNKNOWN
-    )
-    return _result(state, evidence)
+        # 搜索技能没有外部步，reconcile 分支理论上到不了；防御性归为不可用。
+        return _unavailable()
 
 
 def _unavailable() -> DouyinSearchExecutionObservation:

@@ -24,11 +24,6 @@ from automation_tool.executor.discovery_operation import (
 )
 from automation_tool.executor.ledger import ExecutorLedger
 from automation_tool.executor.page_drift_artifact import PageDriftArtifactRejected
-from automation_tool.executor.rpa.douyin.bounded_scroll import (
-    DouyinBoundedScrollEvidence,
-    DouyinBoundedScrollObservation,
-    DouyinBoundedScrollState,
-)
 from automation_tool.executor.rpa.douyin.candidate_extraction import (
     DouyinCandidateExtraction,
     DouyinCandidateExtractionEvidence,
@@ -171,7 +166,7 @@ def test_browser_authority_revalidates_and_releases_explicit_leases(tmp_path: Pa
         authority.acquire()
 
 
-def test_production_discovery_orchestrates_search_scroll_extract_and_closes_runtime(
+def test_production_discovery_orchestrates_search_extract_and_closes_runtime(
     tmp_path: Path,
 ) -> None:
     authority = BrowserLaunchAuthority()
@@ -200,17 +195,6 @@ def test_production_discovery_orchestrates_search_scroll_extract_and_closes_runt
                 evidence=DouyinSearchExecutionEvidence.RESULTS_READY,
             )
 
-    class Scroll:
-        def run(self) -> DouyinBoundedScrollObservation:
-            calls.append(("scroll", True))
-            return DouyinBoundedScrollObservation(
-                state=DouyinBoundedScrollState.COMPLETED,
-                evidence=DouyinBoundedScrollEvidence.TARGET_LIMIT_REACHED,
-                rounds_completed=1,
-                target_count=2,
-                target_limit=2,
-            )
-
     class Extraction:
         def run(self) -> DouyinCandidateExtractionObservation:
             calls.append(("extract", True))
@@ -227,7 +211,6 @@ def test_production_discovery_orchestrates_search_scroll_extract_and_closes_runt
         browser_authority=authority,
         runtime_factory=cast(Any, Runtime),
         search_factory=lambda _window, _search: Search(),
-        scroll_factory=lambda _window, _search, _result, _cancel: Scroll(),
         extraction_factory=lambda _window, _maximum, _revision: Extraction(),
     )
 
@@ -239,7 +222,6 @@ def test_production_discovery_orchestrates_search_scroll_extract_and_closes_runt
         "runtime.start",
         "runtime.window",
         "search",
-        "scroll",
         "extract",
         "runtime.close",
     ]
@@ -251,17 +233,18 @@ def test_production_discovery_orchestrates_search_scroll_extract_and_closes_runt
 @pytest.mark.parametrize(
     ("search_state", "search_evidence", "expected_state", "expected_evidence"),
     (
+        # 技能待录制/修复：自动化不能安全驱动 → 转人工。
         (
-            DouyinSearchExecutionState.LOGIN_REQUIRED,
-            DouyinSearchExecutionEvidence.LOGIN_REQUIRED,
-            DouyinDiscoveryOperationState.LOGIN_REQUIRED,
-            "login_required",
+            DouyinSearchExecutionState.UNKNOWN,
+            DouyinSearchExecutionEvidence.PAGE_VERSION_UNKNOWN,
+            DouyinDiscoveryOperationState.HANDOFF_REQUIRED,
+            "page_version_unknown",
         ),
         (
-            DouyinSearchExecutionState.DIALOG_BLOCKED,
-            DouyinSearchExecutionEvidence.BLOCKING_DIALOG,
-            DouyinDiscoveryOperationState.HANDOFF_REQUIRED,
-            "blocking_dialog",
+            DouyinSearchExecutionState.TIMED_OUT,
+            DouyinSearchExecutionEvidence.NAVIGATION_TIMED_OUT,
+            DouyinDiscoveryOperationState.FAILED,
+            "navigation_timed_out",
         ),
         (
             DouyinSearchExecutionState.UNKNOWN,
@@ -271,7 +254,7 @@ def test_production_discovery_orchestrates_search_scroll_extract_and_closes_runt
         ),
     ),
 )
-def test_production_discovery_maps_search_circuit_breakers_without_scrolling(
+def test_production_discovery_maps_search_circuit_breakers(
     tmp_path: Path,
     search_state: DouyinSearchExecutionState,
     search_evidence: DouyinSearchExecutionEvidence,
@@ -310,7 +293,6 @@ def test_production_discovery_maps_search_circuit_breakers_without_scrolling(
         browser_authority=authority,
         runtime_factory=cast(Any, Runtime),
         search_factory=lambda _window, _search: Search(),
-        scroll_factory=cast(Any, forbidden),
         extraction_factory=cast(Any, forbidden),
     )
 
@@ -324,10 +306,7 @@ def test_production_discovery_maps_search_circuit_breakers_without_scrolling(
 
 @pytest.mark.parametrize(
     "evidence",
-    (
-        DouyinSearchExecutionEvidence.PAGE_VERSION_UNKNOWN,
-        DouyinSearchExecutionEvidence.CONFLICTING_ANCHORS,
-    ),
+    (DouyinSearchExecutionEvidence.PAGE_VERSION_UNKNOWN,),
 )
 def test_production_discovery_saves_page_drift_artifact_and_enters_handoff(
     tmp_path: Path,
@@ -456,17 +435,6 @@ def test_discovery_captures_failed_and_explicitly_enabled_success_diagnostics(
                 evidence=DouyinSearchExecutionEvidence.RESULTS_READY,
             )
 
-    class SuccessfulScroll:
-        @staticmethod
-        def run() -> DouyinBoundedScrollObservation:
-            return DouyinBoundedScrollObservation(
-                state=DouyinBoundedScrollState.COMPLETED,
-                evidence=DouyinBoundedScrollEvidence.TARGET_LIMIT_REACHED,
-                rounds_completed=1,
-                target_count=2,
-                target_limit=2,
-            )
-
     class SuccessfulExtraction:
         @staticmethod
         def run() -> DouyinCandidateExtractionObservation:
@@ -525,7 +493,6 @@ def test_discovery_captures_failed_and_explicitly_enabled_success_diagnostics(
             browser_authority=authority,
             runtime_factory=cast(Any, lambda runtime=runtime: runtime),
             search_factory=lambda _window, _search: SuccessfulSearch(),
-            scroll_factory=lambda _window, _search, _result, _cancel: SuccessfulScroll(),
             extraction_factory=lambda _window, _maximum, _revision: SuccessfulExtraction(),
             capture_successful_diagnostics=capture_successful_diagnostics,
         ).run(payload(), cancellation_requested=lambda: False)
@@ -651,60 +618,11 @@ def test_discovery_result_and_operation_inputs_fail_closed(tmp_path: Path) -> No
         operation.run(payload(), cancellation_requested=cast(Any, None))
 
 
-def test_discovery_maps_every_scroll_and_extraction_boundary() -> None:
+def test_discovery_maps_every_extraction_boundary() -> None:
     revision = 7
     invalid_search = discovery_module._from_search(cast(Any, object()), revision)
     assert invalid_search is not None
     assert invalid_search.evidence == "page_unavailable"
-    scroll_cases = (
-        (cast(Any, object()), DouyinDiscoveryOperationState.FAILED, "page_unavailable"),
-        (
-            DouyinBoundedScrollObservation(
-                state=DouyinBoundedScrollState.BLOCKED,
-                evidence=DouyinBoundedScrollEvidence.LOGIN_REQUIRED,
-                rounds_completed=0,
-                target_count=0,
-                target_limit=2,
-            ),
-            DouyinDiscoveryOperationState.LOGIN_REQUIRED,
-            "login_required",
-        ),
-        (
-            DouyinBoundedScrollObservation(
-                state=DouyinBoundedScrollState.BLOCKED,
-                evidence=DouyinBoundedScrollEvidence.BLOCKING_DIALOG,
-                rounds_completed=0,
-                target_count=0,
-                target_limit=2,
-            ),
-            DouyinDiscoveryOperationState.HANDOFF_REQUIRED,
-            "blocking_dialog",
-        ),
-        (
-            DouyinBoundedScrollObservation(
-                state=DouyinBoundedScrollState.UNKNOWN,
-                evidence=DouyinBoundedScrollEvidence.RESULT_COUNT_DECREASED,
-                rounds_completed=1,
-                target_count=1,
-                target_limit=2,
-            ),
-            DouyinDiscoveryOperationState.FAILED,
-            "result_count_decreased",
-        ),
-    )
-    completed_scroll = DouyinBoundedScrollObservation(
-        state=DouyinBoundedScrollState.COMPLETED,
-        evidence=DouyinBoundedScrollEvidence.TARGET_LIMIT_REACHED,
-        rounds_completed=1,
-        target_count=2,
-        target_limit=2,
-    )
-    assert discovery_module._from_scroll(completed_scroll, revision) is None
-    for observation, expected_state, expected_evidence in scroll_cases:
-        result = discovery_module._from_scroll(observation, revision)
-        assert result is not None
-        assert result.state is expected_state
-        assert result.evidence == expected_evidence
 
     extraction_cases = (
         (cast(Any, object()), DouyinDiscoveryOperationState.FAILED, "page_unavailable"),
@@ -721,25 +639,14 @@ def test_discovery_maps_every_scroll_and_extraction_boundary() -> None:
         ),
         (
             DouyinCandidateExtractionObservation(
-                state=DouyinCandidateExtractionState.BLOCKED,
-                evidence=DouyinCandidateExtractionEvidence.LOGIN_REQUIRED,
+                state=DouyinCandidateExtractionState.UNKNOWN,
+                evidence=DouyinCandidateExtractionEvidence.RESULTS_UNAVAILABLE,
                 candidates=(),
                 requested_limit=2,
                 page_revision=revision,
             ),
-            DouyinDiscoveryOperationState.LOGIN_REQUIRED,
-            "login_required",
-        ),
-        (
-            DouyinCandidateExtractionObservation(
-                state=DouyinCandidateExtractionState.BLOCKED,
-                evidence=DouyinCandidateExtractionEvidence.BLOCKING_DIALOG,
-                candidates=(),
-                requested_limit=2,
-                page_revision=revision,
-            ),
-            DouyinDiscoveryOperationState.HANDOFF_REQUIRED,
-            "blocking_dialog",
+            DouyinDiscoveryOperationState.FAILED,
+            "results_unavailable",
         ),
         (
             DouyinCandidateExtractionObservation(

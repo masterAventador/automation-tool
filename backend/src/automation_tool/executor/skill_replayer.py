@@ -241,8 +241,22 @@ def _success_evidence_holds(skill: AutomationSkill, page: ReplayPage) -> bool:
         for evidence in skill.success_evidence
         if evidence.kind == "url_matches"
     ]
-    if url_patterns and page.current_path() not in url_patterns:
-        return False
+    # url_prefix_matches：搜索这类落点路径随输入变化（/search/<关键词>）的
+    # 流程，用前缀证明结果。与等值证据同为「任一成立即可」。
+    prefix_patterns = [
+        evidence.pattern
+        for evidence in skill.success_evidence
+        if evidence.kind == "url_prefix_matches"
+    ]
+    if url_patterns or prefix_patterns:
+        path = page.current_path()
+        equality_ok = path in url_patterns
+        prefix_ok = any(
+            pattern is not None and path.startswith(pattern)
+            for pattern in prefix_patterns
+        )
+        if not (equality_ok or prefix_ok):
+            return False
     for evidence in skill.success_evidence:
         if evidence.kind == "element_visible" and not page.holds(
             "element_visible", role=evidence.role, name=evidence.name

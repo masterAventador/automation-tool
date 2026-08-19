@@ -269,6 +269,10 @@ class PlaywrightReplayPage:
             if pattern is None:
                 raise ValueError("a url_matches condition needs a pattern")
             return self.current_path() == pattern
+        if kind == "url_prefix_matches":
+            if pattern is None:
+                raise ValueError("a url_prefix_matches condition needs a pattern")
+            return self.current_path().startswith(pattern)
         if kind in {"element_visible", "element_absent"}:
             if role is None or name is None:
                 raise ValueError(f"a {kind} condition needs a role and a name")

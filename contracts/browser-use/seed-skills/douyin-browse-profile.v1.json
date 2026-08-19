@@ -1,0 +1,63 @@
+{
+  "skill": {
+    "schemaVersion": 1,
+    "skillId": "b4359ce7-fd15-4e56-8a36-4462de3ecb71",
+    "version": 1,
+    "parentVersion": null,
+    "platform": "douyin",
+    "domain": "www.douyin.com",
+    "pathPattern": "/user",
+    "entryFingerprint": {
+      "kind": "dom_outline_v1",
+      "sha256": "b4359ce7fd15ae56ca364462de3ecb715f95ec8fb449453a960aff6e8d905c01"
+    },
+    "language": "zh-CN",
+    "viewport": {
+      "width": 1280,
+      "height": 800
+    },
+    "riskLevel": "low",
+    "sideEffectBoundary": {
+      "maxExternalSteps": 0
+    },
+    "steps": [
+      {
+        "index": 1,
+        "goal": {
+          "role": "button",
+          "name": "关注",
+          "nearText": null,
+          "relativePosition": null
+        },
+        "action": {
+          "kind": "wait"
+        },
+        "preconditions": [],
+        "postconditions": [
+          {
+            "kind": "element_visible",
+            "role": "button",
+            "name": "关注"
+          }
+        ],
+        "timeoutSeconds": 10,
+        "external": false,
+        "checkpoint": true
+      }
+    ],
+    "successEvidence": [
+      {
+        "kind": "element_visible",
+        "role": "button",
+        "name": "关注"
+      }
+    ]
+  },
+  "approval": {
+    "reviewer": "aventador",
+    "decision": "approved",
+    "reviewedAt": "2026-08-19T00:00:00Z"
+  },
+  "publicKey": "8bba5703fab278e3977869eb2d32eac44a9ff8c31a1e5b284894716123b741a3",
+  "signature": "c290ba45a0095253c01b1febf5d7980c3cac302a1d11179dfff3a9b170c0ccc80e550ef0b2bf75989cada3b388058732d34ee60e75c847143dc0df99645ced03"
+}

@@ -1,4 +1,8 @@
-"""Single-shot, read-only Douyin target-profile navigation."""
+"""抖音浏览（打开目标主页）：goto（代码）+ 浏览技能回放（自愈式自动化）。
+
+写死选择器的主页就绪检查已删除；「主页真的加载出来了吗」由已签名的浏览
+技能回答（等关注按钮出现）。技能不可路由/回放失败 → PAGE_VERSION_UNKNOWN
+（待技能录制/修复）。浏览没有外部副作用，不经过闸门与台账。"""
 
 from __future__ import annotations
 
@@ -11,17 +15,21 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from automation_tool.executor.browser_runtime import BrowserWindow
 from automation_tool.executor.rpa.douyin.page_version import douyin_user_profile_url
-from automation_tool.executor.rpa.douyin.profile_page import (
-    DouyinProfilePage,
-    DouyinProfilePageEvidence,
-    DouyinProfilePageObservation,
-    DouyinProfilePageState,
+from automation_tool.executor.rpa.douyin.skills import (
+    DOUYIN_BROWSE_PROFILE_SKILL_ID,
+    default_orchestrator,
 )
+from automation_tool.executor.skill_orchestrator import (
+    SkillExecutionKind,
+    SkillOrchestrator,
+)
+from automation_tool.executor.skill_replay_page import PlaywrightReplayPage
+from automation_tool.executor.skill_replayer import ReplayPage
 from automation_tool.protocol import DouyinCandidate
 
-DOUYIN_BROWSE_EXECUTION_VERSION = "douyin.browse-execution.v1"
+DOUYIN_BROWSE_EXECUTION_VERSION = "douyin.browse-execution.v2"
 _NAVIGATION_TIMEOUT_MILLISECONDS = 30_000
-_PAGE_READY_TIMEOUT_MILLISECONDS = 10_000
+_REPLAY_PAGE_TIMEOUT_SECONDS = 10
 
 
 class DouyinBrowseExecutionRejected(RuntimeError):
@@ -31,8 +39,6 @@ class DouyinBrowseExecutionRejected(RuntimeError):
 
 class DouyinBrowseExecutionState(StrEnum):
     COMPLETED = "completed"
-    LOGIN_REQUIRED = "login_required"
-    DIALOG_BLOCKED = "dialog_blocked"
     CANCELLED = "cancelled"
     TIMED_OUT = "timed_out"
     UNKNOWN = "unknown"
@@ -40,14 +46,11 @@ class DouyinBrowseExecutionState(StrEnum):
 
 class DouyinBrowseExecutionEvidence(StrEnum):
     PROFILE_VISIBLE = "profile_visible"
-    LOGIN_REQUIRED = "login_required"
-    BLOCKING_DIALOG = "blocking_dialog"
     CANCELLATION_REQUESTED = "cancellation_requested"
     CANCELLATION_UNAVAILABLE = "cancellation_unavailable"
     NAVIGATION_TIMED_OUT = "navigation_timed_out"
-    PROFILE_READY_TIMED_OUT = "profile_ready_timed_out"
+    # 待技能录制/修复：自动化尚不能安全驱动这个页面。
     PAGE_VERSION_UNKNOWN = "page_version_unknown"
-    CONFLICTING_ANCHORS = "conflicting_anchors"
     PAGE_UNAVAILABLE = "page_unavailable"
 
 
@@ -58,30 +61,18 @@ _ALLOWED_OBSERVATIONS = frozenset(
             DouyinBrowseExecutionEvidence.PROFILE_VISIBLE,
         ),
         (
-            DouyinBrowseExecutionState.LOGIN_REQUIRED,
-            DouyinBrowseExecutionEvidence.LOGIN_REQUIRED,
-        ),
-        (
-            DouyinBrowseExecutionState.DIALOG_BLOCKED,
-            DouyinBrowseExecutionEvidence.BLOCKING_DIALOG,
-        ),
-        (
             DouyinBrowseExecutionState.CANCELLED,
             DouyinBrowseExecutionEvidence.CANCELLATION_REQUESTED,
         ),
-        *(
-            (DouyinBrowseExecutionState.TIMED_OUT, evidence)
-            for evidence in (
-                DouyinBrowseExecutionEvidence.NAVIGATION_TIMED_OUT,
-                DouyinBrowseExecutionEvidence.PROFILE_READY_TIMED_OUT,
-            )
+        (
+            DouyinBrowseExecutionState.TIMED_OUT,
+            DouyinBrowseExecutionEvidence.NAVIGATION_TIMED_OUT,
         ),
         *(
             (DouyinBrowseExecutionState.UNKNOWN, evidence)
             for evidence in (
                 DouyinBrowseExecutionEvidence.CANCELLATION_UNAVAILABLE,
                 DouyinBrowseExecutionEvidence.PAGE_VERSION_UNKNOWN,
-                DouyinBrowseExecutionEvidence.CONFLICTING_ANCHORS,
                 DouyinBrowseExecutionEvidence.PAGE_UNAVAILABLE,
             )
         ),
@@ -125,15 +116,35 @@ class _BrowsePage(Protocol):
     def goto(self, url: str, *, wait_until: str, timeout: float) -> object: ...
 
 
+def _default_replay_page(window: BrowserWindow) -> ReplayPage:
+    return PlaywrightReplayPage(
+        window.playwright_page, action_timeout_seconds=_REPLAY_PAGE_TIMEOUT_SECONDS
+    )
+
+
 class DouyinBrowseExecution:
     """Navigate to one discovered target without triggering any page action."""
 
-    def __init__(self, window: BrowserWindow, candidate: DouyinCandidate) -> None:
-        if not isinstance(window, BrowserWindow) or not isinstance(candidate, DouyinCandidate):
+    def __init__(
+        self,
+        window: BrowserWindow,
+        candidate: DouyinCandidate,
+        *,
+        orchestrator: SkillOrchestrator | None = None,
+        replay_page_factory: Callable[[BrowserWindow], ReplayPage] | None = None,
+    ) -> None:
+        if (
+            not isinstance(window, BrowserWindow)
+            or not isinstance(candidate, DouyinCandidate)
+            or not (orchestrator is None or isinstance(orchestrator, SkillOrchestrator))
+            or not (replay_page_factory is None or callable(replay_page_factory))
+        ):
             raise DouyinBrowseExecutionRejected
+        self._window = window
         self._page = cast(_BrowsePage, window.playwright_page)
-        self._profile_page = DouyinProfilePage(window)
         self._candidate = candidate
+        self._orchestrator = orchestrator
+        self._replay_page_factory = replay_page_factory or _default_replay_page
         self._executed = False
 
     def __repr__(self) -> str:
@@ -174,63 +185,33 @@ class DouyinBrowseExecution:
         if cancelled:
             return _cancelled()
 
-        profile = self._profile_page.wait_for_ready(
-            timeout_milliseconds=_PAGE_READY_TIMEOUT_MILLISECONDS
-        )
-        result = _from_page_observation(profile)
-        if result is not None:
-            return result
-
-        cancelled = _cancellation_requested(cancellation_requested)
-        if cancelled is None:
-            return _unavailable_cancellation()
-        if cancelled:
-            return _cancelled()
         try:
-            self._profile_page.profile_root()
+            orchestrator = (
+                self._orchestrator if self._orchestrator is not None else default_orchestrator()
+            )
+            report = orchestrator.execute(
+                DOUYIN_BROWSE_PROFILE_SKILL_ID,
+                self._replay_page_factory(self._window),
+                parameters={},
+            )
         except Exception:
             return _unavailable()
-        return _result(
-            DouyinBrowseExecutionState.COMPLETED,
-            DouyinBrowseExecutionEvidence.PROFILE_VISIBLE,
-        )
 
-
-def _from_page_observation(
-    observation: DouyinProfilePageObservation,
-) -> DouyinBrowseExecutionObservation | None:
-    if observation.state is DouyinProfilePageState.READY:
-        return None
-    if observation.state is DouyinProfilePageState.LOGIN_REQUIRED:
-        return _result(
-            DouyinBrowseExecutionState.LOGIN_REQUIRED,
-            DouyinBrowseExecutionEvidence.LOGIN_REQUIRED,
-        )
-    if observation.state is DouyinProfilePageState.DIALOG_BLOCKED:
-        return _result(
-            DouyinBrowseExecutionState.DIALOG_BLOCKED,
-            DouyinBrowseExecutionEvidence.BLOCKING_DIALOG,
-        )
-    evidence = {
-        DouyinProfilePageEvidence.REQUIRED_ANCHOR_MISSING: (
-            DouyinBrowseExecutionEvidence.PROFILE_READY_TIMED_OUT
-        ),
-        DouyinProfilePageEvidence.PAGE_VERSION_UNKNOWN: (
-            DouyinBrowseExecutionEvidence.PAGE_VERSION_UNKNOWN
-        ),
-        DouyinProfilePageEvidence.CONFLICTING_ANCHORS: (
-            DouyinBrowseExecutionEvidence.CONFLICTING_ANCHORS
-        ),
-        DouyinProfilePageEvidence.PAGE_UNAVAILABLE: (
-            DouyinBrowseExecutionEvidence.PAGE_UNAVAILABLE
-        ),
-    }.get(observation.evidence, DouyinBrowseExecutionEvidence.PAGE_UNAVAILABLE)
-    state = (
-        DouyinBrowseExecutionState.TIMED_OUT
-        if evidence is DouyinBrowseExecutionEvidence.PROFILE_READY_TIMED_OUT
-        else DouyinBrowseExecutionState.UNKNOWN
-    )
-    return _result(state, evidence)
+        if report.kind is SkillExecutionKind.REPLAYED:
+            return _result(
+                DouyinBrowseExecutionState.COMPLETED,
+                DouyinBrowseExecutionEvidence.PROFILE_VISIBLE,
+            )
+        if report.kind in {
+            SkillExecutionKind.NO_ROUTE,
+            SkillExecutionKind.RECOVERY_PENDING,
+        }:
+            return _result(
+                DouyinBrowseExecutionState.UNKNOWN,
+                DouyinBrowseExecutionEvidence.PAGE_VERSION_UNKNOWN,
+            )
+        # 浏览技能没有外部步，reconcile 分支理论上到不了；防御性归为不可用。
+        return _unavailable()
 
 
 def _cancellation_requested(check: Callable[[], bool]) -> bool | None:

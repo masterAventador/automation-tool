@@ -25,12 +25,6 @@ from automation_tool.executor.page_drift_artifact import (
     PageDriftArtifactRejected,
     PageDriftArtifactStore,
 )
-from automation_tool.executor.rpa.douyin.bounded_scroll import (
-    DouyinBoundedScroll,
-    DouyinBoundedScrollEvidence,
-    DouyinBoundedScrollObservation,
-    DouyinBoundedScrollState,
-)
 from automation_tool.executor.rpa.douyin.candidate_extraction import (
     DouyinCandidateExtraction,
     DouyinCandidateExtractionEvidence,
@@ -143,10 +137,6 @@ class _Search(Protocol):
     def run(self) -> DouyinSearchExecutionObservation: ...
 
 
-class _Scroll(Protocol):
-    def run(self) -> DouyinBoundedScrollObservation: ...
-
-
 class _Extraction(Protocol):
     def run(self) -> DouyinCandidateExtractionObservation: ...
 
@@ -164,7 +154,7 @@ def _default_extraction(
 
 
 class ProductionDouyinDiscoveryOperation:
-    """Run the existing search, bounded-scroll, and privacy extraction adapters once."""
+    """Run the skill-driven search and the privacy extraction adapters once."""
 
     def __init__(
         self,
@@ -173,10 +163,6 @@ class ProductionDouyinDiscoveryOperation:
         browser_authority: BrowserLaunchAuthority,
         runtime_factory: Callable[[], _Runtime] = BrowserRuntime,
         search_factory: Callable[[BrowserWindow, object], _Search] = DouyinSearchExecution,
-        scroll_factory: Callable[
-            [BrowserWindow, object, DouyinSearchExecutionObservation, Callable[[], bool]],
-            _Scroll,
-        ] = DouyinBoundedScroll,
         extraction_factory: Callable[[BrowserWindow, int, int], _Extraction] = _default_extraction,
         page_drift_artifacts: PageDriftArtifactStore | None = None,
         browser_diagnostic_artifacts: BrowserDiagnosticArtifactStore | None = None,
@@ -187,7 +173,6 @@ class ProductionDouyinDiscoveryOperation:
             or not isinstance(browser_authority, BrowserLaunchAuthority)
             or not callable(runtime_factory)
             or not callable(search_factory)
-            or not callable(scroll_factory)
             or not callable(extraction_factory)
             or type(capture_successful_diagnostics) is not bool
         ):
@@ -211,7 +196,6 @@ class ProductionDouyinDiscoveryOperation:
         self._browser_authority = browser_authority
         self._runtime_factory = runtime_factory
         self._search_factory = search_factory
-        self._scroll_factory = scroll_factory
         self._extraction_factory = extraction_factory
         self._page_drift_artifacts = resolved_artifacts
         self._browser_diagnostic_artifacts = resolved_diagnostics
@@ -257,15 +241,6 @@ class ProductionDouyinDiscoveryOperation:
                         "conflicting_anchors",
                     }:
                         self._capture_page_drift(result)
-                    if result is None:
-                        stage = BrowserDiagnosticStage.SCROLL
-                        scroll = self._scroll_factory(
-                            window,
-                            search_input,
-                            search,
-                            cancellation_requested,
-                        ).run()
-                        result = _from_scroll(scroll, payload.page_revision)
                     if result is None:
                         stage = BrowserDiagnosticStage.EXTRACTION
                         extraction = self._extraction_factory(
@@ -320,49 +295,15 @@ def _from_search(
         return _failed(page_revision, "page_unavailable")
     if observation.state is DouyinSearchExecutionState.SUCCEEDED:
         return None
-    if observation.state is DouyinSearchExecutionState.LOGIN_REQUIRED:
-        return _result(
-            DouyinDiscoveryOperationState.LOGIN_REQUIRED,
-            "login_required",
-            page_revision,
-        )
-    if observation.state is DouyinSearchExecutionState.DIALOG_BLOCKED:
-        return _result(
-            DouyinDiscoveryOperationState.HANDOFF_REQUIRED,
-            "blocking_dialog",
-            page_revision,
-        )
     evidence = observation.evidence.value
-    if evidence in {"page_version_unknown", "conflicting_anchors"}:
+    if evidence == "page_version_unknown":
+        # 搜索技能待录制/修复：自动化不能安全驱动，转人工。
         return _result(
             DouyinDiscoveryOperationState.HANDOFF_REQUIRED,
             evidence,
             page_revision,
         )
     return _failed(page_revision, evidence)
-
-
-def _from_scroll(
-    observation: DouyinBoundedScrollObservation,
-    page_revision: int,
-) -> DouyinDiscoveryExecutionResult | None:
-    if not isinstance(observation, DouyinBoundedScrollObservation):
-        return _failed(page_revision, "page_unavailable")
-    if observation.state is DouyinBoundedScrollState.COMPLETED:
-        return None
-    if observation.evidence is DouyinBoundedScrollEvidence.LOGIN_REQUIRED:
-        return _result(
-            DouyinDiscoveryOperationState.LOGIN_REQUIRED,
-            "login_required",
-            page_revision,
-        )
-    if observation.evidence is DouyinBoundedScrollEvidence.BLOCKING_DIALOG:
-        return _result(
-            DouyinDiscoveryOperationState.HANDOFF_REQUIRED,
-            "blocking_dialog",
-            page_revision,
-        )
-    return _failed(page_revision, observation.evidence.value)
 
 
 def _from_extraction(
@@ -379,18 +320,6 @@ def _from_extraction(
             DouyinCandidateExtractionEvidence.CANDIDATES_EXTRACTED.value,
             page_revision,
             observation.candidates,
-        )
-    if observation.evidence is DouyinCandidateExtractionEvidence.LOGIN_REQUIRED:
-        return _result(
-            DouyinDiscoveryOperationState.LOGIN_REQUIRED,
-            "login_required",
-            page_revision,
-        )
-    if observation.evidence is DouyinCandidateExtractionEvidence.BLOCKING_DIALOG:
-        return _result(
-            DouyinDiscoveryOperationState.HANDOFF_REQUIRED,
-            "blocking_dialog",
-            page_revision,
         )
     return _failed(page_revision, observation.evidence.value)
 

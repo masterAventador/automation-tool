@@ -1,7 +1,10 @@
+"""抖音浏览（打开目标主页）：goto 在代码里，主页可见性由浏览技能回答。
+
+技能不可路由/回放失败 → PAGE_VERSION_UNKNOWN（待技能录制/修复）；取消
+检查语义与原实现一致：goto 前后各查一次，取消即停。"""
+
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import replace
 from typing import Any, cast
 
 import pytest
@@ -9,330 +12,183 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from automation_tool.executor.browser_runtime import BrowserWindow
 from automation_tool.executor.rpa.douyin.browse import (
-    DOUYIN_BROWSE_EXECUTION_VERSION,
     DouyinBrowseExecution,
     DouyinBrowseExecutionEvidence,
-    DouyinBrowseExecutionObservation,
     DouyinBrowseExecutionRejected,
     DouyinBrowseExecutionState,
 )
-from automation_tool.executor.rpa.douyin.page_anchors import VISIBLE_MATCH_ENGINE
 from automation_tool.executor.rpa.douyin.page_version import douyin_user_profile_url
+from automation_tool.executor.rpa.douyin.skills import DOUYIN_BROWSE_PROFILE_SKILL_ID
+from automation_tool.executor.skill_orchestrator import (
+    SkillOrchestrator,
+    load_seed_registry,
+)
+from automation_tool.executor.skill_registry import SkillRegistry
 from automation_tool.protocol import (
     DouyinCandidate,
     DouyinCandidateSource,
     DouyinCandidateSummary,
 )
 
-PROFILE_ROOT = 'main[aria-label="用户主页"]'
-LOGIN_DIALOG = '[role="dialog"]:has-text("扫码登录")'
-BLOCKING_DIALOG = '[role="dialog"]'
+FOLLOW_BUTTON = "关注"
 
 
-class FakeLocator:
-    def __init__(self, selector: str, page: FakePage) -> None:
-        self.selector = selector
-        self.page = page
+class GotoPage:
+    def __init__(self, failure: Exception | None = None) -> None:
+        self.failure = failure
+        self.visited: list[str] = []
 
-    @property
-    def first(self) -> FakeLocator:
-        return self
-
-    def locator(self, selector: str) -> FakeLocator:
-        """Every element this page models is on screen, so the filter keeps them all."""
-        assert selector == VISIBLE_MATCH_ENGINE
-        return self
-
-    def count(self) -> int:
-        if self.page.probe_failure:
-            raise RuntimeError("private probe failure")
-        return sum(
-            selector in self.page.visible_selectors for selector in self.selector.split(", ")
-        )
-
-    def wait_for(self, *, state: str, timeout: float) -> None:
-        assert state == "visible"
-        assert 0 < timeout <= 10_000
-        if self.page.wait_failure:
-            raise RuntimeError("private wait failure")
-        callback = self.page.wait_callbacks.get(self.selector)
-        if callback is not None:
-            callback()
-        if self.count() == 0:
-            raise PlaywrightTimeoutError("private wait timeout")
+    def goto(self, url: str, *, wait_until: str, timeout: float) -> object:
+        if self.failure is not None:
+            raise self.failure
+        self.visited.append(url)
+        return object()
 
 
-class FakePage:
-    def __init__(self) -> None:
-        self.url = "about:blank"
-        self.visible_selectors: set[str] = set()
-        self.navigations: list[tuple[str, str, float]] = []
-        self.requested_selectors: list[str] = []
-        self.wait_callbacks: dict[str, Callable[[], None]] = {}
-        self.goto_timeout = False
-        self.goto_failure = False
-        self.probe_failure = False
-        self.wait_failure = False
-        self.after_goto: Callable[[], None] | None = None
+class FakeReplayPage:
+    def __init__(self, *, missing: set[str] | None = None) -> None:
+        self.missing = missing or set()
+        self.side_effects: list[tuple[str, str, str | None]] = []
 
-    def goto(self, url: str, *, wait_until: str, timeout: float) -> None:
-        self.navigations.append((url, wait_until, timeout))
-        if self.goto_timeout:
-            raise PlaywrightTimeoutError("private navigation timeout")
-        if self.goto_failure:
-            raise RuntimeError("private navigation failure")
-        self.url = url
-        if self.after_goto is not None:
-            self.after_goto()
+    def find(
+        self,
+        role: str,
+        name: str,
+        *,
+        near_text: str | None = None,
+        relative_position: str | None = None,
+    ) -> object | None:
+        return None if name in self.missing else (role, name)
 
-    def locator(self, selector: str) -> FakeLocator:
-        self.requested_selectors.append(selector)
-        return FakeLocator(selector, self)
+    def holds(self, kind: str, *, role=None, name=None, pattern=None) -> bool:
+        return name not in self.missing
 
+    def act(self, kind: str, handle: object, value: str | None) -> None:
+        _role, name = cast(tuple[str, str], handle)
+        self.side_effects.append((kind, name, value))
 
-def window(page: FakePage) -> BrowserWindow:
-    return BrowserWindow._for_runtime(object(), cast(Any, page))
+    def current_path(self) -> str:
+        return "/user/target-0001"
 
 
 def candidate() -> DouyinCandidate:
     return DouyinCandidate(
-        platform_target_id="creator-001",
+        platform_target_id="target-0001",
         summary=DouyinCandidateSummary(display_name="目标账号", public_handle=None),
         source=DouyinCandidateSource.GENERAL_SEARCH_AUTHOR,
         page_revision=1,
     )
 
 
-def test_browse_navigates_once_to_canonical_target_and_never_sends() -> None:
-    page = FakePage()
-    page.after_goto = lambda: page.visible_selectors.add(PROFILE_ROOT)
-    checks: list[str] = []
-
-    def not_cancelled() -> bool:
-        checks.append("checked")
-        return False
-
-    observation = DouyinBrowseExecution(window(page), candidate()).run(
-        cancellation_requested=not_cancelled
-    )
-
-    assert page.navigations == [
-        (douyin_user_profile_url("creator-001"), "domcontentloaded", 30_000)
-    ]
-    assert checks == ["checked", "checked", "checked"]
-    assert observation == DouyinBrowseExecutionObservation(
-        state=DouyinBrowseExecutionState.COMPLETED,
-        evidence=DouyinBrowseExecutionEvidence.PROFILE_VISIBLE,
-    )
-    assert observation.execution_version == DOUYIN_BROWSE_EXECUTION_VERSION
-    assert observation.completed is True
-    assert observation.circuit_open is False
-    assert "creator-001" not in repr(observation)
-
-
-@pytest.mark.parametrize(
-    ("checks", "expected_navigations", "probes_dom"),
-    (([True], 0, False), ([False, True], 1, False), ([False, False, True], 1, True)),
-)
-def test_cancellation_at_each_checkpoint_stops_without_retry(
-    checks: list[bool],
-    expected_navigations: int,
-    probes_dom: bool,
-) -> None:
-    page = FakePage()
-    page.after_goto = lambda: page.visible_selectors.add(PROFILE_ROOT)
-    values = iter(checks)
-    observation = DouyinBrowseExecution(window(page), candidate()).run(
-        cancellation_requested=lambda: next(values)
-    )
-    assert observation.state is DouyinBrowseExecutionState.CANCELLED
-    assert observation.evidence is DouyinBrowseExecutionEvidence.CANCELLATION_REQUESTED
-    assert len(page.navigations) == expected_navigations
-    assert bool(page.requested_selectors) is probes_dom
-
-
-@pytest.mark.parametrize("value", (None, 1, "false"))
-def test_invalid_or_failed_cancellation_probe_fails_closed(value: object) -> None:
-    page = FakePage()
-    observation = DouyinBrowseExecution(window(page), candidate()).run(
-        cancellation_requested=cast(Callable[[], bool], lambda: value)
-    )
-    assert observation.state is DouyinBrowseExecutionState.UNKNOWN
-    assert observation.evidence is DouyinBrowseExecutionEvidence.CANCELLATION_UNAVAILABLE
-    assert page.navigations == []
-
-    failed = DouyinBrowseExecution(window(FakePage()), candidate()).run(
-        cancellation_requested=lambda: (_ for _ in ()).throw(RuntimeError("private"))
-    )
-    assert failed.evidence is DouyinBrowseExecutionEvidence.CANCELLATION_UNAVAILABLE
-
-
-@pytest.mark.parametrize(
-    ("checks", "probes_dom"),
-    (([False, None], False), ([False, False, None], True)),
-)
-def test_cancellation_probe_unavailable_after_navigation_or_page_ready_is_closed(
-    checks: list[bool | None],
-    probes_dom: bool,
-) -> None:
-    page = FakePage()
-    page.after_goto = lambda: page.visible_selectors.add(PROFILE_ROOT)
-    values = iter(checks)
-
-    observation = DouyinBrowseExecution(window(page), candidate()).run(
-        cancellation_requested=cast(Callable[[], bool], lambda: next(values))
-    )
-
-    assert observation.state is DouyinBrowseExecutionState.UNKNOWN
-    assert observation.evidence is DouyinBrowseExecutionEvidence.CANCELLATION_UNAVAILABLE
-    assert len(page.navigations) == 1
-    assert bool(page.requested_selectors) is probes_dom
-
-
-@pytest.mark.parametrize(
-    ("attribute", "state", "evidence"),
-    (
-        (
-            "goto_timeout",
-            DouyinBrowseExecutionState.TIMED_OUT,
-            DouyinBrowseExecutionEvidence.NAVIGATION_TIMED_OUT,
+def execution(
+    goto_page: GotoPage,
+    replay_page: FakeReplayPage,
+    *,
+    orchestrator: SkillOrchestrator | None = None,
+) -> DouyinBrowseExecution:
+    return DouyinBrowseExecution(
+        BrowserWindow._for_runtime(object(), cast(Any, goto_page)),
+        candidate(),
+        orchestrator=(
+            orchestrator
+            if orchestrator is not None
+            else SkillOrchestrator(load_seed_registry())
         ),
-        (
-            "goto_failure",
-            DouyinBrowseExecutionState.UNKNOWN,
-            DouyinBrowseExecutionEvidence.PAGE_UNAVAILABLE,
-        ),
-    ),
-)
-def test_navigation_failures_are_bounded_redacted_and_not_retried(
-    attribute: str,
-    state: DouyinBrowseExecutionState,
-    evidence: DouyinBrowseExecutionEvidence,
-) -> None:
-    page = FakePage()
-    setattr(page, attribute, True)
-    observation = DouyinBrowseExecution(window(page), candidate()).run(
-        cancellation_requested=lambda: False
+        replay_page_factory=lambda _window: replay_page,
     )
-    assert observation.state is state
-    assert observation.evidence is evidence
-    assert len(page.navigations) == 1
-    assert "private" not in repr(observation)
 
 
-@pytest.mark.parametrize(
-    ("selectors", "url", "state", "evidence"),
-    (
-        (
-            set(),
-            douyin_user_profile_url("creator-001"),
-            DouyinBrowseExecutionState.TIMED_OUT,
-            DouyinBrowseExecutionEvidence.PROFILE_READY_TIMED_OUT,
-        ),
-        (
-            {LOGIN_DIALOG, BLOCKING_DIALOG},
-            douyin_user_profile_url("creator-001"),
-            DouyinBrowseExecutionState.LOGIN_REQUIRED,
-            DouyinBrowseExecutionEvidence.LOGIN_REQUIRED,
-        ),
-        (
-            {BLOCKING_DIALOG},
-            douyin_user_profile_url("creator-001"),
-            DouyinBrowseExecutionState.DIALOG_BLOCKED,
-            DouyinBrowseExecutionEvidence.BLOCKING_DIALOG,
-        ),
-        (
-            {PROFILE_ROOT},
-            "https://www.douyin.com/live",
-            DouyinBrowseExecutionState.UNKNOWN,
-            DouyinBrowseExecutionEvidence.PAGE_VERSION_UNKNOWN,
-        ),
-    ),
-)
-def test_page_outcomes_map_to_closed_browse_results(
-    selectors: set[str],
-    url: str,
-    state: DouyinBrowseExecutionState,
-    evidence: DouyinBrowseExecutionEvidence,
-) -> None:
-    page = FakePage()
-
-    def after_goto() -> None:
-        page.visible_selectors = selectors
-        page.url = url
-
-    page.after_goto = after_goto
-    observation = DouyinBrowseExecution(window(page), candidate()).run(
-        cancellation_requested=lambda: False
-    )
-    assert observation.state is state
-    assert observation.evidence is evidence
+def never_cancelled() -> bool:
+    return False
 
 
-def test_driver_failure_and_duplicate_profile_anchor_fail_closed() -> None:
-    failed = FakePage()
-    failed.after_goto = lambda: setattr(failed, "probe_failure", True)
-    unavailable = DouyinBrowseExecution(window(failed), candidate()).run(
-        cancellation_requested=lambda: False
-    )
-    assert unavailable.evidence is DouyinBrowseExecutionEvidence.PAGE_UNAVAILABLE
+class TestSkillDrivenBrowse:
+    def test_a_visible_profile_completes(self) -> None:
+        goto_page = GotoPage()
 
-    duplicate = FakePage()
-    duplicate.after_goto = lambda: duplicate.visible_selectors.update(
-        {PROFILE_ROOT, '[data-e2e="user-detail"]'}
-    )
-    conflict = DouyinBrowseExecution(window(duplicate), candidate()).run(
-        cancellation_requested=lambda: False
-    )
-    assert conflict.state is DouyinBrowseExecutionState.UNKNOWN
-    assert conflict.evidence is DouyinBrowseExecutionEvidence.CONFLICTING_ANCHORS
-
-
-def test_profile_anchor_is_rechecked_immediately_before_success(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    page = FakePage()
-    page.after_goto = lambda: page.visible_selectors.add(PROFILE_ROOT)
-
-    def reject_profile_root(_page_object: object) -> None:
-        raise RuntimeError("private disappearing profile")
-
-    monkeypatch.setattr(
-        "automation_tool.executor.rpa.douyin.profile_page.DouyinProfilePage.profile_root",
-        reject_profile_root,
-    )
-    observation = DouyinBrowseExecution(window(page), candidate()).run(
-        cancellation_requested=lambda: False
-    )
-    assert observation.state is DouyinBrowseExecutionState.UNKNOWN
-    assert observation.evidence is DouyinBrowseExecutionEvidence.PAGE_UNAVAILABLE
-
-
-def test_constructor_observation_and_second_run_are_closed() -> None:
-    page = FakePage()
-    page.after_goto = lambda: page.visible_selectors.add(PROFILE_ROOT)
-    execution = DouyinBrowseExecution(window(page), candidate())
-    assert repr(execution) == "DouyinBrowseExecution(<redacted>)"
-    assert execution.run(cancellation_requested=lambda: False).completed
-    with pytest.raises(DouyinBrowseExecutionRejected):
-        execution.run(cancellation_requested=lambda: False)
-    with pytest.raises(DouyinBrowseExecutionRejected):
-        DouyinBrowseExecution(cast(BrowserWindow, object()), candidate())
-    with pytest.raises(DouyinBrowseExecutionRejected):
-        DouyinBrowseExecution(window(page), cast(DouyinCandidate, object()))
-    with pytest.raises(DouyinBrowseExecutionRejected):
-        DouyinBrowseExecution(window(page), candidate()).run(
-            cancellation_requested=cast(Callable[[], bool], object())
+        observation = execution(goto_page, FakeReplayPage()).run(
+            cancellation_requested=never_cancelled
         )
 
-    valid = DouyinBrowseExecutionObservation(
-        state=DouyinBrowseExecutionState.COMPLETED,
-        evidence=DouyinBrowseExecutionEvidence.PROFILE_VISIBLE,
-    )
-    for changes in (
-        {"state": cast(DouyinBrowseExecutionState, "completed")},
-        {"execution_version": "private"},
-        {"evidence": DouyinBrowseExecutionEvidence.PAGE_UNAVAILABLE},
-    ):
+        assert observation.state is DouyinBrowseExecutionState.COMPLETED
+        assert observation.evidence is DouyinBrowseExecutionEvidence.PROFILE_VISIBLE
+        assert goto_page.visited == [douyin_user_profile_url("target-0001")]
+
+    def test_a_missing_profile_anchor_lands_awaiting_repair(self) -> None:
+        observation = execution(
+            GotoPage(), FakeReplayPage(missing={FOLLOW_BUTTON})
+        ).run(cancellation_requested=never_cancelled)
+
+        assert observation.state is DouyinBrowseExecutionState.UNKNOWN
+        assert observation.evidence is DouyinBrowseExecutionEvidence.PAGE_VERSION_UNKNOWN
+
+    def test_no_published_skill_lands_awaiting_recording(self) -> None:
+        observation = execution(
+            GotoPage(),
+            FakeReplayPage(),
+            orchestrator=SkillOrchestrator(SkillRegistry(trusted_public_key=b"\x01" * 32)),
+        ).run(cancellation_requested=never_cancelled)
+
+        assert observation.evidence is DouyinBrowseExecutionEvidence.PAGE_VERSION_UNKNOWN
+
+    def test_navigation_timeout_is_reported_as_timeout(self) -> None:
+        goto_page = GotoPage(failure=PlaywrightTimeoutError("navigation timed out"))
+
+        observation = execution(goto_page, FakeReplayPage()).run(
+            cancellation_requested=never_cancelled
+        )
+
+        assert observation.state is DouyinBrowseExecutionState.TIMED_OUT
+        assert observation.evidence is DouyinBrowseExecutionEvidence.NAVIGATION_TIMED_OUT
+
+    def test_cancellation_before_navigation_stops_without_page_contact(self) -> None:
+        goto_page = GotoPage()
+
+        observation = execution(goto_page, FakeReplayPage()).run(
+            cancellation_requested=lambda: True
+        )
+
+        assert observation.state is DouyinBrowseExecutionState.CANCELLED
+        assert (
+            observation.evidence is DouyinBrowseExecutionEvidence.CANCELLATION_REQUESTED
+        )
+        assert goto_page.visited == []
+
+    def test_cancellation_after_navigation_stops_before_the_skill(self) -> None:
+        goto_page = GotoPage()
+        replay_page = FakeReplayPage()
+        answers = iter([False, True])
+
+        observation = execution(goto_page, replay_page).run(
+            cancellation_requested=lambda: next(answers)
+        )
+
+        assert observation.state is DouyinBrowseExecutionState.CANCELLED
+        assert goto_page.visited == [douyin_user_profile_url("target-0001")]
+        assert replay_page.side_effects == []
+
+    def test_a_broken_cancellation_check_is_unavailable(self) -> None:
+        def broken() -> bool:
+            raise RuntimeError("private cancellation failure")
+
+        observation = execution(GotoPage(), FakeReplayPage()).run(
+            cancellation_requested=broken
+        )
+
+        assert observation.state is DouyinBrowseExecutionState.UNKNOWN
+        assert (
+            observation.evidence
+            is DouyinBrowseExecutionEvidence.CANCELLATION_UNAVAILABLE
+        )
+
+    def test_the_execution_runs_exactly_once(self) -> None:
+        runner = execution(GotoPage(), FakeReplayPage())
+        assert runner.run(cancellation_requested=never_cancelled).completed is True
         with pytest.raises(DouyinBrowseExecutionRejected):
-            replace(valid, **changes)
+            runner.run(cancellation_requested=never_cancelled)
+
+    def test_the_wired_skill_is_the_committed_browse_seed(self) -> None:
+        registry = load_seed_registry()
+        assert (
+            registry.at(DOUYIN_BROWSE_PROFILE_SKILL_ID, 1).skill.risk_level == "low"
+        )

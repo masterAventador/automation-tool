@@ -348,7 +348,7 @@ def _parse_evidence(
     if not isinstance(value, dict) or "kind" not in value:
         _reject("evidence must declare a kind")
     kind = _choice(value["kind"], vocab["evidenceKinds"], "evidence kind")
-    if kind == "url_matches":
+    if kind in {"url_matches", "url_prefix_matches"}:
         record = _exact_keys(value, frozenset({"kind", "pattern"}), "evidence")
         return SkillEvidence(
             kind=kind,

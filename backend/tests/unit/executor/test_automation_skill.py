@@ -137,6 +137,22 @@ class TestAcceptance:
         assert skill.steps[2].postconditions[0].role == "status"
         assert skill.success_evidence[0].role == "status"
 
+    def test_a_url_prefix_is_a_speakable_outcome(self) -> None:
+        """搜索这类导航型流程落在 /search/<关键词>——路径随输入变化，
+        等值 url_matches 表达不了，前缀匹配必须在封闭词汇表内。"""
+        document = copy.deepcopy(golden())
+        document["steps"][2]["postconditions"] = [
+            {"kind": "url_prefix_matches", "pattern": "/creator-micro"}
+        ]
+        document["successEvidence"] = [
+            {"kind": "url_prefix_matches", "pattern": "/creator-micro"}
+        ]
+
+        skill = parse_automation_skill(document)
+
+        assert skill.steps[2].postconditions[0].kind == "url_prefix_matches"
+        assert skill.success_evidence[0].pattern == "/creator-micro"
+
     def test_the_contract_file_pins_the_same_closed_vocabularies(self) -> None:
         document = json.loads(CONTRACT.read_text(encoding="utf-8"))
 
@@ -152,6 +168,7 @@ class TestAcceptance:
             "element_visible",
             "element_absent",
             "url_matches",
+            "url_prefix_matches",
         }
         assert document["limits"]["maxSteps"] >= 3
         assert document["limits"]["maxExternalSteps"] == 1

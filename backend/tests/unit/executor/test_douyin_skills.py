@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from automation_tool.executor.rpa.douyin.skills import (
+    DOUYIN_BROWSE_PROFILE_SKILL_ID,
     DOUYIN_COMMENT_MESSAGE_PARAMETER,
     DOUYIN_COMMENT_SKILL_ID,
     DOUYIN_COMMENT_SUCCESS_NAME,
@@ -14,6 +15,8 @@ from automation_tool.executor.rpa.douyin.skills import (
     DOUYIN_DIRECT_MESSAGE_SKILL_ID,
     DOUYIN_DIRECT_MESSAGE_SUCCESS_NAME,
     DOUYIN_DIRECT_MESSAGE_SUCCESS_ROLE,
+    DOUYIN_SEARCH_KEYWORD_PARAMETER,
+    DOUYIN_SEARCH_SKILL_ID,
     default_orchestrator,
 )
 from automation_tool.executor.skill_orchestrator import load_seed_registry
@@ -63,6 +66,35 @@ class TestCommittedSeeds:
             evidence.kind == "element_visible"
             and evidence.role == DOUYIN_DIRECT_MESSAGE_SUCCESS_ROLE
             and evidence.name == DOUYIN_DIRECT_MESSAGE_SUCCESS_NAME
+            for evidence in skill.success_evidence
+        )
+
+    def test_the_search_seed_verifies_and_matches_its_constant(self) -> None:
+        registry = load_seed_registry()
+
+        skill = registry.at(DOUYIN_SEARCH_SKILL_ID, 1).skill
+
+        assert skill.platform == "douyin"
+        # 搜索没有外部副作用——只是导航；结果证据是 URL 前缀。
+        assert skill.external_step_count == 0
+        assert any(
+            step.action.kind == "fill"
+            and step.action.parameter == DOUYIN_SEARCH_KEYWORD_PARAMETER
+            for step in skill.steps
+        )
+        assert any(
+            evidence.kind == "url_prefix_matches" and evidence.pattern == "/search"
+            for evidence in skill.success_evidence
+        )
+
+    def test_the_browse_profile_seed_verifies_and_matches_its_constant(self) -> None:
+        registry = load_seed_registry()
+
+        skill = registry.at(DOUYIN_BROWSE_PROFILE_SKILL_ID, 1).skill
+
+        assert skill.external_step_count == 0
+        assert any(
+            evidence.kind == "element_visible" and evidence.name == "关注"
             for evidence in skill.success_evidence
         )
 

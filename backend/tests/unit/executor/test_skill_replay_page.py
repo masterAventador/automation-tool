@@ -332,6 +332,13 @@ class TestHolds:
         with pytest.raises(ValueError, match="pattern"):
             adapter(page).holds("url_matches")
 
+    def test_url_prefix_matches_compares_the_path_prefix(self) -> None:
+        page = ScriptedPage(
+            visibilities=[True], url="https://www.douyin.com/search/护肤?type=general"
+        )
+        assert adapter(page).holds("url_prefix_matches", pattern="/search") is True
+        assert adapter(page).holds("url_prefix_matches", pattern="/video") is False
+
     def test_element_visible_polls_until_it_holds(self) -> None:
         page = ScriptedPage(visibilities=[True])
         page.churn_remaining = 1
